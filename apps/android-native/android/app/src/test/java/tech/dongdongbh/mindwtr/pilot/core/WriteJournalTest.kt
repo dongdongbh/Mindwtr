@@ -39,6 +39,16 @@ class WriteJournalTest {
         assertEquals(listOf("complete", "menuCommand", "taskFocus", "update"), open().pending().map { it.method })
     }
 
+    @Test fun aFrozenProjectCalendarReferenceSurvivesJournalRecreation() {
+        val envelope = """{"request":{"requestId":"r","projectId":"p","value":null},"prepared":{"version":1}}"""
+        val entry = open().append("projectCalendarReferenceCommit", listOf(envelope))!!
+        assertTrue(entry.file.exists())
+        val restored = open().pending().single()
+        assertEquals("projectCalendarReferenceCommit", restored.method)
+        assertEquals(listOf(envelope), restored.args)
+        assertEquals(entry.text, restored.text)
+    }
+
     @Test fun anEntryIsDurableBeforeAppendReturns() {
         val dir = File(folder.root, "journal")
         val entry = open(dir).append("complete", listOf("task-1", "3:dev:2026"))!!

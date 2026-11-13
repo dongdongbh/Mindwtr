@@ -344,6 +344,7 @@ import { createArchivedTasksRestoreMethods } from './native-host-contract-archiv
 import { createProjectTasksDeleteMethods } from './native-host-contract-project-bulk-delete';
 import { createTaskChecklistMoveMethods } from './native-host-contract-task-checklist-move';
 import { createArchivedTasksDeleteMethods } from './native-host-contract-archive-bulk-delete';
+import { createProjectCalendarReferenceMethods } from './native-host-contract-project-calendar-reference';
 import { createProjectDateMethods } from './native-host-contract-project-date';
 import { createProjectEditMethods } from './native-host-contract-project-edit';
 import { createProjectAreaMethods } from './native-host-contract-project-area';
@@ -1044,7 +1045,7 @@ export const NATIVE_CONTRACT_SYNC_SCREEN_METHODS: ReadonlySet<string> = new Set(
 export const NATIVE_CONTRACT_NETWORK_READS: ReadonlySet<string> = new Set([
     'loadAIModels', 'requestTaskEditorCopilot', 'requestAICopilot', 'requestTaskEditorClarify', 'requestTaskEditorBreakdown',
     'requestInboxClarify', 'requestWeeklyReviewAnalysis', 'runAboutUpdateCheck', 'submitAboutFeedback', 'sendAboutHeartbeat',
-    'testCalendarFeeds', 'loadExternalCalendarFeed',
+    'testCalendarFeeds', 'loadExternalCalendarFeed', 'getProjectCalendarReferenceOptions',
 ]);
 
 
@@ -1688,7 +1689,9 @@ export function createNativeHostContract(options: {
             sequentialSectionKeys: derived.sequentialSectionKeys,
             now,
         });
-        return {
+
+
+    return {
             version: NATIVE_HOST_CONTRACT_VERSION,
             revision: `${revision()}:${displayRevision(now)}`,
             id: task.id,
@@ -1774,6 +1777,9 @@ export function createNativeHostContract(options: {
     const taskChecklistMethods = createTaskChecklistSaveMethods({ readiness, save, receipts, language: () => language,
         validateField: (field, value) => DRAFT_VALUE_CHECKS[field](value), isReadOnly: isInArchivedProject }, readTaskDraft);
     let self: Record<string, unknown> | null = null;
+    const calendarSettingsMethods = createCalendarSettingsMethods({ readiness, save, t: () => translate,
+        language: () => language, requestIdPattern: CAPTURE_ID_PATTERN, host: () => options.calendar ?? null });
+
     const contract = {
         version: NATIVE_HOST_CONTRACT_VERSION,
         getTaskRowSwipeActions(input: NativeTaskRowSwipeActionsInput) { return nativeTaskRowSwipeActions(input, translate); },
@@ -1962,14 +1968,7 @@ export function createNativeHostContract(options: {
             host: () => options.syncSettings ?? null,
         }),
 
-        ...createCalendarSettingsMethods({
-            readiness,
-            save,
-            t: () => translate,
-            language: () => language,
-            requestIdPattern: CAPTURE_ID_PATTERN,
-            host: () => options.calendar ?? null,
-        }),
+        ...calendarSettingsMethods,
 
 
         ...createTaskViewMethods({ readiness, save, t: () => translate, dateFormatting, revision: (now) => `${revision()}:${displayRevision(now)}`, isReadOnly: isInArchivedProject, readDraft: readTaskDraft }),
@@ -2078,6 +2077,8 @@ export function createNativeHostContract(options: {
         ...createArchivedTasksDeleteMethods({ readiness, save, t: () => translate, shown: bulkSelectionShown }),
         ...createTaskChecklistMoveMethods({ readiness, save, t: () => translate }),
         ...createProjectTasksDeleteMethods({ readiness, save, t: () => translate }),
+        ...createProjectCalendarReferenceMethods({ readiness, save, revision: projectMutationRevision,
+            load: (input) => calendarSettingsMethods.loadExternalCalendarFeed(input) }),
         ...createProjectDateMethods({ readiness, save,
             revision: projectMutationRevision }),
         ...createProjectAreaMethods({ readiness, save,

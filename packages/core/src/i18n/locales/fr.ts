@@ -1,5 +1,21 @@
 
 export const frOverrides: Record<string, string> = {
+    "projects.calendarLimit": "Les 200 premiers résultats sont affichés. Recherchez pour trouver un autre événement.",
+    "projects.calendarTitle": "Calendrier",
+    "projects.calendarLink": "Lier un événement du calendrier",
+    "projects.calendarReplace": "Remplacer l’événement lié",
+    "projects.calendarUnlink": "Délier l’événement du calendrier",
+    "projects.calendarScheduled": "Prochaine étape planifiée",
+    "projects.calendarElapsed": "Examiner le résultat de l’événement",
+    "projects.calendarUnavailable": "Calendrier indisponible · Dernières informations connues",
+    "projects.calendarHelp": "Liez un événement existant comme prochaine étape planifiée de ce projet. Les événements restent en lecture seule.",
+    "projects.calendarWindow": "Événements à venir · 90 jours",
+    "projects.calendarEmpty": "Aucun événement à venir dans les calendriers activés.",
+    "projects.calendarLoadFailed": "Impossible de charger les événements. Fermez puis réessayez.",
+    "projects.calendarSaveFailed": "Impossible d’enregistrer la référence au calendrier. Réessayez.",
+    "projects.calendarReviewStep": "Examiner la prochaine étape planifiée",
+    "projects.calendarLastKnown": "Dernières informations connues sur l’événement",
+
     "settings.syncEncryptionUpgrade": "Mettre à niveau le chiffrement de synchronisation",
     "settings.syncEncryptionUpgradeWarning": "Mettez d’abord Mindwtr à jour sur tous les appareils. Les anciennes versions ne peuvent pas lire les fichiers mis à niveau. La mise à niveau utilise une copie locale vérifiée et s’arrête si la copie synchronisée diffère. Les copies chiffrées existantes sont conservées. Conservez cette phrase secrète pour restaurer les copies conservées, même si vous la modifiez ensuite.",
     "settings.syncEncryptionErrorLegacy": "Cet emplacement utilise un ancien chiffrement. Mettez tous les appareils à jour, puis choisissez Mettre à niveau le chiffrement de synchronisation.",

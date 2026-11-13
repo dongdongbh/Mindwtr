@@ -38,7 +38,7 @@ const SQLITE_BUSY_TIMEOUT_MS: u64 = 5_000;
 const STORAGE_RETRY_ATTEMPTS: usize = 4;
 const STORAGE_RETRY_BASE_DELAY_MS: u64 = 120;
 
-const STORAGE_SCHEMA_VERSION: i64 = 17;
+const STORAGE_SCHEMA_VERSION: i64 = 18;
 const STORAGE_SCHEMA_STATE_TABLE: &str = "storage_schema_state";
 
 const FTS_TRIGGER_MIGRATION_VERSION: i64 = 4;
@@ -131,6 +131,7 @@ CREATE TABLE IF NOT EXISTS projects (
   status TEXT NOT NULL,
   color TEXT NOT NULL,
   colorOverride TEXT,
+  calendarReference TEXT,
   orderNum INTEGER,
   tagIds TEXT,
   isSequential INTEGER,
@@ -581,6 +582,7 @@ fn initialize_sqlite_schema(conn: &mut Connection) -> Result<i64, String> {
         ensure_column(&transaction, "projects", "cancelledAt", "TEXT")?;
         ensure_column(&transaction, "projects", "archivedAt", "TEXT")?;
         ensure_column(&transaction, "projects", "viewSectionIds", "TEXT")?;
+        ensure_column(&transaction, "projects", "calendarReference", "TEXT")?;
         ensure_projects_purged_at_column(&transaction)?;
         ensure_projects_area_order_index(&transaction)?;
         ensure_sync_revision_columns(&transaction)?;
@@ -2217,6 +2219,11 @@ fn row_to_project_value(row: &rusqlite::Row<'_>) -> Result<Value, rusqlite::Erro
             map.insert("viewSectionIds".to_string(), view_section_ids_val);
         }
     }
+    if let Ok(Some(raw)) = row.get::<_, Option<String>>("calendarReference") {
+        if let Ok(value) = serde_json::from_str::<Value>(&raw) {
+            map.insert("calendarReference".to_string(), value);
+        }
+    }
     if let Ok(val) = row.get::<_, Option<String>>("areaId") {
         if let Some(v) = val {
             map.insert("areaId".to_string(), Value::String(v));
@@ -3365,7 +3372,7 @@ fn replace_prepared_data_in_transaction(
         let attachments_json = json_str(project.get("attachments"));
         let view_section_ids_json = json_str(project.get("viewSectionIds"));
         execute_insert(
-            "INSERT OR REPLACE INTO projects (id, title, status, color, orderNum, tagIds, isSequential, sequentialScope, taskSortBy, isFocused, supportNotes, attachments, dueDate, reviewAt, areaId, areaTitle, rev, revBy, createdAt, updatedAt, deletedAt, purgedAt, startDate, cancelledAt, viewSectionIds, archivedAt, colorOverride, perSectionFlow) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28)",
+            "INSERT OR REPLACE INTO projects (id, title, status, color, orderNum, tagIds, isSequential, sequentialScope, taskSortBy, isFocused, supportNotes, attachments, dueDate, reviewAt, areaId, areaTitle, rev, revBy, createdAt, updatedAt, deletedAt, purgedAt, startDate, cancelledAt, viewSectionIds, archivedAt, colorOverride, perSectionFlow, calendarReference) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29)",
             params![
                 project.get("id").and_then(|v| v.as_str()).unwrap_or_default(),
                 project.get("title").and_then(|v| v.as_str()).unwrap_or_default(),
@@ -3395,6 +3402,7 @@ fn replace_prepared_data_in_transaction(
                 project.get("archivedAt").and_then(|v| v.as_str()),
                 project.get("colorOverride").and_then(|v| v.as_str()),
                 project.get("perSectionFlow").and_then(|v| v.as_bool()).map(|v| v as i32),
+                project.get("calendarReference").map(Value::to_string),
             ],
         )
         .map_err(|e| e.to_string())?;
@@ -4973,8 +4981,8 @@ fn replace_project_row(conn: &Connection, project: &Value) -> Result<(), String>
     let normalized_rev = normalized_revision_for_storage(project.get("rev"));
     let normalized_rev_by = normalized_rev_by(project.get("revBy"));
     conn.execute(
-        "INSERT INTO projects (id, title, status, color, orderNum, tagIds, isSequential, sequentialScope, taskSortBy, isFocused, supportNotes, attachments, dueDate, reviewAt, areaId, areaTitle, rev, revBy, createdAt, updatedAt, deletedAt, purgedAt, startDate, cancelledAt, viewSectionIds, archivedAt, colorOverride, perSectionFlow)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28)
+        "INSERT INTO projects (id, title, status, color, orderNum, tagIds, isSequential, sequentialScope, taskSortBy, isFocused, supportNotes, attachments, dueDate, reviewAt, areaId, areaTitle, rev, revBy, createdAt, updatedAt, deletedAt, purgedAt, startDate, cancelledAt, viewSectionIds, archivedAt, colorOverride, perSectionFlow, calendarReference)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29)
          ON CONFLICT(id) DO UPDATE SET
            title=excluded.title, status=excluded.status, color=excluded.color, orderNum=excluded.orderNum,
            tagIds=excluded.tagIds, isSequential=excluded.isSequential, sequentialScope=excluded.sequentialScope,
@@ -4984,7 +4992,7 @@ fn replace_project_row(conn: &Connection, project: &Value) -> Result<(), String>
            createdAt=excluded.createdAt, updatedAt=excluded.updatedAt, deletedAt=excluded.deletedAt,
            purgedAt=excluded.purgedAt, startDate=excluded.startDate, cancelledAt=excluded.cancelledAt,
            viewSectionIds=excluded.viewSectionIds, archivedAt=excluded.archivedAt, colorOverride=excluded.colorOverride,
-           perSectionFlow=excluded.perSectionFlow",
+           perSectionFlow=excluded.perSectionFlow, calendarReference=excluded.calendarReference",
         params![
             project.get("id").and_then(Value::as_str).unwrap_or_default(),
             project.get("title").and_then(Value::as_str).unwrap_or_default(),
@@ -5032,6 +5040,7 @@ fn replace_project_row(conn: &Connection, project: &Value) -> Result<(), String>
                 .get("perSectionFlow")
                 .and_then(Value::as_bool)
                 .map(|v| v as i32),
+            project.get("calendarReference").map(Value::to_string),
         ],
     )
     .map_err(|e| e.to_string())?;
@@ -8031,6 +8040,37 @@ mod tests {
             area.get("projectArchivedAt"),
             Some(&Value::String("2026-05-21T00:00:00.000Z".into()))
         );
+    }
+
+    #[test]
+    fn project_calendar_reference_and_explicit_removal_survive_sqlite() {
+        let conn = Connection::open_in_memory().expect("open db");
+        conn.execute_batch(SQLITE_SCHEMA).expect("create schema");
+        let mut project = serde_json::json!({
+            "id": "reference-project", "title": "Project", "status": "active", "color": "#6B7280",
+            "createdAt": "2026-11-01T10:00:00.000Z", "updatedAt": "2026-11-01T10:00:00.000Z",
+            "calendarReference": {"sourceId": "feed", "uid": "event", "sourceName": "Calendar", "title": "Meeting",
+                "start": "2026-11-01T10:00:00.000Z", "end": "2026-11-01T11:00:00.000Z", "allDay": false}
+        });
+        replace_project_row(&conn, &project).expect("write reference");
+        let read = || {
+            conn.query_row(
+                "SELECT * FROM projects WHERE id='reference-project'",
+                [],
+                row_to_project_value,
+            )
+            .expect("read project")
+        };
+        assert_eq!(read()["calendarReference"], project["calendarReference"]);
+        project["calendarReference"] = Value::Null;
+        replace_project_row(&conn, &project).expect("clear reference");
+        assert_eq!(read().get("calendarReference"), Some(&Value::Null));
+        project
+            .as_object_mut()
+            .expect("project object")
+            .remove("calendarReference");
+        replace_project_row(&conn, &project).expect("write omitted reference");
+        assert!(read().get("calendarReference").is_none());
     }
 
     #[test]

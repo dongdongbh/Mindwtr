@@ -1,5 +1,21 @@
 
 export const ruOverrides: Record<string, string> = {
+    "projects.calendarLimit": "Показаны первые 200 совпадений. Используйте поиск, чтобы найти другое событие.",
+    "projects.calendarTitle": "Календарь",
+    "projects.calendarLink": "Связать событие календаря",
+    "projects.calendarReplace": "Заменить связанное событие",
+    "projects.calendarUnlink": "Отвязать событие календаря",
+    "projects.calendarScheduled": "Запланированный следующий шаг",
+    "projects.calendarElapsed": "Проверить итог события",
+    "projects.calendarUnavailable": "Календарь недоступен · Последние известные данные",
+    "projects.calendarHelp": "Свяжите существующее событие как запланированный следующий шаг проекта. События остаются только для чтения.",
+    "projects.calendarWindow": "Предстоящие события · ближайшие 90 дней",
+    "projects.calendarEmpty": "В подключённых календарях нет предстоящих событий.",
+    "projects.calendarLoadFailed": "Не удалось загрузить события. Закройте и повторите попытку.",
+    "projects.calendarSaveFailed": "Не удалось сохранить ссылку на календарь. Повторите попытку.",
+    "projects.calendarReviewStep": "Проверить запланированный следующий шаг",
+    "projects.calendarLastKnown": "Последние известные данные события",
+
     "quickAdd.invalidReminderCommand": "Недопустимое напоминание: укажите поддерживаемый интервал и точные дату и время",
     'task.copyDetails': "Копировать сведения о задаче",
     "taskEdit.startAdvanceReminderLabel": "До начала",

@@ -1,5 +1,21 @@
 
 export const hiOverrides: Record<string, string> = {
+    "projects.calendarLimit": "पहले 200 परिणाम दिखाए जा रहे हैं। अन्य इवेंट खोजने के लिए खोजें।",
+    "projects.calendarTitle": "कैलेंडर",
+    "projects.calendarLink": "कैलेंडर इवेंट लिंक करें",
+    "projects.calendarReplace": "लिंक किया गया इवेंट बदलें",
+    "projects.calendarUnlink": "कैलेंडर इवेंट अनलिंक करें",
+    "projects.calendarScheduled": "तय किया गया अगला कदम",
+    "projects.calendarElapsed": "इवेंट के परिणाम की समीक्षा करें",
+    "projects.calendarUnavailable": "कैलेंडर उपलब्ध नहीं · अंतिम ज्ञात विवरण",
+    "projects.calendarHelp": "मौजूदा इवेंट को इस प्रोजेक्ट के तय किए गए अगले कदम के रूप में लिंक करें। कैलेंडर इवेंट केवल पढ़ने के लिए रहते हैं।",
+    "projects.calendarWindow": "आगामी इवेंट · अगले 90 दिन",
+    "projects.calendarEmpty": "सक्रिय कैलेंडर फ़ीड में कोई आगामी इवेंट नहीं है।",
+    "projects.calendarLoadFailed": "कैलेंडर इवेंट लोड नहीं हो सके। बंद करके फिर कोशिश करें।",
+    "projects.calendarSaveFailed": "कैलेंडर संदर्भ सहेजा नहीं जा सका। फिर कोशिश करें।",
+    "projects.calendarReviewStep": "तय किए गए अगले कदम की समीक्षा करें",
+    "projects.calendarLastKnown": "इवेंट का अंतिम ज्ञात विवरण",
+
     "quickAdd.invalidReminderCommand": "अमान्य अनुस्मारक: समर्थित अवधि और स्पष्ट तारीख व समय दें",
     'task.copyDetails': "कार्य का विवरण कॉपी करें",
     "taskEdit.startAdvanceReminderLabel": "शुरू होने से पहले",

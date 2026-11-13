@@ -21201,6 +21201,58 @@ final class CoreHostTests: XCTestCase {
         }
     }
 
+    func testProjectCalendarReferenceClearRollbackRetryAndColdReceiptPreserveOtherRows() async throws {
+        try await seedProjectRenameRows()
+        let reference: [String: Any] = ["sourceId": "feed", "uid": "event", "sourceName": "Calendar", "title": "Meeting",
+            "start": "2036-11-01", "end": "2036-11-02", "allDay": true, "recurrenceId": "DATE:2036-11-01"]
+        let edit = try SQLiteBridge(url: database)
+        _ = try edit.execute("UPDATE projects SET calendarReference=? WHERE id='focus-target'", parametersJSON: json([json(reference)]))
+        edit.close()
+        let faults = HostIOFaults()
+        let writer = host(faults)
+        _ = try await writer.start()
+        let options = try object(await writer.call("projectCalendarReferenceOptions", argumentsJSON: json([json(["projectId": "focus-target"])])))
+        XCTAssertEqual(options["canEdit"] as? Bool, true)
+        var expected = try XCTUnwrap(options["project"] as? [String: Any])
+        expected.removeValue(forKey: "id")
+        let request: [String: Any] = ["requestId": UUID().uuidString.lowercased(), "projectId": "focus-target",
+            "value": NSNull(), "pickerId": try XCTUnwrap(options["pickerId"] as? String), "expected": expected]
+        let targetBefore = try XCTUnwrap(projectRows("focus-target").first)
+        let beforeSQLite = try SQLiteBridge(url: database)
+        let before = try nineTableSnapshot(beforeSQLite)
+        beforeSQLite.close()
+        faults.beforeSQL = { if $0 == "COMMIT" { throw HostFailure("Injected calendar reference COMMIT failure") } }
+        await expectFailure("SAVE_FAILED") { _ = try await writer.call("projectCalendarReferenceWrite", argumentsJSON: json([json(request)])) }
+        XCTAssertEqual(try object(String(contentsOf: journal))["method"] as? String, "projectCalendarReferenceCommit")
+        let rolledBack = try SQLiteBridge(url: database)
+        XCTAssertEqual(try nineTableSnapshot(rolledBack), before)
+        rolledBack.close()
+        faults.beforeSQL = nil
+        var journalWrites = 0
+        faults.journalWrite = { journalWrites += 1; if journalWrites == 1 { throw HostFailure("Injected calendar reference lost reply") } }
+        await expectFailure("lost reply") { _ = try await writer.retryPending() }
+        await writer.close()
+        let reopened = host()
+        let startup = try object(await reopened.start())
+        let recovery = try XCTUnwrap(startup["recovery"] as? [String: Any])
+        XCTAssertEqual(recovery["method"] as? String, "projectCalendarReferenceCommit")
+        let result = try XCTUnwrap(recovery["result"] as? [String: Any])
+        XCTAssertEqual(result["id"] as? String, "focus-target")
+        XCTAssertTrue(result["value"] is NSNull)
+        let targetAfter = try XCTUnwrap(projectRows("focus-target").first)
+        XCTAssertEqual(targetAfter["calendarReference"] as? String, "null")
+        XCTAssertEqual(targetAfter["rev"] as? Int, (targetBefore["rev"] as? Int ?? 0) + 1)
+        for (field, value) in targetBefore where !["calendarReference", "rev", "revBy", "updatedAt"].contains(field) {
+            XCTAssertEqual(try json([targetAfter[field] ?? NSNull()]), try json([value]), field)
+        }
+        let saved = try SQLiteBridge(url: database)
+        let after = try nineTableSnapshot(saved)
+        saved.close()
+        for index in [0, 2, 3, 4, 5, 6, 7, 8] { XCTAssertEqual(after[index], before[index]) }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
+        await reopened.close()
+    }
+
     func testProjectDateFailedCommitExactRetryPreservesRichRowsAndOtherDates() async throws {
         try await seedProjectRenameRows()
         let edit = try SQLiteBridge(url: database)

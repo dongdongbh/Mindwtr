@@ -1,5 +1,21 @@
 
 export const daOverrides: Record<string, string> = {
+    "projects.calendarLimit": "Viser de første 200 resultater. Søg for at finde en anden begivenhed.",
+    "projects.calendarTitle": "Kalender",
+    "projects.calendarLink": "Tilknyt kalenderbegivenhed",
+    "projects.calendarReplace": "Erstat tilknyttet begivenhed",
+    "projects.calendarUnlink": "Fjern tilknytning til begivenhed",
+    "projects.calendarScheduled": "Planlagt næste skridt",
+    "projects.calendarElapsed": "Gennemgå begivenhedens resultat",
+    "projects.calendarUnavailable": "Kalender utilgængelig · Senest kendte oplysninger",
+    "projects.calendarHelp": "Tilknyt en eksisterende begivenhed som projektets planlagte næste skridt. Kalenderbegivenheder er skrivebeskyttede.",
+    "projects.calendarWindow": "Kommende begivenheder · næste 90 dage",
+    "projects.calendarEmpty": "Ingen kommende begivenheder i aktiverede kalenderabonnementer.",
+    "projects.calendarLoadFailed": "Kalenderbegivenheder kunne ikke indlæses. Luk og prøv igen.",
+    "projects.calendarSaveFailed": "Kalenderhenvisningen kunne ikke gemmes. Prøv igen.",
+    "projects.calendarReviewStep": "Gennemgå planlagt næste skridt",
+    "projects.calendarLastKnown": "Senest kendte begivenhedsoplysninger",
+
     "quickAdd.invalidReminderCommand": "Ugyldig påmindelse: angiv en understøttet varighed og en udtrykkelig dato og tid",
     "taskEdit.startAdvanceReminderLabel": "Før start",
     "taskEdit.advanceReminderLabel": "Forhåndspåmindelse",

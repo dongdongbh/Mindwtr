@@ -1,4 +1,4 @@
-export const SQLITE_SCHEMA_VERSION = 15;
+export const SQLITE_SCHEMA_VERSION = 16;
 
 
 export const SQLITE_BASE_SCHEMA = `
@@ -87,7 +87,8 @@ CREATE TABLE IF NOT EXISTS projects (
   cancelledAt TEXT,
   archivedAt TEXT,
   viewSectionIds TEXT,
-  perSectionFlow INTEGER
+  perSectionFlow INTEGER,
+  calendarReference TEXT
 );
 
 CREATE TABLE IF NOT EXISTS areas (

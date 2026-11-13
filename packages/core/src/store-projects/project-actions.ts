@@ -1,3 +1,4 @@
+import { isProjectCalendarReference } from '../project-calendar-reference-schema';
 import { retainProjectTaxonomy, retainTaxonomyEffects } from '../taxonomy-catalog';
 import { getAttachmentUnrecoverablePatch } from '../mobile-attachment-availability';
 import {
@@ -155,7 +156,7 @@ export const projectFocusToggleUpdate = (project: Project, focusedProjectCount: 
 export const countFocusedLiveProjects = (projects: readonly Project[]): number =>
     projects.filter((project) => !project.deletedAt && project.isFocused).length;
 
-const projectJsonColumns = new Set(['tagIds', 'attachments']);
+const projectJsonColumns = new Set(['tagIds', 'attachments', 'calendarReference']);
 
 export const sameProjectSqliteRow = (left: Project, right: Project): boolean => {
     const before = projectToSqliteRow(left);
@@ -572,6 +573,12 @@ export const projectLifecycleEffect = (scope: PreparedProjectLifecycle['scope'],
 };
 
 
+export const projectCalendarReferenceEffect = (project: Project, value: Project['calendarReference'],
+    deviceId: string, now: string): PreparedProjectDate['effect'] => ({
+    project: { before: project, after: { ...project, calendarReference: value,
+        updatedAt: now, rev: nextRevision(project.rev), revBy: deviceId } },
+});
+
 export const projectDateEffect = (project: Project, field: 'startDate' | 'dueDate' | 'reviewAt', value: string | null,
     deviceId: string, now: string): PreparedProjectDate['effect'] => {
     const transition = applyProjectLifecycleTransition(project, { [field]: value ?? undefined }, [], [], now, deviceId);
@@ -772,6 +779,10 @@ export const createProjectCoreActions = ({
     getSaveGeneration,
 }: ProjectActionContext): ProjectCoreActions => ({
     addProject: async (title: string, color: string, initialProps?: Partial<Project>) => {
+        if (initialProps?.calendarReference != null && !isProjectCalendarReference(initialProps.calendarReference)) {
+            set({ error: 'Invalid project calendar reference' });
+            return null;
+        }
         if (!isValidProjectColorOverride(initialProps?.colorOverride)) {
             set({ error: 'Project color must be a six-digit hex color' });
             return null;
@@ -1267,6 +1278,36 @@ export const createProjectCoreActions = ({
         return result;
     },
 
+    commitPreparedProjectCalendarReference: async (input): Promise<PreparedTaskEditResult> => {
+        let result: PreparedTaskEditResult = { success: false, reason: 'conflict',
+            error: 'Prepared Project calendar reference conflicts with current data' };
+        set((state) => {
+            const current = state._projectsById.get(input.request.projectId);
+
+            if (current && (!input.deviceIdToInitialize || state.settings.deviceId === input.deviceIdToInitialize)
+                && sameProjectSqliteRow(current, input.effect.project.after)) {
+                result = { success: true, id: current.id, outcome: 'replayed' };
+                return state;
+            }
+            if (!current || current.deletedAt || current.purgedAt || current.status === 'archived'
+                || (state.settings.deviceId ?? null) !== input.deviceIdBefore
+                || (input.deviceIdBefore === null ? !input.deviceIdToInitialize : input.deviceIdToInitialize !== null)
+                || !sameProjectSqliteRow(current, input.scope.project)) return state;
+            const planned = projectCalendarReferenceEffect(current, input.request.value,
+                input.deviceIdBefore ?? input.deviceIdToInitialize!, input.updateAt);
+            if (!taskEditValuesEqual(planned, input.effect)) return state;
+            const projects = replaceEntitiesInArray(state._allProjects, [planned.project.after]);
+            const settings = input.deviceIdToInitialize
+                ? { ...state.settings, deviceId: input.deviceIdToInitialize } : state.settings;
+            persist(set, debouncedSave, state, { projects,
+                ...(settings !== state.settings ? { settings } : {}) });
+            result = { success: true, id: current.id, outcome: 'applied' };
+            return { _allProjects: projects, settings,
+                lastDataChangeAt: getNextDataChangeAt(state.lastDataChangeAt) };
+        });
+        return result;
+    },
+
     commitPreparedProjectArea: async (input): Promise<PreparedTaskEditResult> => {
         let result: PreparedTaskEditResult = { success: false, reason: 'conflict',
             error: 'Prepared Project Area conflicts with current data' };
@@ -1484,6 +1525,11 @@ export const createProjectCoreActions = ({
     },
 
     updateProject: async (id: string, updates: Partial<Project>) => {
+        if (updates.calendarReference != null && !isProjectCalendarReference(updates.calendarReference)) {
+            const message = 'Invalid project calendar reference';
+            set({ error: message });
+            return actionFail(message);
+        }
         if (!isValidProjectColorOverride(updates.colorOverride)) {
             const message = 'Project color must be a six-digit hex color';
             set({ error: message });

@@ -1,5 +1,21 @@
 
 export const plOverrides: Record<string, string> = {
+    "projects.calendarLimit": "Wyświetlono pierwszych 200 wyników. Wyszukaj inne wydarzenie.",
+    "projects.calendarTitle": "Kalendarz",
+    "projects.calendarLink": "Połącz wydarzenie z kalendarza",
+    "projects.calendarReplace": "Zastąp połączone wydarzenie",
+    "projects.calendarUnlink": "Odłącz wydarzenie z kalendarza",
+    "projects.calendarScheduled": "Zaplanowany następny krok",
+    "projects.calendarElapsed": "Przejrzyj wynik wydarzenia",
+    "projects.calendarUnavailable": "Kalendarz niedostępny · Ostatnie znane dane",
+    "projects.calendarHelp": "Połącz istniejące wydarzenie jako zaplanowany następny krok projektu. Wydarzenia pozostają tylko do odczytu.",
+    "projects.calendarWindow": "Nadchodzące wydarzenia · następne 90 dni",
+    "projects.calendarEmpty": "Brak nadchodzących wydarzeń w aktywnych subskrypcjach kalendarzy.",
+    "projects.calendarLoadFailed": "Nie udało się wczytać wydarzeń. Zamknij i spróbuj ponownie.",
+    "projects.calendarSaveFailed": "Nie udało się zapisać odwołania do kalendarza. Spróbuj ponownie.",
+    "projects.calendarReviewStep": "Przejrzyj zaplanowany następny krok",
+    "projects.calendarLastKnown": "Ostatnie znane dane wydarzenia",
+
     "quickAdd.invalidReminderCommand": "Nieprawidłowe przypomnienie: podaj obsługiwany czas oraz dokładną datę i godzinę",
     'task.copyDetails': "Kopiuj szczegóły zadania",
     "taskEdit.startAdvanceReminderLabel": "Przed rozpoczęciem",

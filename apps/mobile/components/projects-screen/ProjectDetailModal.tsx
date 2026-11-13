@@ -55,6 +55,7 @@ import { MarkdownText } from '../../components/markdown-text';
 import { ThemedAlertHost } from '../../components/themed-alert';
 import { ProjectTaskList, getProjectDetailTaskListOptions } from './ProjectTaskList';
 import { ProjectToSectionModal } from './ProjectToSectionModal';
+import { ProjectCalendarReference } from './ProjectCalendarReference';
 import { TaskListBulkBar, type TaskListBulkBarProps } from '../task-list/TaskListBulkBar';
 import { TaskListSortModal } from '../task-list/TaskListSortModal';
 import { AttachmentProgressIndicator } from '../../components/AttachmentProgressIndicator';
@@ -1170,6 +1171,7 @@ export function ProjectDetailModal({
 
                                 {showProjectMeta && (
                                     <>
+                                        <ProjectCalendarReference key={selectedProject.id} project={selectedProject} readOnly={isArchivedProject} t={t} />
                                         <View style={[styles.reviewContainer, { backgroundColor: tc.cardBg, borderColor: tc.border }]}>
                                             <View style={styles.reviewLabelRow}>
                                                 <Text style={[styles.reviewLabel, { color: tc.text }]}>{t('projects.statusLabel')}</Text>

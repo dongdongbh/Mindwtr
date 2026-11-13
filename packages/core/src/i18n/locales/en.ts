@@ -1,5 +1,21 @@
 
 export const en: Record<string, string> = {
+    "projects.calendarLimit": "Showing the first 200 matches. Search to find another event.",
+    "projects.calendarTitle": "Calendar",
+    "projects.calendarLink": "Link calendar event",
+    "projects.calendarReplace": "Replace linked event",
+    "projects.calendarUnlink": "Unlink calendar event",
+    "projects.calendarScheduled": "Scheduled next step",
+    "projects.calendarElapsed": "Review event outcome",
+    "projects.calendarUnavailable": "Calendar unavailable · Last known event details",
+    "projects.calendarHelp": "Link an existing event as this project’s scheduled next step. Calendar events stay read-only.",
+    "projects.calendarWindow": "Upcoming events · next 90 days",
+    "projects.calendarEmpty": "No upcoming events in enabled calendar feeds.",
+    "projects.calendarLoadFailed": "Calendar events could not be loaded. Close and try again.",
+    "projects.calendarSaveFailed": "Calendar reference could not be saved. Try again.",
+    "projects.calendarReviewStep": "Review scheduled next step",
+    "projects.calendarLastKnown": "Last known event details",
+
     "quickAdd.invalidReminderCommand": "Invalid reminder: use a supported duration and an explicit date and time",
     "taskEdit.startAdvanceReminderLabel": "Before start",
     "taskEdit.advanceReminderLabel": "Advance reminder",

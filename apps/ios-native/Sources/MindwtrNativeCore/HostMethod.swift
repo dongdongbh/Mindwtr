@@ -120,6 +120,7 @@ struct HostMethod: Equatable {
         "projectAttachmentEditOptions": .readText, "projectAttachmentWrite": .writeText, "projectAttachmentWriteRetryOutcome": .readText,
         "projectFileRemoveWrite": .writeText, "projectFileRemoveWriteRetryOutcome": .readText,
         "projectStatusOptions": .readText, "projectStatusWrite": .writeText, "projectStatusRetryOutcome": .readText,
+        "projectCalendarReferenceOptions": .readText, "projectCalendarReferenceWrite": .writeText, "projectCalendarReferenceRetryOutcome": .readText,
         "projectDateOptions": .readText, "projectDateWrite": .writeText, "projectDateRetryOutcome": .readText,
         "projectAreaOptions": .readText, "projectAreaWrite": .writeText, "projectAreaRetryOutcome": .readText,
         "menuRead": .readPair, "archiveTaskSelection": .readText, "doneBulkTagInput": .read(.string, .tagCount), "destinationPicker": .readText, "editorSuggestions": .read(.string, .string, .string, .integer), "calendarPreference": .writeText, "calendarUnschedule": .writeText, "calendarDelete": .writeText, "boardAction": .writeText,

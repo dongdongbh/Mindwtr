@@ -1,3 +1,4 @@
+import { getProjectCalendarReferenceSummary } from './project-calendar-reference';
 
 
 
@@ -53,6 +54,7 @@ export function getReviewOverviewText(t: Translate) {
         expandAreas: tFallback(t, 'review.expandAreas', 'Expand areas'),
         expandEverything: tFallback(t, 'review.expandEverything', 'Expand projects'),
         collapseEverything: tFallback(t, 'review.collapseEverything', 'Collapse all'),
+        calendarReferenceSummary: (project: Project) => project.calendarReference ? getProjectCalendarReferenceSummary(project.calendarReference, t) : null,
         hasNextAction: t('review.hasNextAction'),
         waiting: t('status.waiting'),
         projectDeferred: t('review.projectDeferred'),
@@ -168,7 +170,8 @@ export function decorateReviewOverviewGroups(
                 const isSingleActions = !projectGroup.project;
                 const groupTitle = projectGroup.project?.title || text.singleActions;
                 const state = projectGroup.nextActionState;
-                const stateLabel = state === 'next' ? text.hasNextAction : state === 'waiting' ? text.waiting : state === 'deferred' ? text.projectDeferred : text.needsAction;
+                const stateLabel = state === 'next' ? text.hasNextAction : state === 'waiting' ? text.waiting : state === 'deferred' ? text.projectDeferred
+                    : (projectGroup.project && text.calendarReferenceSummary?.(projectGroup.project)) || text.needsAction;
                 const projectSummary = scope === 'due'
                     ? text.countTask(projectGroup.tasks.length)
                     : isSingleActions
@@ -387,6 +390,8 @@ const defaultWeeklyReviewLabels = {
     projectDeferred: 'Scheduled',
     laterInSequence: 'Later in sequence',
     needsAction: '! Needs Action',
+    calendarReviewStep: 'Review scheduled next step',
+    calendarLastKnown: 'Last known event details',
     activeTask: 'active task',
     activeTasks: 'active tasks',
     moreItems: 'more items',
@@ -472,6 +477,8 @@ const weeklyReviewLabelKeys: WeeklyReviewLabels = {
     projectDeferred: 'review.projectDeferred',
     laterInSequence: 'projects.laterInSequence',
     needsAction: 'review.needsAction',
+    calendarReviewStep: 'projects.calendarReviewStep',
+    calendarLastKnown: 'projects.calendarLastKnown',
     activeTask: 'review.activeTask',
     activeTasks: 'review.activeTasks',
     moreItems: 'review.moreItems',
@@ -631,7 +638,10 @@ export function getWeeklyReviewProjects(
             ...entry,
             areaColor: getProjectAccentColor(entry.project, areaById, themePreset) || null,
             badge: {
-                label: labels[badge.label],
+                label: entry.nextActionState === 'none' && entry.project.calendarReference
+                    ? getProjectCalendarReferenceSummary(entry.project.calendarReference, key => key === 'projects.calendarReviewStep'
+                        ? labels.calendarReviewStep : key === 'projects.calendarLastKnown' ? labels.calendarLastKnown : key)
+                    : labels[badge.label],
                 color: einkSafeColor(badge.color, themePreset),
                 background: themePreset === 'eink' ? '#EEEEEE' : badge.background,
             },

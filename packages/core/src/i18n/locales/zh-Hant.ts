@@ -1,5 +1,21 @@
 
 export const zhHant: Record<string, string> = {
+    "projects.calendarLimit": "顯示前 200 個符合項目。搜尋以尋找其他事件。",
+    "projects.calendarTitle": "行事曆",
+    "projects.calendarLink": "連結行事曆事件",
+    "projects.calendarReplace": "取代已連結事件",
+    "projects.calendarUnlink": "取消連結行事曆事件",
+    "projects.calendarScheduled": "已排定的下一步",
+    "projects.calendarElapsed": "回顧事件結果",
+    "projects.calendarUnavailable": "行事曆無法使用 · 上次已知的事件詳情",
+    "projects.calendarHelp": "將現有事件連結為此專案已排定的下一步。行事曆事件維持唯讀。",
+    "projects.calendarWindow": "未來 90 天的事件",
+    "projects.calendarEmpty": "已啟用的行事曆訂閱中沒有未來事件。",
+    "projects.calendarLoadFailed": "無法載入行事曆事件。請關閉後再試。",
+    "projects.calendarSaveFailed": "無法儲存行事曆連結。請再試一次。",
+    "projects.calendarReviewStep": "回顧已排定的下一步",
+    "projects.calendarLastKnown": "上次已知的事件詳情",
+
     "quickAdd.invalidReminderCommand": "提醒無效：請使用支援的時長，並明確指定日期和時間",
     "taskEdit.startAdvanceReminderLabel": "開始前提醒",
     "taskEdit.advanceReminderLabel": "提前提醒",

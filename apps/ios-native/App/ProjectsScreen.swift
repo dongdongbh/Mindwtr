@@ -1376,7 +1376,10 @@ struct ProjectDetailScreen: View {
         .onChange(of: notesFocused) { if !$0 { Task { await model.flushProjectNotesEdit() } } }
         .task(id: [model.projectHeader.text("id"), model.projectDetail.text("mutationRevision"),
                    model.projectCurrent ? "current" : "stale", detailsExpanded ? "expanded" : "collapsed"]) {
-            if detailsExpanded && model.projectCurrent && !model.projectSelectionMode { await model.readProjectAttachments() }
+            if detailsExpanded && model.projectCurrent && !model.projectSelectionMode {
+                await model.readProjectAttachments()
+                await model.readProjectCalendarReference()
+            }
         }
         .task(id: model.projectDetail.text("mutationRevision")) {
             if model.projectDateField != nil && !model.projectDatePending && model.projectCurrent {
@@ -1517,6 +1520,11 @@ struct ProjectDetailScreen: View {
             ProjectBulkTagSheet(model: model, palette: palette)
                 .presentationDetents([.medium, .large])
                 .interactiveDismissDisabled(!model.projectBulkComposerCloseEnabled)
+        }
+        .sheet(isPresented: $model.projectCalendarReferencePresented) {
+            ProjectCalendarReferencePicker(model: model, palette: palette)
+                .presentationDetents([.large])
+                .interactiveDismissDisabled(model.busy || model.projectCalendarReferencePending || model.retryNeeded)
         }
         .sheet(isPresented: Binding(get: { model.projectAreaPresented },
                                     set: { if !$0 && !model.appLock.concealed { model.closeProjectArea() } })) {
@@ -1967,6 +1975,7 @@ struct ProjectDetailScreen: View {
                 ProjectDatesMetadata(model: model, palette: palette, metadata: metadata) {
                     resignProjectNotesInput()
                 }
+                ProjectCalendarReferenceCard(model: model, palette: palette)
             }
         }
         .padding(12).frame(maxWidth: .infinity, alignment: .leading)
@@ -3018,6 +3027,123 @@ private struct ProjectSectionsMetadata: View {
     }
 }
 
+
+private func projectCalendarReferenceDate(_ reference: CoreObject) -> String {
+    let raw = reference.text("start")
+    let formatter = DateFormatter()
+    formatter.dateStyle = .medium
+    formatter.timeStyle = .none
+    if reference.flag("allDay"), raw.count == 10 {
+        let parser = DateFormatter()
+        parser.locale = Locale(identifier: "en_US_POSIX")
+        parser.calendar = Calendar(identifier: .gregorian)
+        parser.dateFormat = "yyyy-MM-dd"
+        if let date = parser.date(from: raw) { return formatter.string(from: date) }
+        return raw
+    }
+    let parser = ISO8601DateFormatter()
+    parser.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    var date = parser.date(from: raw)
+    parser.formatOptions = [.withInternetDateTime]
+    date = date ?? parser.date(from: raw)
+    formatter.timeStyle = .short
+    return date.map { formatter.string(from: $0) } ?? raw
+}
+
+private struct ProjectCalendarReferenceCard: View {
+    @ObservedObject var model: CoreModel
+    let palette: AppPalette
+    var body: some View {
+        let options = model.projectCalendarReferenceOptions
+        let reference = options.object("current")
+        VStack(alignment: .leading, spacing: 8) {
+            Text(model.label("projects.calendarTitle")).rnFont(14, .semibold).foregroundStyle(palette.text)
+            if !reference.isEmpty {
+                Text(model.label(options.text("status") == "scheduled" ? "projects.calendarScheduled"
+                    : options.text("status") == "elapsed" ? "projects.calendarElapsed" : "projects.calendarUnavailable"))
+                    .rnFont(13, .semibold).foregroundStyle(palette.secondary)
+                Text(reference.text("title")).rnFont(14).foregroundStyle(palette.text)
+                Text(reference.text("sourceName") + " · " + projectCalendarReferenceDate(reference))
+                    .rnFont(13).foregroundStyle(palette.secondary)
+            }
+            Text(model.label("projects.calendarHelp")).rnFont(12).foregroundStyle(palette.secondary)
+            if !model.projectDetail.flag("readOnly") {
+                Button(model.label(reference.isEmpty ? "projects.calendarLink" : "projects.calendarReplace")) {
+                    Task { await model.openProjectCalendarReference() }
+                }
+                .rnFont(14, .semibold).frame(minHeight: 44)
+                .disabled(model.busy || model.retryNeeded || model.projectCalendarReferencePending || !model.projectActionsEnabled)
+                .accessibilityIdentifier("project-calendar-link")
+                if !reference.isEmpty {
+                    Button(model.label("projects.calendarUnlink")) { Task { await model.changeProjectCalendarReference(nil) } }
+                        .rnFont(14).frame(minHeight: 44).disabled(!model.projectCalendarReferenceCanEdit)
+                        .accessibilityIdentifier("project-calendar-unlink")
+                }
+            }
+            if let message = model.projectCalendarReferenceError {
+                Text(message).rnFont(13).foregroundStyle(palette.danger).textSelection(.enabled)
+                Button(model.label("common.retry")) {
+                    Task { if model.projectCalendarReferencePending { await model.retry() } else { await model.readProjectCalendarReference() } }
+                }
+                .frame(minHeight: 44).disabled(model.busy)
+            }
+        }
+        .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+        .background(palette.filter, in: RoundedRectangle(cornerRadius: 8))
+        .accessibilityIdentifier("project-calendar-reference")
+    }
+}
+
+private struct ProjectCalendarReferencePicker: View {
+    @ObservedObject var model: CoreModel
+    let palette: AppPalette
+    var body: some View {
+        let options = model.projectCalendarReferenceOptions
+        let candidates = options.objects("candidates")
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text(model.label("projects.calendarWindow")).rnFont(20, .bold).foregroundStyle(palette.text)
+                Spacer()
+                Button(model.label("common.close")) { model.projectCalendarReferencePresented = false }
+                    .frame(minHeight: 44).disabled(model.busy || model.retryNeeded || model.projectCalendarReferencePending)
+            }
+            TextField(model.label("common.search"), text: $model.projectCalendarReferenceQuery)
+                .textFieldStyle(.roundedBorder).disabled(model.busy || model.retryNeeded || model.projectCalendarReferencePending)
+                .accessibilityIdentifier("project-calendar-search")
+                .onChange(of: model.projectCalendarReferenceQuery) { query in Task { await model.searchProjectCalendarReference(query) } }
+            if options.number("total") > candidates.count {
+                Text("\(candidates.count) / \(options.number("total"))").rnFont(12).foregroundStyle(palette.secondary)
+            }
+            if !options.flag("available") {
+                Text(model.label("projects.calendarLoadFailed")).foregroundStyle(palette.secondary)
+            } else if candidates.isEmpty {
+                Text(model.label("projects.calendarEmpty")).foregroundStyle(palette.secondary)
+            }
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 8) {
+                    ForEach(Array(candidates.enumerated()), id: \.offset) { index, reference in
+                        Button { Task { await model.changeProjectCalendarReference(reference) } } label: {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(reference.text("title")).rnFont(15, .semibold).foregroundStyle(palette.text)
+                                Text(reference.text("sourceName") + " · " + projectCalendarReferenceDate(reference))
+                                    .rnFont(13).foregroundStyle(palette.secondary)
+                            }
+                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain).disabled(!model.projectCalendarReferenceCanEdit)
+                        .accessibilityIdentifier("project-calendar-event-\(index)")
+                    }
+                }
+            }
+            if let message = model.projectCalendarReferenceError {
+                Text(message).foregroundStyle(palette.danger)
+                Button(model.label("common.retry")) { Task { if model.projectCalendarReferencePending { await model.retry() } else { await model.readProjectCalendarReference() } } }
+                    .frame(minHeight: 44).disabled(model.busy)
+            }
+        }
+        .padding(16).background(palette.card)
+    }
+}
 
 private struct ProjectDatesMetadata: View {
     @ObservedObject var model: CoreModel

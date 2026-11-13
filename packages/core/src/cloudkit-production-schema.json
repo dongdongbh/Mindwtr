@@ -82,7 +82,8 @@
     "viewSectionIds",
     "archivedAt",
     "colorOverride",
-    "perSectionFlow"
+    "perSectionFlow",
+    "calendarReference"
    ],
    "pendingProduction": []
   },

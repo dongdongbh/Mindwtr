@@ -1,5 +1,21 @@
 
 export const svOverrides: Record<string, string> = {
+    "projects.calendarLimit": "Visar de första 200 träffarna. Sök för att hitta en annan händelse.",
+    "projects.calendarTitle": "Kalender",
+    "projects.calendarLink": "Länka kalenderhändelse",
+    "projects.calendarReplace": "Ersätt länkad händelse",
+    "projects.calendarUnlink": "Ta bort händelselänk",
+    "projects.calendarScheduled": "Planerat nästa steg",
+    "projects.calendarElapsed": "Granska händelsens resultat",
+    "projects.calendarUnavailable": "Kalendern är otillgänglig · Senast kända uppgifter",
+    "projects.calendarHelp": "Länka en befintlig händelse som projektets planerade nästa steg. Kalenderhändelser förblir skrivskyddade.",
+    "projects.calendarWindow": "Kommande händelser · nästa 90 dagar",
+    "projects.calendarEmpty": "Inga kommande händelser i aktiverade kalenderprenumerationer.",
+    "projects.calendarLoadFailed": "Kalenderhändelser kunde inte läsas in. Stäng och försök igen.",
+    "projects.calendarSaveFailed": "Kalenderreferensen kunde inte sparas. Försök igen.",
+    "projects.calendarReviewStep": "Granska planerat nästa steg",
+    "projects.calendarLastKnown": "Senast kända händelseuppgifter",
+
     "quickAdd.invalidReminderCommand": "Ogiltig påminnelse: ange en stödd tidsperiod och ett uttryckligt datum och klockslag",
     "taskEdit.startAdvanceReminderLabel": "Före start",
     "taskEdit.advanceReminderLabel": "Förhandspåminnelse",

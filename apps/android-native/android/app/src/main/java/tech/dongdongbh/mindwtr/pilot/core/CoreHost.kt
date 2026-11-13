@@ -618,6 +618,19 @@ class CoreHost(
     fun menuCommand(name: String, json: String): JSONObject = callAsync("menuCommand", name, json)
 
 
+    fun prepareProjectCalendarReference(json: String): JSONObject {
+        val prepared = callAsync("projectCalendarReferencePrepare", json)
+        if (prepared.getString("kind") == "prepared") {
+            val envelope = JSONObject().put("request", JSONObject(json)).put("prepared", prepared.getJSONObject("prepared")).toString()
+            callAsync("projectCalendarReferenceValidate", envelope)
+            checkNotNull(journal) { "The write journal is not open" }.append("projectCalendarReferenceCommit", listOf(envelope))
+            prepared.put("envelope", envelope)
+        }
+        return prepared
+    }
+
+    fun commitProjectCalendarReference(envelope: String): JSONObject = callAsync("projectCalendarReferenceCommit", envelope)
+
     fun journalAhead(name: String, json: String) {
         require(name == "projectEdit") { "$name is not journaled ahead" }
         checkNotNull(journal) { "The write journal is not open" }.append("menuCommand", listOf(name, json))
@@ -1229,7 +1242,12 @@ class CoreHost(
 
     private fun settle(entry: WriteJournal.Entry?, result: JSONObject, replay: Boolean): Boolean {
         result.optJSONObject("value")?.optJSONArray("deviceWrites")?.let { devices.store(it, entry?.sequence, replay) }
-        return entry != null && checkNotNull(journal).settle(entry, result.error(), replay)
+        val settled = entry != null && checkNotNull(journal).settle(entry, result.error(), replay)
+        if (entry?.method == "projectCalendarReferenceCommit" && result.error() == null) {
+            val request = JSONObject(entry.args.single() as String).getJSONObject("request")
+            Log.i(TAG, "Project calendar reference saved releaseCheck=v1.3.9/project-calendar-reference outcome=${if (request.isNull("value")) "unlinked" else "linked"}")
+        }
+        return settled
     }
 
 

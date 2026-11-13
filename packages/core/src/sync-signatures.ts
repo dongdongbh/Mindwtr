@@ -1,3 +1,4 @@
+import { normalizeProjectCalendarReference } from './project-calendar-reference-schema';
 import { normalizeTaskReminderPolicy } from './task-reminder-policy';
 import type { Area, Attachment, Person, Project, Section, Task } from './types';
 import { normalizeProjectSequentialScope, normalizeProjectTaskSortBy } from './project-utils';
@@ -138,6 +139,7 @@ export const normalizeProjectForContentComparison = (project: Project): Record<s
     const comparable: Record<string, unknown> = {
         ...project,
         colorOverride: project.colorOverride ?? undefined,
+        calendarReference: normalizeProjectCalendarReference(project.calendarReference) ?? undefined,
         tagIds: normalizeOptionalArrayForComparison(project.tagIds),
         attachments: project.deletedAt ? undefined : normalizeAttachmentsForContentComparison(project.attachments),
         isSequential: project.isSequential ? true : undefined,

@@ -248,3 +248,23 @@ describe('eink review colors', () => {
         expect(area.color).toBe('#000000');
     });
 });
+
+
+describe('calendar commitments in project review', () => {
+    it('shows the named last-known commitment without claiming a task Next Action or hiding review needs', () => {
+        const project: Project = { id: 'p', title: 'Proposal', status: 'active', color: '#123456', order: 0, tagIds: [],
+            createdAt: '2026-11-01T00:00:00Z', updatedAt: '2026-11-01T00:00:00Z',
+            calendarReference: { sourceId: 'feed', uid: 'meeting', sourceName: 'Work', title: 'Proposal meeting',
+                start: '2026-11-19T14:00:00Z', end: '2026-11-19T15:00:00Z', allDay: false } };
+        const labels = getWeeklyReviewLabels(key => key);
+        const entry = { project, tasks: [], currentTasks: [], laterTasks: [], nextActionState: 'none' as const };
+        const [row] = getWeeklyReviewProjects([entry], new Map(), labels);
+        expect(row.badge.label).toContain('Proposal meeting');
+        expect(row.badge.label).toContain('Last known event details');
+        expect(row.badge.label).not.toContain(labels.hasNext);
+        expect(row.nextActionState).toBe('none');
+        expect(project.status).toBe('active');
+        const [next] = getWeeklyReviewProjects([{ ...entry, nextActionState: 'next' }], new Map(), labels);
+        expect(next.badge.label).toBe(labels.hasNext);
+    });
+});

@@ -1,5 +1,21 @@
 
 export const arOverrides: Record<string, string> = {
+    "projects.calendarLimit": "تُعرض أول 200 نتيجة. ابحث للعثور على حدث آخر.",
+    "projects.calendarTitle": "التقويم",
+    "projects.calendarLink": "ربط حدث من التقويم",
+    "projects.calendarReplace": "استبدال الحدث المرتبط",
+    "projects.calendarUnlink": "إلغاء ربط حدث التقويم",
+    "projects.calendarScheduled": "الخطوة التالية المجدولة",
+    "projects.calendarElapsed": "مراجعة نتيجة الحدث",
+    "projects.calendarUnavailable": "التقويم غير متاح · آخر تفاصيل معروفة",
+    "projects.calendarHelp": "اربط حدثًا موجودًا باعتباره الخطوة التالية المجدولة لهذا المشروع. تظل أحداث التقويم للقراءة فقط.",
+    "projects.calendarWindow": "الأحداث القادمة · خلال 90 يومًا",
+    "projects.calendarEmpty": "لا توجد أحداث قادمة في اشتراكات التقويم المفعّلة.",
+    "projects.calendarLoadFailed": "تعذّر تحميل أحداث التقويم. أغلق وحاول مجددًا.",
+    "projects.calendarSaveFailed": "تعذّر حفظ مرجع التقويم. حاول مجددًا.",
+    "projects.calendarReviewStep": "مراجعة الخطوة التالية المجدولة",
+    "projects.calendarLastKnown": "آخر تفاصيل معروفة للحدث",
+
     "quickAdd.invalidReminderCommand": "تذكير غير صالح: استخدم مدة مدعومة وتاريخًا ووقتًا محددين",
     'task.copyDetails': "نسخ تفاصيل المهمة",
     "taskEdit.startAdvanceReminderLabel": "قبل البدء",

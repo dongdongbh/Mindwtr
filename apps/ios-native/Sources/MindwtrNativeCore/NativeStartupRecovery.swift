@@ -20,7 +20,7 @@ struct NativeStartupRecovery: Equatable {
         "manageAreaCreateCommit", "manageAreaDeleteCommit", "manageAreaEditCommit", "managePersonCreateCommit",
         "managePersonDeleteCommit", "managePersonEditCommit", "manageTaxonomyCommit", "mindSweepCommit",
         "notificationSettingCommit", "projectAreaCommit", "projectAttachmentWriteCommit", "projectCreateCommit",
-        "projectDateCommit", "projectDeleteCommit", "projectDeleteUndoCommit", "projectDuplicateCommit",
+        "projectDateCommit", "projectCalendarReferenceCommit", "projectDeleteCommit", "projectDeleteUndoCommit", "projectDuplicateCommit",
         "projectFileRemoveWriteCommit", "projectFlowCommit", "projectFocusCommit", "projectLifecycleCommit", "projectMoveCommit",
         "projectNotesWriteCommit", "projectOrganizeDestinationCreateCommit", "projectRenameCommit",
         "projectSectionCreateCommit", "projectSectionDeleteCommit", "projectSectionOrderCommit",

@@ -258,6 +258,7 @@ export * from './ai-task-actions';
 export * from './sqlite-schema';
 export * from './task-sync-schema';
 export * from './project-sync-schema';
+export * from './project-calendar-reference-schema';
 export * from './section-sync-schema';
 export * from './sqlite-adapter';
 export * from './logger';
@@ -472,3 +473,7 @@ export type { NativeTaskChecklistMoveRequest, NativeTaskChecklistMoveUndoRequest
 
 export type { NativeTaskRowSwipeActionsInput } from './native-host-contract-row-swipe';
 export type { NativeRowTaskFocusRequest, NativeRowTaskFocusResult, NativePreparedRowTaskFocus, NativeRowTaskFocusEnvelope, NativeRowTaskFocusPreparation } from './native-host-contract-task-checklist';
+
+export * from './project-calendar-reference';
+
+export * from './native-host-contract-project-calendar-reference';

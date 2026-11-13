@@ -1,5 +1,21 @@
 
 export const itOverrides: Record<string, string> = {
+    "projects.calendarLimit": "Sono mostrati i primi 200 risultati. Cerca per trovare un altro evento.",
+    "projects.calendarTitle": "Calendario",
+    "projects.calendarLink": "Collega evento del calendario",
+    "projects.calendarReplace": "Sostituisci evento collegato",
+    "projects.calendarUnlink": "Scollega evento del calendario",
+    "projects.calendarScheduled": "Prossimo passo pianificato",
+    "projects.calendarElapsed": "Rivedi l’esito dell’evento",
+    "projects.calendarUnavailable": "Calendario non disponibile · Ultimi dettagli noti",
+    "projects.calendarHelp": "Collega un evento esistente come prossimo passo pianificato del progetto. Gli eventi restano di sola lettura.",
+    "projects.calendarWindow": "Eventi in arrivo · prossimi 90 giorni",
+    "projects.calendarEmpty": "Nessun evento in arrivo nei calendari abilitati.",
+    "projects.calendarLoadFailed": "Impossibile caricare gli eventi. Chiudi e riprova.",
+    "projects.calendarSaveFailed": "Impossibile salvare il riferimento al calendario. Riprova.",
+    "projects.calendarReviewStep": "Rivedi il prossimo passo pianificato",
+    "projects.calendarLastKnown": "Ultimi dettagli noti dell’evento",
+
     "quickAdd.invalidReminderCommand": "Promemoria non valido: usa una durata supportata e una data e ora esplicite",
     'task.copyDetails': "Copia dettagli attività",
     "taskEdit.startAdvanceReminderLabel": "Prima dell’inizio",

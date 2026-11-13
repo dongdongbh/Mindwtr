@@ -2,6 +2,22 @@
 
 
 export const esOverrides: Record<string, string> = {
+    "projects.calendarLimit": "Se muestran las primeras 200 coincidencias. Busca para encontrar otro evento.",
+    "projects.calendarTitle": "Calendario",
+    "projects.calendarLink": "Vincular evento del calendario",
+    "projects.calendarReplace": "Reemplazar evento vinculado",
+    "projects.calendarUnlink": "Desvincular evento del calendario",
+    "projects.calendarScheduled": "Siguiente paso programado",
+    "projects.calendarElapsed": "Revisar el resultado del evento",
+    "projects.calendarUnavailable": "Calendario no disponible · Últimos datos conocidos",
+    "projects.calendarHelp": "Vincula un evento existente como siguiente paso programado de este proyecto. Los eventos son de solo lectura.",
+    "projects.calendarWindow": "Próximos eventos · 90 días",
+    "projects.calendarEmpty": "No hay próximos eventos en los calendarios habilitados.",
+    "projects.calendarLoadFailed": "No se pudieron cargar los eventos. Cierra y vuelve a intentarlo.",
+    "projects.calendarSaveFailed": "No se pudo guardar la referencia al calendario. Vuelve a intentarlo.",
+    "projects.calendarReviewStep": "Revisar el siguiente paso programado",
+    "projects.calendarLastKnown": "Últimos datos conocidos del evento",
+
     "quickAdd.invalidReminderCommand": "Recordatorio no válido: usa una duración admitida y una fecha y hora explícitas",
     "taskEdit.startAdvanceReminderLabel": "Antes del inicio",
     "taskEdit.advanceReminderLabel": "Recordatorio anticipado",

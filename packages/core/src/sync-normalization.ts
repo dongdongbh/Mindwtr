@@ -1,3 +1,4 @@
+import { isProjectCalendarReference, normalizeProjectCalendarReference } from './project-calendar-reference-schema';
 import { isSingleTaskReminder, normalizeTaskReminderPolicy } from './task-reminder-policy';
 import { DEFAULT_PROJECT_COLOR, isValidProjectColorOverride } from './color-constants';
 import { isTaxonomyCatalog } from './taxonomy-catalog';
@@ -304,6 +305,7 @@ export const normalizeProjectForSyncMerge = (
         status: normalizeProjectStatusForMerge(project.status),
         color: normalizeOptionalString(project.color) ?? '#6B7280',
         colorOverride: isValidProjectColorOverride(project.colorOverride) ? project.colorOverride : undefined,
+        calendarReference: normalizeProjectCalendarReference(project.calendarReference),
         tagIds: normalizeStringArray(project.tagIds),
         isSequential: normalizeSyncedBoolean(project.isSequential),
         sequentialScope: normalizeProjectSequentialScope(project.sequentialScope),
@@ -785,6 +787,9 @@ export function* validateMergedSyncDataPass(data: AppData): CooperativePass<stri
     if (Array.isArray(data.projects)) {
         data.projects.forEach((project, index) => {
             if (!isObjectRecord(project)) return;
+            if (project.calendarReference != null && !isProjectCalendarReference(project.calendarReference)) {
+                errors.push(`projects[${index}].calendarReference must be a valid calendar reference or null`);
+            }
             if (!isValidProjectColorOverride(project.colorOverride)) {
                 errors.push(`projects[${index}].colorOverride must be a six-digit hex color or null`);
             }

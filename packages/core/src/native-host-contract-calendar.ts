@@ -440,6 +440,9 @@ const isEvent = (value: unknown): value is ExternalCalendarEvent => (
     isObjectRecord(value) && isText(value.id) && isText(value.sourceId) && isText(value.title, 2000)
     && isText(value.start, ISO_INSTANT_LIMIT) && isText(value.end, ISO_INSTANT_LIMIT) && typeof value.allDay === 'boolean'
     && (value.nativeEventId === undefined || isText(value.nativeEventId))
+    && (value.uid === undefined || isText(value.uid, 2048))
+    && (value.calendarSourceId === undefined || isText(value.calendarSourceId, 2048))
+    && (value.recurrenceId === undefined || isText(value.recurrenceId, ISO_INSTANT_LIMIT))
     && (value.description === undefined || isText(value.description, 20_000))
     && (value.location === undefined || isText(value.location, 2000))
 );
@@ -1922,7 +1925,7 @@ export function createCalendarViewMethods(deps: CalendarViewDeps) {
                     if (!calendarKeys(input, ['event', 'canOpen', 'state', 'calendarName'])
                         || (input.canOpen && !canOpenExternalCalendarEvent(input.event, 'ios'))
                         || !eventCopyStateValid(input.state)
-                        || Object.keys(input.event).some((key) => !['id', 'sourceId', 'title', 'start', 'end', 'allDay', 'nativeEventId', 'description', 'location'].includes(key))) {
+                        || Object.keys(input.event).some((key) => !['id', 'sourceId', 'title', 'start', 'end', 'allDay', 'nativeEventId', 'description', 'location', 'uid', 'calendarSourceId', 'recurrenceId'].includes(key))) {
                         return fail('INVALID_INPUT', 'An owned event state and calendar name are required');
                     }
                     const { title, start, end, allDay, description, location } = input.event;

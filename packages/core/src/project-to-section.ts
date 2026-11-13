@@ -71,7 +71,7 @@ export const getProjectToSectionEligibility = (state: ConversionState, sourcePro
         return { ok: false, reason: 'source-sections' };
     if (source.attachments?.some((attachment) => !attachment.deletedAt))
         return { ok: false, reason: 'source-attachments' };
-    if (source.startDate || source.dueDate || source.reviewAt)
+    if (source.startDate || source.dueDate || source.reviewAt || source.calendarReference)
         return { ok: false, reason: 'source-dates' };
     if (source.tagIds?.length) return { ok: false, reason: 'source-tags' };
     if (source.isFocused) return { ok: false, reason: 'source-focus' };

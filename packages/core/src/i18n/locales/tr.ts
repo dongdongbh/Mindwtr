@@ -1,5 +1,21 @@
 
 export const trOverrides: Record<string, string> = {
+    "projects.calendarLimit": "İlk 200 eşleşme gösteriliyor. Başka bir etkinlik bulmak için arayın.",
+    "projects.calendarTitle": "Takvim",
+    "projects.calendarLink": "Takvim etkinliği bağla",
+    "projects.calendarReplace": "Bağlı etkinliği değiştir",
+    "projects.calendarUnlink": "Takvim etkinliği bağlantısını kaldır",
+    "projects.calendarScheduled": "Planlanmış sonraki adım",
+    "projects.calendarElapsed": "Etkinlik sonucunu gözden geçir",
+    "projects.calendarUnavailable": "Takvim kullanılamıyor · Son bilinen bilgiler",
+    "projects.calendarHelp": "Mevcut bir etkinliği bu projenin planlanmış sonraki adımı olarak bağlayın. Takvim etkinlikleri salt okunur kalır.",
+    "projects.calendarWindow": "Yaklaşan etkinlikler · sonraki 90 gün",
+    "projects.calendarEmpty": "Etkin takvim akışlarında yaklaşan etkinlik yok.",
+    "projects.calendarLoadFailed": "Takvim etkinlikleri yüklenemedi. Kapatıp yeniden deneyin.",
+    "projects.calendarSaveFailed": "Takvim başvurusu kaydedilemedi. Yeniden deneyin.",
+    "projects.calendarReviewStep": "Planlanmış sonraki adımı gözden geçir",
+    "projects.calendarLastKnown": "Etkinliğin son bilinen bilgileri",
+
     "quickAdd.invalidReminderCommand": "Geçersiz hatırlatıcı: desteklenen bir süre ve açık tarih ve saat kullanın",
     'task.copyDetails': "Görev ayrıntılarını kopyala",
     "taskEdit.startAdvanceReminderLabel": "Başlamadan önce",

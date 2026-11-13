@@ -29,6 +29,7 @@ class WriteJournal(
             "backupDocumentCommit" to listOf("{id,sha256}", "id"),
 
             "pomodoroTransitionCommit" to listOf("text", "bool"),
+            "projectCalendarReferenceCommit" to listOf("text"),
         )
 
         val MENU = mapOf(

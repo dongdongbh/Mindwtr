@@ -1,6 +1,140 @@
 import { describe, it, expect } from 'vitest';
 import { expandCategoryCalendars, parseIcs, parseIcsWithMetadata } from './ics';
 
+describe('ICS recurrence source timezone', () => {
+    it.each([
+        ['DAILY', '20260307', '', ['2026-03-07', '2026-03-08', '2026-03-09']],
+        ['WEEKLY', '20260301', ';BYDAY=SU', ['2026-03-01', '2026-03-08', '2026-03-15']],
+        ['MONTHLY', '20260201', ';BYDAY=1SU', ['2026-02-01', '2026-03-01', '2026-04-05']],
+        ['YEARLY', '20250309', ';BYMONTH=3;BYDAY=2SU', ['2025-03-09', '2026-03-08', '2027-03-14']],
+    ])('expands %s in its declared time basis across device timezones', (frequency, start, selectors, days) => {
+        const previousZone = process.env.TZ;
+        try {
+            for (const zone of ['UTC', 'America/New_York', 'Asia/Tokyo']) {
+                process.env.TZ = zone;
+                for (const counted of [true, false]) {
+                    for (const source of ['UTC', 'America/New_York']) {
+                        const expected = days.map(day => {
+                            const hour = source === 'UTC' ? '00:30'
+                                : day.startsWith('2026') && day < '2026-03-08' ? '14:00' : '13:00';
+                            return `${day}T${hour}:00.000Z`;
+                        });
+                        const input = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'BEGIN:VEVENT', 'UID:source-zone', 'SUMMARY:Meeting',
+                            source === 'UTC' ? `DTSTART:${start}T003000Z` : `DTSTART;TZID=${source}:${start}T090000`,
+                            'DURATION:PT1H', `RRULE:FREQ=${frequency}${selectors}${counted ? ';COUNT=3' : ''}`,
+                            'END:VEVENT', 'END:VCALENDAR'].join('\n');
+                        const events = parseIcs(input, { sourceId: 'feed',
+                            rangeStart: new Date(`${days[0]}T00:00:00Z`),
+                            rangeEnd: new Date(Date.parse(`${days[2]}T00:00:00Z`) + 86_400_000) });
+                        expect(events.map(event => event.start), `${zone}/${source}/${counted}`).toEqual(expected);
+                        expect(events.map(event => event.recurrenceId), `${zone}/${source}/${counted}`).toEqual(expected);
+                    }
+                }
+            }
+        } finally {
+            if (previousZone === undefined) delete process.env.TZ;
+            else process.env.TZ = previousZone;
+        }
+    });
+
+    it('matches UTC overrides and exclusions after a TZID daylight saving transition', () => {
+        const previousZone = process.env.TZ;
+        const input = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'BEGIN:VEVENT', 'UID:source-zone', 'SUMMARY:Meeting',
+            'DTSTART;TZID=America/New_York:20260307T090000', 'DURATION:PT1H',
+            'RRULE:FREQ=DAILY;UNTIL=20260310T130000Z', 'EXDATE:20260309T130000Z', 'END:VEVENT',
+            'BEGIN:VEVENT', 'UID:source-zone', 'SUMMARY:Moved', 'RECURRENCE-ID:20260308T130000Z',
+            'DTSTART;TZID=America/New_York:20260308T110000', 'DURATION:PT1H', 'END:VEVENT', 'END:VCALENDAR'].join('\n');
+        try {
+            for (const zone of ['UTC', 'America/New_York', 'Asia/Tokyo']) {
+                process.env.TZ = zone;
+                const events = parseIcs(input, { sourceId: 'feed', rangeStart: new Date('2026-03-07T00:00:00Z'),
+                    rangeEnd: new Date('2026-03-12T00:00:00Z') });
+                expect(events.map(event => event.start)).toEqual([
+                    '2026-03-07T14:00:00.000Z', '2026-03-08T15:00:00.000Z', '2026-03-10T13:00:00.000Z',
+                ]);
+                expect(events[1].recurrenceId).toBe('2026-03-08T13:00:00.000Z');
+            }
+        } finally {
+            if (previousZone === undefined) delete process.env.TZ;
+            else process.env.TZ = previousZone;
+        }
+    });
+
+    it.each([
+        ['DTSTART;VALUE=DATE:20260307', ['DATE:2026-03-07', 'DATE:2026-03-08', 'DATE:2026-03-09']],
+        ['DTSTART:20260307T090000', ['FLOAT:2026-03-07T09:00:00', 'FLOAT:2026-03-08T09:00:00', 'FLOAT:2026-03-09T09:00:00']],
+    ])('keeps civil recurrence identity stable for %s', (start, expected) => {
+        const previousZone = process.env.TZ;
+        try {
+            for (const zone of ['UTC', 'America/New_York', 'Asia/Tokyo']) {
+                process.env.TZ = zone;
+                const input = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'BEGIN:VEVENT', 'UID:civil', 'SUMMARY:Civil', start,
+                    'RRULE:FREQ=DAILY;COUNT=3', 'END:VEVENT', 'END:VCALENDAR'].join('\n');
+                const events = parseIcs(input, { sourceId: 'feed', rangeStart: new Date('2026-03-06T00:00:00Z'),
+                    rangeEnd: new Date('2026-03-11T00:00:00Z') });
+                expect(events.map(event => event.recurrenceId)).toEqual(expected);
+            }
+        } finally {
+            if (previousZone === undefined) delete process.env.TZ;
+            else process.env.TZ = previousZone;
+        }
+    });
+
+    it('preserves all-day calendar duration across daylight saving transitions', () => {
+        const previousZone = process.env.TZ;
+        try {
+            process.env.TZ = 'America/New_York';
+            const input = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'BEGIN:VEVENT', 'UID:civil', 'SUMMARY:Civil',
+                'DTSTART;VALUE=DATE:20260308', 'DTEND;VALUE=DATE:20260309', 'RRULE:FREQ=DAILY;COUNT=3',
+                'END:VEVENT', 'END:VCALENDAR'].join('\n');
+            const events = parseIcs(input, { sourceId: 'feed', rangeStart: new Date('2026-03-07T00:00:00Z'),
+                rangeEnd: new Date('2026-03-12T00:00:00Z') });
+            expect(events.map(event => [event.start, event.end])).toEqual([
+                ['2026-03-08T05:00:00.000Z', '2026-03-09T04:00:00.000Z'],
+                ['2026-03-09T04:00:00.000Z', '2026-03-10T04:00:00.000Z'],
+                ['2026-03-10T04:00:00.000Z', '2026-03-11T04:00:00.000Z'],
+            ]);
+        } finally {
+            if (previousZone === undefined) delete process.env.TZ;
+            else process.env.TZ = previousZone;
+        }
+    });
+
+    it('preserves the occurrence limit when seeking a later source-time window', () => {
+        const input = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'BEGIN:VEVENT', 'UID:bounded', 'SUMMARY:Meeting',
+            'DTSTART;TZID=America/New_York:20260307T090000', 'DURATION:PT1H', 'RRULE:FREQ=DAILY',
+            'END:VEVENT', 'END:VCALENDAR'].join('\n');
+        const events = parseIcs(input, { sourceId: 'feed', rangeStart: new Date('2026-03-09T00:00:00Z'),
+            rangeEnd: new Date('2026-03-10T00:00:00Z'), maxOccurrencesPerEvent: 1 });
+        expect(events.map(event => event.start)).toEqual(['2026-03-09T13:00:00.000Z']);
+    });
+
+    it.each([';COUNT=3', ''])('keeps overlapping fold occurrences when narrowing the range with %s', (count) => {
+        const previousZone = process.env.TZ;
+        const input = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'BEGIN:VEVENT', 'UID:fold', 'SUMMARY:Meeting',
+            'DTSTART;TZID=America/New_York:20261031T014500', 'DURATION:PT30M', `RRULE:FREQ=DAILY${count}`,
+            'END:VEVENT', 'END:VCALENDAR'].join('\n');
+        try {
+            for (const zone of ['UTC', 'America/New_York', 'Asia/Tokyo']) {
+                process.env.TZ = zone;
+                const options = { sourceId: 'feed', rangeStart: new Date('2026-11-01T04:00:00Z'), maxOccurrencesPerEvent: 1 };
+                const wide = parseIcs(input, { ...options, rangeEnd: new Date('2026-11-01T07:00:00Z') });
+                const narrow = parseIcs(input, { ...options, rangeEnd: new Date('2026-11-01T06:30:00Z') });
+                expect(wide.map(event => [event.start, event.end])).toEqual([
+                    ['2026-11-01T05:45:00.000Z', '2026-11-01T06:15:00.000Z'],
+                ]);
+                expect(narrow).toEqual(wide);
+                const later = parseIcs(input, { ...options, rangeStart: new Date('2026-11-02T05:00:00Z'),
+                    rangeEnd: new Date('2026-11-02T08:00:00Z') });
+                expect(later.map(event => event.start)).toEqual(['2026-11-02T06:45:00.000Z']);
+            }
+        } finally {
+            if (previousZone === undefined) delete process.env.TZ;
+            else process.env.TZ = previousZone;
+        }
+    });
+});
+
 describe('ics', () => {
     it('parses a simple timed event', () => {
         const ics = [

@@ -1,5 +1,21 @@
 
 export const zhHans: Record<string, string> = {
+    "projects.calendarLimit": "显示前 200 个匹配项。搜索以查找其他事件。",
+    "projects.calendarTitle": "日历",
+    "projects.calendarLink": "关联日历事件",
+    "projects.calendarReplace": "替换关联事件",
+    "projects.calendarUnlink": "取消关联日历事件",
+    "projects.calendarScheduled": "已安排的下一步",
+    "projects.calendarElapsed": "回顾事件结果",
+    "projects.calendarUnavailable": "日历不可用 · 上次已知的事件详情",
+    "projects.calendarHelp": "将已有事件关联为此项目已安排的下一步。日历事件保持只读。",
+    "projects.calendarWindow": "未来 90 天的事件",
+    "projects.calendarEmpty": "已启用的日历订阅中没有未来事件。",
+    "projects.calendarLoadFailed": "无法加载日历事件。请关闭后重试。",
+    "projects.calendarSaveFailed": "无法保存日历关联。请重试。",
+    "projects.calendarReviewStep": "回顾已安排的下一步",
+    "projects.calendarLastKnown": "上次已知的事件详情",
+
     "quickAdd.invalidReminderCommand": "提醒无效：请使用支持的时长，并明确指定日期和时间",
     "taskEdit.startAdvanceReminderLabel": "开始前提醒",
     "taskEdit.advanceReminderLabel": "提前提醒",

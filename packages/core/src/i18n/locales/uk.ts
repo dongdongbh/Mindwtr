@@ -1,5 +1,21 @@
 
 export const ukOverrides: Record<string, string> = {
+    "projects.calendarLimit": "Показано перші 200 збігів. Скористайтеся пошуком, щоб знайти іншу подію.",
+    "projects.calendarTitle": "Календар",
+    "projects.calendarLink": "Пов’язати подію календаря",
+    "projects.calendarReplace": "Замінити пов’язану подію",
+    "projects.calendarUnlink": "Від’єднати подію календаря",
+    "projects.calendarScheduled": "Запланований наступний крок",
+    "projects.calendarElapsed": "Переглянути результат події",
+    "projects.calendarUnavailable": "Календар недоступний · Останні відомі дані",
+    "projects.calendarHelp": "Пов’яжіть наявну подію як запланований наступний крок проєкту. Події залишаються лише для читання.",
+    "projects.calendarWindow": "Майбутні події · наступні 90 днів",
+    "projects.calendarEmpty": "В увімкнених календарях немає майбутніх подій.",
+    "projects.calendarLoadFailed": "Не вдалося завантажити події. Закрийте та спробуйте ще раз.",
+    "projects.calendarSaveFailed": "Не вдалося зберегти посилання на календар. Спробуйте ще раз.",
+    "projects.calendarReviewStep": "Переглянути запланований наступний крок",
+    "projects.calendarLastKnown": "Останні відомі дані події",
+
     "quickAdd.invalidReminderCommand": "Недійсне нагадування: вкажіть підтримувану тривалість і точну дату та час",
     'task.copyDetails': "Копіювати деталі завдання",
     "taskEdit.startAdvanceReminderLabel": "До початку",

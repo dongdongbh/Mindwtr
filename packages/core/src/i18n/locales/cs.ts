@@ -1,5 +1,21 @@
 
 export const csOverrides: Record<string, string> = {
+    "projects.calendarLimit": "Zobrazuje se prvních 200 výsledků. Další událost najdete vyhledáváním.",
+    "projects.calendarTitle": "Kalendář",
+    "projects.calendarLink": "Propojit událost kalendáře",
+    "projects.calendarReplace": "Nahradit propojenou událost",
+    "projects.calendarUnlink": "Odpojit událost kalendáře",
+    "projects.calendarScheduled": "Naplánovaný další krok",
+    "projects.calendarElapsed": "Zkontrolovat výsledek události",
+    "projects.calendarUnavailable": "Kalendář není dostupný · Poslední známé údaje",
+    "projects.calendarHelp": "Propojte existující událost jako naplánovaný další krok projektu. Události zůstanou pouze ke čtení.",
+    "projects.calendarWindow": "Nadcházející události · příštích 90 dní",
+    "projects.calendarEmpty": "V zapnutých odběrech kalendářů nejsou nadcházející události.",
+    "projects.calendarLoadFailed": "Události kalendáře se nepodařilo načíst. Zavřete a zkuste to znovu.",
+    "projects.calendarSaveFailed": "Odkaz na kalendář se nepodařilo uložit. Zkuste to znovu.",
+    "projects.calendarReviewStep": "Zkontrolovat naplánovaný další krok",
+    "projects.calendarLastKnown": "Poslední známé údaje události",
+
     "quickAdd.invalidReminderCommand": "Neplatná připomínka: zadejte podporovanou dobu a výslovné datum a čas",
     'task.copyDetails': "Kopírovat podrobnosti úkolu",
     "taskEdit.startAdvanceReminderLabel": "Před začátkem",

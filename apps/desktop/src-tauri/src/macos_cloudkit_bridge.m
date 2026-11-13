@@ -206,6 +206,7 @@ static const MWFieldSpec kProjectFields[] = {
     {"isSequential", "isSequential", MWFieldKindBool},
     {"sequentialScope", "sequentialScope", MWFieldKindString},
     {"perSectionFlow", "perSectionFlow", MWFieldKindBool},
+    {"calendarReference", "calendarReference", MWFieldKindJsonString},
     {"taskSortBy",   "taskSortBy",   MWFieldKindString},
     {"isFocused",    "isFocused",    MWFieldKindBool},
     {"supportNotes", "supportNotes", MWFieldKindString},
@@ -325,6 +326,13 @@ static void ck_apply_fields(NSDictionary *json, CKRecord *record, NSString *reco
         NSString *ckKey = [NSString stringWithUTF8String:specs[i].ckKey];
         id value = json[jsKey];
 
+        if ([jsKey isEqualToString:@"calendarReference"]) {
+            if (!value) continue;
+            if ([value isKindOfClass:[NSNull class]]) {
+                ck_set_json_field(record, ckKey, @"null");
+                continue;
+            }
+        }
         if (!value || [value isKindOfClass:[NSNull class]]) {
             ck_set_field(record, ckKey, nil);
             continue;
@@ -389,6 +397,10 @@ static NSDictionary *ck_json_from_record(CKRecord *record) {
                 if ([value isKindOfClass:[NSArray class]]) result[jsKey] = value;
                 break;
             case MWFieldKindJsonString:
+                if ([jsKey isEqualToString:@"calendarReference"] && [value isEqual:@"null"]) {
+                    result[jsKey] = [NSNull null];
+                    break;
+                }
                 if ([value isKindOfClass:[NSString class]]) {
                     NSData *data = [(NSString *)value dataUsingEncoding:NSUTF8StringEncoding];
                     if (data) {

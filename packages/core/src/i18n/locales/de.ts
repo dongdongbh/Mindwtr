@@ -1,5 +1,21 @@
 
 export const deOverrides: Record<string, string> = {
+    "projects.calendarLimit": "Die ersten 200 Treffer werden angezeigt. Suche nach einem anderen Termin.",
+    "projects.calendarTitle": "Kalender",
+    "projects.calendarLink": "Kalendertermin verknüpfen",
+    "projects.calendarReplace": "Verknüpften Termin ersetzen",
+    "projects.calendarUnlink": "Kalenderverknüpfung entfernen",
+    "projects.calendarScheduled": "Geplanter nächster Schritt",
+    "projects.calendarElapsed": "Ergebnis des Termins prüfen",
+    "projects.calendarUnavailable": "Kalender nicht verfügbar · Letzter bekannter Stand",
+    "projects.calendarHelp": "Verknüpfe einen vorhandenen Termin als geplanten nächsten Schritt dieses Projekts. Kalendertermine bleiben schreibgeschützt.",
+    "projects.calendarWindow": "Anstehende Termine · nächste 90 Tage",
+    "projects.calendarEmpty": "Keine anstehenden Termine in den aktivierten Kalenderabonnements.",
+    "projects.calendarLoadFailed": "Kalendertermine konnten nicht geladen werden. Schließen und erneut versuchen.",
+    "projects.calendarSaveFailed": "Kalenderverweis konnte nicht gespeichert werden. Erneut versuchen.",
+    "projects.calendarReviewStep": "Geplanten nächsten Schritt prüfen",
+    "projects.calendarLastKnown": "Letzte bekannte Termindetails",
+
     "quickAdd.invalidReminderCommand": "Ungültige Erinnerung: unterstützte Dauer und ausdrückliches Datum mit Uhrzeit angeben",
     'task.copyDetails': "Aufgabendetails kopieren",
     "taskEdit.startAdvanceReminderLabel": "Vor dem Start",

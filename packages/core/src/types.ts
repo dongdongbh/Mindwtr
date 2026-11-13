@@ -85,12 +85,24 @@ export type ProjectSequentialScope = 'project' | 'section';
 
 export type ProjectFlowMode = 'parallel' | 'sequential' | 'perSection';
 
+export type ProjectCalendarReference = {
+    sourceId: string;
+    uid: string;
+    recurrenceId?: string;
+    sourceName: string;
+    title: string;
+    start: string;
+    end: string;
+    allDay: boolean;
+};
+
 export interface Project {
     id: string;
     title: string;
     status: 'active' | 'someday' | 'waiting' | 'archived';
     color: string;
     colorOverride?: string | null;
+    calendarReference?: ProjectCalendarReference | null;
     order: number;
     tagIds: string[];
     isSequential?: boolean;

@@ -1,5 +1,21 @@
 
 export const nlOverrides: Record<string, string> = {
+    "projects.calendarLimit": "De eerste 200 resultaten worden getoond. Zoek om een andere afspraak te vinden.",
+    "projects.calendarTitle": "Agenda",
+    "projects.calendarLink": "Agenda-afspraak koppelen",
+    "projects.calendarReplace": "Gekoppelde afspraak vervangen",
+    "projects.calendarUnlink": "Agenda-afspraak ontkoppelen",
+    "projects.calendarScheduled": "Geplande volgende stap",
+    "projects.calendarElapsed": "Uitkomst van afspraak bekijken",
+    "projects.calendarUnavailable": "Agenda niet beschikbaar · Laatst bekende gegevens",
+    "projects.calendarHelp": "Koppel een bestaande afspraak als geplande volgende stap van dit project. Agenda-afspraken blijven alleen-lezen.",
+    "projects.calendarWindow": "Komende afspraken · volgende 90 dagen",
+    "projects.calendarEmpty": "Geen komende afspraken in ingeschakelde agenda-abonnementen.",
+    "projects.calendarLoadFailed": "Agenda-afspraken konden niet worden geladen. Sluit en probeer opnieuw.",
+    "projects.calendarSaveFailed": "Agendaverwijzing kon niet worden opgeslagen. Probeer opnieuw.",
+    "projects.calendarReviewStep": "Geplande volgende stap bekijken",
+    "projects.calendarLastKnown": "Laatst bekende afspraakgegevens",
+
     'inbox.completedInSession': 'Voltooid in deze sessie',
     "quickAdd.invalidReminderCommand": "Ongeldige herinnering: gebruik een ondersteunde duur en een expliciete datum en tijd",
     'task.copyDetails': "Taakdetails kopiëren",

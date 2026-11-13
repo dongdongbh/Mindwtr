@@ -5062,6 +5062,31 @@ globalThis.MindwtrHost = {
     projectDateCommit(json: string): string {
         return submit(async () => unwrap(await contract.commitPreparedProjectDate(JSON.parse(json))));
     },
+    projectCalendarReferenceOptions(json: string): string {
+        return submit(async () => {
+            requireSaved();
+            return unwrap(await contract.getProjectCalendarReferenceOptions(JSON.parse(json)));
+        });
+    },
+    projectCalendarReferenceRetryOutcome(json: string): string {
+        return submit(async () => {
+            requireSaved();
+            return unwrap(contract.probeProjectCalendarReferenceOutcome(JSON.parse(json)));
+        });
+    },
+
+    projectCalendarReferencePrepare(json: string): string {
+        return submit(async () => {
+            requireSaved();
+            return unwrap(contract.prepareProjectCalendarReference(JSON.parse(json)));
+        });
+    },
+    projectCalendarReferenceValidate(json: string): string {
+        return submit(async () => unwrap(contract.validatePreparedProjectCalendarReference(JSON.parse(json))));
+    },
+    projectCalendarReferenceCommit(json: string): string {
+        return submit(async () => unwrap(await contract.commitPreparedProjectCalendarReference(JSON.parse(json))));
+    },
     projectAreaOptions(id: string): string {
         return submit(async () => {
             requireSaved();
@@ -6962,6 +6987,7 @@ globalThis.MindwtrHost = {
 
 
             if (name !== 'more') requireSaved();
+            if (name === 'projectCalendarReferenceOptions') return unwrap(await contract.getProjectCalendarReferenceOptions(JSON.parse(json)));
             const read = MENU_READS[name];
             if (!read) throw new Error(`INVALID_INPUT: no menu read ${name}`);
             return unwrap(read(JSON.parse(json) as never));

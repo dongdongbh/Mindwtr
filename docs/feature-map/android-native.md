@@ -519,3 +519,11 @@ The native client is a Kotlin and Jetpack Compose app in `apps/android-native`. 
 - Ownership: `packages/core/src/task-reminder-policy.ts`, `packages/core/src/schedule-utils.ts`, `packages/core/src/task-editor-schedule.ts`; each platform consumes the shared reminder model and plan.
 - Checks: `packages/core/src/selective-reminders.test.ts`; confirm old alarms are withdrawn after changing modes, completion, or permission revocation. Review reminders remain separate.
 - Compatibility: older clients skip these selective reminders and cannot edit or preserve the new policy reliably. Update every device before using the new modes.
+
+## Project calendar reference
+
+- Reach: Projects › open a Project › expand Details › Calendar › Link calendar event, Replace linked event, or Unlink calendar event. Search the upcoming 90-day event picker by event title or calendar name.
+- Selectors: `project-calendar-reference`, `project-calendar-link`, `project-calendar-unlink`, `project-calendar-search`
+- Code: `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/ProjectDetails.kt`, `packages/core/src/native-host-contract-project-calendar-reference.ts`
+- Checks: `packages/core/src/native-host-contract-project-calendar-reference.test.ts`
+- Notes: One read-only ICS event reference belongs to the Project. Linking creates no task and changes no calendar event. Ambiguous identities and incomplete feed reads offer no candidates; unavailable feeds show last-known details. Archived Projects are read-only. Explicit unlink persists a null marker. Native writes freeze the selected candidate and Project snapshot before journaling, retain exact retries, and acknowledge only after durable storage.

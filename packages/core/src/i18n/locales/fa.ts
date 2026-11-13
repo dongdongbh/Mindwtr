@@ -1,5 +1,21 @@
 
 export const faOverrides: Record<string, string> = {
+    "projects.calendarLimit": "۲۰۰ نتیجهٔ نخست نمایش داده می‌شود. برای یافتن رویداد دیگر جست‌وجو کنید.",
+    "projects.calendarTitle": "تقویم",
+    "projects.calendarLink": "پیوند رویداد تقویم",
+    "projects.calendarReplace": "جایگزینی رویداد پیوندشده",
+    "projects.calendarUnlink": "حذف پیوند رویداد تقویم",
+    "projects.calendarScheduled": "گام بعدی زمان‌بندی‌شده",
+    "projects.calendarElapsed": "مرور نتیجهٔ رویداد",
+    "projects.calendarUnavailable": "تقویم در دسترس نیست · آخرین جزئیات شناخته‌شده",
+    "projects.calendarHelp": "یک رویداد موجود را به‌عنوان گام بعدی زمان‌بندی‌شدهٔ این پروژه پیوند دهید. رویدادهای تقویم فقط‌خواندنی می‌مانند.",
+    "projects.calendarWindow": "رویدادهای پیش رو · ۹۰ روز آینده",
+    "projects.calendarEmpty": "در تقویم‌های فعال رویداد پیش رویی وجود ندارد.",
+    "projects.calendarLoadFailed": "رویدادهای تقویم بارگیری نشدند. ببندید و دوباره تلاش کنید.",
+    "projects.calendarSaveFailed": "ارجاع تقویم ذخیره نشد. دوباره تلاش کنید.",
+    "projects.calendarReviewStep": "مرور گام بعدی زمان‌بندی‌شده",
+    "projects.calendarLastKnown": "آخرین جزئیات شناخته‌شدهٔ رویداد",
+
     "quickAdd.invalidReminderCommand": "یادآور نامعتبر: مدت پشتیبانی‌شده و تاریخ و زمان مشخص وارد کنید",
     "taskEdit.startAdvanceReminderLabel": "پیش از شروع",
     "taskEdit.advanceReminderLabel": "یادآوری پیشاپیش",
