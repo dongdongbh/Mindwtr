@@ -15,7 +15,7 @@ val LABEL_KEYS = listOf(
     "nav.addTask", "quickAdd.inputLabel", "quickAdd.bulkImportTextFile", "quickAdd.bulkImportTextFileLabel", "common.more", "common.retry", "common.done", "common.edit", "common.back",
     "agenda.laterToday",
 
-    "settings.lastSyncError",
+    "settings.lastSyncError", "settings.feedbackFailed",
     "common.cancel", "common.close", "common.save", "common.ok", "common.clear", "common.discard",
 
     "projects.actionsLabel", "projects.duplicate", "projects.complete", "projects.reactivate", "projects.cancel", "projects.archiveHelp",
@@ -98,7 +98,7 @@ val LABEL_KEYS = listOf(
     "projects.reviewAt", "projects.sectionPlaceholder", "projects.moveUp", "projects.moveDown", "projects.deleteSectionConfirm", "common.add",
     "projects.parallel", "projects.sequential", "projects.perSection", "projects.perSectionTooltip", "projects.sequenceMode",
 
-    "projects.moveProjectFailed", "areas.manage", "projects.manageAreas", "projects.renameArea", "areas.new", "areas.nameExists", "projects.changeColor", "common.rename", "projects.sortByName", "projects.sortByColor", "projects.colorNone", "projects.color",
+    "projects.moveProjectFailed", "areas.manage", "projects.manageAreas", "projects.renameArea", "areas.new", "areas.nameExists", "projects.changeColor", "common.rename", "projects.sortByName", "projects.sortByColor", "projects.colorNone", "projects.color", "projects.useAreaColor",
 
     "settings.gettingStartedContentContinueTitle", "settings.gettingStartedContentContinueDesc", "onboarding.startFreshTitle",
 

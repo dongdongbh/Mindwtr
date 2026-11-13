@@ -2030,6 +2030,119 @@ const labelBlock = labelsKt.slice(labelsKt.indexOf('val LABEL_KEYS = listOf('), 
 const labelKeys = [...code(labelBlock).matchAll(/"([^"]*)"/g)].map(([, name]) => name);
 assert(labelKeys.length > 0 && labelKeys.length <= 500 && new Set(labelKeys).size === labelKeys.length, 'LABEL_KEYS: unique, at most getStrings\' 500');
 for (const name of labelKeys) assert(enKeys.has(name), `LABEL_KEYS: ${name} is not a key in core's en.ts`);
+{
+    const pilot = resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr/pilot');
+    const walk = (dir) => readdirSync(dir, { withFileTypes: true }).flatMap((entry) => (entry.isDirectory()
+        ? walk(resolve(dir, entry.name)) : entry.name.endsWith('.kt') ? [resolve(dir, entry.name)] : []));
+    const pilotSources = walk(pilot).map((path) => ({ name: path.slice(pilot.length + 1), text: readFileSync(path, 'utf8') }));
+    const coreSource = (name) => readFileSync(resolve(app, '../../packages/core/src', name), 'utf8');
+    const quoted = (text) => [...text.matchAll(/'([^']*)'/g)].map(([, value]) => value);
+    const coreTypes = coreSource('types.ts');
+    const editorModel = coreSource('task-editor-model.ts');
+    const union = (pattern) => quoted(pattern.exec(coreTypes)[1]);
+    const statusKeys = [...union(/export type TaskStatus = ([^;]+);/), ...union(/export interface Project \{[^}]*?\n\s+status: ([^;]+);/)].map((value) => `status.${value}`);
+    const priorityKeys = union(/export type TaskPriority = ([^;]+);/).map((value) => `priority.${value}`);
+    const energyKeys = union(/export type TaskEnergyLevel = ([^;]+);/).map((value) => `energyLevel.${value}`);
+    const ordinalKeys = [...enKeys].filter((name) => name.startsWith('recurrence.ordinal.'));
+    assert.match(editorModel, /titleKey: id === 'basic' \? null : `taskEdit\.\$\{id\}`/);
+    const sectionKeys = quoted(/TASK_EDITOR_SECTION_ORDER: TaskEditorSectionId\[\] = \[([^\]]+)\]/.exec(coreSource('task-editor-layout.ts'))[1])
+        .filter((id) => id !== 'basic').map((id) => `taskEdit.${id}`);
+    assert.match(editorModel, /recurrences: TASK_EDITOR_RECURRENCE_OPTIONS\.map\(/);
+    const recurrenceKeys = [.../TASK_EDITOR_RECURRENCE_OPTIONS[^=]*= \[([^\]]+)\]/.exec(editorModel)[1].matchAll(/labelKey: '([^']+)'/g)].map(([, value]) => value);
+    const hostGmail = readFileSync(resolve(app, 'bundle/host-gmail.ts'), 'utf8');
+    assert.deepEqual([...hostGmail.matchAll(/\berrorKey: (\w+)\(/g)].map(([, call]) => call), ['gmailCaptureErrorTranslation']);
+    assert.equal(hostGmail.match(/\berrorKey\b/g).length, 1);
+    const gmailErrorKeys = quoted(/gmailCaptureErrorTranslation = [\s\S]*?\}\)\[error\.kind\]/.exec(coreSource('gmail-capture.ts'))[0]);
+    const kotlinLiterals = [];
+    const DYNAMIC_LABEL_SITES = {
+        'AreaOrderSheet.kt: t(key)': [1, kotlinLiterals],
+        'Attachments.kt: ::t': [1, kotlinLiterals],
+        'FocusScreen.kt: t("status.${project.status}")': [1, statusKeys],
+        'GmailCapture.kt: t(key)': [2, gmailErrorKeys],
+        'InboxViewModel.kt: t(it)': [1, kotlinLiterals],
+        'InboxViewModel.kt: t(notice.messageKey)': [2, kotlinLiterals],
+        'InboxViewModel.kt: t(notice.titleKey)': [2, kotlinLiterals],
+        'MainActivity.kt: t(if (screen == Screen.Projects) menu.quickLabel else screen.label)': [1, kotlinLiterals],
+        'MainActivity.kt: t(label)': [1, kotlinLiterals],
+        'MenuWidgets.kt: t(screen.title)': [1, kotlinLiterals],
+        'ProjectDetails.kt: t("status.${row.optString("status")}")': [1, statusKeys],
+        'ProjectDetails.kt: t(field.second)': [1, kotlinLiterals],
+        'ProjectDetails.kt: t(it)': [2, kotlinLiterals],
+        'ProjectDetails.kt: t(key)': [4, kotlinLiterals],
+        'ProjectsScreen.kt: ::t': [1, kotlinLiterals],
+        'ProjectsScreen.kt: t(heading)': [1, kotlinLiterals],
+        'TaskEditor.kt: ::t': [4, kotlinLiterals],
+        'TaskEditor.kt: t("energyLevel.$it")': [1, energyKeys],
+        'TaskEditor.kt: t("priority.$it")': [1, priorityKeys],
+        'TaskEditor.kt: t("recurrence.ordinal." + when (ordinal) { "-1" -> "last"; "2" -> "second"; "3" -> "third"; "4" -> "fourth"; else -> "first" })': [1, ordinalKeys],
+        'TaskEditor.kt: t("status.$status")': [3, statusKeys],
+        'TaskEditor.kt: t(key)': [4, recurrenceKeys],
+        'TaskEditor.kt: t(label)': [2, kotlinLiterals],
+        'TaskEditor.kt: t(section.titleKey!!)': [1, sectionKeys],
+        'TaskEditor.kt: t(unit)': [1, kotlinLiterals],
+        'TaskRowView.kt: t("status.$status")': [1, statusKeys],
+        'TaskView.kt: t(key)': [1, kotlinLiterals],
+    };
+
+    const NOT_LABELS = new Set(['trash.fill', 'tray.fill', 'sandbox.db']);
+    const namespaces = new Set([...enKeys].map((name) => name.split('.')[0]));
+    const closing = (text, open) => {
+        let depth = 0, quote = false;
+        for (let index = open; index < text.length; index++) {
+            const char = text[index];
+            if (char === '\\' && quote) index++;
+            else if (char === '"') quote = !quote;
+            else if (!quote && char === '(') depth++;
+            else if (!quote && char === ')' && --depth === 0) return index;
+        }
+        return text.length;
+    };
+    const branchValues = (arg) => {
+        const literals = [];
+        let shape = arg.replace(/"((?:[^"\\$]|\\.)*)"/g, (_, value) => ` L${literals.push(value) - 1} `);
+        if (/["$]/.test(shape)) return null;
+        for (let previous; previous !== shape;) { previous = shape; shape = shape.replace(/\([^()]*\)/g, ' C '); }
+        shape = shape.trim();
+        const literal = (token) => (/^L\d+$/.test(token) ? literals[Number(token.slice(1))] : null);
+        if (literal(shape) !== null) return [literal(shape)];
+        if (shape.includes('+') || !/^(?:if\s+C\b|when\b)/.test(shape)) return null;
+        const values = [...shape.matchAll(/(?:->|\belse\b(?!\s*->)|\bif\s+C\b)\s*([^\s;}]+)/g)].map(([, token]) => token).filter((token) => token !== 'if');
+        return values.every((token) => literal(token) !== null) ? values.map(literal) : null;
+    };
+    const labelLookups = (sources, keys) => {
+        const missing = new Set(), dynamic = [];
+        for (const { name, text } of sources) {
+            const at = (index, key) => `${name}:${text.slice(0, index).split('\n').length} uses ${key}`;
+            for (const { index, 1: key } of text.matchAll(/"([A-Za-z]\w*\.[\w.]*\w)"/g)) {
+                if (namespaces.has(key.split('.')[0]) && !NOT_LABELS.has(key) && !keys.has(key)) missing.add(at(index, key));
+            }
+            for (const { index } of text.matchAll(/(?<![\w.:]|fun )t\(/g)) {
+                const arg = text.slice(index + 2, closing(text, index + 1));
+                const values = branchValues(arg);
+                if (values === null) dynamic.push(`${name}: t(${arg.replace(/\s+/g, ' ')})`);
+                else for (const key of values) if (!keys.has(key)) missing.add(at(index, key));
+            }
+            for (const reference of text.match(/::t\b/g) ?? []) dynamic.push(`${name}: ${reference}`);
+        }
+        return { missing: [...missing], dynamic };
+    };
+
+    assert.deepEqual(labelLookups([{ name: 'Probe.kt', text: 'Text(t("projects.calendarTitle"))\nval keys = listOf("a" to "projects.calendarLink")\nText(t(if (on) "common.ok" else "nope"))\nText(t("x.$y"))\nnote.let(::t)' }], new Set(['common.ok'])),
+        { missing: ['Probe.kt:1 uses projects.calendarTitle', 'Probe.kt:2 uses projects.calendarLink', 'Probe.kt:3 uses nope'], dynamic: ['Probe.kt: t("x.$y")', 'Probe.kt: ::t'] },
+        'the label lookup guard reports a missing literal key, a missing key in a Kotlin table, a missing branch key, and each computed key');
+    assert.equal(pilotSources.reduce((count, { text }) => count + (text.match(/\bLabels\[|\bLabels\.get\(/g)?.length ?? 0), 0), 1, 'Kotlin reads labels only through t()');
+    const keys = new Set(labelKeys);
+    const { missing, dynamic } = labelLookups(pilotSources, keys);
+    assert.deepEqual(missing, [], `LABEL_KEYS lacks keys that Kotlin reads, so these show as raw keys:\n${missing.join('\n')}`);
+    const counted = {};
+    for (const site of dynamic) counted[site] = (counted[site] ?? 0) + 1;
+    assert.deepEqual(counted, Object.fromEntries(Object.entries(DYNAMIC_LABEL_SITES).map(([site, [count]]) => [site, count])),
+        'every label lookup with a computed key is listed in DYNAMIC_LABEL_SITES with the keys it can produce');
+    for (const [site, [, produced]] of Object.entries(DYNAMIC_LABEL_SITES)) {
+        assert(produced === kotlinLiterals || produced.length > 0, `${site}: no keys read from core`);
+        for (const key of produced) assert(keys.has(key), `LABEL_KEYS lacks ${key}, which ${site} can read`);
+    }
+}
 assert.match(labelsKt, /operator fun get\(name: String\): String = strings\[name\] \?: name\.also\(::missing\)/);
 assert.match(labelsKt, /strings = LABEL_KEYS\.filter\(values::has\)\.associateWith\(values::getString\)/);
 assert.match(labelsKt, /if \(logged\.add\(name\)\) Log\.w\(/, 'a missing key is logged once');
