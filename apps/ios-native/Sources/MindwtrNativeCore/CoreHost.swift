@@ -29109,7 +29109,8 @@ private final class Engine: @unchecked Sendable {
                     : waitingSelection ? "Waiting" : somedaySelection ? "Someday" : reviewSelection ? "Review" : contextsSelection ? "Contexts" : "Done"
                 let selectionKeys: Set<String> = ["list", "params", "taskIds", "anchorId", "selectionEdit", "rangeSelectMode", "busy", "picker", "organize"]
                 guard json.utf8.count <= 2_000_000, ["done", "reference", "inbox", "project", "waiting", "someday", "review", "contexts"].contains(input["list"] as? String ?? ""),
-                      !(reviewSelection || contextsSelection) || (input["organize"] == nil && input["picker"] == nil && input["rangeSelectMode"] as? Bool != true),
+                      !(reviewSelection || contextsSelection) || ((contextsSelection ? input["organize"] == nil && input["picker"] == nil
+                          : input["picker"] == nil || input["organize"] != nil) && input["rangeSelectMode"] as? Bool != true),
                       Set(input.keys).isSubset(of: selectionKeys),
                       input["rangeSelectMode"] == nil || Self.isBoolean(input["rangeSelectMode"]),
                       input["busy"] == nil || Self.isBoolean(input["busy"]),
@@ -29153,7 +29154,7 @@ private final class Engine: @unchecked Sendable {
                     }
                 }
                 if let organize = input["organize"] {
-                    guard inboxSelection || projectSelection, let value = organize as? [String: Any],
+                    guard inboxSelection || projectSelection || reviewSelection, let value = organize as? [String: Any],
                           Set(value.keys).isSubset(of: ["draft", "edit"]) else {
                         throw HostFailure("INVALID_INPUT: Inbox Organize requires a bounded draft and edit")
                     }
@@ -29176,7 +29177,7 @@ private final class Engine: @unchecked Sendable {
                 }
                 if let picker = input["picker"] {
                     guard let value = picker as? [String: Any], Set(value.keys).isSubset(of: ["kind", "query", "offset", "limit", "revision"]),
-                          value["kind"] as? String == "removeTag" || ((inboxSelection || projectSelection) && input["organize"] != nil && ["project", "area"].contains(value["kind"] as? String ?? "")),
+                          value["kind"] as? String == "removeTag" || ((inboxSelection || projectSelection || reviewSelection) && input["organize"] != nil && ["project", "area"].contains(value["kind"] as? String ?? "")),
                           value["query"] == nil || (value["query"] as? String).map({ $0.utf16.count <= 500 }) == true,
                           value["offset"] == nil || Self.isInteger(value["offset"]) && (0...9_007_199_254_740_991).contains((value["offset"] as? NSNumber)?.doubleValue ?? -1),
                           value["limit"] == nil || Self.isInteger(value["limit"]) && (1...100).contains((value["limit"] as? NSNumber)?.intValue ?? 0),
