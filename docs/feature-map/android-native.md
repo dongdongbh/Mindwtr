@@ -524,6 +524,6 @@ The native client is a Kotlin and Jetpack Compose app in `apps/android-native`. 
 
 - Reach: Projects › open a Project › expand Details › Calendar › Link calendar event, Replace linked event, or Unlink calendar event. Search the upcoming 90-day event picker by event title or calendar name.
 - Selectors: `project-calendar-reference`, `project-calendar-link`, `project-calendar-unlink`, `project-calendar-search`
-- Code: `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/ProjectDetails.kt`, `packages/core/src/native-host-contract-project-calendar-reference.ts`
-- Checks: `packages/core/src/native-host-contract-project-calendar-reference.test.ts`
+- Code: `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/ProjectDetails.kt`, `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/core/CoreHost.kt`, `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/core/WriteJournal.kt`, `packages/core/src/native-host-contract-project-calendar-reference.ts`
+- Checks: `packages/core/src/native-host-contract-project-calendar-reference.test.ts`, `apps/android-native/bundle/host-project-calendar-reference.test.ts`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/core/WriteJournalTest.kt`
 - Notes: One read-only ICS event reference belongs to the Project. Linking creates no task and changes no calendar event. Ambiguous identities and incomplete feed reads offer no candidates; unavailable feeds show last-known details. Archived Projects are read-only. Explicit unlink persists a null marker. Native writes freeze the selected candidate and Project snapshot before journaling, retain exact retries, and acknowledge only after durable storage.
