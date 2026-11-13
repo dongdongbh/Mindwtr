@@ -9,6 +9,24 @@ export type RetryOptions = {
     random?: () => number;
     shouldRetry?: (error: unknown, attempt: number) => boolean;
     onRetry?: (error: unknown, attempt: number, delayMs: number) => void;
+    signal?: AbortSignal;
+};
+
+const waitForRetry = async (delayMs: number, signal: AbortSignal | undefined): Promise<void> => {
+    if (!signal) {
+        await sleep(delayMs);
+        return;
+    }
+    let release = () => {};
+    const aborted = new Promise<void>((resolve) => {
+        release = () => resolve();
+        signal.addEventListener('abort', release, { once: true });
+    });
+    try {
+        await Promise.race([sleep(delayMs), aborted]);
+    } finally {
+        signal.removeEventListener('abort', release);
+    }
 };
 
 const DEFAULT_MAX_ATTEMPTS = 3;
@@ -82,7 +100,7 @@ export async function withRetry<T>(
             return await operation();
         } catch (error) {
             lastError = error;
-            const canRetry = attempt < maxAttempts && shouldRetry(error, attempt);
+            const canRetry = attempt < maxAttempts && !options.signal?.aborted && shouldRetry(error, attempt);
             if (!canRetry) break;
             const exponentialDelay = Math.min(maxDelayMs, baseDelayMs * Math.pow(2, attempt - 1));
             const jitterSpan = exponentialDelay * jitterRatio;
@@ -90,8 +108,9 @@ export async function withRetry<T>(
             const delayMs = Math.max(0, Math.min(maxDelayMs, exponentialDelay + jitterOffset));
             options.onRetry?.(error, attempt, delayMs);
             if (delayMs > 0) {
-                await sleep(delayMs);
+                await waitForRetry(delayMs, options.signal);
             }
+            if (options.signal?.aborted) break;
         }
     }
 

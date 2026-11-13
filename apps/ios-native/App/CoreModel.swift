@@ -11431,6 +11431,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
             do { try await Task.sleep(nanoseconds: UInt64(delayMs) * 1_000_000) } catch { return }
             guard let self, self.host === currentHost, self.syncChangeTicket == ticket else { return }
             self.syncChangeWake = nil
+            self.admitForegroundSync()
             self.admitCloudKitPushSync()
             self.admitChangeSync(currentHost)
         }
@@ -11469,12 +11470,22 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         startAutomaticSync("syncChange", host: currentHost)
     }
 
-    private func startAutomaticSync(_ command: String, host currentHost: CoreHost) {
+    private func startAutomaticSync(_ command: String, host currentHost: CoreHost, requeue: ForegroundSyncReason? = nil) {
         guard let token = completedStartupToken else { return }
         syncChangeTask = Task { [weak self] in
             guard let self else { return }
             var synced = false, deferred = false
             do {
+                #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
+                if requeue == .startup && self.startupSyncTestThrowOnce {
+                    self.startupSyncTestThrowOnce = false
+                    throw CocoaError(.fileWriteUnknown)
+                }
+                if requeue == .resume && self.resumeSyncTestThrowOnce {
+                    self.resumeSyncTestThrowOnce = false
+                    throw CocoaError(.fileWriteUnknown)
+                }
+                #endif
                 let result: CoreObject = try self.decode(try await currentHost.foregroundSync(command: command, requestJSON: "{}"))
                 try self.validateForegroundSyncReply(result)
                 synced = result.flag("ok") && result.object("value").flag("success") && !result.object("value").flag("skipped")
@@ -11487,11 +11498,11 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
                 self.requireSettingsSyncRestart(currentHost)
             }
             if deferred && command == "syncPush" { self.cloudKitPushInbox.note() }
-            self.finishChangeSync(currentHost, token: token, synced: synced, deferred: deferred)
+            self.finishChangeSync(currentHost, token: token, synced: synced, deferred: deferred, requeue: requeue)
         }
     }
 
-    private func finishChangeSync(_ owner: CoreHost, token: UUID, synced: Bool, deferred: Bool) {
+    private func finishChangeSync(_ owner: CoreHost, token: UUID, synced: Bool, deferred: Bool, requeue: ForegroundSyncReason? = nil) {
         syncChangeTask = nil
         guard host === owner, completedStartupToken == token else { return }
         if synced && UIApplication.shared.applicationState == .active { refreshRequested = true }
@@ -11500,7 +11511,12 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         admitBackgroundSync()
         observeLeaveSync()
         admitRequestedRefresh()
+        observeSyncBadge()
         if deferred, foregroundSyncSceneActive {
+            if let requeue, foregroundSyncIntent == nil {
+                foregroundSyncIntent = ForegroundSyncIntent(id: UUID(), host: owner, startupToken: token,
+                    reason: requeue, foregroundRequested: true)
+            }
             syncChangeTicket &+= 1
             armChangeSync(after: Self.syncChangeDeferralMs, host: owner, ticket: syncChangeTicket)
         } else {
@@ -11834,6 +11850,10 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         guard foregroundSyncSceneActive, UIApplication.shared.applicationState == .active,
               !appLock.concealed, !appLockActive, !busy, foregroundSyncOwner == nil, syncChangeTask == nil else { return }
         foregroundSyncIntent = nil
+        if intent.reason == .startup || intent.reason == .resume {
+            startAutomaticSync(intent.reason.command, host: intent.host, requeue: intent.reason)
+            return
+        }
         let owner = ForegroundSyncOwner(id: intent.id, host: intent.host, startupToken: intent.startupToken,
             reason: intent.reason, generation: foregroundSyncGeneration)
         foregroundSyncOwner = owner
@@ -11858,16 +11878,6 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
             var retentionPurged = false
             do {
                 guard self.foregroundSyncCurrent(owner) else { throw CancellationError() }
-                #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
-                if owner.reason == .startup && self.startupSyncTestThrowOnce {
-                    self.startupSyncTestThrowOnce = false
-                    throw CocoaError(.fileWriteUnknown)
-                }
-                if owner.reason == .resume && self.resumeSyncTestThrowOnce {
-                    self.resumeSyncTestThrowOnce = false
-                    throw CocoaError(.fileWriteUnknown)
-                }
-                #endif
                 let request = owner.reason == .retention ? #"{"editorOpen":false}"# : "{}"
                 let result = try self.decode(try await owner.host.foregroundSync(command: owner.reason.command, requestJSON: request))
                 if owner.reason == .retention {

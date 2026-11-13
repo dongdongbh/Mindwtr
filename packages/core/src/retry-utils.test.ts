@@ -39,6 +39,24 @@ describe('withRetry', () => {
         expect(delays).toEqual([1, 2]);
     });
 
+    it('stops waiting and retrying as soon as its signal aborts', async () => {
+        const controller = new AbortController();
+        let attempts = 0;
+        const fn = vi.fn().mockImplementation(async () => {
+            attempts += 1;
+            if (attempts === 1) setTimeout(() => controller.abort(), 5);
+            throw new Error('timeout');
+        });
+        const startedAt = Date.now();
+        await expect(withRetry(fn, { maxAttempts: 5, baseDelayMs: 10_000, jitterRatio: 0, signal: controller.signal }))
+            .rejects.toThrow('timeout');
+        expect(attempts).toBe(1);
+        expect(Date.now() - startedAt).toBeLessThan(2_000);
+        const before = attempts;
+        await expect(withRetry(fn, { maxAttempts: 5, baseDelayMs: 0, signal: controller.signal })).rejects.toThrow('timeout');
+        expect(attempts - before).toBe(1);
+    });
+
     it('stops after max attempts', async () => {
         let attempts = 0;
         const fn = vi.fn().mockImplementation(async () => {

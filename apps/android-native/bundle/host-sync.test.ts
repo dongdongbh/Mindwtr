@@ -783,6 +783,54 @@ describe('event-owned iOS stored/resume pacing', () => {
         expect(fixture.sync.badgeView()).toEqual({ state: 'attention', color: '#EF4444', accessibilityLabel: 'settings.syncBadgeWarning', icon: null });
     });
 
+    const silentServer = () => {
+        const requests: string[] = [];
+        globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+            requests.push(String(input));
+            const signal = init?.signal;
+            if (signal?.aborted) { reject(signal.reason); return; }
+            signal?.addEventListener('abort', () => reject(signal.reason ?? Object.assign(new Error('aborted'), { name: 'AbortError' })));
+        })) as typeof fetch;
+        return requests;
+    };
+
+    for (const reason of ['startup', 'resume'] as const) {
+        it(`stops an automatic ${reason} WebDAV sync whose server never answers, reports it and logs it once`, async () => {
+            resetForTests();
+            const requests = silentServer();
+            const fixture = configured();
+            fixture.bindings.serverAnswerWindowMs = 50;
+            const sync = createNativeSync(fixture.bindings);
+            const forced: { message: string; context?: Record<string, unknown>; force?: boolean }[] = [];
+            fixture.bindings.appendLog = async (entry, force) => { forced.push({ message: entry.message, context: entry.context, force }); return null; };
+            const startedAt = performance.now();
+            if (reason === 'resume') spyOn(Date, 'now').mockReturnValue(10_000_000);
+            expect(await sync.performStoredAutomaticSync(reason)).toEqual({ success: false, skipped: false });
+            expect(performance.now() - startedAt).toBeLessThan(10_000);
+            expect(requests.length).toBeGreaterThan(0);
+            expect(core.useTaskStore.getState().settings.lastSyncStatus).toBe('error');
+            const unanswered = forced.filter(({ context }) => context?.releaseCheck === 'v1.3.9/ios-sync-unanswered');
+            expect(unanswered).toEqual([{ message: 'Native iOS automatic sync stopped because the server did not answer', force: true,
+                context: { releaseCheck: 'v1.3.9/ios-sync-unanswered', operation: reason, windowMs: '50' } }]);
+        }, 30_000);
+    }
+
+    it('keeps a slow automatic sync running once the server has answered', async () => {
+        resetForTests();
+        let answered = 0;
+        globalThis.fetch = (async () => {
+            answered += 1;
+            if (answered > 1) await new Promise((resolve) => setTimeout(resolve, 120));
+            return new Response(JSON.stringify(data()), { status: 200, headers: { ETag: '"fixture-data"' } });
+        }) as typeof fetch;
+        const fixture = configured();
+        fixture.bindings.serverAnswerWindowMs = 50;
+        const sync = createNativeSync(fixture.bindings);
+        expect(await sync.performStoredAutomaticSync('startup')).toEqual({ success: true, skipped: false });
+        expect(answered).toBeGreaterThan(1);
+        expect(fixture.lines).not.toContain('Native iOS automatic sync stopped because the server did not answer');
+    });
+
     it('runs an explicit stored pull despite automatic resume pacing and preserves configuration', async () => {
         resetForTests(); serve();
         spyOn(Date, 'now').mockReturnValue(100_000);
