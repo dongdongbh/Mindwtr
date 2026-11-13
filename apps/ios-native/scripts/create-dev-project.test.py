@@ -218,9 +218,11 @@ class DevProjectTests(unittest.TestCase):
                 original = plistlib.loads(originals[Path("App") / source])
                 self.assertEqual(plistlib.loads((output / "CloudKit" / copied).read_bytes()), {**original, **claims})
             info = plistlib.loads(originals[Path("App/Info.plist")])
+            pushed = {"UIBackgroundModes": [*info["UIBackgroundModes"], "remote-notification"]}
             self.assertEqual(plistlib.loads((output / "CloudKit/Info.plist").read_bytes()),
-                             {**info, "NativeCloudKitContainer": container})
+                             {**info, "NativeCloudKitContainer": container, **pushed})
             self.assertNotIn("NativeCloudKitContainer", info)
+            self.assertNotIn("remote-notification", info["UIBackgroundModes"])
             self.assertFalse((normal / "CloudKit").exists())
             for enabled_cloudkit in [False, True]:
                 configured = generator.generate(native, native / ("DropboxCloud.xcodeproj" if enabled_cloudkit else "Dropbox.xcodeproj"),
@@ -228,7 +230,7 @@ class DevProjectTests(unittest.TestCase):
                                                 dropbox_redirect_uri="mindwtr-native-dev://redirect")
                 relative = "CloudKit/Info.plist" if enabled_cloudkit else "Dropbox/Info.plist"
                 configured_info = plistlib.loads((configured / relative).read_bytes())
-                self.assertEqual(configured_info, {**info, **({"NativeCloudKitContainer": container} if enabled_cloudkit else {}),
+                self.assertEqual(configured_info, {**info, **({"NativeCloudKitContainer": container, **pushed} if enabled_cloudkit else {}),
                                                   "MindwtrDropboxAppKey": "synthetic123",
                                                   "MindwtrDropboxRedirectURI": "mindwtr-native-dev://redirect"})
                 graph = plistlib.loads((configured / "project.pbxproj").read_bytes())
@@ -246,6 +248,18 @@ class DevProjectTests(unittest.TestCase):
             reference = ET.fromstring((output / "xcshareddata/xcschemes/MindwtrNative.xcscheme").read_bytes()).find("BuildableReference")
             self.assertEqual(reference.get("BlueprintIdentifier"), "app")
             self.assertEqual(reference.get("ReferencedContainer"), "container:" + generator.CLOUDKIT_OUTPUT)
+            pushed_output = generator.generate(native, native / "Push.xcodeproj", cloudkit=True, cloudkit_push=True)
+            for copied, source in [("App.entitlements", "NativeShareDev.entitlements"),
+                                   ("Simulator.entitlements", "NativeShareDevSimulator.entitlements")]:
+                original = plistlib.loads(originals[Path("App") / source])
+                self.assertEqual(plistlib.loads((pushed_output / "CloudKit" / copied).read_bytes()),
+                                 {**original, **claims, "aps-environment": "development"})
+            self.assertEqual((pushed_output / "CloudKit/Info.plist").read_bytes(), (output / "CloudKit/Info.plist").read_bytes())
+            for name in [generator.DEFAULT_OUTPUT, "PushWithoutCloudKit.xcodeproj"]:
+                refused = native / ("Refused" + name)
+                with self.assertRaises(ValueError):
+                    generator.generate(native, refused, cloudkit_push=True)
+                self.assertFalse(refused.exists())
             frozen = {path.relative_to(output): path.read_bytes() for path in output.rglob("*") if path.is_file()}
             with self.assertRaises(FileExistsError):
                 generator.generate(native, output, cloudkit=True)
@@ -255,7 +269,10 @@ class DevProjectTests(unittest.TestCase):
         for arguments, name, enabled in [([], generator.DEFAULT_OUTPUT, False), (["--cloudkit"], generator.CLOUDKIT_OUTPUT, True)]:
             with patch.object(sys, "argv", ["create-dev-project.py", *arguments]), patch.object(generator, "generate") as generate, patch("builtins.print"):
                 generator.main()
-                generate.assert_called_once_with(HERE.parent, HERE.parent / name, cloudkit=enabled, watch=False, dropbox_app_key=None, dropbox_redirect_uri=None)
+                generate.assert_called_once_with(HERE.parent, HERE.parent / name, cloudkit=enabled, cloudkit_push=False, watch=False, dropbox_app_key=None, dropbox_redirect_uri=None)
+        with patch.object(sys, "argv", ["create-dev-project.py", "--cloudkit", "--cloudkit-push"]), patch.object(generator, "generate") as generate, patch("builtins.print"):
+            generator.main()
+            generate.assert_called_once_with(HERE.parent, HERE.parent / generator.CLOUDKIT_OUTPUT, cloudkit=True, cloudkit_push=True, watch=False, dropbox_app_key=None, dropbox_redirect_uri=None)
         with patch.object(sys, "argv", ["create-dev-project.py", "--cloudkit", "--container", "iCloud.example.foreign"]), patch("sys.stderr"):
             with self.assertRaises(SystemExit) as refused:
                 generator.main()
@@ -351,7 +368,8 @@ class DevProjectTests(unittest.TestCase):
                 info = plistlib.loads((native / host_settings["INFOPLIST_FILE"]).read_bytes())
                 source_info = plistlib.loads(originals[native / "App/Info.plist"])
                 self.assertEqual(info, {**source_info, "MindwtrWatchEnabled": True,
-                                 **({"NativeCloudKitContainer": generator.CLOUDKIT_CONTAINER} if cloudkit else {})})
+                                 **({"NativeCloudKitContainer": generator.CLOUDKIT_CONTAINER,
+                                     "UIBackgroundModes": [*source_info["UIBackgroundModes"], "remote-notification"]} if cloudkit else {})})
                 self.assertFalse(source_info.get("MindwtrWatchEnabled", False))
                 icon = (output / "Watch/Assets.xcassets/AppIcon.appiconset/AppIcon.png").read_bytes()
                 self.assertEqual(icon, (HERE / "create-dev-project-assets/WatchAppIcon.png").read_bytes())
@@ -376,7 +394,7 @@ class DevProjectTests(unittest.TestCase):
                                          (["--watch", "--cloudkit"], generator.WATCH_CLOUDKIT_OUTPUT, True)]:
             with patch.object(sys, "argv", ["create-dev-project.py", *arguments]), patch.object(generator, "generate") as generate, patch("builtins.print"):
                 generator.main()
-                generate.assert_called_once_with(HERE.parent, HERE.parent / name, cloudkit=cloudkit, watch=True, dropbox_app_key=None, dropbox_redirect_uri=None)
+                generate.assert_called_once_with(HERE.parent, HERE.parent / name, cloudkit=cloudkit, cloudkit_push=False, watch=True, dropbox_app_key=None, dropbox_redirect_uri=None)
 
 
 if __name__ == "__main__":
