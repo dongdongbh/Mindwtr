@@ -350,9 +350,6 @@ def generate(native_root, output, *, cloudkit=False, cloudkit_push=False, watch=
         info = plistlib.loads((native_root / "App/Info.plist").read_bytes())
         require(isinstance(info, dict), "App Info must be a dictionary")
         info["NativeCloudKitContainer"] = CLOUDKIT_CONTAINER
-        modes = info.get("UIBackgroundModes", [])
-        require(isinstance(modes, list), "App background modes must be a list")
-        info["UIBackgroundModes"] = modes if "remote-notification" in modes else [*modes, "remote-notification"]
         generated_files["CloudKit/Info.plist"] = plistlib.dumps(info, sort_keys=False)
         claims = {"com.apple.developer.icloud-container-identifiers": [CLOUDKIT_CONTAINER],
                   "com.apple.developer.icloud-services": ["CloudKit"],

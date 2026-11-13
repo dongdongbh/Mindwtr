@@ -218,11 +218,10 @@ class DevProjectTests(unittest.TestCase):
                 original = plistlib.loads(originals[Path("App") / source])
                 self.assertEqual(plistlib.loads((output / "CloudKit" / copied).read_bytes()), {**original, **claims})
             info = plistlib.loads(originals[Path("App/Info.plist")])
-            pushed = {"UIBackgroundModes": [*info["UIBackgroundModes"], "remote-notification"]}
             self.assertEqual(plistlib.loads((output / "CloudKit/Info.plist").read_bytes()),
-                             {**info, "NativeCloudKitContainer": container, **pushed})
+                             {**info, "NativeCloudKitContainer": container})
             self.assertNotIn("NativeCloudKitContainer", info)
-            self.assertNotIn("remote-notification", info["UIBackgroundModes"])
+            self.assertEqual(info["UIBackgroundModes"], ["processing", "remote-notification"])
             self.assertFalse((normal / "CloudKit").exists())
             for enabled_cloudkit in [False, True]:
                 configured = generator.generate(native, native / ("DropboxCloud.xcodeproj" if enabled_cloudkit else "Dropbox.xcodeproj"),
@@ -230,7 +229,7 @@ class DevProjectTests(unittest.TestCase):
                                                 dropbox_redirect_uri="mindwtr-native-dev://redirect")
                 relative = "CloudKit/Info.plist" if enabled_cloudkit else "Dropbox/Info.plist"
                 configured_info = plistlib.loads((configured / relative).read_bytes())
-                self.assertEqual(configured_info, {**info, **({"NativeCloudKitContainer": container, **pushed} if enabled_cloudkit else {}),
+                self.assertEqual(configured_info, {**info, **({"NativeCloudKitContainer": container} if enabled_cloudkit else {}),
                                                   "MindwtrDropboxAppKey": "synthetic123",
                                                   "MindwtrDropboxRedirectURI": "mindwtr-native-dev://redirect"})
                 graph = plistlib.loads((configured / "project.pbxproj").read_bytes())
@@ -368,8 +367,7 @@ class DevProjectTests(unittest.TestCase):
                 info = plistlib.loads((native / host_settings["INFOPLIST_FILE"]).read_bytes())
                 source_info = plistlib.loads(originals[native / "App/Info.plist"])
                 self.assertEqual(info, {**source_info, "MindwtrWatchEnabled": True,
-                                 **({"NativeCloudKitContainer": generator.CLOUDKIT_CONTAINER,
-                                     "UIBackgroundModes": [*source_info["UIBackgroundModes"], "remote-notification"]} if cloudkit else {})})
+                                 **({"NativeCloudKitContainer": generator.CLOUDKIT_CONTAINER} if cloudkit else {})})
                 self.assertFalse(source_info.get("MindwtrWatchEnabled", False))
                 icon = (output / "Watch/Assets.xcassets/AppIcon.appiconset/AppIcon.png").read_bytes()
                 self.assertEqual(icon, (HERE / "create-dev-project-assets/WatchAppIcon.png").read_bytes())
