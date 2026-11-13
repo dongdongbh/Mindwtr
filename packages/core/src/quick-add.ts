@@ -985,10 +985,6 @@ export function parseQuickAdd(
                 ?? areas?.find((area) => area.name.toLowerCase() === token.toLowerCase());
             if (matched) {
                 areaId = matched.id;
-            } else if (!areas || areas.length === 0) {
-                if (/^[0-9a-f-]{8,}$/i.test(token)) {
-                    areaId = token;
-                }
             }
         }
         if (areaId) {
@@ -1014,15 +1010,6 @@ export function parseQuickAdd(
                             areaId = found.id;
                             working = stripToken(working, `!${prefixMatch.consumedRaw}`);
                         }
-                    }
-
-
-                } else {
-                    const firstWord = rawFull.match(/\S+/u)?.[0] ?? '';
-                    const restoredFirst = restoreEscapes(firstWord);
-                    if (/^[0-9a-f-]{8,}$/i.test(restoredFirst)) {
-                        areaId = restoredFirst;
-                        working = stripToken(working, `!${firstWord}`);
                     }
                 }
             }
@@ -1109,12 +1096,7 @@ export function parseQuickAdd(
                         const strippedTitle = restoreEscapes(working.replace(/\s{2,}/g, ' ').trim());
                         return { title: strippedTitle, props: {} };
                     }
-                    if ((!projects || projects.length === 0) && /^[0-9a-f-]{8,}$/i.test(rawProject)) {
-                        projectId = rawProject;
-                    }
-                    if (!projectId) {
-                        projectTitle = rawProject;
-                    }
+                    projectTitle = rawProject;
                     working = stripToken(working, plusMatch[0]);
                 }
             }
