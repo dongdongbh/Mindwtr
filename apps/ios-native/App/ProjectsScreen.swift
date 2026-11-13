@@ -982,391 +982,39 @@ struct ProjectDetailScreen: View {
                     .padding(.horizontal, 16).padding(.vertical, 8)
             }
             VStack(spacing: 0) {
-                HStack(spacing: 8) {
-                    Button { resignProjectNotesInput(); Task { await model.closeProject() } } label: {
-                        AppIcon(name: "chevron", size: 24).rotationEffect(.degrees(90)).foregroundStyle(palette.tint)
-                            .frame(width: 44, height: 44).contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain).disabled(model.busy || model.retryNeeded || model.projectRenameEditing
-                        || model.projectAttachmentOpening || model.projectFileAddOpening || model.projectFileImporterPresented)
-                    .accessibilityLabel(model.label("common.back")).accessibilityIdentifier("project-back")
-                    if model.projectRenameEditing {
-                        TextField(model.label("taskEdit.titleLabel"), text: Binding(
-                            get: { model.projectRenameTitle },
-                            set: { model.setProjectRenameTitle($0) }))
-                            .focused($renameFocused).submitLabel(.done).onSubmit { submitRename() }
-                            .rnFont(18, .bold).foregroundStyle(palette.text)
-                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                            .disabled(!model.projectRenameInputEnabled)
-                            .accessibilityIdentifier("project-rename-title")
-                    } else {
-                        Text(model.projectHeader.text("title")).rnFont(18, .bold)
-                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                            .accessibilityAddTraits(.isHeader)
-                            .accessibilityIdentifier("project-detail-title")
-                            .overlay {
-                                Button { resignProjectNotesInput(); Task { await model.openProjectRename() } } label: {
-                                    Color.clear.frame(maxWidth: .infinity, minHeight: 44).contentShape(Rectangle())
-                                }
-                                .buttonStyle(.plain).disabled(!model.projectRenameOpenEnabled)
-                                .accessibilityLabel(model.label("taskEdit.titleLabel"))
-                                .accessibilityIdentifier("project-rename-open")
-                            }
-                    }
-                    Menu {
-                        Button {
-                            let id = model.projectHeader.text("id")
-                            let revision = model.projectDetail.text("projectRevision")
-                            let action = model.projectLifecycleAction
-                            Task { await model.changeProjectLifecycle(expectedID: id, expectedRevision: revision, action: action) }
-                        } label: {
-                            Label(model.label(model.projectLifecycleAction == "complete" ? "projects.complete" : "projects.reactivate"),
-                                  systemImage: model.projectLifecycleAction == "complete" ? "archivebox" : "arrow.uturn.backward")
-                        }
-                        .disabled(!model.projectLifecycleOpenEnabled)
-                        .accessibilityHint(model.projectLifecycleAction == "complete" ? model.label("projects.archiveHelp") : "")
-                        .accessibilityIdentifier(model.projectLifecycleAction == "complete" ? "project-archive-button" : "project-reactivate-button")
-                        if model.projectLifecycleAction == "complete" {
-                            Button(role: .destructive) {
-                                guard model.projectLifecycleOpenEnabled else { return }
-                                cancelProjectConfirmedID = model.projectHeader.text("id")
-                                cancelProjectConfirmedRevision = model.projectDetail.text("projectRevision")
-                                cancelProjectConfirmPresented = true
-                            } label: {
-                                Label(model.label("projects.cancel"), systemImage: "xmark.circle")
-                            }
-                            .disabled(!model.projectLifecycleOpenEnabled)
-                            .accessibilityIdentifier("project-cancel-button")
-                        }
-                        Button {
-                            let id = model.projectHeader.text("id")
-                            let revision = model.projectDetail.text("projectRevision")
-                            Task { await model.duplicateProject(expectedID: id, expectedRevision: revision) }
-                        } label: {
-                            Label(model.label("projects.duplicate"), systemImage: "square.on.square")
-                        }
-                        .disabled(!model.projectDuplicateOpenEnabled)
-                        .accessibilityIdentifier("project-duplicate-button")
-                        Button {
-                            let id = model.projectHeader.text("id")
-                            let revision = model.projectDetail.text("projectRevision")
-                            Task { await model.openProjectConvert(expectedID: id, expectedRevision: revision) }
-                        } label: {
-                            Label(model.label("projects.convertToSection"), systemImage: "folder")
-                        }
-                        .disabled(!model.projectConvertOpenEnabled)
-                        .accessibilityIdentifier("project-convert-to-section-button")
-                        Button(role: .destructive) {
-                            deleteProjectConfirmedID = model.projectHeader.text("id")
-                            deleteProjectConfirmedRevision = model.projectDetail.text("projectRevision")
-                            deleteProjectConfirmPresented = true
-                        } label: {
-                            Label(model.label("common.delete"), systemImage: "trash")
-                        }
-                        .accessibilityIdentifier("project-delete-button")
-                    } label: {
-                        Image(systemName: "ellipsis").font(.system(size: 20)).foregroundStyle(palette.secondary)
-                            .frame(width: 44, height: 44).background(palette.filter, in: RoundedRectangle(cornerRadius: 10))
-                            .overlay(RoundedRectangle(cornerRadius: 10).stroke(palette.border, lineWidth: 1))
-                    }
-                    .disabled(!model.projectDeleteOpenEnabled)
-                    .accessibilityLabel(model.label("projects.actionsLabel"))
-                    .accessibilityIdentifier("project-actions-menu")
-                }
-                if model.projectRenameEditing {
-                    HStack(spacing: 12) {
-                        Button { submitRename() } label: {
-                            Text(model.label("common.save"))
-                                .frame(maxWidth: .infinity, minHeight: 44).contentShape(Rectangle())
-                        }
-                        .disabled(!model.projectRenameCanSave)
-                        .accessibilityIdentifier("project-rename-save")
-                        Button {
-                            renameFocused = false
-                            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-                            model.cancelProjectRename()
-                        } label: {
-                            Text(model.label("common.cancel"))
-                                .frame(maxWidth: .infinity, minHeight: 44).contentShape(Rectangle())
-                        }
-                        .disabled(model.busy || model.retryNeeded || model.projectRenamePending)
-                        .accessibilityIdentifier("project-rename-cancel")
-                    }
-                    .buttonStyle(.plain).rnFont(14, .semibold).foregroundStyle(palette.tint)
-                }
-                if let message = model.projectBulkRetryError ?? model.projectBulkError {
-                    Text(message).rnFont(13).foregroundStyle(palette.danger).textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .accessibilityIdentifier("project-bulk-error")
-                    if model.projectBulkRetryError != nil {
-                        Button(model.label("common.retry")) { Task { await model.retry() } }
-                            .rnFont(14, .semibold).frame(minHeight: 45)
-                            .disabled(model.busy).accessibilityIdentifier("project-bulk-retry")
-                    }
-                }
-                if let error = model.projectRenameError {
-                    Text(error).rnFont(13).foregroundStyle(palette.danger).textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .accessibilityIdentifier("project-rename-error")
-                    if model.projectRenamePending {
-                        Button(model.label("common.retry")) { Task { await model.retry() } }
-                            .rnFont(14, .semibold).frame(minHeight: 44)
-                            .disabled(model.busy).accessibilityIdentifier("project-rename-retry")
-                    }
-                }
-                if let error = model.projectRenameReadError {
-                    Text(error).rnFont(13).foregroundStyle(palette.danger).textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .accessibilityIdentifier("project-rename-read-error")
-                    Button(model.label("common.retry")) { Task { await model.retryProjectRenameRead() } }
-                        .rnFont(14, .semibold).frame(minHeight: 44)
-                        .disabled(model.busy || model.retryNeeded || model.projectRenamePending)
-                        .accessibilityIdentifier("project-rename-read-retry")
-                }
-                if let error = model.projectDeleteError {
-                    Text(error).rnFont(13).foregroundStyle(palette.danger).textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .accessibilityIdentifier("project-delete-error")
-                    if model.retryNeeded {
-                        Button(model.label("common.retry")) { Task { await model.retry() } }
-                            .rnFont(14, .semibold).frame(minHeight: 44)
-                            .disabled(model.busy).accessibilityIdentifier("project-delete-retry")
-                    }
-                }
-                if let error = model.projectDuplicateError {
-                    Text(error).rnFont(13).foregroundStyle(palette.danger).textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .accessibilityIdentifier("project-duplicate-error")
-                    if model.retryNeeded {
-                        Button(model.label("common.retry")) { Task { await model.retry() } }
-                            .rnFont(14, .semibold).frame(minHeight: 44)
-                            .disabled(model.busy).accessibilityIdentifier("project-duplicate-retry")
-                    }
-                }
-                if let error = model.projectLifecycleError {
-                    Text(error).rnFont(13).foregroundStyle(palette.danger).textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .accessibilityIdentifier("project-lifecycle-error")
-                    if model.retryNeeded {
-                        Button(model.label("common.retry")) { Task { await model.retry() } }
-                            .rnFont(14, .semibold).frame(minHeight: 44)
-                            .disabled(model.busy).accessibilityIdentifier("project-lifecycle-retry")
-                    }
-                }
-                if let error = model.projectFlowError {
-                    Text(error).rnFont(13).foregroundStyle(palette.danger).textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .accessibilityIdentifier("project-flow-error")
-                    if model.projectFlowPending {
-                        Button { Task { await model.retry() } } label: {
-                            Text(model.label("common.retry")).rnFont(14, .semibold)
-                                .frame(maxWidth: .infinity, minHeight: 44).contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain).disabled(model.busy).accessibilityIdentifier("project-flow-retry")
-                    }
-                }
-                    if let error = model.projectFlowReadError {
-                    Text(error).rnFont(13).foregroundStyle(palette.danger).textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .accessibilityIdentifier("project-flow-read-error")
-                    Button { Task { await model.retryProjectFlowRead() } } label: {
-                        Text(model.label("common.retry")).rnFont(14, .semibold)
-                            .frame(maxWidth: .infinity, minHeight: 44).contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain).disabled(model.busy || model.retryNeeded || model.projectFlowPending)
-                        .accessibilityIdentifier("project-flow-read-retry")
-                    }
-                    if !model.projectTaskSortPresented { projectTaskSortErrors }
-                    if model.projectDateField == nil || !model.projectCurrent {
-                        ProjectDateErrors(model: model, palette: palette)
-                    }
+                ProjectDetailTopBar(model: model, palette: palette, renameFocused: $renameFocused,
+                                    onResign: resignProjectNotesInput, onSubmitRename: submitRename,
+                                    onCancelProject: confirmProjectCancel, onDeleteProject: confirmProjectDelete)
+                ProjectDetailMessages(model: model, palette: palette, renameFocused: $renameFocused,
+                                      onResign: resignProjectNotesInput, onSubmitRename: submitRename)
             }
             .padding(.horizontal, 16).padding(.vertical, 8).background(palette.card)
             .overlay(alignment: .bottom) { palette.border.frame(height: 1) }
             if !model.projectDetail.isEmpty {
-                HStack {
-                    if model.projectTaskOrderPresented {
-                        Text(model.projectTaskOrderView.text("label").isEmpty ? model.label("projects.reorderTasks")
-                             : model.projectTaskOrderView.text("label")).rnFont(14, .semibold)
-                        Spacer(minLength: 0)
-                        Button { Task { await model.closeProjectTaskOrder() } } label: {
-                            Text(model.label("common.done")).rnFont(14, .semibold)
-                                .frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
-                        }
-                            .buttonStyle(.plain)
-                            .disabled(model.busy || model.retryNeeded || model.projectTaskOrderPending)
-                            .accessibilityIdentifier("project-task-order-done")
-                    } else {
-                    Button { resignProjectNotesInput(); Task { await model.openProjectViewOptions() } } label: {
-                        Image(systemName: "ellipsis").font(.system(size: 20))
-                            .foregroundStyle(model.projectTaskViewActive ? palette.tint : palette.secondary)
-                            .frame(width: 44, height: 44).contentShape(Rectangle())
-                            .background(palette.filter, in: RoundedRectangle(cornerRadius: 8))
-                            .overlay(RoundedRectangle(cornerRadius: 8).stroke(palette.border, lineWidth: 1))
-                    }
-                    .buttonStyle(.plain).disabled(!model.projectViewOpenEnabled)
-                    .accessibilityLabel(model.label("taskEdit.moreOptions"))
-                    .accessibilityAddTraits(model.projectTaskViewActive ? .isSelected : [])
-                    .accessibilityIdentifier("project-task-view-options-button")
-                    if model.projectDetail.object("filters").flag("hasActive") {
-                        Button { resignProjectNotesInput(); Task { await model.openProjectFilters() } } label: {
-                            Text(model.projectDetail.text("filterButtonLabel")).rnFont(13, .semibold)
-                                .foregroundStyle(palette.tint).padding(.horizontal, 12)
-                                .frame(minHeight: 44).contentShape(Rectangle())
-                                .background(palette.filter, in: RoundedRectangle(cornerRadius: 8))
-                        }
-                        .buttonStyle(.plain).disabled(!model.projectViewOpenEnabled)
-                        .accessibilityIdentifier("project-filter-button")
-                    }
-                    Spacer(minLength: 0)
-                    }
-                }
-                .padding(.horizontal, 12).padding(.vertical, 8).background(palette.card)
-                .overlay(alignment: .bottom) { palette.border.frame(height: 1) }
-                if !model.projectDetail.objects("chips").isEmpty {
-                    AppChipFlow {
-                        ForEach(model.projectDetail.objects("chips").indices, id: \.self) { index in
-                            let chip = model.projectDetail.objects("chips")[index]
-                            Button {
-                                resignProjectNotesInput()
-                                Task { await model.editProjectFilter(chip.object("action").object("filterEdit")) }
-                            } label: {
-                                HStack(spacing: 4) {
-                                    Text(chip.text("label")).rnFont(12, .semibold).strikethrough(chip.flag("excluded"))
-                                    AppIcon(name: "x", size: 12)
-                                }
-                                .foregroundStyle(palette.onTint).padding(.horizontal, 10)
-                                .frame(minHeight: 44).background(chip.flag("excluded") ? palette.danger : palette.tint,
-                                                                in: RoundedRectangle(cornerRadius: 22))
-                                .contentShape(RoundedRectangle(cornerRadius: 22))
-                            }
-                            .buttonStyle(.plain).disabled(!model.projectFilterActionsEnabled)
-                            .accessibilityIdentifier("project-filter-chip-" + chip.text("id"))
-                        }
-                        Button {
-                            resignProjectNotesInput()
-                            Task { await model.editProjectFilter(model.projectDetail.object("filters").object("clearEdit")) }
-                        } label: {
-                            Text(model.label("filters.clear")).rnFont(12, .semibold)
-                                .foregroundStyle(palette.tint).padding(.horizontal, 10)
-                                .frame(minHeight: 44).contentShape(Capsule())
-                        }
-                        .buttonStyle(.plain).disabled(!model.projectFilterActionsEnabled)
-                        .accessibilityIdentifier("project-filter-clear")
-                    }
-                    .padding(.horizontal, 12).padding(.bottom, 8).background(palette.card)
-                }
+                ProjectDetailViewBar(model: model, palette: palette, onResign: resignProjectNotesInput)
             }
             if model.projectSelectionMode { projectBulkBar }
             if model.projectTaskOrderPresented {
                 projectTaskOrderList
             } else {
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 8) {
-                    if let error = model.projectError {
-                        Text(error).rnFont(13).foregroundStyle(palette.danger).textSelection(.enabled)
-                            .accessibilityIdentifier("project-error")
-                        Button { Task { await model.refresh() } } label: {
-                            Text(model.label("common.retry")).rnFont(14, .semibold)
-                                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).contentShape(Rectangle())
-                        }
-                            .buttonStyle(.plain).disabled(model.busy || model.retryNeeded)
-                            .accessibilityIdentifier("project-retry")
-                    }
-                    if !model.projectCurrent { statusReadErrorView }
-
-                    if model.projectCurrent || ((model.busy || model.projectViewReadPending) && !model.projectDetail.isEmpty
-                        && model.projectDetail.text("projectId") == model.projectHeader.text("id")) {
-                        Group {
-                            let metadata = model.projectDetail.object("metadata")
-                            if !metadata.isEmpty { detailsPanel(metadata) }
-                            let items = model.projectDetail.objects("items")
-                            if items.isEmpty {
-                                let empty = model.projectDetail.object("empty")
-                                VStack(spacing: 8) {
-                                    Text(empty.text("message").isEmpty ? model.label("list.noTasks") : empty.text("message"))
-                                        .rnFont(16).foregroundStyle(palette.secondary)
-                                    if !empty.text("hint").isEmpty {
-                                        Text(empty.text("hint")).rnFont(13).foregroundStyle(palette.secondary)
-                                    }
-                                    if !empty.object("action").object("filterEdit").isEmpty {
-                                        Button {
-                                            Task { await model.editProjectFilter(empty.object("action").object("filterEdit")) }
-                                        } label: {
-                                            Text(empty.text("actionLabel")).rnFont(14, .semibold)
-                                                .frame(minHeight: 44).contentShape(Rectangle())
-                                        }
-                                        .buttonStyle(.plain).disabled(!model.projectFilterActionsEnabled)
-                                        .accessibilityIdentifier("project-empty-filter-clear")
-                                    }
-                                }
-                                .frame(maxWidth: .infinity).padding(32).accessibilityIdentifier("project-empty")
-                            }
-                            ForEach(items.map { ProjectDetailDisplayItem(value: $0) }) { entry in
-                                let item = entry.value
-                                if item.text("type") == "section" {
-                                    if item.flag("collapsible") {
-                                        Button {
-                                            resignProjectNotesInput()
-                                            Task { await model.toggleProjectCompletedSection(item.text("id")) }
-                                        } label: {
-                                            HStack(spacing: 8) {
-                                                AppIcon(name: "chevron", size: 16)
-                                                    .rotationEffect(.degrees(item.flag("collapsed") ? -90 : 0)).accessibilityHidden(true)
-                                                Text(item.text("title")).rnFont(13, .bold)
-                                                Text(String(item.number("count"))).rnFont(12, .semibold)
-                                                Spacer(minLength: 0)
-                                            }
-                                            .foregroundStyle(palette.secondary)
-                                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).contentShape(Rectangle())
-                                        }
-                                        .buttonStyle(.plain).disabled(!model.projectViewOpenEnabled)
-                                        .accessibilityLabel(item.text("title") + ", " + String(item.number("count")))
-                                        .accessibilityValue(model.label(item.flag("collapsed") ? "markdown.expand" : "markdown.collapse"))
-                                        .accessibilityIdentifier("project-completed-toggle")
-                                    } else {
-                                        HStack(spacing: 8) {
-                                            Text(item.text("title")).rnFont(13, .bold)
-                                            Text(String(item.number("count"))).rnFont(12, .semibold)
-                                        }
-                                        .foregroundStyle(item.flag("muted") ? palette.secondary : palette.text)
-                                        .padding(.top, 12).padding(.bottom, 4).accessibilityAddTraits(.isHeader)
-                                    }
-                                } else if item.text("type") == "task" {
-                                    projectTaskRow(item.object("row"))
-                                }
-                            }
-                            if items.count < model.projectDetail.number("total") {
-                                Button { resignProjectNotesInput(); Task { await model.loadMoreProject() } } label: {
-                                    Text(model.label("common.more")).rnFont(13, .semibold)
-                                        .padding(.horizontal, 16).frame(minHeight: 44).background(palette.filter, in: Capsule())
-                                }
-                                .buttonStyle(.plain).disabled(!model.projectRowsEnabled)
-                                .frame(maxWidth: .infinity).accessibilityIdentifier("project-more")
-                            }
-                        }
-                        .disabled(!model.projectCurrent)
-                        .allowsHitTesting(model.projectCurrent)
-                        .background {
-                            if model.projectCurrent, !model.busy, !model.projectViewReadPending,
-                               model.projectError == nil, navigationReplayUncovered,
-                               let ticket = model.navigationReplayTicket(for: "project") {
-                                NavigationReplayContentEntry(model: model, ticket: ticket,
-                                    uncovered: { navigationReplayUncovered })
-                            }
-                        }
-                    }
-                    if model.busy { ProgressView().frame(maxWidth: .infinity).padding(12) }
-                }
-                .padding(12)
-            }
-            .accessibilityIdentifier("project-detail-scroll")
-            .refreshable { resignProjectNotesInput(); await model.pullToRefresh() }
-            .allowsHitTesting(!model.projectRenameEditing)
+                ProjectDetailList(model: model, palette: palette, onResign: resignProjectNotesInput,
+                                  replayUncovered: { navigationReplayUncovered }, details: { AnyView(detailsPanel($0)) })
             }
         }
         .disabled(model.projectAttachmentOpening)
         .accessibilityHidden(model.projectFileOpenPresentation != nil)
+    }
+
+    private func confirmProjectCancel() {
+        cancelProjectConfirmedID = model.projectHeader.text("id")
+        cancelProjectConfirmedRevision = model.projectDetail.text("projectRevision")
+        cancelProjectConfirmPresented = true
+    }
+
+    private func confirmProjectDelete() {
+        deleteProjectConfirmedID = model.projectHeader.text("id")
+        deleteProjectConfirmedRevision = model.projectDetail.text("projectRevision")
+        deleteProjectConfirmPresented = true
     }
 
     private var observedDetailContent: some View {
@@ -1561,36 +1209,6 @@ struct ProjectDetailScreen: View {
         .accessibilityAction(.escape) { resignProjectNotesInput(); Task { await model.closeProject() } }
     }
 
-    private func projectTaskRow(_ row: CoreObject) -> some View {
-        let writable = !model.projectDetail.flag("readOnly") && model.projectTaskSelectable(row.text("id"))
-        let selected = model.projectTaskSelected(row.text("id"))
-        return HStack(spacing: 8) {
-            if model.projectSelectionMode && writable {
-                Button {
-                    resignProjectNotesInput()
-                    Task { await model.selectProjectTask(row) }
-                } label: {
-                    Image(systemName: selected ? "checkmark.circle.fill" : "circle")
-                        .font(.system(size: 22)).foregroundStyle(palette.tint)
-                        .frame(width: 45, height: 45).contentShape(Rectangle())
-                }
-                .buttonStyle(.plain).accessibilityLabel(row.text("title"))
-                .accessibilityAddTraits(selected ? .isSelected : [])
-                .accessibilityIdentifier("project-select-" + row.text("id"))
-            }
-            TaskCard(row: row, model: model, palette: palette,
-                     readOnly: !writable || model.projectSelectionMode,
-                     hideStatusBadge: model.projectSelectionMode,
-                     beforeAction: resignProjectNotesInput,
-                     onSelection: model.projectSelectionMode && writable ? { selected in
-                         resignProjectNotesInput(); Task { await model.selectProjectTask(selected) }
-                     } : nil,
-                     onSelectionStart: writable ? { selected in
-                         resignProjectNotesInput(); Task { await model.selectProjectTask(selected) }
-                     } : nil)
-        }
-        .disabled(!model.projectRowsEnabled)
-    }
 
     private var projectBulkBar: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -1842,28 +1460,8 @@ struct ProjectDetailScreen: View {
             .accessibilityIdentifier("project-filters-sheet")
     }
 
-    @ViewBuilder private var projectTaskSortErrors: some View {
-        if let error = model.projectTaskSortError {
-            Text(error).rnFont(13).foregroundStyle(palette.danger).textSelection(.enabled)
-                .accessibilityIdentifier("project-sort-error")
-            if model.projectTaskSortPending {
-                Button { Task { await model.retry() } } label: {
-                    Text(model.label("common.retry")).rnFont(14, .semibold)
-                        .frame(maxWidth: .infinity, minHeight: 44).contentShape(Rectangle())
-                }
-                .buttonStyle(.plain).disabled(model.busy).accessibilityIdentifier("project-sort-retry")
-            }
-        }
-        if let error = model.projectTaskSortReadError {
-            Text(error).rnFont(13).foregroundStyle(palette.danger).textSelection(.enabled)
-                .accessibilityIdentifier("project-sort-read-error")
-            Button { Task { await model.retryProjectTaskSortRead() } } label: {
-                Text(model.label("common.retry")).rnFont(14, .semibold)
-                    .frame(maxWidth: .infinity, minHeight: 44).contentShape(Rectangle())
-            }
-            .buttonStyle(.plain).disabled(model.busy || model.retryNeeded || model.projectTaskSortPending)
-            .accessibilityIdentifier("project-sort-read-retry")
-        }
+    private var projectTaskSortErrors: some View {
+        ProjectTaskSortErrors(model: model, palette: palette)
     }
 
     @ViewBuilder
@@ -2402,6 +2000,485 @@ struct ProjectDetailScreen: View {
     private func resignProjectNotesInput() {
         notesFocused = false
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+    }
+}
+
+private struct ProjectDetailTopBar: View {
+    let model: CoreModel
+    let palette: AppPalette
+    var renameFocused: FocusState<Bool>.Binding
+    let onResign: () -> Void
+    let onSubmitRename: () -> Void
+    let onCancelProject: () -> Void
+    let onDeleteProject: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Button { onResign(); Task { await model.closeProject() } } label: {
+                AppIcon(name: "chevron", size: 24).rotationEffect(.degrees(90)).foregroundStyle(palette.tint)
+                    .frame(width: 44, height: 44).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain).disabled(model.busy || model.retryNeeded || model.projectRenameEditing
+                || model.projectAttachmentOpening || model.projectFileAddOpening || model.projectFileImporterPresented)
+            .accessibilityLabel(model.label("common.back")).accessibilityIdentifier("project-back")
+            if model.projectRenameEditing {
+                TextField(model.label("taskEdit.titleLabel"), text: Binding(
+                    get: { model.projectRenameTitle },
+                    set: { model.setProjectRenameTitle($0) }))
+                    .focused(renameFocused).submitLabel(.done).onSubmit { onSubmitRename() }
+                    .rnFont(18, .bold).foregroundStyle(palette.text)
+                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    .disabled(!model.projectRenameInputEnabled)
+                    .accessibilityIdentifier("project-rename-title")
+            } else {
+                Text(model.projectHeader.text("title")).rnFont(18, .bold)
+                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    .accessibilityAddTraits(.isHeader)
+                    .accessibilityIdentifier("project-detail-title")
+                    .overlay {
+                        Button { onResign(); Task { await model.openProjectRename() } } label: {
+                            Color.clear.frame(maxWidth: .infinity, minHeight: 44).contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain).disabled(!model.projectRenameOpenEnabled)
+                        .accessibilityLabel(model.label("taskEdit.titleLabel"))
+                        .accessibilityIdentifier("project-rename-open")
+                    }
+            }
+            Menu {
+                Button {
+                    let id = model.projectHeader.text("id")
+                    let revision = model.projectDetail.text("projectRevision")
+                    let action = model.projectLifecycleAction
+                    Task { await model.changeProjectLifecycle(expectedID: id, expectedRevision: revision, action: action) }
+                } label: {
+                    Label(model.label(model.projectLifecycleAction == "complete" ? "projects.complete" : "projects.reactivate"),
+                          systemImage: model.projectLifecycleAction == "complete" ? "archivebox" : "arrow.uturn.backward")
+                }
+                .disabled(!model.projectLifecycleOpenEnabled)
+                .accessibilityHint(model.projectLifecycleAction == "complete" ? model.label("projects.archiveHelp") : "")
+                .accessibilityIdentifier(model.projectLifecycleAction == "complete" ? "project-archive-button" : "project-reactivate-button")
+                if model.projectLifecycleAction == "complete" {
+                    Button(role: .destructive) {
+                        guard model.projectLifecycleOpenEnabled else { return }
+                        onCancelProject()
+                    } label: {
+                        Label(model.label("projects.cancel"), systemImage: "xmark.circle")
+                    }
+                    .disabled(!model.projectLifecycleOpenEnabled)
+                    .accessibilityIdentifier("project-cancel-button")
+                }
+                Button {
+                    let id = model.projectHeader.text("id")
+                    let revision = model.projectDetail.text("projectRevision")
+                    Task { await model.duplicateProject(expectedID: id, expectedRevision: revision) }
+                } label: {
+                    Label(model.label("projects.duplicate"), systemImage: "square.on.square")
+                }
+                .disabled(!model.projectDuplicateOpenEnabled)
+                .accessibilityIdentifier("project-duplicate-button")
+                Button {
+                    let id = model.projectHeader.text("id")
+                    let revision = model.projectDetail.text("projectRevision")
+                    Task { await model.openProjectConvert(expectedID: id, expectedRevision: revision) }
+                } label: {
+                    Label(model.label("projects.convertToSection"), systemImage: "folder")
+                }
+                .disabled(!model.projectConvertOpenEnabled)
+                .accessibilityIdentifier("project-convert-to-section-button")
+                Button(role: .destructive) {
+                    onDeleteProject()
+                } label: {
+                    Label(model.label("common.delete"), systemImage: "trash")
+                }
+                .accessibilityIdentifier("project-delete-button")
+            } label: {
+                Image(systemName: "ellipsis").font(.system(size: 20)).foregroundStyle(palette.secondary)
+                    .frame(width: 44, height: 44).background(palette.filter, in: RoundedRectangle(cornerRadius: 10))
+                    .overlay(RoundedRectangle(cornerRadius: 10).stroke(palette.border, lineWidth: 1))
+            }
+            .disabled(!model.projectDeleteOpenEnabled)
+            .accessibilityLabel(model.label("projects.actionsLabel"))
+            .accessibilityIdentifier("project-actions-menu")
+        }
+    }
+}
+
+private struct ProjectDetailMessages: View {
+    let model: CoreModel
+    let palette: AppPalette
+    var renameFocused: FocusState<Bool>.Binding
+    let onResign: () -> Void
+    let onSubmitRename: () -> Void
+
+    var body: some View {
+        if model.projectRenameEditing {
+            HStack(spacing: 12) {
+                Button { onSubmitRename() } label: {
+                    Text(model.label("common.save"))
+                        .frame(maxWidth: .infinity, minHeight: 44).contentShape(Rectangle())
+                }
+                .disabled(!model.projectRenameCanSave)
+                .accessibilityIdentifier("project-rename-save")
+                Button {
+                    renameFocused.wrappedValue = false
+                    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                    model.cancelProjectRename()
+                } label: {
+                    Text(model.label("common.cancel"))
+                        .frame(maxWidth: .infinity, minHeight: 44).contentShape(Rectangle())
+                }
+                .disabled(model.busy || model.retryNeeded || model.projectRenamePending)
+                .accessibilityIdentifier("project-rename-cancel")
+            }
+            .buttonStyle(.plain).rnFont(14, .semibold).foregroundStyle(palette.tint)
+        }
+        if let message = model.projectBulkRetryError ?? model.projectBulkError {
+            Text(message).rnFont(13).foregroundStyle(palette.danger).textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityIdentifier("project-bulk-error")
+            if model.projectBulkRetryError != nil {
+                Button(model.label("common.retry")) { Task { await model.retry() } }
+                    .rnFont(14, .semibold).frame(minHeight: 45)
+                    .disabled(model.busy).accessibilityIdentifier("project-bulk-retry")
+            }
+        }
+        if let error = model.projectRenameError {
+            Text(error).rnFont(13).foregroundStyle(palette.danger).textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityIdentifier("project-rename-error")
+            if model.projectRenamePending {
+                Button(model.label("common.retry")) { Task { await model.retry() } }
+                    .rnFont(14, .semibold).frame(minHeight: 44)
+                    .disabled(model.busy).accessibilityIdentifier("project-rename-retry")
+            }
+        }
+        if let error = model.projectRenameReadError {
+            Text(error).rnFont(13).foregroundStyle(palette.danger).textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityIdentifier("project-rename-read-error")
+            Button(model.label("common.retry")) { Task { await model.retryProjectRenameRead() } }
+                .rnFont(14, .semibold).frame(minHeight: 44)
+                .disabled(model.busy || model.retryNeeded || model.projectRenamePending)
+                .accessibilityIdentifier("project-rename-read-retry")
+        }
+        if let error = model.projectDeleteError {
+            Text(error).rnFont(13).foregroundStyle(palette.danger).textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityIdentifier("project-delete-error")
+            if model.retryNeeded {
+                Button(model.label("common.retry")) { Task { await model.retry() } }
+                    .rnFont(14, .semibold).frame(minHeight: 44)
+                    .disabled(model.busy).accessibilityIdentifier("project-delete-retry")
+            }
+        }
+        if let error = model.projectDuplicateError {
+            Text(error).rnFont(13).foregroundStyle(palette.danger).textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityIdentifier("project-duplicate-error")
+            if model.retryNeeded {
+                Button(model.label("common.retry")) { Task { await model.retry() } }
+                    .rnFont(14, .semibold).frame(minHeight: 44)
+                    .disabled(model.busy).accessibilityIdentifier("project-duplicate-retry")
+            }
+        }
+        if let error = model.projectLifecycleError {
+            Text(error).rnFont(13).foregroundStyle(palette.danger).textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityIdentifier("project-lifecycle-error")
+            if model.retryNeeded {
+                Button(model.label("common.retry")) { Task { await model.retry() } }
+                    .rnFont(14, .semibold).frame(minHeight: 44)
+                    .disabled(model.busy).accessibilityIdentifier("project-lifecycle-retry")
+            }
+        }
+        if let error = model.projectFlowError {
+            Text(error).rnFont(13).foregroundStyle(palette.danger).textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityIdentifier("project-flow-error")
+            if model.projectFlowPending {
+                Button { Task { await model.retry() } } label: {
+                    Text(model.label("common.retry")).rnFont(14, .semibold)
+                        .frame(maxWidth: .infinity, minHeight: 44).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain).disabled(model.busy).accessibilityIdentifier("project-flow-retry")
+            }
+        }
+            if let error = model.projectFlowReadError {
+            Text(error).rnFont(13).foregroundStyle(palette.danger).textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityIdentifier("project-flow-read-error")
+            Button { Task { await model.retryProjectFlowRead() } } label: {
+                Text(model.label("common.retry")).rnFont(14, .semibold)
+                    .frame(maxWidth: .infinity, minHeight: 44).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain).disabled(model.busy || model.retryNeeded || model.projectFlowPending)
+                .accessibilityIdentifier("project-flow-read-retry")
+            }
+            if !model.projectTaskSortPresented { ProjectTaskSortErrors(model: model, palette: palette) }
+            if model.projectDateField == nil || !model.projectCurrent {
+                ProjectDateErrors(model: model, palette: palette)
+            }
+    }
+}
+
+private struct ProjectTaskSortErrors: View {
+    let model: CoreModel
+    let palette: AppPalette
+
+    var body: some View {
+        if let error = model.projectTaskSortError {
+            Text(error).rnFont(13).foregroundStyle(palette.danger).textSelection(.enabled)
+                .accessibilityIdentifier("project-sort-error")
+            if model.projectTaskSortPending {
+                Button { Task { await model.retry() } } label: {
+                    Text(model.label("common.retry")).rnFont(14, .semibold)
+                        .frame(maxWidth: .infinity, minHeight: 44).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain).disabled(model.busy).accessibilityIdentifier("project-sort-retry")
+            }
+        }
+        if let error = model.projectTaskSortReadError {
+            Text(error).rnFont(13).foregroundStyle(palette.danger).textSelection(.enabled)
+                .accessibilityIdentifier("project-sort-read-error")
+            Button { Task { await model.retryProjectTaskSortRead() } } label: {
+                Text(model.label("common.retry")).rnFont(14, .semibold)
+                    .frame(maxWidth: .infinity, minHeight: 44).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain).disabled(model.busy || model.retryNeeded || model.projectTaskSortPending)
+            .accessibilityIdentifier("project-sort-read-retry")
+        }
+    }
+}
+
+private struct ProjectDetailViewBar: View {
+    let model: CoreModel
+    let palette: AppPalette
+    let onResign: () -> Void
+
+    var body: some View {
+        HStack {
+            if model.projectTaskOrderPresented {
+                Text(model.projectTaskOrderView.text("label").isEmpty ? model.label("projects.reorderTasks")
+                     : model.projectTaskOrderView.text("label")).rnFont(14, .semibold)
+                Spacer(minLength: 0)
+                Button { Task { await model.closeProjectTaskOrder() } } label: {
+                    Text(model.label("common.done")).rnFont(14, .semibold)
+                        .frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
+                }
+                    .buttonStyle(.plain)
+                    .disabled(model.busy || model.retryNeeded || model.projectTaskOrderPending)
+                    .accessibilityIdentifier("project-task-order-done")
+            } else {
+            Button { onResign(); Task { await model.openProjectViewOptions() } } label: {
+                Image(systemName: "ellipsis").font(.system(size: 20))
+                    .foregroundStyle(model.projectTaskViewActive ? palette.tint : palette.secondary)
+                    .frame(width: 44, height: 44).contentShape(Rectangle())
+                    .background(palette.filter, in: RoundedRectangle(cornerRadius: 8))
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(palette.border, lineWidth: 1))
+            }
+            .buttonStyle(.plain).disabled(!model.projectViewOpenEnabled)
+            .accessibilityLabel(model.label("taskEdit.moreOptions"))
+            .accessibilityAddTraits(model.projectTaskViewActive ? .isSelected : [])
+            .accessibilityIdentifier("project-task-view-options-button")
+            if model.projectDetail.object("filters").flag("hasActive") {
+                Button { onResign(); Task { await model.openProjectFilters() } } label: {
+                    Text(model.projectDetail.text("filterButtonLabel")).rnFont(13, .semibold)
+                        .foregroundStyle(palette.tint).padding(.horizontal, 12)
+                        .frame(minHeight: 44).contentShape(Rectangle())
+                        .background(palette.filter, in: RoundedRectangle(cornerRadius: 8))
+                }
+                .buttonStyle(.plain).disabled(!model.projectViewOpenEnabled)
+                .accessibilityIdentifier("project-filter-button")
+            }
+            Spacer(minLength: 0)
+            }
+        }
+        .padding(.horizontal, 12).padding(.vertical, 8).background(palette.card)
+        .overlay(alignment: .bottom) { palette.border.frame(height: 1) }
+        if !model.projectDetail.objects("chips").isEmpty {
+            AppChipFlow {
+                ForEach(model.projectDetail.objects("chips").indices, id: \.self) { index in
+                    let chip = model.projectDetail.objects("chips")[index]
+                    Button {
+                        onResign()
+                        Task { await model.editProjectFilter(chip.object("action").object("filterEdit")) }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text(chip.text("label")).rnFont(12, .semibold).strikethrough(chip.flag("excluded"))
+                            AppIcon(name: "x", size: 12)
+                        }
+                        .foregroundStyle(palette.onTint).padding(.horizontal, 10)
+                        .frame(minHeight: 44).background(chip.flag("excluded") ? palette.danger : palette.tint,
+                                                        in: RoundedRectangle(cornerRadius: 22))
+                        .contentShape(RoundedRectangle(cornerRadius: 22))
+                    }
+                    .buttonStyle(.plain).disabled(!model.projectFilterActionsEnabled)
+                    .accessibilityIdentifier("project-filter-chip-" + chip.text("id"))
+                }
+                Button {
+                    onResign()
+                    Task { await model.editProjectFilter(model.projectDetail.object("filters").object("clearEdit")) }
+                } label: {
+                    Text(model.label("filters.clear")).rnFont(12, .semibold)
+                        .foregroundStyle(palette.tint).padding(.horizontal, 10)
+                        .frame(minHeight: 44).contentShape(Capsule())
+                }
+                .buttonStyle(.plain).disabled(!model.projectFilterActionsEnabled)
+                .accessibilityIdentifier("project-filter-clear")
+            }
+            .padding(.horizontal, 12).padding(.bottom, 8).background(palette.card)
+        }
+    }
+}
+
+private struct ProjectDetailList: View {
+    let model: CoreModel
+    let palette: AppPalette
+    let onResign: () -> Void
+    let replayUncovered: () -> Bool
+    let details: (CoreObject) -> AnyView
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 8) {
+                if let error = model.projectError {
+                    Text(error).rnFont(13).foregroundStyle(palette.danger).textSelection(.enabled)
+                        .accessibilityIdentifier("project-error")
+                    Button { Task { await model.refresh() } } label: {
+                        Text(model.label("common.retry")).rnFont(14, .semibold)
+                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).contentShape(Rectangle())
+                    }
+                        .buttonStyle(.plain).disabled(model.busy || model.retryNeeded)
+                        .accessibilityIdentifier("project-retry")
+                }
+                if !model.projectCurrent { ProjectStatusReadError(model: model, palette: palette) }
+
+                if model.projectCurrent || ((model.busy || model.projectViewReadPending) && !model.projectDetail.isEmpty
+                    && model.projectDetail.text("projectId") == model.projectHeader.text("id")) {
+                    Group {
+                        let metadata = model.projectDetail.object("metadata")
+                        if !metadata.isEmpty { details(metadata) }
+                        let items = model.projectDetail.objects("items")
+                        if items.isEmpty {
+                            let empty = model.projectDetail.object("empty")
+                            VStack(spacing: 8) {
+                                Text(empty.text("message").isEmpty ? model.label("list.noTasks") : empty.text("message"))
+                                    .rnFont(16).foregroundStyle(palette.secondary)
+                                if !empty.text("hint").isEmpty {
+                                    Text(empty.text("hint")).rnFont(13).foregroundStyle(palette.secondary)
+                                }
+                                if !empty.object("action").object("filterEdit").isEmpty {
+                                    Button {
+                                        Task { await model.editProjectFilter(empty.object("action").object("filterEdit")) }
+                                    } label: {
+                                        Text(empty.text("actionLabel")).rnFont(14, .semibold)
+                                            .frame(minHeight: 44).contentShape(Rectangle())
+                                    }
+                                    .buttonStyle(.plain).disabled(!model.projectFilterActionsEnabled)
+                                    .accessibilityIdentifier("project-empty-filter-clear")
+                                }
+                            }
+                            .frame(maxWidth: .infinity).padding(32).accessibilityIdentifier("project-empty")
+                        }
+                        ForEach(items.map { ProjectDetailDisplayItem(value: $0) }) { entry in
+                            let item = entry.value
+                            if item.text("type") == "section" {
+                                if item.flag("collapsible") {
+                                    Button {
+                                        onResign()
+                                        Task { await model.toggleProjectCompletedSection(item.text("id")) }
+                                    } label: {
+                                        HStack(spacing: 8) {
+                                            AppIcon(name: "chevron", size: 16)
+                                                .rotationEffect(.degrees(item.flag("collapsed") ? -90 : 0)).accessibilityHidden(true)
+                                            Text(item.text("title")).rnFont(13, .bold)
+                                            Text(String(item.number("count"))).rnFont(12, .semibold)
+                                            Spacer(minLength: 0)
+                                        }
+                                        .foregroundStyle(palette.secondary)
+                                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).contentShape(Rectangle())
+                                    }
+                                    .buttonStyle(.plain).disabled(!model.projectViewOpenEnabled)
+                                    .accessibilityLabel(item.text("title") + ", " + String(item.number("count")))
+                                    .accessibilityValue(model.label(item.flag("collapsed") ? "markdown.expand" : "markdown.collapse"))
+                                    .accessibilityIdentifier("project-completed-toggle")
+                                } else {
+                                    HStack(spacing: 8) {
+                                        Text(item.text("title")).rnFont(13, .bold)
+                                        Text(String(item.number("count"))).rnFont(12, .semibold)
+                                    }
+                                    .foregroundStyle(item.flag("muted") ? palette.secondary : palette.text)
+                                    .padding(.top, 12).padding(.bottom, 4).accessibilityAddTraits(.isHeader)
+                                }
+                            } else if item.text("type") == "task" {
+                                ProjectDetailTaskRow(model: model, palette: palette, row: item.object("row"), onResign: onResign)
+                            }
+                        }
+                        if items.count < model.projectDetail.number("total") {
+                            Button { onResign(); Task { await model.loadMoreProject() } } label: {
+                                Text(model.label("common.more")).rnFont(13, .semibold)
+                                    .padding(.horizontal, 16).frame(minHeight: 44).background(palette.filter, in: Capsule())
+                            }
+                            .buttonStyle(.plain).disabled(!model.projectRowsEnabled)
+                            .frame(maxWidth: .infinity).accessibilityIdentifier("project-more")
+                        }
+                    }
+                    .disabled(!model.projectCurrent)
+                    .allowsHitTesting(model.projectCurrent)
+                    .background {
+                        if model.projectCurrent, !model.busy, !model.projectViewReadPending,
+                           model.projectError == nil, replayUncovered(),
+                           let ticket = model.navigationReplayTicket(for: "project") {
+                            NavigationReplayContentEntry(model: model, ticket: ticket,
+                                uncovered: replayUncovered)
+                        }
+                    }
+                }
+                if model.busy { ProgressView().frame(maxWidth: .infinity).padding(12) }
+            }
+            .padding(12)
+        }
+        .accessibilityIdentifier("project-detail-scroll")
+        .refreshable { onResign(); await model.pullToRefresh() }
+        .allowsHitTesting(!model.projectRenameEditing)
+    }
+}
+
+private struct ProjectDetailTaskRow: View {
+    let model: CoreModel
+    let palette: AppPalette
+    let row: CoreObject
+    let onResign: () -> Void
+
+    var body: some View {
+        let writable = !model.projectDetail.flag("readOnly") && model.projectTaskSelectable(row.text("id"))
+        let selected = model.projectTaskSelected(row.text("id"))
+        return HStack(spacing: 8) {
+            if model.projectSelectionMode && writable {
+                Button {
+                    onResign()
+                    Task { await model.selectProjectTask(row) }
+                } label: {
+                    Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                        .font(.system(size: 22)).foregroundStyle(palette.tint)
+                        .frame(width: 45, height: 45).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain).accessibilityLabel(row.text("title"))
+                .accessibilityAddTraits(selected ? .isSelected : [])
+                .accessibilityIdentifier("project-select-" + row.text("id"))
+            }
+            TaskCard(row: row, model: model, palette: palette,
+                     readOnly: !writable || model.projectSelectionMode,
+                     hideStatusBadge: model.projectSelectionMode,
+                     beforeAction: onResign,
+                     onSelection: model.projectSelectionMode && writable ? { selected in
+                         onResign(); Task { await model.selectProjectTask(selected) }
+                     } : nil,
+                     onSelectionStart: writable ? { selected in
+                         onResign(); Task { await model.selectProjectTask(selected) }
+                     } : nil)
+        }
+        .disabled(!model.projectRowsEnabled)
     }
 }
 
