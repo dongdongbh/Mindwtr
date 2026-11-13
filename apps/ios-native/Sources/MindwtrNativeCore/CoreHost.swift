@@ -30082,7 +30082,7 @@ private final class Engine: @unchecked Sendable {
         return { try await NativeCloudKitBridge.accountStatus(containerIdentifier: container) }
     }
 
-    private static let changeSyncDeferred = CoreHostRejection(message: "NOT_READY: The local change sync waits for the current operation")
+    private static let changeSyncDeferred = CoreHostRejection(message: "NOT_READY: The automatic sync waits for the current operation")
 
     private func changeSyncEngineIdle() throws -> Bool {
         try started && !closed && lockFD >= 0 && context != nil && !recoveryActivationPending && !invoking
@@ -30100,7 +30100,7 @@ private final class Engine: @unchecked Sendable {
 
     func foregroundSync(command: String, requestJSON: String, cancellation: NativeAttachmentCancellation) throws -> String {
         dispatchPrecondition(condition: .onQueue(queue))
-        if command == "syncChange", (try? changeSyncEngineIdle()) != true { throw Self.changeSyncDeferred }
+        if ["syncChange", "syncStored", "syncResume"].contains(command), (try? changeSyncEngineIdle()) != true { throw Self.changeSyncDeferred }
         var cancelSettled = false
         do {
             try denyCleanupOwner()

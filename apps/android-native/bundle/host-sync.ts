@@ -112,7 +112,11 @@ export type NativeSyncBindings = {
     retireLocalAttachment?: NativeAttachmentBindings['retireLocalAttachment'];
 
     listRecoverySnapshots?: () => Promise<string[]>;
+
+    serverAnswerWindowMs?: number;
 };
+
+const IOS_SERVER_ANSWER_WINDOW_MS = 20_000;
 
 
 type HostCryptoCall = (request: Record<string, unknown>) => Promise<Uint8Array>;
@@ -383,7 +387,11 @@ export const createNativeSync = (bindings: NativeSyncBindings, fileEncryptionSta
     const cloudKit = cloudKitBinding && attachments?.syncCloudKitAttachments
         ? { ...cloudKitBinding, syncAttachments: attachments.syncCloudKitAttachments } : undefined;
 
-    const syncFetch = createDeadlineFetch((input, init) => fetch(input, init));
+    let serverAnswered = false;
+    const syncFetch = createDeadlineFetch((input, init) => fetch(input, init).then((response) => {
+        serverAnswered = true;
+        return response;
+    }));
     const service = createMobileSyncService<MobileFileSyncLease | NativeFileSyncLease>({
         ...(cloudKit ? { cloudKit } : {}),
         allowQueuedFollowUp: platform !== 'ios',
@@ -733,8 +741,23 @@ export const createNativeSync = (bindings: NativeSyncBindings, fileEncryptionSta
             const controller = automaticController();
             if (reason === 'resume' && Date.now() - controller.getLastAutoSyncAt()
                 <= getMobileAutoSyncCadence(backend).foregroundMinIntervalMs) return { success: true, skipped: true };
-            if (reason === 'change') await controller.requestAutoSync(undefined, 'data-change');
-            else await controller.requestAutoSync(0, reason === 'leave' ? 'app-state-background' : reason);
+            const windowMs = bindings.serverAnswerWindowMs ?? IOS_SERVER_ANSWER_WINDOW_MS;
+            let unanswered = false;
+            serverAnswered = false;
+            const watch = backend === 'webdav' || backend === 'cloud' ? setTimeout(() => {
+                if (serverAnswered) return;
+                unanswered = true;
+                service.abortMobileSync('unanswered');
+            }, windowMs) : null;
+            try {
+                if (reason === 'change') await controller.requestAutoSync(undefined, 'data-change');
+                else await controller.requestAutoSync(0, reason === 'leave' ? 'app-state-background' : reason);
+            } finally {
+                if (watch) clearTimeout(watch);
+            }
+            if (unanswered) await logLine('warn', 'Native iOS automatic sync stopped because the server did not answer', {
+                scope: 'native-ios', force: true, extra: { releaseCheck: 'v1.3.9/ios-sync-unanswered', operation: reason, windowMs: String(windowMs) },
+            });
             if (fatalCleanupError) throw fatalCleanupError;
             if (reason === 'change' && !frame.result && hasPendingLocalChange()) {
                 iosChangeDueAt = Date.now() + getMobileAutoSyncCadence(backend).debounceContinuousChangeMs;

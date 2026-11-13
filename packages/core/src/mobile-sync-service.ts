@@ -79,6 +79,7 @@ const isSyncEncryptionError = (error: unknown): boolean =>
   || error instanceof SyncEncryptionPartlyEncryptedError;
 
 const DEFAULT_SYNC_TIMEOUT_MS = 30_000;
+const MOBILE_SYNC_UNANSWERED_ERROR = 'The sync server did not answer';
 const WEBDAV_RETRY_OPTIONS = { maxAttempts: 5, baseDelayMs: 2000, maxDelayMs: 30_000 };
 const WEBDAV_READ_RETRY_OPTIONS = { ...WEBDAV_RETRY_OPTIONS, shouldRetry: isRetryableWebdavReadError };
 const DROPBOX_RETRY_OPTIONS = { maxAttempts: 3, baseDelayMs: 1000, maxDelayMs: 8000 };
@@ -689,7 +690,7 @@ export const createMobileSyncService = <Lease>(host: MobileSyncServiceHost<Lease
   const webdavSyncRateLimitController = createWebdavSyncRateLimitController();
   let activeMobileSyncAbortController: AbortController | null = null;
 
-  let activeMobileSyncAbortReason: 'lifecycle' | 'deadline' | null = null;
+  let activeMobileSyncAbortReason: 'lifecycle' | 'deadline' | 'unanswered' | null = null;
 
   const setMobileSyncActivityState = (next: MobileSyncActivityState) => {
     if (mobileSyncActivityState === next) return;
@@ -1296,9 +1297,15 @@ export const createMobileSyncService = <Lease>(host: MobileSyncServiceHost<Lease
     }
 
 
+    private webdavRetryOptions(read: boolean) {
+      return { ...(read ? WEBDAV_READ_RETRY_OPTIONS : WEBDAV_RETRY_OPTIONS), signal: this.requestAbortController.signal };
+    }
+
+
     private dropboxTransientRetryOptions() {
       return {
         ...DROPBOX_RETRY_OPTIONS,
+        signal: this.requestAbortController.signal,
         shouldRetry: (error: unknown) => !this.networkWentOffline
           && !this.requestAbortController.signal.aborted
           && isRetryableError(error),
@@ -1741,7 +1748,7 @@ export const createMobileSyncService = <Lease>(host: MobileSyncServiceHost<Lease
                 fetcher: this.fetchWithAbort,
               }, {
                 requireStrongEtag: !legacyWebdavPostureAllowed,
-              }), WEBDAV_READ_RETRY_OPTIONS);
+              }), this.webdavRetryOptions(true));
               if (compatibility === 'legacy-plaintext' && !legacyWebdavPostureAllowed) {
                 throw new SyncEncryptionRemoteVersionUnavailableError('WebDAV data.json');
               }
@@ -2087,7 +2094,7 @@ export const createMobileSyncService = <Lease>(host: MobileSyncServiceHost<Lease
                 material: this.encryptionMaterial ?? undefined,
                 cryptoPrims: host.crypto,
               }),
-              WEBDAV_READ_RETRY_OPTIONS
+              this.webdavRetryOptions(true)
             );
           } catch (error) {
 
@@ -2123,7 +2130,7 @@ export const createMobileSyncService = <Lease>(host: MobileSyncServiceHost<Lease
                   expectedEtag,
                 });
               },
-              WEBDAV_RETRY_OPTIONS
+              this.webdavRetryOptions(false)
             );
           } catch (error) {
             if (!isSyncEncryptionError(error)) this.handleWebdavRateLimit(error);
@@ -2178,7 +2185,7 @@ export const createMobileSyncService = <Lease>(host: MobileSyncServiceHost<Lease
                   signal: this.requestAbortController.signal,
                   allowWeakFingerprint: webdavConfig.allowWeakFingerprint,
                 }),
-              WEBDAV_READ_RETRY_OPTIONS
+              this.webdavRetryOptions(true)
             );
             return metadata;
           } catch (error) {
@@ -2592,11 +2599,12 @@ export const createMobileSyncService = <Lease>(host: MobileSyncServiceHost<Lease
   }
 
 
-  function abortMobileSync(reason: 'lifecycle' | 'deadline' = 'lifecycle'): boolean {
+  function abortMobileSync(reason: 'lifecycle' | 'deadline' | 'unanswered' = 'lifecycle'): boolean {
     if (!activeMobileSyncAbortController) return false;
 
     if (activeMobileSyncAbortReason !== 'deadline') activeMobileSyncAbortReason = reason;
-    activeMobileSyncAbortController.abort();
+    if (reason === 'unanswered') activeMobileSyncAbortController.abort(new Error(MOBILE_SYNC_UNANSWERED_ERROR));
+    else activeMobileSyncAbortController.abort();
     return true;
   }
 
