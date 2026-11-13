@@ -7175,6 +7175,17 @@ final class CoreHostTests: XCTestCase {
         return try object(raw)["someday"] as? String
     }
 
+    func testMarkdownEditorReadsPassTheNativeMenuReadGate() async throws {
+        let core = host()
+        _ = try await core.start()
+        let toolbar = try object(await core.call("menuRead", argumentsJSON: json(["markdownToolbarActions", "{}"])))
+        XCTAssertEqual((toolbar["actions"] as? [[String: Any]])?.first?["id"] as? String, "heading")
+        let bold = try object(await core.call("menuRead", argumentsJSON: json(["markdownToolbarApply",
+            json(["value": "pack the boxes", "start": 5, "end": 8, "action": "bold"])])))
+        XCTAssertEqual(try json(bold), try json(["value": "pack **the** boxes", "start": 7, "end": 10]))
+        await core.close()
+    }
+
     func testSomedayProjectSectionMoveWritesProbesAndRecoversAfterAFailedSave() async throws {
         let id = try await seedSomedayProjectSections()
         let faults = HostIOFaults()
