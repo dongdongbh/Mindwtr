@@ -105,7 +105,7 @@ Widgets, App Intents and Siri, the Share Extension and the Watch app belong to t
 
 ## Task editor
 
-- Reach: Tap a task title. The sheet opens in Preview or Edit. More holds Duplicate, Share, Cancel, Delete, Skip this occurrence, Create project from task and, for Reference tasks, Convert to action.
+- Reach: Tap a task title. The sheet opens in Preview or Edit. Swiping the sheet down with unsaved changes shows the same Save/Discard/Cancel prompt as Close, as in RN (#1552). More holds Duplicate, Share, Cancel, Delete, Skip this occurrence, Create project from task and, for Reference tasks, Convert to action.
 - Selectors: `task-preview-mark-done`, `task-mode-view`, `task-mode-edit`, `task-editor-title`, `task-editor-focus-star`, `task-editor-note`, `task-editor-save`, `task-editor-save-close`, `task-editor-discard`, `task-more`, `task-duplicate`, `task-share`, `task-cancel`, `task-delete`, `task-skip-occurrence`, `task-promote`, `task-reference-convert-to-action`, `task-view-close`
 - Code: `apps/ios-native/App/TaskViewSheet.swift`, `apps/ios-native/Sources/MindwtrNativeCore/EditorDraftStore.swift`, `apps/ios-native/App/CoreModel.swift`
 - Checks: `apps/ios-native/App/UITests/FoundationUITests.swift` (testTaskDuplicate…, testTaskShare…, testTaskCancellation…, testTaskDelete…, testTaskSkip…, testTaskPromotion…, testTaskPreview…, testGtdTaskEditor…, testTaskEditorFocusStar…)
