@@ -97,6 +97,17 @@ const fixture = (platform: 'ios' | 'android' = 'ios') => {
 };
 
 describe('actual exported native diagnostic bridge', () => {
+    it('persists the CloudKit push arrival with logging off, as RN forces its push delivery line', async () => {
+        const f = fixture(); await f.boot(); f.state.fixture.disableLogging();
+        const message = 'Native iOS CloudKit change notification received';
+        const context = { releaseCheck: 'v1.3.9/ios-cloudkit-push', operation: 'push', outcome: 'received' };
+        expect(await f.poll(f.state.MindwtrHost.logLine(message, JSON.stringify(context)))).toEqual({ ok: true, value: {} });
+        expect(await f.poll(f.state.MindwtrHost.logLine('Unrelated diagnostic', '{}'))).toEqual({ ok: true, value: {} });
+        await f.poll(f.state.MindwtrHost.logShare());
+        const entries = f.logText().trim().split('\n').filter(Boolean).map((line) => JSON.parse(line));
+        expect(entries.filter((entry) => entry.message === message).map((entry) => entry.context)).toEqual([context]);
+        expect(entries.some((entry) => entry.message === 'Unrelated diagnostic')).toBe(false);
+    });
     it.each(['Native Whisper model store initialized', 'Native Whisper model operation failed'])('persists %s with logging disabled', async (message) => {
         const f = fixture(); await f.boot(); f.state.fixture.disableLogging();
         const context = { releaseCheck: 'v1.3.9/ios-whisper-model-download', stage: 'writer', outcome: 'failed', reason: 'writerFile', errno: 13 };

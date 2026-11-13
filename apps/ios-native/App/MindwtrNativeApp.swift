@@ -887,8 +887,8 @@ final class NativeNotificationDelegate: NSObject, UIApplicationDelegate, UNUserN
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         guard let selection = try? NativeAppLaunch.selection.get() else { return true }
         switch selection {
-        case .production, .standard: application.registerForRemoteNotifications()
-        case .isolated, .rehearsal: break
+        case .production, .standard, .isolated: application.registerForRemoteNotifications()
+        case .rehearsal: break
         }
         return true
     }
