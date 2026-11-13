@@ -261,6 +261,23 @@ describe('speech provider dispatch', () => {
         logWarn: vi.fn(),
     });
 
+    it('preserves a custom server model through parsing and retry', async () => {
+        const models: string[] = [];
+        const p = ports();
+        p.withOpenAIUpload.mockImplementation(async send => send({ part: new Blob(['synthetic']) }));
+        const result = await dispatchSpeechCapture({ provider: 'openai', model: 'local-transcribe',
+            parseModel: 'gpt-4o-custom-alias', baseUrl: 'http://localhost:8000/v1' }, false, {
+            ...p, fetcher: async (input, init) => {
+                expect(String(input).startsWith('http://localhost:8000/v1/')).toBe(true);
+                if (String(input).endsWith('/audio/transcriptions')) return new Response(JSON.stringify({ text: 'Buy milk' }));
+                models.push(JSON.parse(String(init?.body)).model);
+                return new Response('Unavailable', { status: 503 });
+            },
+        });
+        expect(models).toEqual(Array(4).fill('gpt-4o-custom-alias'));
+        expect(result.transcript).toBe('Buy milk');
+    });
+
     it('refuses a cloud provider in a FOSS build and logs it, before reading the recording', async () => {
         const p = ports();
         await expect(dispatchSpeechCapture({ provider: 'gemini', apiKey: 'secret', model: 'gemini-2.5-flash' }, true, p))

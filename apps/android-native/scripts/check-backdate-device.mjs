@@ -34,7 +34,7 @@ const run = `${String(Date.now()).slice(-6)}${String(randomInt(1_000_000)).padSt
 const title = `63${run}`;
 const archivedTitle = `65${run}`;
 
-const PROJECT = `BD${run}`;
+const PROJECT = `BX${run}`;
 const projectTask = `64${run}`;
 const LOG_LINE = 'Native completion time saved';
 
@@ -257,14 +257,17 @@ try {
     console.log(`note - "${LOG_LINE}" lines in logcat: ${saves() - logsBefore} after (a) and (b)`);
 
 
-    for (let step = 0; step < 6; step += 1) {
-        nodes = await screen();
-        if (tab(nodes, en['nav.projects']) && !tagged(nodes, 'menu-screen') && !inEditor(nodes) && !sheetOpen(nodes)) break;
-        requireAppFront();
-        sh('input keyevent KEYCODE_BACK');
-        await sleep(900);
-    }
-    nodes = await tapExpecting(tab(await screen(), en['nav.projects']) ?? fail('no Projects tab'), (current) => tabSelected(current, en['nav.projects']), 'the Projects tab');
+    nodes = await device.projectsTab(async () => {
+        for (let step = 0; step < 6; step += 1) {
+            const current = await screen();
+            if (tab(current, en['tab.menu']) && !tagged(current, 'menu-screen') && !inEditor(current) && !sheetOpen(current)) return current;
+            requireAppFront();
+            sh('input keyevent KEYCODE_BACK');
+            await sleep(900);
+        }
+        return fail('the tabs did not come back');
+    });
+    nodes = await tapExpecting(tab(nodes, en['nav.projects']), (current) => tabSelected(current, en['nav.projects']), 'the Projects tab');
     nodes = await device.reveal(PROJECT);
     nodes = await tapExpecting(nodes.find((node) => node.text === PROJECT) ?? fail(`no project ${PROJECT}`), (current) => projectTitled(current, PROJECT) && !inEditor(current),
         `the project ${PROJECT}`, 30_000);

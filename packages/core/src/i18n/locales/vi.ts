@@ -1,4 +1,20 @@
 export const viOverrides: Record<string, string> = {
+    "projects.calendarLimit": "Hiển thị 200 kết quả đầu tiên. Tìm kiếm để tìm sự kiện khác.",
+    "projects.calendarTitle": "Lịch",
+    "projects.calendarLink": "Liên kết sự kiện lịch",
+    "projects.calendarReplace": "Thay sự kiện đã liên kết",
+    "projects.calendarUnlink": "Hủy liên kết sự kiện lịch",
+    "projects.calendarScheduled": "Bước tiếp theo đã lên lịch",
+    "projects.calendarElapsed": "Xem lại kết quả sự kiện",
+    "projects.calendarUnavailable": "Lịch không khả dụng · Chi tiết được biết gần nhất",
+    "projects.calendarHelp": "Liên kết một sự kiện hiện có làm bước tiếp theo đã lên lịch của dự án. Các sự kiện lịch vẫn ở chế độ chỉ đọc.",
+    "projects.calendarWindow": "Sự kiện sắp tới · 90 ngày tới",
+    "projects.calendarEmpty": "Không có sự kiện sắp tới trong các nguồn lịch đã bật.",
+    "projects.calendarLoadFailed": "Không thể tải sự kiện lịch. Hãy đóng và thử lại.",
+    "projects.calendarSaveFailed": "Không thể lưu tham chiếu lịch. Hãy thử lại.",
+    "projects.calendarReviewStep": "Xem lại bước tiếp theo đã lên lịch",
+    "projects.calendarLastKnown": "Chi tiết sự kiện được biết gần nhất",
+
     "quickAdd.invalidReminderCommand": "Lời nhắc không hợp lệ: dùng khoảng thời gian được hỗ trợ và ngày giờ rõ ràng",
     'task.copyDetails': "Sao chép chi tiết công việc",
     "taskEdit.startAdvanceReminderLabel": "Trước khi bắt đầu",
@@ -653,6 +669,7 @@ export const viOverrides: Record<string, string> = {
 
 
         'inbox.title': 'Hộp thư đến',
+        'inbox.completedInSession': 'Đã hoàn thành trong phiên này',
         'inbox.processButton': 'Xử lý hộp thư đến',
         'inbox.projectHint': 'Việc cần nhiều hơn một hành động? Khi xử lý, hãy chọn “Có, tạo thành dự án” để đặt tên cho kết quả và hành động kế tiếp đầu tiên của nó.',
         'inbox.addPlaceholder': 'Thêm nhiệm vụ vào hộp thư đến...',

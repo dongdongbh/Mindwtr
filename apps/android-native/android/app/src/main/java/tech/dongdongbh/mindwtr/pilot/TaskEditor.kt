@@ -250,6 +250,9 @@ data class EditorSuggestions(val text: String, val draftValue: String, val match
 }
 
 
+internal fun checklistEditOf(edit: String): JSONObject? = edit.takeIf { it.isNotEmpty() }?.let { JSONObject(it).optJSONObject("checklist") }
+
+
 data class TaskEditor(
     val model: EditorModel, val edited: Map<String, String>, val inputs: Map<String, String> = emptyMap(),
     val resolved: Map<String, String> = emptyMap(), val bases: Map<String, String> = emptyMap(), val waitingFor: String? = null,
@@ -339,7 +342,7 @@ data class TaskEditor(
 
 
     val checklistStructurePending get() = pending.any { queued ->
-        JSONObject(queued.edit).optJSONObject("checklist")?.let { checklist ->
+        checklistEditOf(queued.edit)?.let { checklist ->
             when (checklist.optString("kind")) {
                 "move", "remove", "insertAfter", "add", "append" -> true
                 "rename" -> checklist.optString("text").any { it == '\n' || it == '\r' }
@@ -350,7 +353,7 @@ data class TaskEditor(
 
 
     fun queued(edit: String, field: String?): TaskEditor {
-        val checklist = JSONObject(edit).optJSONObject("checklist")
+        val checklist = checklistEditOf(edit)
         if (checklist != null && (checklist.has("index") || checklist.has("from")) && checklistStructurePending) return this
         return copy(pending = pending + PendingEdit(nextSeq, edit, field), nextSeq = nextSeq + 1)
     }

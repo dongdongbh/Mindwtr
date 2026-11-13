@@ -28,8 +28,8 @@ export function readWatchOpenAIRuntime(settings: AppSettings) {
     if (selectedParseModel !== undefined && !field(selectedParseModel, 2000)) throw invalid();
     return { version: 1, provider: 'openai', enabled: options.enabled, model, language,
         mode: options.mode, fieldStrategy: options.fieldStrategy, endpoint: request.url,
-        credentialRequired: !baseUrl?.trim(), parseModel: resolveOpenAIParseModel(selectedParseModel),
-        retryModel: resolveOpenAIParseModel('gpt-4o-mini') };
+        credentialRequired: !baseUrl?.trim(), parseModel: resolveOpenAIParseModel(selectedParseModel, baseUrl),
+        retryModel: baseUrl?.trim() ? resolveOpenAIParseModel(selectedParseModel, baseUrl) : resolveOpenAIParseModel('gpt-4o-mini') };
 }
 
 export function buildWatchOpenAITranscription(value: unknown) {
@@ -48,12 +48,13 @@ export function buildWatchOpenAIParse(value: unknown) {
         || !field(value.model, 2000) || !value.model.trim() || !text(value.transcript, 64 * 1024)
         || !value.transcript || !record(value.config)) throw invalid();
     const config = value.config;
-    if (!exact(config, ['language', 'fieldStrategy', 'now', 'timeZone']) || !field(config.language, 200)
+    if (!exact(config, ['language', 'fieldStrategy', 'now', 'timeZone', 'baseUrl']) || !field(config.language, 200)
+        || !field(config.baseUrl, 4096) || !config.baseUrl
         || !['smart', 'title_only', 'description_only'].includes(String(config.fieldStrategy))
         || !text(config.now, 40) || !Number.isFinite(Date.parse(config.now))
         || new Date(config.now).toISOString() !== config.now
         || config.timeZone !== null && !field(config.timeZone, 200)) throw invalid();
-    return buildRemoteOpenAISpeechParseRequest({ language: config.language,
+    return buildRemoteOpenAISpeechParseRequest({ language: config.language, baseUrl: config.baseUrl,
         fieldStrategy: config.fieldStrategy as 'smart' | 'title_only' | 'description_only', now: new Date(config.now),
         ...(config.timeZone === null ? {} : { timeZone: config.timeZone as string }) }, value.transcript, value.model, value.api);
 }

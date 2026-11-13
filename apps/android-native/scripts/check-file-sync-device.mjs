@@ -6,7 +6,8 @@ import { createHash, randomInt, randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { box, check, connect, evidenced, fail, inboxCount, inEditor, inList, linesAfter, logStamp, Stopped, tab, tabSelected, tagged, withDescription, button } from './device.mjs';
+import { box, check, connect, evidenced, fail, inboxCount, inEditor, inList, isOn, linesAfter, logStamp, Stopped, tab, tabSelected, tagged, withDescription, button } from './device.mjs';
+import { projectFiles, removeNowhereFiles } from './nowhere-files.mjs';
 
 const [serial, ...rest] = process.argv.slice(2);
 const CLEAR_LEFTOVER = rest.includes('--clear-encryption-leftover');
@@ -291,6 +292,24 @@ const remoteOnlyAttachments = () => ['tasks', 'projects'].flatMap((table) => sql
     .flatMap((row) => JSON.parse(row.attachments).filter((a) => a.kind === 'file' && !a.deletedAt && a.cloudKey && (!a.uri || a.localStatus === 'missing'))
         .map((a) => `${a.id} on ${table.slice(0, -1)} ${row.id}`)));
 
+const { removeProjectFile } = projectFiles({ device, en, toTabs, hideKeyboard });
+
+const sharePhoneFile = async () => {
+    const name = `97${run}1.pdf`;
+    writeFileSync(resolve(work, name), `File Sync phone file ${run}\n`);
+    execFileSync(adbBin, ['-s', serial, 'push', resolve(work, name), `/data/local/tmp/${name}`], { stdio: 'ignore' });
+    sh(`run-as ${PKG} sh -c 'mkdir -p files/share-test && cp /data/local/tmp/${name} files/share-test/'`);
+    sh(`rm -f /data/local/tmp/${name}`);
+    requireAppFront();
+    sh(`am start -W --activity-multiple-task -n ${PKG}/tech.dongdongbh.mindwtr.pilot.ShareTestSender --es action android.intent.action.SEND --es type 'application/pdf' --esal uris content://${PKG}.sharetest/file/${name}`);
+    const nodes = await waitFor('the capture screen with the shared phone file', (current) => Boolean(tagged(current, 'capture-modal-save')), 30_000);
+    await tapExpecting(tagged(nodes, 'capture-modal-save'), (current) => !tagged(current, 'capture-modal'), 'the shared phone file to save');
+    await until('the shared phone file stored with its bytes on the phone', () => sqlite(pullFile(`files/${DB}`, 'db'),
+        `SELECT 1 FROM tasks t, json_each(t.attachments) j WHERE t.deletedAt IS NULL AND (j.value->>'title' = '${name}' OR t.title = '97${run}1') AND j.value->>'kind' = 'file' AND coalesce(j.value->>'uri', '') <> ''`).length > 0, 30_000, 1_000);
+    sh(`run-as ${PKG} rm -rf files/share-test`);
+    console.log(`note - shared ${name} into a new task, so the library holds a phone file for (2b) to publish`);
+};
+
 const removeHostFile = async () => {
 
     if (!storedAttachments(titles.attached).some((a) => a.id === hostFile.id && !a.deletedAt)) { hostFilePending = false; return; }
@@ -314,7 +333,7 @@ const decryptedTitles = () => {
         if (header.kind !== 'encrypted') throw new Error('not MWENC1: ' + header.kind);
         const prims = crypto.defaultSyncCryptoPrimitives;
         const material = await crypto.deriveSyncKeyMaterial(process.env.PASS, header.salt, header.params, prims);
-        const plain = await crypto.decryptSyncArtifact(bytes, material.key, prims);
+        const plain = await crypto.decryptSyncArtifact(bytes, material.key, prims, { kind: 'document' });
         console.log(JSON.stringify(JSON.parse(new TextDecoder().decode(plain)).tasks.map((task) => task.title)));
     `], { cwd: repo, encoding: 'utf8', env: { ...process.env, PASS: PASSPHRASE }, maxBuffer: 1 << 28 }).trim().split('\n').pop();
     return JSON.parse(out);
@@ -453,6 +472,9 @@ try {
     execFileSync(adbBin, ['-s', serial, 'install', '-r', apk], { stdio: 'inherit' });
     await restart();
     requireRestorableBackend(rkStorage());
+    if (remoteOnlyAttachments().length) {
+        await removeNowhereFiles({ query: (sql) => sqlite(pullFile(`files/${DB}`, 'db'), sql), removeProjectFile });
+    }
     const remoteOnly = remoteOnlyAttachments();
     if (remoteOnly.length) {
         throw new Refused(`the library holds ${remoteOnly.length} live file attachments with a cloud key and no local copy (${remoteOnly.slice(0, 5).join('; ')}); `
@@ -466,7 +488,7 @@ try {
     if (!nodes.some((node) => node.text === en['settings.syncOff'])) {
         await tapTag('sync-backend-off', (current) => current.some((node) => node.text === en['settings.syncOff']), 'Sync off');
     }
-    await tapTag('sync-backend-file', (current) => Boolean(tagged(current, 'sync-select-folder')), 'the File panel');
+    await tapTag('sync-backend-file', (current) => isOn(tagged(current, 'sync-backend-file')), 'the File panel');
     setProp('sync_tree', START);
     let since = stamp();
     await tapTag('sync-select-folder', otherAppFront, 'the folder picker', 15_000);
@@ -515,6 +537,7 @@ try {
     await syncNow('(2) Sync now after this computer wrote the folder');
     await until('this computer\'s task on the phone', () => phoneTasks()[titles.host] === 'inbox', 30_000);
     check(true, `(2) Sync now brought "${titles.host}" from the folder exactly`);
+    await sharePhoneFile();
     await capture(titles.phone);
     await syncNow('(2) Sync now after a capture');
     const back = folderDocument();

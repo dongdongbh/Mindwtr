@@ -61,6 +61,24 @@ struct TaskViewSheet: View {
         model.taskAttachmentState == .interrupted || model.taskAttachmentState == .savedCleanup
             || model.taskAttachmentState == .blocked
     }
+    private var closeDisabled: Bool {
+        (ownedCloseDecision
+            ? busy || model.taskAttachmentOpening || model.taskAttachmentWorking || model.taskFileImporterPresented || modalPresented
+            : frozen) || model.taskScheduleUpdating
+    }
+
+    private func requestClose() {
+        if model.taskDirty || ownedCloseDecision {
+            model.preserveTaskTokenInputForTransientModal()
+            _ = UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder),
+                to: nil, from: nil, for: nil)
+            discardConfirm = true
+        } else {
+            endEditingBeforeAction()
+            model.closeTask()
+        }
+    }
+
     private var ownedCloseDecision: Bool {
         model.taskAttachmentState == .active || model.taskAttachmentState == .interrupted
             || model.taskAttachmentState == .blocked
@@ -240,22 +258,10 @@ struct TaskViewSheet: View {
     private var taskContent: some View {
         VStack(spacing: 0) {
             HStack {
-                Button {
-                    if model.taskDirty || ownedCloseDecision {
-                        model.preserveTaskTokenInputForTransientModal()
-                        _ = UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder),
-                            to: nil, from: nil, for: nil)
-                        discardConfirm = true
-                    } else {
-                        endEditingBeforeAction()
-                        model.closeTask()
-                    }
-                } label: {
+                Button { requestClose() } label: {
                     AppIcon(name: "x", size: 22).frame(width: 44, height: 44).contentShape(Rectangle())
                 }
-                .buttonStyle(.plain).disabled((ownedCloseDecision
-                    ? busy || model.taskAttachmentOpening || model.taskAttachmentWorking || model.taskFileImporterPresented || modalPresented
-                    : frozen) || model.taskScheduleUpdating)
+                .buttonStyle(.plain).disabled(closeDisabled)
                 .accessibilityLabel(strings.text("common.close")).accessibilityIdentifier("task-view-close")
                 Spacer()
                 if !model.taskEditor.isEmpty {
@@ -457,6 +463,10 @@ struct TaskViewSheet: View {
         .foregroundStyle(palette.text).background(palette.card)
         .tint(palette.tint)
         .interactiveDismissDisabled(frozen || model.taskDirty || ownedCloseDecision || modalPresented)
+        .background(TaskSheetDismissAttempt {
+            guard !closeDisabled, !discardConfirm, model.taskDirty || ownedCloseDecision else { return }
+            requestClose()
+        }.frame(width: 0, height: 0).accessibilityHidden(true))
         .alert(ownedCloseDecision ? "Finish this draft?" : strings.text("taskEdit.discardChanges"), isPresented: $discardConfirm) {
             if model.taskAttachmentState == .active {
                 Button(strings.text("common.save")) {
@@ -4092,5 +4102,69 @@ final class NativeMarkdownToolbar: UIView {
         case "strikethrough": return "strikethrough"
         default: return nil
         }
+    }
+}
+
+private struct TaskSheetDismissAttempt: UIViewControllerRepresentable {
+    let onAttempt: () -> Void
+
+    func makeUIViewController(context: Context) -> Controller { Controller(onAttempt: onAttempt) }
+
+    func updateUIViewController(_ controller: Controller, context: Context) {
+        controller.onAttempt = onAttempt
+        controller.install()
+    }
+
+    @MainActor
+    final class Controller: UIViewController {
+        var onAttempt: () -> Void
+        private var proxy: TaskSheetDismissAttemptProxy?
+
+        init(onAttempt: @escaping () -> Void) {
+            self.onAttempt = onAttempt
+            super.init(nibName: nil, bundle: nil)
+        }
+
+        required init?(coder: NSCoder) { nil }
+
+        override func viewDidAppear(_ animated: Bool) {
+            super.viewDidAppear(animated)
+            install()
+        }
+
+        func install() {
+            var root: UIViewController = self
+            while let parent = root.parent { root = parent }
+            guard let presentation = root.presentationController else { return }
+            if let proxy, presentation.delegate === proxy { return }
+            let next = TaskSheetDismissAttemptProxy(original: presentation.delegate) { [weak self] in self?.onAttempt() }
+            proxy = next
+            presentation.delegate = next
+        }
+    }
+}
+
+@MainActor
+private final class TaskSheetDismissAttemptProxy: NSObject, UIAdaptivePresentationControllerDelegate {
+    nonisolated(unsafe) weak var original: UIAdaptivePresentationControllerDelegate?
+    private let onAttempt: () -> Void
+
+    init(original: UIAdaptivePresentationControllerDelegate?, onAttempt: @escaping () -> Void) {
+        self.original = original
+        self.onAttempt = onAttempt
+        super.init()
+    }
+
+    nonisolated override func responds(to selector: Selector!) -> Bool {
+        super.responds(to: selector) || original?.responds(to: selector) == true
+    }
+
+    nonisolated override func forwardingTarget(for selector: Selector!) -> Any? {
+        original?.responds(to: selector) == true ? original : super.forwardingTarget(for: selector)
+    }
+
+    func presentationControllerDidAttemptToDismiss(_ presentationController: UIPresentationController) {
+        original?.presentationControllerDidAttemptToDismiss?(presentationController)
+        onAttempt()
     }
 }

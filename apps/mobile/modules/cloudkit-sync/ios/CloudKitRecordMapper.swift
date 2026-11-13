@@ -54,6 +54,10 @@ enum CloudKitRecordMapper {
             case .stringArray:
                 if let arr = value as? [String] { result[spec.jsKey] = arr }
             case .jsonString:
+                if spec.jsKey == "calendarReference", value as? String == "null" {
+                    result[spec.jsKey] = NSNull()
+                    continue
+                }
 
                 if let s = value as? String,
                    let data = s.data(using: .utf8),
@@ -161,6 +165,7 @@ enum CloudKitRecordMapper {
         FieldSpec(jsKey: "isSequential", ckKey: "isSequential", kind: .bool),
         FieldSpec(jsKey: "sequentialScope", ckKey: "sequentialScope", kind: .string),
         FieldSpec(jsKey: "perSectionFlow", ckKey: "perSectionFlow", kind: .bool),
+        FieldSpec(jsKey: "calendarReference", ckKey: "calendarReference", kind: .jsonString),
         FieldSpec(jsKey: "taskSortBy", ckKey: "taskSortBy", kind: .string),
         FieldSpec(jsKey: "isFocused", ckKey: "isFocused", kind: .bool),
         FieldSpec(jsKey: "supportNotes", ckKey: "supportNotes", kind: .string),
@@ -261,11 +266,17 @@ enum CloudKitRecordMapper {
         for spec in specs {
             guard let value = json[spec.jsKey] else {
 
-                setField(nil, on: record, key: spec.ckKey)
+                if spec.jsKey != "calendarReference" {
+                    setField(nil, on: record, key: spec.ckKey)
+                }
                 continue
             }
 
             if value is NSNull {
+                if spec.jsKey == "calendarReference" {
+                    setJSONField("null", on: record, key: spec.ckKey)
+                    continue
+                }
                 setField(nil, on: record, key: spec.ckKey)
                 continue
             }

@@ -274,8 +274,8 @@ describe('private prepared ordinary Project availability', () => {
             const api = privateMethods(env);
             const envelope = JSON.parse(JSON.stringify(value(await api.prepareProjectFileAvailability(downloadRequest(env)))));
 
-            expect(envelope.prepared.effect.rawBefore.splice(26)).toEqual([null, null]);
-            expect(envelope.prepared.effect.rawAfter.splice(26)).toEqual([null, null]);
+            expect(envelope.prepared.effect.rawBefore.splice(26)).toEqual([null, null, null]);
+            expect(envelope.prepared.effect.rawAfter.splice(26)).toEqual([null, null, null]);
             expect(api.validatePreparedProjectFileAvailability(envelope)).toMatchObject({ ok: true });
             await env.restart();
             expect(await privateMethods(env).commitPreparedProjectFileAvailability(envelope)).toMatchObject({ ok: true });
@@ -288,6 +288,22 @@ describe('private prepared ordinary Project availability', () => {
             expect((await env.sql('SELECT colorOverride FROM projects WHERE id=?', ['target']))[0]).toEqual({ colorOverride: '#ef4444' });
         } finally { await env.close(); }
     });
+    it.each([null, { sourceId: 'feed', uid: 'event', sourceName: 'Calendar', title: 'Meeting',
+        start: at, end: at, allDay: false }])('refuses an older journal after calendar reference changes to %j', async (calendarReference) => {
+        const { env } = await open(undefined, project('target', { attachments: [{ ...file, uri: '' }, sibling] }));
+        try {
+            const api = privateMethods(env);
+            const envelope = JSON.parse(JSON.stringify(value(await api.prepareProjectFileAvailability(downloadRequest(env)))));
+            envelope.prepared.effect.rawBefore.splice(28);
+            envelope.prepared.effect.rawAfter.splice(28);
+            expect(api.validatePreparedProjectFileAvailability(envelope)).toMatchObject({ ok: true });
+            await useTaskStore.getState().updateProject('target', { calendarReference });
+            const before = await allRows(env);
+            expect(await privateMethods(env).commitPreparedProjectFileAvailability(envelope)).toMatchObject({ ok: false });
+            expect(await allRows(env)).toEqual(before);
+        } finally { await env.close(); }
+    });
+
     it.each(['', target])('freezes missing URI %j without file, domain, queue or save work', async (uri) => {
         const { env, ensure } = await open(undefined, project('target', { attachments: [{ ...file, uri }, sibling] }));
         try {

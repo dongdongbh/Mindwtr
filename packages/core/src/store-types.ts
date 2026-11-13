@@ -333,6 +333,8 @@ export type PreparedProjectDate = {
 };
 
 
+export type PreparedProjectCalendarReference = PreparedProjectDate;
+
 export type PreparedProjectArea = {
     version?: 1 | 2;
     scope: { project: Project; selectedArea: { id: string; name: string; color?: string | null } | null; orderMax: number };
@@ -876,6 +878,7 @@ export interface TaskStore {
     commitPreparedProjectDuplicate: (input: PreparedProjectDuplicate) => Promise<PreparedTaskEditResult>;
     commitPreparedProjectLifecycle: (input: PreparedProjectLifecycle, options?: Extract<PreparedChecklistWriteOptions, { authority: PreparedAreaAuthority }>) => Promise<PreparedTaskEditResult>;
     commitPreparedProjectDate: (input: PreparedProjectDate & { request: { projectId: string; field: 'startDate' | 'dueDate' | 'reviewAt'; value: string | null } }) => Promise<PreparedTaskEditResult>;
+    commitPreparedProjectCalendarReference: (input: PreparedProjectCalendarReference & { request: { projectId: string; value: Project['calendarReference'] } }) => Promise<PreparedTaskEditResult>;
     commitPreparedProjectArea: (input: PreparedProjectArea & { request: { projectId: string; areaId: string | null; colorOverride?: string | null } }) => Promise<PreparedTaskEditResult>;
     commitPreparedProjectSectionCreate: (input: PreparedProjectSectionCreate) => Promise<PreparedTaskEditResult>;
     commitPreparedProjectSectionRename: (input: PreparedProjectSectionRename & { request: {

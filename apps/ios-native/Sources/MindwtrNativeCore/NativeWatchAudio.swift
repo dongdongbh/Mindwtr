@@ -127,5 +127,9 @@ enum NativeVoiceAudioFormat: Sendable {
 
 enum NativeOpenAISpeechAPI: String, CaseIterable, Sendable {
     case responses, chat
-    var endpoint: String { "https://api.openai.com/v1/" + (self == .responses ? "responses" : "chat/completions") }
+    func endpoint(transcriptionEndpoint: String) throws -> String {
+        let suffix = "/audio/transcriptions"
+        guard transcriptionEndpoint.lowercased().hasSuffix(suffix) else { throw NativeWatchAudio.invalid }
+        return String(transcriptionEndpoint.dropLast(suffix.count)) + (self == .responses ? "/responses" : "/chat/completions")
+    }
 }

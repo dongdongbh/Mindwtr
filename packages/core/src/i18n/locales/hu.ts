@@ -2,6 +2,22 @@
 
 
 export const huOverrides: Record<string, string> = {
+    "projects.calendarLimit": "Az első 200 találat látható. Másik esemény kereséssel található meg.",
+    "projects.calendarTitle": "Naptár",
+    "projects.calendarLink": "Naptáresemény csatolása",
+    "projects.calendarReplace": "Csatolt esemény cseréje",
+    "projects.calendarUnlink": "Naptáresemény leválasztása",
+    "projects.calendarScheduled": "Ütemezett következő lépés",
+    "projects.calendarElapsed": "Esemény eredményének áttekintése",
+    "projects.calendarUnavailable": "A naptár nem érhető el · Utolsó ismert adatok",
+    "projects.calendarHelp": "Csatolj egy meglévő eseményt a projekt ütemezett következő lépéseként. A naptáresemények csak olvashatók maradnak.",
+    "projects.calendarWindow": "Közelgő események · következő 90 nap",
+    "projects.calendarEmpty": "Nincs közelgő esemény az engedélyezett naptárakban.",
+    "projects.calendarLoadFailed": "Nem sikerült betölteni a naptáreseményeket. Zárd be, és próbáld újra.",
+    "projects.calendarSaveFailed": "Nem sikerült menteni a naptárhivatkozást. Próbáld újra.",
+    "projects.calendarReviewStep": "Ütemezett következő lépés áttekintése",
+    "projects.calendarLastKnown": "Az esemény utolsó ismert adatai",
+
     "quickAdd.invalidReminderCommand": "Érvénytelen emlékeztető: támogatott időtartam és pontos dátum és idő szükséges",
     "taskEdit.startAdvanceReminderLabel": "Kezdés előtt",
     "taskEdit.advanceReminderLabel": "Előzetes emlékeztető",
@@ -721,6 +737,7 @@ export const huOverrides: Record<string, string> = {
     'recurrence.showFutureInCalendarHint': 'Csak tervezési előnézet; a következő feladat továbbra is akkor jön létre, amikor ez befejeződik.',
     'recurrence.nextCalendarPreview': 'Következő naptár-előnézet',
     'inbox.title': 'Beérkezett elemek',
+    'inbox.completedInSession': 'Ebben a munkamenetben befejezve',
     'inbox.processButton': 'Beérkezett elemek feldolgozása',
     'inbox.projectHint': 'Olyasmi, ami több lépést is igényel? Feldolgozás közben válassza az „Igen, legyen belőle projekt” lehetőséget, hogy elnevezze a végeredményt és az első következő teendőjét.',
     'inbox.addPlaceholder': 'Feladat hozzáadása a Beérkezett elemekhez…',

@@ -1401,11 +1401,11 @@ public final class CoreHost: @unchecked Sendable {
         return response
     }
     private func completeOpenAIVoiceSpeech(_ job: Engine.VoiceSpeech, bytes: Data) async throws {
-        guard let remote = job.capture.remote, case .openai(let config, let credential) = remote else { throw NativeVoiceJSON.invalid }
+        guard let remote = job.capture.remote, case .openai(let config, _) = remote else { throw NativeVoiceJSON.invalid }
         let request = try await perform { try $0.buildVoiceOpenAITranscription(job, bytes: bytes) }
         let response = try await voiceSpeechHTTP(job, request: request)
         let initial = try await perform { try $0.decodeVoiceOpenAITranscription(job, response: response) }
-        if !initial.isEmpty, config.mode == .smartParse, credential != nil {
+        if !initial.isEmpty, config.mode == .smartParse {
             for model in [config.parseModel, config.retryModel] {
                 for api in NativeOpenAISpeechAPI.allCases {
                     let decoded: String
@@ -1895,8 +1895,8 @@ public final class CoreHost: @unchecked Sendable {
 
     private func parseWatchOpenAIAudio(_ job: Engine.WatchAudio, initial: String,
                                       readmit: @escaping @Sendable () async -> Bool) async throws -> String {
-        guard let runtime = job.runtime, case .openai(let config, let credential) = runtime else { throw NativeWatchAudio.invalid }
-        if config.mode == .smartParse, credential != nil {
+        guard let runtime = job.runtime, case .openai(let config, _) = runtime else { throw NativeWatchAudio.invalid }
+        if config.mode == .smartParse {
             for model in [config.parseModel, config.retryModel] {
                 for api in NativeOpenAISpeechAPI.allCases {
                     guard await readmit(), job.lease.isCurrent, !Task.isCancelled, !job.cancellation.isCancelled else { throw NativeWatchAudio.ownerChanged }
@@ -5841,6 +5841,10 @@ private final class Engine: @unchecked Sendable {
             _ = try invoke("projectDateValidate", arguments: journalArguments(command))
             if case .success(let value) = command.terminal { try validateProjectDateAcknowledgment(command, value: value) }
         }
+        if let command = pending, command.method == "projectCalendarReferenceCommit" {
+            _ = try invoke("projectCalendarReferenceValidate", arguments: journalArguments(command))
+            if case .success(let value) = command.terminal { try validateProjectCalendarReferenceAcknowledgment(command, value: value) }
+        }
         if let command = pending, command.method == "projectAreaCommit" {
             _ = try invoke("projectAreaValidate", arguments: journalArguments(command))
             if case .success(let value) = command.terminal { try validateProjectAreaAcknowledgment(command, value: value) }
@@ -8859,7 +8863,7 @@ private final class Engine: @unchecked Sendable {
     }
     func buildVoiceOpenAIParse(_ job: VoiceSpeech, transcript: String, model: String, api: NativeOpenAISpeechAPI) throws -> String {
         try checkVoiceSpeech(job)
-        guard let remote = job.capture.remote, case .openai(let config, let credential) = remote, let credential else { throw NativeVoiceJSON.invalid }
+        guard let remote = job.capture.remote, case .openai(let config, let credential) = remote else { throw NativeVoiceJSON.invalid }
         return try buildOpenAIParse(binding: job.capture.binding, config: config, credential: credential, transcript: transcript, model: model,
                                    api: api, now: job.speechNow, timeZone: job.timeZone, cancellation: job.cancellation)
     }
@@ -9793,26 +9797,29 @@ private final class Engine: @unchecked Sendable {
 
     func buildWatchOpenAIParse(_ job: WatchAudio, transcript: String, model: String, api: NativeOpenAISpeechAPI) throws -> String {
         try checkWatchAudio(job)
-        guard let runtime = job.runtime, case .openai(let config, let credential) = runtime, let credential else { throw NativeWatchAudio.invalid }
+        guard let runtime = job.runtime, case .openai(let config, let credential) = runtime else { throw NativeWatchAudio.invalid }
         return try buildOpenAIParse(binding: job.binding, config: config, credential: credential, transcript: transcript, model: model,
                                    api: api, now: job.speechNow, timeZone: job.timeZone, cancellation: job.cancellation)
     }
-    private func buildOpenAIParse(binding: VoiceBinding, config: NativeWatchOpenAIRuntime, credential: String,
+    private func buildOpenAIParse(binding: VoiceBinding, config: NativeWatchOpenAIRuntime, credential: String?,
                                  transcript: String, model: String, api: NativeOpenAISpeechAPI, now: String, timeZone: String,
                                  cancellation: NativeAttachmentCancellation) throws -> String {
         try requireVoiceBinding(binding, cancellation: cancellation)
         guard Self.ownedEqual(model, config.parseModel) || Self.ownedEqual(model, config.retryModel) else { throw NativeWatchAudio.invalid }
         let requestConfig: [String: Any] = ["language": config.language, "fieldStrategy": config.fieldStrategy.rawValue,
-                                           "now": now, "timeZone": timeZone]
+                                           "now": now, "timeZone": timeZone, "baseUrl": config.endpoint]
         let input = try NativeVoiceJSON.encode(["config": requestConfig, "transcript": transcript, "model": model, "api": api.rawValue])
         let built = try NativeVoiceJSON.object(invokeVoice("iosVoiceOpenAIParseBuild", [input], binding: binding, cancellation: cancellation), maximum: 8 * 1024 * 1024)
         guard Set(built.keys) == ["url", "method", "headers", "body", "timeoutMs"], built["method"] as? String == "POST",
               Self.isInteger(built["timeoutMs"], equalTo: 30000), let url = built["url"] as? String,
-              Self.ownedEqual(url, api.endpoint), let parsed = URL(string: url), NativeHTTPJobs.allowedURL(parsed),
+              Self.ownedEqual(url, try api.endpoint(transcriptionEndpoint: config.endpoint)), let parsed = URL(string: url), NativeHTTPJobs.allowedURL(parsed),
               let headers = built["headers"] as? [[String]], headers == [["Content-Type", "application/json"]],
               let body = built["body"] as? String, body.utf8.count <= 8 * 1024 * 1024 else { throw NativeWatchAudio.invalid }
+        let routingContext = try NativeVoiceJSON.encode(["releaseCheck": "v1.3.9/speech-parse-endpoint", "provider": "openai",
+            "destination": config.credentialRequired ? "default" : "configured", "outcome": "routed"])
+        _ = try? invoke("logLine", arguments: ["Native iOS speech Smart Parse request routed", routingContext])
         return try NativeVoiceJSON.encode(["url": url, "method": "POST", "redirect": "error",
-            "headers": headers + [["Authorization", "Bearer " + credential]], "text": body])
+            "headers": headers + (credential.map { [["Authorization", "Bearer " + $0]] } ?? []), "text": body])
     }
 
     func decodeWatchOpenAIParse(_ job: WatchAudio, response: String, api: NativeOpenAISpeechAPI) throws -> String {
@@ -14672,7 +14679,7 @@ private final class Engine: @unchecked Sendable {
             if ["gtdArchiveOptions", "gtdTaskEditorFieldOptions", "taskOpenTab", "archiveRetentionOptions", "archiveRetentionReview", "captureCopilotEdit", "captureCopilotSubmit"].contains(method), pending == nil {
                 throw CoreHostRejection(message: error.localizedDescription)
             }
-            if ["mindSweepAdd", "weeklyReviewProjectTaskWrite", "inboxCommit", "inboxSkip", "inboxUndo", "checklistSave", "checklistReset", "projectCreate", "projectCreateRetryOutcome", "projectSectionOptions", "projectSectionCreate", "projectSectionCreateRetryOutcome", "projectSectionRenameOptions", "projectSectionRename", "projectSectionRenameRetryOutcome", "projectSectionDeleteOptions", "projectSectionDelete", "projectSectionDeleteRetryOutcome", "projectSectionOrderOptions", "projectSectionOrder", "projectSectionOrderRetryOutcome", "projectMoveWrite", "projectMoveRetryOutcome", "notificationSetting", "deviceCalendarSetting", "appLockOptions", "appLock", "appLockRetryOutcome", "gtdWorkflowOptions", "gtdPomodoroOptions", "gtdReviewOptions", "gtdInboxOptions", "gtdCaptureAreaOptions", "gtdCaptureParseOptions", "gtdCaptureAudioOptions", "gtdTaskEditorOpenOptions", "gtdTaskEditorPresetOptions", "gtdTaskEditorFieldOptions", "gtdWorkflowDraft", "gtdWorkflow", "gtdWorkflowRetryOutcome", "generalPreferenceOptions", "manageTaxonomyOptions", "managePersonEditOptions", "generalPreference", "manageTaxonomy", "managePersonEdit", "generalPreferenceRetryOutcome", "manageTaxonomyRetryOutcome", "managePersonEditRetryOutcome", "managePersonDeleteOptions", "managePersonDelete", "managePersonDeleteRetryOutcome", "managePersonCreateResolve", "managePersonCreate", "managePersonCreateRetryOutcome", "areaCreateResolve", "areaCreate", "manageAreaCreate", "areaCreateRetryOutcome", "areaColor", "areaColorRetryOutcome", "areaRename", "areaRenameRetryOutcome", "manageAreaEdit", "manageAreaEditRetryOutcome", "areaOrder", "areaOrderRetryOutcome", "areaDelete", "areaDeleteRetryOutcome", "manageAreaDelete", "manageAreaDeleteRetryOutcome", "focusGroupOptions", "focusGroupWrite", "focusGroupRetryOutcome", "taskListSortOptions", "taskListSortWrite", "taskListSortRetryOutcome", "somedaySectionCreateOptions", "somedaySectionCreateWrite", "somedaySectionCreateRetryOutcome", "somedaySectionRenameOptions", "somedaySectionRenameWrite", "somedaySectionRenameRetryOutcome", "somedayProjectSectionMoveWrite", "somedayProjectSectionMoveRetryOutcome", "somedaySectionDeleteOptions", "somedaySectionDeleteWrite", "somedaySectionDeleteRetryOutcome", "somedaySectionTaskOptions", "somedaySectionTaskPrepare", "somedaySectionTaskCommit", "somedaySectionTaskRetryOutcome", "projectFocusOptions", "projectFocusWrite", "projectFocusRetryOutcome", "taskFocusOptions", "taskFocusWrite", "taskFocusRetryOutcome", "focusOrderOptions", "focusOrderWrite", "focusOrderRetryOutcome", "focusSavedFilterOptions", "savedSearchOptions", "focusSavedFilterWrite", "savedSearchWrite", "focusSavedFilterRetryOutcome", "savedSearchRetryOutcome", "projectRenameOptions", "projectRenameWrite", "projectRenameRetryOutcome", "projectFlowOptions", "projectFlowModeOptions", "projectSectionFlowOptions", "projectFlowWrite", "projectFlowRetryOutcome", "projectTaskSortOptions", "projectTaskSortWrite", "projectTaskSortRetryOutcome", "projectTaskOrderWrite", "projectTaskOrderRetryOutcome", "projectNotesEditOptions", "projectNotesReferenceTarget", "projectNotesDraftDirection", "projectNotesWrite", "projectNotesWriteRetryOutcome", "projectTagsEditOptions", "projectTagsWrite", "projectTagsWriteRetryOutcome", "projectAttachmentEditOptions", "projectAttachmentWrite", "projectFileRemoveWrite", "projectAttachmentWriteRetryOutcome", "projectFileRemoveWriteRetryOutcome", "projectStatusOptions", "projectStatusWrite", "projectStatusRetryOutcome", "projectDateOptions", "projectDateWrite", "projectDateRetryOutcome", "projectAreaOptions", "projectAreaWrite", "projectAreaRetryOutcome"].contains(method), pending == nil { throw CoreHostRejection(message: error.localizedDescription) }
+            if ["mindSweepAdd", "weeklyReviewProjectTaskWrite", "inboxCommit", "inboxSkip", "inboxUndo", "checklistSave", "checklistReset", "projectCreate", "projectCreateRetryOutcome", "projectSectionOptions", "projectSectionCreate", "projectSectionCreateRetryOutcome", "projectSectionRenameOptions", "projectSectionRename", "projectSectionRenameRetryOutcome", "projectSectionDeleteOptions", "projectSectionDelete", "projectSectionDeleteRetryOutcome", "projectSectionOrderOptions", "projectSectionOrder", "projectSectionOrderRetryOutcome", "projectMoveWrite", "projectMoveRetryOutcome", "notificationSetting", "deviceCalendarSetting", "appLockOptions", "appLock", "appLockRetryOutcome", "gtdWorkflowOptions", "gtdPomodoroOptions", "gtdReviewOptions", "gtdInboxOptions", "gtdCaptureAreaOptions", "gtdCaptureParseOptions", "gtdCaptureAudioOptions", "gtdTaskEditorOpenOptions", "gtdTaskEditorPresetOptions", "gtdTaskEditorFieldOptions", "gtdWorkflowDraft", "gtdWorkflow", "gtdWorkflowRetryOutcome", "generalPreferenceOptions", "manageTaxonomyOptions", "managePersonEditOptions", "generalPreference", "manageTaxonomy", "managePersonEdit", "generalPreferenceRetryOutcome", "manageTaxonomyRetryOutcome", "managePersonEditRetryOutcome", "managePersonDeleteOptions", "managePersonDelete", "managePersonDeleteRetryOutcome", "managePersonCreateResolve", "managePersonCreate", "managePersonCreateRetryOutcome", "areaCreateResolve", "areaCreate", "manageAreaCreate", "areaCreateRetryOutcome", "areaColor", "areaColorRetryOutcome", "areaRename", "areaRenameRetryOutcome", "manageAreaEdit", "manageAreaEditRetryOutcome", "areaOrder", "areaOrderRetryOutcome", "areaDelete", "areaDeleteRetryOutcome", "manageAreaDelete", "manageAreaDeleteRetryOutcome", "focusGroupOptions", "focusGroupWrite", "focusGroupRetryOutcome", "taskListSortOptions", "taskListSortWrite", "taskListSortRetryOutcome", "somedaySectionCreateOptions", "somedaySectionCreateWrite", "somedaySectionCreateRetryOutcome", "somedaySectionRenameOptions", "somedaySectionRenameWrite", "somedaySectionRenameRetryOutcome", "somedayProjectSectionMoveWrite", "somedayProjectSectionMoveRetryOutcome", "somedaySectionDeleteOptions", "somedaySectionDeleteWrite", "somedaySectionDeleteRetryOutcome", "somedaySectionTaskOptions", "somedaySectionTaskPrepare", "somedaySectionTaskCommit", "somedaySectionTaskRetryOutcome", "projectFocusOptions", "projectFocusWrite", "projectFocusRetryOutcome", "taskFocusOptions", "taskFocusWrite", "taskFocusRetryOutcome", "focusOrderOptions", "focusOrderWrite", "focusOrderRetryOutcome", "focusSavedFilterOptions", "savedSearchOptions", "focusSavedFilterWrite", "savedSearchWrite", "focusSavedFilterRetryOutcome", "savedSearchRetryOutcome", "projectRenameOptions", "projectRenameWrite", "projectRenameRetryOutcome", "projectFlowOptions", "projectFlowModeOptions", "projectSectionFlowOptions", "projectFlowWrite", "projectFlowRetryOutcome", "projectTaskSortOptions", "projectTaskSortWrite", "projectTaskSortRetryOutcome", "projectTaskOrderWrite", "projectTaskOrderRetryOutcome", "projectNotesEditOptions", "projectNotesReferenceTarget", "projectNotesDraftDirection", "projectNotesWrite", "projectNotesWriteRetryOutcome", "projectTagsEditOptions", "projectTagsWrite", "projectTagsWriteRetryOutcome", "projectAttachmentEditOptions", "projectAttachmentWrite", "projectFileRemoveWrite", "projectAttachmentWriteRetryOutcome", "projectFileRemoveWriteRetryOutcome", "projectStatusOptions", "projectStatusWrite", "projectStatusRetryOutcome", "projectDateOptions", "projectDateWrite", "projectDateRetryOutcome", "projectAreaOptions", "projectAreaWrite", "projectAreaRetryOutcome", "projectCalendarReferenceOptions", "projectCalendarReferenceWrite", "projectCalendarReferenceRetryOutcome"].contains(method), pending == nil { throw CoreHostRejection(message: error.localizedDescription) }
             throw error
         }
         if pomodoroOwned {
@@ -14810,7 +14817,7 @@ private final class Engine: @unchecked Sendable {
                     throw CoreHostRejection(message: failure.message)
                 }
             }
-            if ["focusGroupRetryOutcome", "taskListSortRetryOutcome", "unassignedAreaColorRetryOutcome", "somedaySectionCreateRetryOutcome", "somedaySectionRenameRetryOutcome", "somedayProjectSectionMoveRetryOutcome", "somedaySectionDeleteRetryOutcome", "somedaySectionOrderRetryOutcome", "somedaySectionTaskRetryOutcome", "projectCreateRetryOutcome", "projectSectionCreateRetryOutcome", "projectSectionRenameRetryOutcome", "projectSectionDeleteRetryOutcome", "projectSectionOrderRetryOutcome", "projectMoveRetryOutcome", "appLockRetryOutcome", "gtdWorkflowRetryOutcome", "generalPreferenceRetryOutcome", "manageTaxonomyRetryOutcome", "managePersonEditRetryOutcome", "managePersonDeleteRetryOutcome", "managePersonCreateRetryOutcome", "areaCreateRetryOutcome", "areaColorRetryOutcome", "areaRenameRetryOutcome", "manageAreaEditRetryOutcome", "areaOrderRetryOutcome", "areaDeleteRetryOutcome", "manageAreaDeleteRetryOutcome", "projectFocusRetryOutcome", "taskFocusRetryOutcome", "focusOrderRetryOutcome", "focusSavedFilterRetryOutcome", "savedSearchRetryOutcome", "projectRenameRetryOutcome", "projectFlowRetryOutcome", "projectTaskSortRetryOutcome", "projectTaskOrderRetryOutcome", "projectNotesWriteRetryOutcome", "projectTagsWriteRetryOutcome", "projectAttachmentWriteRetryOutcome", "projectFileRemoveWriteRetryOutcome", "projectStatusRetryOutcome", "projectDateRetryOutcome", "projectAreaRetryOutcome"].contains(method) {
+            if ["focusGroupRetryOutcome", "taskListSortRetryOutcome", "unassignedAreaColorRetryOutcome", "somedaySectionCreateRetryOutcome", "somedaySectionRenameRetryOutcome", "somedayProjectSectionMoveRetryOutcome", "somedaySectionDeleteRetryOutcome", "somedaySectionOrderRetryOutcome", "somedaySectionTaskRetryOutcome", "projectCreateRetryOutcome", "projectSectionCreateRetryOutcome", "projectSectionRenameRetryOutcome", "projectSectionDeleteRetryOutcome", "projectSectionOrderRetryOutcome", "projectMoveRetryOutcome", "appLockRetryOutcome", "gtdWorkflowRetryOutcome", "generalPreferenceRetryOutcome", "manageTaxonomyRetryOutcome", "managePersonEditRetryOutcome", "managePersonDeleteRetryOutcome", "managePersonCreateRetryOutcome", "areaCreateRetryOutcome", "areaColorRetryOutcome", "areaRenameRetryOutcome", "manageAreaEditRetryOutcome", "areaOrderRetryOutcome", "areaDeleteRetryOutcome", "manageAreaDeleteRetryOutcome", "projectFocusRetryOutcome", "taskFocusRetryOutcome", "focusOrderRetryOutcome", "focusSavedFilterRetryOutcome", "savedSearchRetryOutcome", "projectRenameRetryOutcome", "projectFlowRetryOutcome", "projectTaskSortRetryOutcome", "projectTaskOrderRetryOutcome", "projectNotesWriteRetryOutcome", "projectTagsWriteRetryOutcome", "projectAttachmentWriteRetryOutcome", "projectFileRemoveWriteRetryOutcome", "projectStatusRetryOutcome", "projectDateRetryOutcome", "projectAreaRetryOutcome", "projectCalendarReferenceRetryOutcome"].contains(method) {
                 do {
                     let value = try invoke(method, arguments: args)
                     if method == "appLockRetryOutcome" {
@@ -14835,6 +14842,9 @@ private final class Engine: @unchecked Sendable {
                     }
                     if method == "manageTaxonomyRetryOutcome" {
                         throw HostFailure("Malformed taxonomy probe: positive outcome is unsupported")
+                    }
+                    if method == "projectCalendarReferenceRetryOutcome" {
+                        throw HostFailure("Malformed Project calendar reference probe: positive outcome is unsupported")
                     }
                     if method == "projectMoveRetryOutcome" {
                         throw HostFailure("Malformed Project move probe: positive outcome is unsupported")
@@ -15337,6 +15347,9 @@ private final class Engine: @unchecked Sendable {
                 let expected = String(decoding: try JSONSerialization.data(withJSONObject: ["id": requestID], options: [.sortedKeys]), as: UTF8.self)
                 try validateSomedaySectionTaskAcknowledgment(arguments: [envelope], value: expected)
                 preparedSomedaySectionTaskEnvelope = Data(envelope.utf8)
+            }
+            if method == "projectCalendarReferenceOptions", let input = args.first as? String {
+                try validateProjectCalendarReferenceOptions(value, request: input)
             }
             if method == "projectDateOptions", let input = args.first as? String {
                 try validateProjectDateOptions(value, request: input)
@@ -16185,6 +16198,45 @@ private final class Engine: @unchecked Sendable {
                 command = PendingCommand(version: 2, method: "projectDateCommit", argumentsJSON: encoded)
                 _ = try journalArguments(command)
                 _ = try invoke("projectDateValidate", arguments: journalArguments(command))
+            } catch { throw CoreHostRejection(message: error.localizedDescription) }
+        } else if method == "projectCalendarReferenceWrite" {
+            try allowRetainedOrdinaryPreparation()
+            do {
+                let value = try invoke("projectCalendarReferencePrepare", arguments: args)
+                guard let response = try NativeJSON.jsonObject(with: Data(value.utf8)) as? [String: Any],
+                      let kind = response["kind"] as? String,
+                      let original = args.first as? String,
+                      let submitted = try NativeJSON.jsonObject(with: Data(original.utf8)) as? [String: Any],
+                      let projectID = submitted["projectId"] as? String else {
+                    throw HostFailure("Malformed Project calendar reference preparation")
+                }
+                if kind == "noop" || kind == "blocked" {
+                    guard Set(response.keys) == Set(["kind", "result"]),
+                          let result = response["result"] as? [String: Any],
+                          (kind == "noop"
+                            ? Set(result.keys) == Set(["id", "value"])
+                                && result["id"] as? String == projectID
+                                && Self.equalJSON(result["value"], submitted["value"])
+                            : Set(result.keys) == Set(["blocked"])
+                                && result["blocked"] as? String == "") else {
+                        throw HostFailure("Malformed no-write Project calendar reference result")
+                    }
+                    return .result(String(decoding: try JSONSerialization.data(withJSONObject: result, options: [.sortedKeys]), as: UTF8.self))
+                }
+                guard kind == "prepared", Set(response.keys) == Set(["kind", "prepared"]),
+                      let prepared = response["prepared"] as? [String: Any],
+                      let request = prepared["request"] as? [String: Any],
+                      try JSONSerialization.data(withJSONObject: request, options: [.sortedKeys])
+                        == JSONSerialization.data(withJSONObject: submitted, options: [.sortedKeys]) else {
+                    throw HostFailure("Malformed prepared Project calendar reference")
+                }
+                let commit = String(decoding: try JSONSerialization.data(withJSONObject: ["request": request, "prepared": prepared], options: [.sortedKeys]), as: UTF8.self)
+                guard commit.utf8.count <= 2_000_000 else { throw HostFailure("INVALID_INPUT: Prepared Project calendar reference is too large") }
+                let encoded = String(decoding: try JSONSerialization.data(withJSONObject: [commit]), as: UTF8.self)
+                guard encoded.utf8.count <= 12_000_000 else { throw HostFailure("INVALID_INPUT: Prepared Project calendar reference journal is too large") }
+                command = PendingCommand(version: 2, method: "projectCalendarReferenceCommit", argumentsJSON: encoded)
+                _ = try journalArguments(command)
+                _ = try invoke("projectCalendarReferenceValidate", arguments: journalArguments(command))
             } catch { throw CoreHostRejection(message: error.localizedDescription) }
         } else if method == "projectAreaWrite" {
             try allowRetainedOrdinaryPreparation()
@@ -18448,6 +18500,10 @@ private final class Engine: @unchecked Sendable {
             _ = try invoke("projectDateValidate", arguments: journalArguments(command))
             if case .success(let value) = terminal { try validateProjectDateAcknowledgment(command, value: value) }
         }
+        if command.method == "projectCalendarReferenceCommit" {
+            _ = try invoke("projectCalendarReferenceValidate", arguments: journalArguments(command))
+            if case .success(let value) = terminal { try validateProjectCalendarReferenceAcknowledgment(command, value: value) }
+        }
         if command.method == "projectAreaCommit" {
             _ = try invoke("projectAreaValidate", arguments: journalArguments(command))
             if case .success(let value) = terminal { try validateProjectAreaAcknowledgment(command, value: value) }
@@ -19285,6 +19341,14 @@ private final class Engine: @unchecked Sendable {
 #endif
             NSLog("Native iOS Project status saved releaseCheck=v1.3.3/native-ios-project-status outcome=applied")
         }
+        if command.method == "projectCalendarReferenceCommit", case .success = terminal {
+            if let args = try? journalArguments(command), let encoded = args.first as? String,
+               let envelope = try? NativeJSON.jsonObject(with: Data(encoded.utf8)) as? [String: Any],
+               let request = envelope["request"] as? [String: Any] {
+                let outcome = request["value"] is NSNull ? "unlinked" : "linked"
+                NSLog("Native iOS Project calendar reference saved releaseCheck=v1.3.9/project-calendar-reference outcome=%@", outcome)
+            }
+        }
         if command.method == "projectDateCommit", case .success = terminal {
             let review = projectDateField(command) == "reviewAt"
 #if DEBUG
@@ -19387,7 +19451,7 @@ private final class Engine: @unchecked Sendable {
             || (["reminderCompletionCommit", "reminderSnoozeCommit"].contains(method) && message.hasPrefix("STALE_REVISION:"))
             || (["rowQuickStatusCommit", "inlineChecklistCommit", "doneTaskStatusCommit", "doneTaskCompletedAtCommit", "archiveTaskCompletedAtCommit", "referenceTaskBackdateCommit", "rowTaskBackdateCommit", "referenceTaskDestinationCommit", "referenceProjectNextActionCommit"].contains(method) && message.hasPrefix("STALE_REVISION:"))
             || (["referenceTasksRemoveTagCommit", "referenceTasksAddTagCommit", "inboxTasksAddTagCommit", "projectTasksAddTagCommit", "inboxTasksRemoveTagCommit", "projectTasksRemoveTagCommit", "inboxTasksOrganizeCommit", "projectTasksOrganizeCommit", "inboxOrganizeDestinationCreateCommit", "projectOrganizeDestinationCreateCommit", "referenceTasksMoveCommit", "inboxTasksMoveCommit", "projectTasksMoveCommit", "archivedTaskRestoreCommit", "archivedTasksRestoreCommit", "trashItemsRestoreCommit", "trashItemsPurgeCommit", "archivedTasksDeleteCommit", "archivedTasksDeleteUndoCommit", "projectTasksDeleteCommit", "projectTasksDeleteUndoCommit", "taskCompletionCommit", "taskCompletionUndoCommit", "taskDeleteCommit", "taskDeleteUndoCommit", "taskPromoteCommit", "trashTaskRestoreCommit", "trashProjectRestoreCommit", "projectDeleteCommit", "projectDeleteUndoCommit", "projectDuplicateCommit", "projectLifecycleCommit"].contains(method) && message.hasPrefix("STALE_REVISION:"))
-            || (["saveDraft", "draftCommit", "calendarPreference", "focusGroupWrite", "taskListSortWrite", "unassignedAreaColorWrite", "somedaySectionCreateWrite", "somedaySectionRenameWrite", "somedayProjectSectionMoveWrite", "somedaySectionDeleteWrite", "somedaySectionTaskCommit", "boardCommit", "calendarUnscheduleCommit", "calendarDeleteCommit", "calendarComposerCommit", "calendarComposerCreateCommit", "calendarEventTaskCommit", "mindSweepCommit", "weeklyReviewProjectTaskCommit", "inboxPreparedCommit", "inboxUndoCommit", "checklistPreparedCommit", "taskCancellationUndoCommit", "projectCreateCommit", "projectSectionCreateCommit", "projectSectionRenameCommit", "projectSectionDeleteCommit", "projectSectionOrderCommit", "projectMoveCommit", "areaCreateCommit", "manageAreaCreateCommit", "managePersonCreateCommit", "appLockCommit", "gtdWorkflowCommit", "notificationSettingCommit", "iosAITextConfigurationCommit", "iosAITextConfigurationCommitV2", "iosAIRequestTimeoutCommit", "iosAIReasoningEffortCommit", "iosAIGeminiThinkingBudgetCommit", "deviceCalendarSettingCommit", "calendarSubscriptionSettingCommit", "generalPreferenceCommit", "manageTaxonomyCommit", "managePersonEditCommit", "managePersonDeleteCommit", "areaColorCommit", "areaRenameCommit", "manageAreaEditCommit", "areaOrderCommit", "areaDeleteCommit", "manageAreaDeleteCommit", "projectFocusCommit", "taskFocusCommit", "focusOrderCommit", "focusSavedFilterCommit", "savedSearchCommit", "projectRenameCommit", "projectFlowCommit", "projectTaskSortCommit", "projectTaskOrderCommit", "projectNotesWriteCommit", "projectTagsWriteCommit", "projectAttachmentWriteCommit", "projectFileRemoveWriteCommit", "projectStatusCommit", "projectDateCommit", "projectAreaCommit"].contains(method) && message.hasPrefix("STALE_REVISION:"))
+            || (["saveDraft", "draftCommit", "calendarPreference", "focusGroupWrite", "taskListSortWrite", "unassignedAreaColorWrite", "somedaySectionCreateWrite", "somedaySectionRenameWrite", "somedayProjectSectionMoveWrite", "somedaySectionDeleteWrite", "somedaySectionTaskCommit", "boardCommit", "calendarUnscheduleCommit", "calendarDeleteCommit", "calendarComposerCommit", "calendarComposerCreateCommit", "calendarEventTaskCommit", "mindSweepCommit", "weeklyReviewProjectTaskCommit", "inboxPreparedCommit", "inboxUndoCommit", "checklistPreparedCommit", "taskCancellationUndoCommit", "projectCreateCommit", "projectSectionCreateCommit", "projectSectionRenameCommit", "projectSectionDeleteCommit", "projectSectionOrderCommit", "projectMoveCommit", "areaCreateCommit", "manageAreaCreateCommit", "managePersonCreateCommit", "appLockCommit", "gtdWorkflowCommit", "notificationSettingCommit", "iosAITextConfigurationCommit", "iosAITextConfigurationCommitV2", "iosAIRequestTimeoutCommit", "iosAIReasoningEffortCommit", "iosAIGeminiThinkingBudgetCommit", "deviceCalendarSettingCommit", "calendarSubscriptionSettingCommit", "generalPreferenceCommit", "manageTaxonomyCommit", "managePersonEditCommit", "managePersonDeleteCommit", "areaColorCommit", "areaRenameCommit", "manageAreaEditCommit", "areaOrderCommit", "areaDeleteCommit", "manageAreaDeleteCommit", "projectFocusCommit", "taskFocusCommit", "focusOrderCommit", "focusSavedFilterCommit", "savedSearchCommit", "projectRenameCommit", "projectFlowCommit", "projectTaskSortCommit", "projectTaskOrderCommit", "projectNotesWriteCommit", "projectTagsWriteCommit", "projectAttachmentWriteCommit", "projectFileRemoveWriteCommit", "projectStatusCommit", "projectDateCommit", "projectAreaCommit", "projectCalendarReferenceCommit"].contains(method) && message.hasPrefix("STALE_REVISION:"))
             || (Self.somedayMoveCommits.contains(method)
                 && message.hasPrefix("STALE_REVISION:"))
             || (["somedaySectionOrderWrite", "backupDocumentCommit", "captureLinesCommit"].contains(method) && message.hasPrefix("STALE_REVISION:"))
@@ -20752,6 +20816,23 @@ private final class Engine: @unchecked Sendable {
         }
     }
 
+    private func validateProjectCalendarReferenceAcknowledgment(_ command: PendingCommand, value: String) throws {
+        let args = try journalArguments(command)
+        guard let encoded = args.first as? String,
+              let envelope = try NativeJSON.jsonObject(with: Data(encoded.utf8)) as? [String: Any],
+              let request = envelope["request"] as? [String: Any],
+              let prepared = envelope["prepared"] as? [String: Any],
+              let expected = prepared["result"] as? [String: Any],
+              let result = try NativeJSON.jsonObject(with: Data(value.utf8)) as? [String: Any],
+              Set(result.keys) == Set(["id", "value"]),
+              result["id"] as? String == request["projectId"] as? String,
+              Self.equalJSON(result["value"], request["value"]),
+              try JSONSerialization.data(withJSONObject: result, options: [.sortedKeys])
+                == JSONSerialization.data(withJSONObject: expected, options: [.sortedKeys]) else {
+            throw HostFailure("Malformed Project calendar reference acknowledgment")
+        }
+    }
+
     private func validateProjectAreaAcknowledgment(_ command: PendingCommand, value: String) throws {
         let args = try journalArguments(command)
         guard let encoded = args.first as? String,
@@ -21151,6 +21232,74 @@ private final class Engine: @unchecked Sendable {
               let envelope = try? NativeJSON.jsonObject(with: Data(encoded.utf8)) as? [String: Any],
               let request = envelope["request"] as? [String: Any] else { return nil }
         return request["field"] as? String
+    }
+
+    private static func validProjectCalendarReference(_ value: Any?) -> Bool {
+        if value is NSNull { return true }
+        guard let reference = value as? [String: Any],
+              Set(reference.keys) == Set(["sourceId", "uid", "sourceName", "title", "start", "end", "allDay"])
+                .union(reference["recurrenceId"] == nil ? [] : ["recurrenceId"]),
+              ["sourceId", "uid"].allSatisfy({ field in
+                  (reference[field] as? String).map({ !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && $0.utf16.count <= 2048 }) == true
+              }),
+              reference["recurrenceId"] == nil || (reference["recurrenceId"] as? String).map({ !$0.isEmpty && $0.utf16.count <= 2048 }) == true,
+              ["sourceName", "title"].allSatisfy({ (reference[$0] as? String).map({ $0.utf16.count <= 1000 }) == true }),
+              Self.isBoolean(reference["allDay"]),
+              let start = reference["start"] as? String, start.utf16.count <= 40,
+              let end = reference["end"] as? String, end.utf16.count <= 40 else { return false }
+        if reference["allDay"] as? Bool == true, start.count == 10, end.count == 10 {
+            let civil = DateFormatter()
+            civil.locale = Locale(identifier: "en_US_POSIX")
+            civil.calendar = Calendar(identifier: .gregorian)
+            civil.timeZone = TimeZone(secondsFromGMT: 0)
+            civil.dateFormat = "yyyy-MM-dd"
+            civil.isLenient = false
+            guard let first = civil.date(from: start), let last = civil.date(from: end),
+                  civil.string(from: first) == start, civil.string(from: last) == end else { return false }
+            return last >= first
+        }
+        let parser = ISO8601DateFormatter()
+        parser.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let startDate = parser.date(from: start), endDate = parser.date(from: end)
+        parser.formatOptions = [.withInternetDateTime]
+        guard let first = startDate ?? parser.date(from: start), let last = endDate ?? parser.date(from: end) else { return false }
+        return last >= first
+    }
+
+    private static func validProjectCalendarReferenceToken(_ value: Any?) -> Bool {
+        guard let token = value as? [String: Any],
+              Set(token.keys) == Set(["title", "status", "calendarReference", "rev", "revBy", "updatedAt"]),
+              (token["title"] as? String).map({ $0.utf16.count <= 100_000 }) == true,
+              (token["status"] as? String).map({ ["active", "someday", "waiting", "archived"].contains($0) }) == true,
+              Self.validProjectCalendarReference(token["calendarReference"]),
+              token["rev"] is NSNull || (Self.isInteger(token["rev"]) && (token["rev"] as? NSNumber).map({ $0.doubleValue >= 0 && $0.doubleValue <= 9_007_199_254_740_991 }) == true),
+              token["revBy"] is NSNull || (token["revBy"] as? String).map({ $0.utf16.count <= 500 }) == true,
+              (token["updatedAt"] as? String).map({ Self.isCanonicalReviewInstant($0) }) == true else { return false }
+        return true
+    }
+
+    private func validateProjectCalendarReferenceOptions(_ value: String, request encoded: String) throws {
+        guard value.utf8.count <= 2_000_000,
+              let request = try NativeJSON.jsonObject(with: Data(encoded.utf8)) as? [String: Any],
+              let options = try NativeJSON.jsonObject(with: Data(value.utf8)) as? [String: Any],
+              Set(options.keys) == Set(["revision", "project", "canEdit", "pickerId", "status", "current", "currentDateLabel", "candidates", "candidateDateLabels", "available", "total", "query"]),
+              let revision = options["revision"] as? String, !revision.isEmpty,
+              let project = options["project"] as? [String: Any],
+              project["id"] as? String == request["projectId"] as? String,
+              Self.validProjectCalendarReferenceToken(project.filter({ $0.key != "id" })),
+              Self.isBoolean(options["canEdit"]), Self.isBoolean(options["available"]),
+              (options["canEdit"] as? Bool) == (project["status"] as? String != "archived"),
+              (options["pickerId"] as? String).map({ UUID(uuidString: $0) != nil }) == true,
+              (options["status"] as? String).map({ ["scheduled", "elapsed", "unavailable"].contains($0) }) == true,
+              Self.validProjectCalendarReference(options["current"]),
+              options["currentDateLabel"] is NSNull || (options["currentDateLabel"] as? String).map({ $0.utf16.count <= 1000 }) == true,
+              let dateLabels = options["candidateDateLabels"] as? [String], dateLabels.allSatisfy({ $0.utf16.count <= 1000 }),
+              let query = options["query"] as? String, query.utf16.count <= 1000,
+              Self.isInteger(options["total"]), (options["total"] as? Int ?? -1) >= 0,
+              let candidates = options["candidates"] as? [[String: Any]], candidates.count <= 200, dateLabels.count == candidates.count,
+              candidates.allSatisfy({ Self.validProjectCalendarReference($0) }) else {
+            throw HostFailure("Malformed Project calendar reference options")
+        }
     }
 
     private func validateProjectDateOptions(_ value: String, request encoded: String) throws {
@@ -25573,6 +25722,24 @@ private final class Engine: @unchecked Sendable {
             _ = try arguments("projectDateWrite", String(decoding: try JSONSerialization.data(withJSONObject: [requestJSON]), as: UTF8.self))
             return args
         }
+        if command.method == "projectCalendarReferenceCommit" {
+            guard command.argumentsJSON.utf8.count <= 12_000_000,
+                  let args = try NativeJSON.jsonObject(with: Data(command.argumentsJSON.utf8)) as? [String], args.count == 1,
+                  args[0].utf8.count <= 2_000_000,
+                  let input = try NativeJSON.jsonObject(with: Data(args[0].utf8)) as? [String: Any],
+                  Set(input.keys) == Set(["request", "prepared"]),
+                  let request = input["request"] as? [String: Any],
+                  let prepared = input["prepared"] as? [String: Any],
+                  Self.isInteger(prepared["version"], equalTo: 1),
+                  let original = prepared["request"] as? [String: Any],
+                  try JSONSerialization.data(withJSONObject: request, options: [.sortedKeys])
+                    == JSONSerialization.data(withJSONObject: original, options: [.sortedKeys]) else {
+                throw HostFailure("Malformed prepared Project calendar reference journal")
+            }
+            let requestJSON = String(decoding: try JSONSerialization.data(withJSONObject: request, options: [.sortedKeys]), as: UTF8.self)
+            _ = try arguments("projectCalendarReferenceWrite", String(decoding: try JSONSerialization.data(withJSONObject: [requestJSON]), as: UTF8.self))
+            return args
+        }
         return nil
     }
 
@@ -26963,7 +27130,7 @@ private final class Engine: @unchecked Sendable {
         if method == "taskEditorDraftDirection" && json.utf8.count > 12_000_000 {
             throw HostFailure("INVALID_INPUT: Task Editor direction transport is too large")
         }
-        if ["projectCreate", "projectSectionOptions", "projectSectionCreate", "projectSectionCreateRetryOutcome", "projectSectionRenameOptions", "projectSectionRename", "projectSectionRenameRetryOutcome", "projectSectionDeleteOptions", "projectSectionDelete", "projectSectionDeleteRetryOutcome", "projectSectionOrderOptions", "projectSectionOrder", "projectSectionOrderRetryOutcome", "projectMoveWrite", "projectMoveRetryOutcome", "areaCreate", "manageAreaCreate", "areaCreateResolve", "areaCreateRetryOutcome", "areaColor", "areaColorRetryOutcome", "areaRename", "areaRenameRetryOutcome", "manageAreaEdit", "manageAreaEditRetryOutcome", "areaOrder", "areaOrderRetryOutcome", "areaDelete", "areaDeleteRetryOutcome", "manageAreaDelete", "manageAreaDeleteRetryOutcome", "projectFocusOptions", "projectFocusWrite", "projectFocusRetryOutcome", "taskFocusOptions", "taskFocusWrite", "taskFocusRetryOutcome", "projectRenameOptions", "projectRenameWrite", "projectRenameRetryOutcome", "projectFlowOptions", "projectFlowModeOptions", "projectSectionFlowOptions", "projectFlowWrite", "projectFlowRetryOutcome", "projectTaskSortOptions", "projectTaskSortWrite", "projectTaskSortRetryOutcome", "projectTaskOrderWrite", "projectTaskOrderRetryOutcome", "projectNotesEditOptions", "projectNotesReferenceTarget", "projectNotesDraftDirection", "projectNotesWrite", "projectNotesWriteRetryOutcome", "projectTagsEditOptions", "projectTagsWrite", "projectTagsWriteRetryOutcome", "projectAttachmentEditOptions", "projectAttachmentWrite", "projectFileRemoveWrite", "projectAttachmentWriteRetryOutcome", "projectFileRemoveWriteRetryOutcome", "projectStatusOptions", "projectStatusWrite", "projectStatusRetryOutcome", "projectDateOptions", "projectDateWrite", "projectDateRetryOutcome", "projectAreaOptions", "projectAreaWrite", "projectAreaRetryOutcome"].contains(method) && json.utf8.count > 12_000_000 {
+        if ["projectCreate", "projectSectionOptions", "projectSectionCreate", "projectSectionCreateRetryOutcome", "projectSectionRenameOptions", "projectSectionRename", "projectSectionRenameRetryOutcome", "projectSectionDeleteOptions", "projectSectionDelete", "projectSectionDeleteRetryOutcome", "projectSectionOrderOptions", "projectSectionOrder", "projectSectionOrderRetryOutcome", "projectMoveWrite", "projectMoveRetryOutcome", "areaCreate", "manageAreaCreate", "areaCreateResolve", "areaCreateRetryOutcome", "areaColor", "areaColorRetryOutcome", "areaRename", "areaRenameRetryOutcome", "manageAreaEdit", "manageAreaEditRetryOutcome", "areaOrder", "areaOrderRetryOutcome", "areaDelete", "areaDeleteRetryOutcome", "manageAreaDelete", "manageAreaDeleteRetryOutcome", "projectFocusOptions", "projectFocusWrite", "projectFocusRetryOutcome", "taskFocusOptions", "taskFocusWrite", "taskFocusRetryOutcome", "projectRenameOptions", "projectRenameWrite", "projectRenameRetryOutcome", "projectFlowOptions", "projectFlowModeOptions", "projectSectionFlowOptions", "projectFlowWrite", "projectFlowRetryOutcome", "projectTaskSortOptions", "projectTaskSortWrite", "projectTaskSortRetryOutcome", "projectTaskOrderWrite", "projectTaskOrderRetryOutcome", "projectNotesEditOptions", "projectNotesReferenceTarget", "projectNotesDraftDirection", "projectNotesWrite", "projectNotesWriteRetryOutcome", "projectTagsEditOptions", "projectTagsWrite", "projectTagsWriteRetryOutcome", "projectAttachmentEditOptions", "projectAttachmentWrite", "projectFileRemoveWrite", "projectAttachmentWriteRetryOutcome", "projectFileRemoveWriteRetryOutcome", "projectStatusOptions", "projectStatusWrite", "projectStatusRetryOutcome", "projectDateOptions", "projectCalendarReferenceOptions", "projectDateWrite", "projectCalendarReferenceWrite", "projectDateRetryOutcome", "projectCalendarReferenceRetryOutcome", "projectAreaOptions", "projectAreaWrite", "projectAreaRetryOutcome"].contains(method) && json.utf8.count > 12_000_000 {
             throw HostFailure(method == "projectCreate" ? "INVALID_INPUT: Project creation transport is too large"
                 : ["areaColor", "areaColorRetryOutcome"].contains(method) ? "INVALID_INPUT: Area color transport is too large"
                 : ["areaRename", "areaRenameRetryOutcome", "manageAreaEdit", "manageAreaEditRetryOutcome"].contains(method) ? "INVALID_INPUT: Area rename transport is too large"
@@ -26980,7 +27147,7 @@ private final class Engine: @unchecked Sendable {
                 : ["projectAttachmentEditOptions", "projectAttachmentWrite", "projectFileRemoveWrite", "projectAttachmentWriteRetryOutcome", "projectFileRemoveWriteRetryOutcome"].contains(method) ? "INVALID_INPUT: Project URL link transport is too large"
                 : ["projectStatusOptions", "projectStatusWrite", "projectStatusRetryOutcome"].contains(method) ? "INVALID_INPUT: Project status transport is too large"
                 : ["projectAreaOptions", "projectAreaWrite", "projectAreaRetryOutcome"].contains(method) ? "INVALID_INPUT: Project Area transport is too large"
-                : ["projectDateOptions", "projectDateWrite", "projectDateRetryOutcome"].contains(method) ? "INVALID_INPUT: Project date transport is too large"
+                : ["projectDateOptions", "projectCalendarReferenceOptions", "projectDateWrite", "projectCalendarReferenceWrite", "projectDateRetryOutcome", "projectCalendarReferenceRetryOutcome"].contains(method) ? "INVALID_INPUT: Project date transport is too large"
                 : ["projectSectionOptions", "projectSectionCreate", "projectSectionCreateRetryOutcome"].contains(method) ? "INVALID_INPUT: Project Section transport is too large"
                 : ["projectSectionRenameOptions", "projectSectionRename", "projectSectionRenameRetryOutcome"].contains(method) ? "INVALID_INPUT: Project Section rename transport is too large"
                 : ["projectSectionDeleteOptions", "projectSectionDelete", "projectSectionDeleteRetryOutcome"].contains(method) ? "INVALID_INPUT: Project Section deletion transport is too large"
@@ -27448,7 +27615,7 @@ private final class Engine: @unchecked Sendable {
         }
         if ["inboxView", "captureView", "captureEdit", "captureSubmit", "setAreaFilter", "taskView", "taskOpenTab", "taskViewReferenceTarget", "editDraft", "destinationPicker", "search", "mindSweepGuide", "mindSweepAdd",
             "calendarComposerOpen", "calendarComposerEdit", "calendarComposerSave", "calendarEventTaskCreate", "projectCreate", "projectCreateRetryOutcome", "projectSectionOptions", "projectSectionCreate", "projectSectionCreateRetryOutcome", "projectSectionRenameOptions", "projectSectionRename", "projectSectionRenameRetryOutcome", "projectSectionDeleteOptions", "projectSectionDelete", "projectSectionDeleteRetryOutcome",
-            "notificationSetting", "appLockOptions", "appLock", "appLockRetryOutcome", "gtdWorkflowOptions", "gtdPomodoroOptions", "gtdReviewOptions", "gtdInboxOptions", "gtdCaptureAreaOptions", "gtdCaptureParseOptions", "gtdCaptureAudioOptions", "gtdTaskEditorOpenOptions", "gtdTaskEditorPresetOptions", "gtdTaskEditorFieldOptions", "gtdWorkflowDraft", "gtdWorkflow", "gtdWorkflowRetryOutcome", "generalPreferenceOptions", "manageTaxonomyOptions", "managePersonEditOptions", "generalPreference", "manageTaxonomy", "managePersonEdit", "generalPreferenceRetryOutcome", "manageTaxonomyRetryOutcome", "managePersonEditRetryOutcome", "managePersonDeleteOptions", "managePersonDelete", "managePersonDeleteRetryOutcome", "managePersonCreateResolve", "managePersonCreate", "managePersonCreateRetryOutcome", "areaCreateResolve", "areaCreate", "manageAreaCreate", "areaCreateRetryOutcome", "areaColor", "areaColorRetryOutcome", "areaRename", "areaRenameRetryOutcome", "manageAreaEdit", "manageAreaEditRetryOutcome", "areaOrder", "areaOrderRetryOutcome", "areaDelete", "areaDeleteRetryOutcome", "manageAreaDelete", "manageAreaDeleteRetryOutcome", "projectFocusOptions", "projectFocusWrite", "projectFocusRetryOutcome", "taskFocusOptions", "taskFocusWrite", "taskFocusRetryOutcome", "projectRenameOptions", "projectRenameWrite", "projectRenameRetryOutcome", "projectFlowOptions", "projectFlowModeOptions", "projectSectionFlowOptions", "projectFlowWrite", "projectFlowRetryOutcome", "projectTaskSortOptions", "projectTaskSortWrite", "projectTaskSortRetryOutcome", "projectTaskOrderWrite", "projectTaskOrderRetryOutcome", "projectNotesEditOptions", "projectNotesReferenceTarget", "projectNotesDraftDirection", "projectNotesWrite", "projectNotesWriteRetryOutcome", "projectTagsWrite", "projectTagsWriteRetryOutcome", "projectAttachmentEditOptions", "projectAttachmentWrite", "projectFileRemoveWrite", "projectAttachmentWriteRetryOutcome", "projectFileRemoveWriteRetryOutcome", "projectStatusOptions", "projectStatusWrite", "projectStatusRetryOutcome", "projectDateOptions", "projectDateWrite", "projectDateRetryOutcome", "projectAreaWrite", "projectAreaRetryOutcome"].contains(method) {
+            "notificationSetting", "appLockOptions", "appLock", "appLockRetryOutcome", "gtdWorkflowOptions", "gtdPomodoroOptions", "gtdReviewOptions", "gtdInboxOptions", "gtdCaptureAreaOptions", "gtdCaptureParseOptions", "gtdCaptureAudioOptions", "gtdTaskEditorOpenOptions", "gtdTaskEditorPresetOptions", "gtdTaskEditorFieldOptions", "gtdWorkflowDraft", "gtdWorkflow", "gtdWorkflowRetryOutcome", "generalPreferenceOptions", "manageTaxonomyOptions", "managePersonEditOptions", "generalPreference", "manageTaxonomy", "managePersonEdit", "generalPreferenceRetryOutcome", "manageTaxonomyRetryOutcome", "managePersonEditRetryOutcome", "managePersonDeleteOptions", "managePersonDelete", "managePersonDeleteRetryOutcome", "managePersonCreateResolve", "managePersonCreate", "managePersonCreateRetryOutcome", "areaCreateResolve", "areaCreate", "manageAreaCreate", "areaCreateRetryOutcome", "areaColor", "areaColorRetryOutcome", "areaRename", "areaRenameRetryOutcome", "manageAreaEdit", "manageAreaEditRetryOutcome", "areaOrder", "areaOrderRetryOutcome", "areaDelete", "areaDeleteRetryOutcome", "manageAreaDelete", "manageAreaDeleteRetryOutcome", "projectFocusOptions", "projectFocusWrite", "projectFocusRetryOutcome", "taskFocusOptions", "taskFocusWrite", "taskFocusRetryOutcome", "projectRenameOptions", "projectRenameWrite", "projectRenameRetryOutcome", "projectFlowOptions", "projectFlowModeOptions", "projectSectionFlowOptions", "projectFlowWrite", "projectFlowRetryOutcome", "projectTaskSortOptions", "projectTaskSortWrite", "projectTaskSortRetryOutcome", "projectTaskOrderWrite", "projectTaskOrderRetryOutcome", "projectNotesEditOptions", "projectNotesReferenceTarget", "projectNotesDraftDirection", "projectNotesWrite", "projectNotesWriteRetryOutcome", "projectTagsWrite", "projectTagsWriteRetryOutcome", "projectAttachmentEditOptions", "projectAttachmentWrite", "projectFileRemoveWrite", "projectAttachmentWriteRetryOutcome", "projectFileRemoveWriteRetryOutcome", "projectStatusOptions", "projectStatusWrite", "projectStatusRetryOutcome", "projectDateOptions", "projectCalendarReferenceOptions", "projectDateWrite", "projectCalendarReferenceWrite", "projectDateRetryOutcome", "projectCalendarReferenceRetryOutcome", "projectAreaWrite", "projectAreaRetryOutcome"].contains(method) {
             guard let json = args.first as? String,
                   (try NativeJSON.jsonObject(with: Data(json.utf8))) is [String: Any] else {
                 throw HostFailure("Core input must be a JSON object")
@@ -27745,6 +27912,28 @@ private final class Engine: @unchecked Sendable {
                   expected["revBy"] is NSNull || (expected["revBy"] as? String).map({ $0.utf16.count <= 500 }) == true,
                   let updated = expected["updatedAt"] as? String, updated.utf16.count <= 100 else {
                 throw HostFailure("INVALID_INPUT: Project rename needs a bounded row token and lowercase UUID")
+            }
+        }
+        if method == "projectCalendarReferenceOptions" {
+            guard let encoded = args.first as? String, encoded.utf8.count <= 2_000_000,
+                  let input = try NativeJSON.jsonObject(with: Data(encoded.utf8)) as? [String: Any],
+                  Set(input.keys) == Set(["projectId"]).union(input["query"] == nil ? [] : ["query"]).union(input["summary"] == nil ? [] : ["summary"]),
+                  input["query"] == nil || (input["query"] as? String).map({ $0.utf16.count <= 1000 }) == true,
+                  input["summary"] == nil || (Self.isBoolean(input["summary"]) && input["summary"] as? Bool == true),
+                  let projectID = input["projectId"] as? String, !projectID.isEmpty, projectID.utf16.count <= 500 else {
+                throw HostFailure("INVALID_INPUT: Project calendar reference options need a bounded Project ID")
+            }
+        }
+        if ["projectCalendarReferenceWrite", "projectCalendarReferenceRetryOutcome"].contains(method) {
+            guard let encoded = args.first as? String, encoded.utf8.count <= 2_000_000,
+                  let input = try NativeJSON.jsonObject(with: Data(encoded.utf8)) as? [String: Any],
+                  Set(input.keys) == Set(["requestId", "projectId", "value", "pickerId", "expected"]),
+                  let id = input["requestId"] as? String, UUID(uuidString: id) != nil, id == id.lowercased(),
+                  let projectID = input["projectId"] as? String, !projectID.isEmpty, projectID.utf16.count <= 500,
+                  Self.validProjectCalendarReference(input["value"]),
+                  input["pickerId"] is NSNull || (input["pickerId"] as? String).map({ UUID(uuidString: $0) != nil && $0 == $0.lowercased() }) == true,
+                  Self.validProjectCalendarReferenceToken(input["expected"]) else {
+                throw HostFailure("INVALID_INPUT: Project calendar reference needs a bounded row token and lowercase UUID")
             }
         }
         if method == "projectDateOptions" {
@@ -29333,7 +29522,7 @@ private final class Engine: @unchecked Sendable {
             }
             if name == "contexts" {
                 let legacyFields: Set<String> = ["tokens", "matchMode", "searchQuery", "offset", "limit", "revision"]
-                let enhancedFields: Set<String> = ["filters", "filterEdit", "savedFilterId", "preservedCriteria", "filterSheetOpen", "filterPicker", "savedFiltersWindow"]
+                let enhancedFields: Set<String> = ["filters", "filterEdit", "savedFilterId", "preservedCriteria", "filterSheetOpen", "filterPicker", "savedFiltersWindow", "sortOverride"]
                 let enhanced = input["filters"] != nil
                 guard json.utf8.count <= 2_000_000, (try? NativeJSON.hasUniqueObjectKeys(json)) == true,
                       Set(input.keys).isSubset(of: enhanced ? legacyFields.union(enhancedFields) : legacyFields),
@@ -29342,7 +29531,9 @@ private final class Engine: @unchecked Sendable {
                       input["preservedCriteria"] == nil || input["preservedCriteria"] is [String: Any],
                       input["savedFilterId"] == nil || input["savedFilterId"] is NSNull
                         || (input["savedFilterId"] as? String).map({ !$0.isEmpty && $0.utf16.count <= 200 }) == true,
-                      input["filterSheetOpen"] == nil || Self.isBoolean(input["filterSheetOpen"]) else {
+                      input["filterSheetOpen"] == nil || Self.isBoolean(input["filterSheetOpen"]),
+                      input["sortOverride"] == nil || input["sortOverride"] is NSNull
+                        || (input["sortOverride"] as? String).map({ !$0.isEmpty && $0.utf16.count <= 100 }) == true else {
                     throw HostFailure("Unsupported native Contexts browsing input")
                 }
                 if let filters = input["filters"] { try Self.validateContextsFilters(filters) }

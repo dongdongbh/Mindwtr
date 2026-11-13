@@ -11294,7 +11294,8 @@ mod tests {
             "areaTitle",
         ];
 
-        const NOT_IMPLEMENTED: [&str; 8] = [
+        const NOT_IMPLEMENTED: [&str; 9] = [
+            "calendarReference",
             "tagIds",
             "taskSortBy",
             "isFocused",

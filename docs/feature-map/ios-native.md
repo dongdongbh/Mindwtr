@@ -105,7 +105,7 @@ Widgets, App Intents and Siri, the Share Extension and the Watch app belong to t
 
 ## Task editor
 
-- Reach: Tap a task title. The sheet opens in Preview or Edit. More holds Duplicate, Share, Cancel, Delete, Skip this occurrence, Create project from task and, for Reference tasks, Convert to action.
+- Reach: Tap a task title. The sheet opens in Preview or Edit. Swiping the sheet down with unsaved changes shows the same Save/Discard/Cancel prompt as Close, as in RN (#1552). More holds Duplicate, Share, Cancel, Delete, Skip this occurrence, Create project from task and, for Reference tasks, Convert to action.
 - Selectors: `task-preview-mark-done`, `task-mode-view`, `task-mode-edit`, `task-editor-title`, `task-editor-focus-star`, `task-editor-note`, `task-editor-save`, `task-editor-save-close`, `task-editor-discard`, `task-more`, `task-duplicate`, `task-share`, `task-cancel`, `task-delete`, `task-skip-occurrence`, `task-promote`, `task-reference-convert-to-action`, `task-view-close`
 - Code: `apps/ios-native/App/TaskViewSheet.swift`, `apps/ios-native/Sources/MindwtrNativeCore/EditorDraftStore.swift`, `apps/ios-native/App/CoreModel.swift`
 - Checks: `apps/ios-native/App/UITests/FoundationUITests.swift` (testTaskDuplicate…, testTaskShare…, testTaskCancellation…, testTaskDelete…, testTaskSkip…, testTaskPromotion…, testTaskPreview…, testGtdTaskEditor…, testTaskEditorFocusStar…)
@@ -389,3 +389,11 @@ Widgets, App Intents and Siri, the Share Extension and the Watch app belong to t
 - Ownership: `packages/core/src/task-reminder-policy.ts`, `packages/core/src/schedule-utils.ts`, `packages/core/src/task-editor-schedule.ts`; each platform consumes the shared reminder model and plan.
 - Checks: `packages/core/src/selective-reminders.test.ts`; confirm old alarms are withdrawn after changing modes, completion, or permission revocation. Review reminders remain separate.
 - Compatibility: older clients skip these selective reminders and cannot edit or preserve the new policy reliably. Update every device before using the new modes.
+
+## Project calendar reference
+
+- Reach: Projects › open a Project › expand Details › the calendar card (first in Details, as in RN) › Link calendar event, Replace linked event, or Unlink calendar event. The picker opens inside the card. Search the upcoming 90-day events by event title or calendar name.
+- Selectors: `project-calendar-reference`, `project-calendar-link`, `project-calendar-unlink`, `project-calendar-search`, `project-calendar-cancel`, `project-calendar-title`, `project-calendar-date`, `project-calendar-status`, `project-calendar-picker-status`, `project-calendar-save-failed`; each picker row is `project-calendar-event-` plus its index
+- Code: `apps/ios-native/App/ProjectsScreen.swift`, `apps/ios-native/App/CoreModel.swift`, `apps/ios-native/Sources/MindwtrNativeCore/CoreHost.swift`, `packages/core/src/native-host-contract-project-calendar-reference.ts`
+- Checks: `packages/core/src/native-host-contract-project-calendar-reference.test.ts`, `apps/ios-native/Tests/MindwtrNativeCoreTests/CoreHostTests.swift` (testProjectCalendarReference…)
+- Notes: One read-only ICS event reference belongs to the Project. Linking creates no task and changes no calendar event. Ambiguous identities and incomplete feed reads offer no candidates; unavailable feeds show last-known details. Expanding Details reads the stored link first with `summary: true`, which never downloads feeds; feeds download only when a link exists or the picker is open. Dates show "start – end". Archived Projects are read-only. Explicit unlink persists a null marker. Native writes freeze the selected candidate and Project snapshot before journaling, retain exact retries, and acknowledge only after durable storage.

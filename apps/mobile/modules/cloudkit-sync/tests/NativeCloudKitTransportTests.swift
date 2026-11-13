@@ -53,6 +53,23 @@ final class NativeCloudKitTransportTests: XCTestCase {
         XCTAssertEqual(calls.value, 0)
     }
 
+    func testProjectCalendarReferenceRoundtripKeepsExplicitRemovalAndOmittedUpdates() throws {
+        let zone = CKRecordZone.ID(zoneName: "SyntheticZone", ownerName: CKCurrentUserDefaultName)
+        let reference: [String: Any] = ["sourceId": "feed", "uid": "event", "sourceName": "Calendar", "title": "Meeting",
+            "start": "2026-11-01T10:00:00.000Z", "end": "2026-11-01T11:00:00.000Z", "allDay": false]
+        let record = try XCTUnwrap(CloudKitRecordMapper.record(from: ["id": "project", "calendarReference": reference],
+            recordType: "MindwtrProject", zoneID: zone))
+        XCTAssertEqual((CloudKitRecordMapper.json(from: record)["calendarReference"] as? NSDictionary), reference as NSDictionary)
+        CloudKitRecordMapper.updateRecord(record, from: ["id": "project"], recordType: "MindwtrProject")
+        XCTAssertEqual((CloudKitRecordMapper.json(from: record)["calendarReference"] as? NSDictionary), reference as NSDictionary)
+        CloudKitRecordMapper.updateRecord(record, from: ["id": "project", "calendarReference": NSNull()], recordType: "MindwtrProject")
+        XCTAssertEqual(record["calendarReference"] as? String, "null")
+        XCTAssertTrue(CloudKitRecordMapper.json(from: record)["calendarReference"] is NSNull)
+        XCTAssertTrue(NativeCloudKitTransport.mappedRecord(record)["calendarReference"] is NSNull)
+        CloudKitRecordMapper.updateRecord(record, from: ["id": "project"], recordType: "MindwtrProject")
+        XCTAssertTrue(CloudKitRecordMapper.json(from: record)["calendarReference"] is NSNull)
+    }
+
     func testCanonicalMapperRoundtripPreservesBOMNestedAttachmentAndDistinctUnicodeIDs() throws {
         let raw = #"[{"id":"\uFEFFfirst","title":"\uFEFFtitle","status":"next","rev":3,"isFocusedToday":true,"description":"note","contexts":["@home"],"attachments":[{"id":"asset","title":"\uFEFFasset"}]},{"id":"é","title":"Composed"},{"id":"e\u0301","title":"Decomposed"}]"#
         let values = try NativeCloudKitTransport.records(raw, recordType: "MindwtrTask")

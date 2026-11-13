@@ -1353,10 +1353,11 @@ try {
         await confirmQuestion(item.title);
         nodes = await toastWith(en['settings.backupMobile.importComplete']);
         check(Boolean(undoButton(nodes)), `(I1 ${item.key}) the result shows RN's Undo`);
+        await tap(undoButton(nodes));
+        await waitFor(`the question "${en['settings.undoImportConfirmTitle']}"`, (current) => hasText(current, en['settings.undoImportConfirmTitle']) && Boolean(confirmButton(current)), 60_000);
         const after = taggedRows(pullDb(`i1-${item.key}-after`));
         check(after.length > JSON.parse(beforeRows).length && JSON.stringify(after) === JSON.stringify(expected),
             `(I1 ${item.key}) the imported rows are core's import of the fixture: ${JSON.stringify(after)}`);
-        await tap(undoButton(nodes));
         await confirmQuestion(en['settings.undoImportConfirmTitle']);
         await toastWith(en['settings.backupMobile.restoreComplete']);
         check(JSON.stringify(taggedRows(pullDb(`i1-${item.key}-undo`))) === beforeRows, `(I1 ${item.key}) Undo gave the library back as it was`);

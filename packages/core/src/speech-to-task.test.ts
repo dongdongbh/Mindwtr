@@ -70,6 +70,45 @@ describe('credential-free OpenAI speech projections', () => {
 });
 
 describe('runRemoteSpeechToTaskCapture', () => {
+    it.each(['https://speech.example/v1', 'https://speech.example/v1/audio/transcriptions/'])('keeps every parse attempt on %s with the configured model', async (baseUrl) => {
+        const requests: Array<{ url: string; init?: RequestInit }> = [];
+        const fetcher: typeof fetch = async (input, init) => {
+            const url = String(input);
+            requests.push({ url, init });
+            if (url.endsWith('/audio/transcriptions')) return new Response(JSON.stringify({ text: 'Call dentist tomorrow' }));
+            if (requests.length < 5) return new Response('Unavailable', { status: 503 });
+            return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ title: 'Call dentist', dueDate: '2026-11-14' }) } }] }));
+        };
+        const result = await runRemoteSpeechToTaskCapture({ provider: 'openai', model: 'custom-transcribe',
+            baseUrl, apiKey: 'synthetic-custom-credential', parseModel: 'custom-chat', mode: 'smart_parse' }, {
+            withOpenAIUpload: async send => send({ part: new Blob(['synthetic']) }),
+        }, { fetcher });
+        expect(requests.map(request => request.url)).toEqual([
+            'https://speech.example/v1/audio/transcriptions', 'https://speech.example/v1/responses',
+            'https://speech.example/v1/chat/completions', 'https://speech.example/v1/responses',
+            'https://speech.example/v1/chat/completions',
+        ]);
+        for (const request of requests.slice(1)) {
+            expect(JSON.parse(String(request.init?.body)).model).toBe('custom-chat');
+            expect(new Headers(request.init?.headers).get('Authorization')).toBe('Bearer synthetic-custom-credential');
+        }
+        expect(result).toMatchObject({ title: 'Call dentist', dueDate: '2026-11-14' });
+    });
+
+    it('parses with a keyless custom server without an Authorization header', async () => {
+        const requests: Array<{ url: string; init?: RequestInit }> = [];
+        const fetcher: typeof fetch = async (input, init) => {
+            requests.push({ url: String(input), init });
+            return new Response(JSON.stringify(String(input).endsWith('/audio/transcriptions')
+                ? { text: 'Buy milk' } : { output_text: JSON.stringify({ title: 'Buy milk' }) }));
+        };
+        const result = await runRemoteSpeechToTaskCapture({ provider: 'openai', model: 'whisper', parseModel: 'local-chat',
+            baseUrl: 'http://localhost:8000/v1' }, { withOpenAIUpload: async send => send({ part: new Blob(['synthetic']) }) }, { fetcher });
+        expect(requests.map(request => request.url)).toEqual(['http://localhost:8000/v1/audio/transcriptions', 'http://localhost:8000/v1/responses']);
+        expect(requests.every(request => !new Headers(request.init?.headers).has('Authorization'))).toBe(true);
+        expect(result.title).toBe('Buy milk');
+    });
+
     it('times out and cancels a stalled remote speech error body', async () => {
         vi.useFakeTimers();
         try {

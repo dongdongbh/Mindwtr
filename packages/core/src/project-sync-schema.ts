@@ -1,3 +1,4 @@
+import { normalizeProjectCalendarReference } from './project-calendar-reference-schema';
 import schemaFixture from './project-sync-schema.fixture.json';
 import type { Project } from './types';
 import { normalizeProjectSequentialScope, normalizeProjectTaskSortBy } from './project-utils';
@@ -93,6 +94,7 @@ const projectColumnValues = (project: Project): Record<string, unknown> => ({
     deletedAt: project.deletedAt ?? null,
     purgedAt: project.purgedAt ?? null,
     viewSectionIds: toJson(project.viewSectionIds),
+    calendarReference: toJson(project.calendarReference),
 });
 
 export const projectToSqliteRow = (project: Project): unknown[] =>
@@ -147,5 +149,7 @@ export const projectFromSqliteRow = (row: Record<string, unknown>): Project => {
         deletedAt: fromOptional(row.deletedAt as string | null),
         purgedAt: fromOptional(row.purgedAt as string | null),
         viewSectionIds: fromJson<unknown>(row.viewSectionIds, undefined) as Project['viewSectionIds'],
+        calendarReference: row.calendarReference === 'null' ? null
+            : normalizeProjectCalendarReference(fromJson<unknown>(row.calendarReference, undefined)),
     };
 };

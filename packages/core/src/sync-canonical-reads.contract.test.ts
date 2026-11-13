@@ -2640,6 +2640,31 @@ describe('canonical local reads contract', () => {
                 expect(useTaskStore.getState()._projectsById.get(id))
                     .toEqual(planned.prepared.effect.project.after);
             },
+            commitPreparedProjectCalendarReference: async (control) => {
+                const projectId = settled.projects[1].id;
+                const calendarReference = { sourceId: 'contract-calendar', uid: 'contract-event',
+                    sourceName: 'Contract calendar', title: 'Contract event',
+                    start: '2028-02-29', end: '2028-03-01', allDay: true };
+                await call('updateProject', projectId, { calendarReference });
+                const host = await nativeHost(control);
+                const options = nativeValue(await host.getProjectCalendarReferenceOptions({ projectId }));
+                const { id, ...expected } = options.project;
+                expect(expected.calendarReference).toEqual(calendarReference);
+                const request = { requestId: 'bd6e1c42-fd37-418b-937c-92a67524b54d', projectId: id,
+                    value: null, pickerId: null, expected };
+                const planned = nativeValue(host.prepareProjectCalendarReference(request));
+                expect(planned.kind).toBe('prepared');
+                if (planned.kind !== 'prepared') throw new Error('Calendar unlink must prepare a real write');
+                expect(planned.prepared.effect.project.after.calendarReference).toBeNull();
+                control.expectPersisted((written) => {
+                    expect(written.projects.find((entry) => entry.id === id))
+                        .toEqual(planned.prepared.effect.project.after);
+                });
+                expect(nativeValue(await host.commitPreparedProjectCalendarReference({ request, prepared: planned.prepared })))
+                    .toEqual(planned.prepared.result);
+                expect(useTaskStore.getState()._projectsById.get(id))
+                    .toEqual(planned.prepared.effect.project.after);
+            },
             commitPreparedProjectArea: async (control) => {
                 const host = await nativeHost(control);
                 const options = nativeValue(host.getProjectAreaOptions({ projectId: settled.projects[1].id }));

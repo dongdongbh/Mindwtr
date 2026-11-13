@@ -9,6 +9,9 @@ The native client is a Kotlin and Jetpack Compose app in `apps/android-native`. 
 - **One shared phone.** All device checks run on one shared test phone. Each script takes the adb serial as its first argument: `node apps/android-native/scripts/check-<name>-device.mjs <adb-serial> [apk]`.
 - **The lock.** Each check first runs itself again under `flock` on a lock file for that serial (`apps/android-native/scripts/device-lock.mjs`). So two runs never share the phone. A second run prints "waiting for another run" and waits up to 4 hours.
 - **Batch runner.** `node apps/android-native/scripts/run-device-batch.mjs [check names] [--no-build] [--detach] [--log <dir>]` runs a batch. It builds the bundle and the Gradle variants, takes a batch-wide lock, runs each check with a 1-hour timeout, and runs `check-upgrade-device` last. The last line of `summary.txt` in the log folder is `VERDICT PASS n/n` or `VERDICT FAIL`.
+- **Clean start.** Before the first check, the runner runs `pm clear` on the two disposable test packages, `tech.dongdongbh.mindwtr.nativeclient.dev` and `tech.dongdongbh.mindwtr.upgradetest`, and grants their permissions again. It does the same after a check fails, so one failure does not break the checks after it. It never clears any other package. After each clear, and once more after the last check, `past-onboarding-device.mjs` opens the dev app and skips the welcome sheet, so the next run (also an older runner on another branch) finds the dev library past onboarding. When the empty library opens the welcome sheet, `waitFor` in `device.mjs` taps "Skip for now". `check-onboarding-device` turns that off with `keepWelcome`.
+- **Known-stale checks.** `KNOWN_STALE` in `run-device-batch.mjs` lists the checks whose own assertion is wrong while the app works. Each entry has a date, the reason, the check line that misreads the app (`file.mjs:line`), and `proof /path` to a log or screenshot that shows the feature works. "Fails on `main` too" is not proof, and a real app bug never goes on the list. The runner refuses to start when an entry lacks any of these. The runner still runs them. A failure prints a `KNOWN-STALE FAILED` line and does not turn the verdict to FAIL. A pass prints `KNOWN-STALE PASSED`, which means you can take the check off the list.
+- **Upgrade harness.** `build-upgrade-harness.mjs` always signs with `/home/dd/.mindwtr-harness/upgradetest.keystore` and reads the RN APKs from `/home/dd/.mindwtr-harness/apks`, even when `MINDWTR_HARNESS_DIR` points elsewhere. So every harness folder has one signer.
 - **Who has the phone.** `node apps/android-native/scripts/phone-queue.mjs` lists the run that holds the lock and the runs that wait.
 - **Selectors.** Compose `testTag` values show up as the resource id. `apps/android-native/scripts/device.mjs` finds a node by the last part of its resource id (`tagged`), or by English text from `en.ts` (`button`, `tab`).
 - **Keyboard.** Checks type through the phone's own keyboard. They stop with exit 3 unless the layout is English. Set `MINDWTR_KEYBOARD_OK=1` only after you checked the keyboard yourself.
@@ -132,9 +135,10 @@ The native client is a Kotlin and Jetpack Compose app in `apps/android-native`. 
 ## Task View tab and checklist
 
 - Reach: Editor › View tab. The checklist has add, reorder by drag, and Reset checklist.
-- Selectors: `task-view`, `view-checklist-add`, `checklist-add-item`, `checklist-item-input`, `checklist-reset`
+- Shortcuts: Drag a checklist row by its two-bar handle. The row follows the finger and the rows in between shift to show the drop slot, as in RN (#1483). Release commits the move; a cancelled drag puts every row back. Tap a handle for its row actions.
+- Selectors: `task-view`, `view-checklist-add`, `checklist-add-item`, `checklist-item-input`, `checklist-drag-` (+ item index), `checklist-reset`
 - Code: `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/TaskView.kt`, `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/ChecklistDrag.kt`
-- Checks: `apps/android-native/scripts/check-settings-editor-device.mjs`, `apps/android-native/scripts/check-editor-menu-device.mjs`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/TaskEditorChecklistTest.kt`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/TaskEditorChecklistAddTest.kt`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/ChecklistDragTest.kt`
+- Checks: `apps/android-native/scripts/check-checklist-drag-device.mjs`, `apps/android-native/scripts/check-settings-editor-device.mjs`, `apps/android-native/scripts/check-editor-menu-device.mjs`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/TaskEditorChecklistTest.kt`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/TaskEditorChecklistAddTest.kt`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/ChecklistDragTest.kt`
 - Notes: Settings › GTD › Task editor layout decides whether a task opens on Preview (View) or on the Form.
 
 ## Task editor menu
@@ -225,7 +229,7 @@ The native client is a Kotlin and Jetpack Compose app in `apps/android-native`. 
 - Selectors: `contexts-list`, `list-search`, `token-picker-list`
 - Code: `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/ContextsScreen.kt`
 - Checks: `apps/android-native/scripts/check-review-device.mjs`, `apps/android-native/scripts/check-review-organize-device.mjs`
-- Notes: The bulk bar here adds Add context and Remove context.
+- Notes: The bulk bar here adds Add context and Remove context. While a saved filter is selected, the list uses that filter's sort. A sort change then lasts only until another saved filter is chosen or saved, and does not change the global sort. Back from the Contexts screen clears the selected saved filter and its sort, as in RN; switching quick-access tabs keeps them. A filter saved here stores no sort, so it follows the global sort (#1485).
 
 ## Trash
 
@@ -255,10 +259,10 @@ The native client is a Kotlin and Jetpack Compose app in `apps/android-native`. 
 
 ## External calendars
 
-- Reach: Settings › Advanced › External Calendar. It has calendar URL subscriptions (Add, Test), Device calendar, and the push to a Mindwtr calendar (Delete Mindwtr calendar).
+- Reach: Settings › Advanced › External Calendar. It has calendar URL subscriptions (Add, Test), Device calendar, and the push to a Mindwtr calendar (Delete Mindwtr calendar). Push also runs after background work with the app closed: a capture or widget check-off, a reminder's Done, a background sync. It pushes only the tasks that work changed.
 - Selectors: `calendar-url`, `calendar-device`, `calendar-device-body`, `calendar-grant`, `calendar-push`, `calendar-delete-confirm`
 - Code: `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/CalendarSettings.kt`, `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/core/HostCalendars.kt`, `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/core/CalendarPushWrites.kt`, `apps/android-native/bundle/host-calendar.ts`
-- Checks: `apps/android-native/scripts/check-calendar-feeds-device.mjs`, `apps/android-native/scripts/check-calendar-push-device.mjs`, `apps/android-native/scripts/check-upgrade-device.mjs`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/core/HostCalendarsTest.kt`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/core/CalendarPushWritesTest.kt`
+- Checks: `apps/android-native/scripts/check-calendar-feeds-device.mjs`, `apps/android-native/scripts/check-calendar-push-device.mjs`, `apps/android-native/scripts/check-upgrade-device.mjs`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/core/HostCalendarsTest.kt`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/core/CalendarPushWritesTest.kt`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/CoreJobTest.kt`, `apps/android-native/bundle/host-calendar-push.test.ts`
 - Notes: A subscription URL is never written to the journal, the log files, or logcat. Feed requests carry no Origin header.
 
 ## Board
@@ -334,6 +338,7 @@ The native client is a Kotlin and Jetpack Compose app in `apps/android-native`. 
 - Shortcuts: Tap a widget row's ring to complete it. The widget header opens the app or a widget list.
 - Code: `apps/android-native/android/widget/src/main/java/tech/dongdongbh/mindwtr/androidwidget/CaptureSyncHeadlessService.kt`, `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/core/HostWidgets.kt`, `apps/android-native/bundle/host-widgets.ts`, `apps/android-native/scripts/build-widgets.mjs`, `apps/mobile/modules/android-widget`
 - Checks: `apps/android-native/scripts/check-widgets-device.mjs`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/core/WidgetRefreshGateTest.kt`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/core/WidgetAudioDrainTest.kt`, `apps/android-native/android/widget/src/test/java/tech/dongdongbh/mindwtr/androidwidget/CaptureSyncHeadlessServiceTest.kt`
+- Notes: The widget chooser requests fresh published options on open and updates them without clearing search or pending choices. The built-in compact list is named Today; saved Focus filters use the shared Focus task sections.
 - Notes: The widget code is RN's module, compiled as is. A ring tap is queued and completed by a background job, even if the app was killed first. Rings tapped in a row keep every row in place until three seconds after the last tap, the same as RN (#1211).
 
 ## Widget list
@@ -341,9 +346,9 @@ The native client is a Kotlin and Jetpack Compose app in `apps/android-native`. 
 - Reach: A widget's list link opens the list full screen. Back leaves it.
 - Shortcuts: Link `mindwtr-native-dev:///widget-list`.
 - Selectors: `swipe-done`, `swipe-focus`
-- Code: `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/WidgetListScreen.kt`
-- Checks: `apps/android-native/scripts/check-widget-list-device.mjs`
-- Notes: A saved filter that is gone shows "No results" with no rows.
+- Code: `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/WidgetListScreen.kt`, `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/MenuModel.kt`
+- Checks: `apps/android-native/scripts/check-widget-list-device.mjs`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/WidgetContextsFilterTest.kt`
+- Notes: A saved filter that is gone shows "No results" with no rows. A saved Contexts filter link opens the Contexts screen with that filter selected and editable, as in RN (#1485).
 
 ## Automation capture
 
@@ -518,3 +523,11 @@ The native client is a Kotlin and Jetpack Compose app in `apps/android-native`. 
 - Ownership: `packages/core/src/task-reminder-policy.ts`, `packages/core/src/schedule-utils.ts`, `packages/core/src/task-editor-schedule.ts`; each platform consumes the shared reminder model and plan.
 - Checks: `packages/core/src/selective-reminders.test.ts`; confirm old alarms are withdrawn after changing modes, completion, or permission revocation. Review reminders remain separate.
 - Compatibility: older clients skip these selective reminders and cannot edit or preserve the new policy reliably. Update every device before using the new modes.
+
+## Project calendar reference
+
+- Reach: Projects › open a Project › expand Details › the calendar card (first in Details, as in RN) › Link calendar event, Replace linked event, or Unlink calendar event. The picker opens inside the card. Search the upcoming 90-day events by event title or calendar name.
+- Selectors: `project-calendar-reference`, `project-calendar-link`, `project-calendar-unlink`, `project-calendar-search`, `project-calendar-cancel`, `project-calendar-title`, `project-calendar-date`, `project-calendar-status`, `project-calendar-picker-status`, `project-calendar-save-failed`; each picker row is `project-calendar-event-` plus its index
+- Code: `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/ProjectDetails.kt`, `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/core/CoreHost.kt`, `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/core/WriteJournal.kt`, `packages/core/src/native-host-contract-project-calendar-reference.ts`
+- Checks: `packages/core/src/native-host-contract-project-calendar-reference.test.ts`, `apps/android-native/bundle/host-project-calendar-reference.test.ts`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/core/WriteJournalTest.kt`, `apps/android-native/scripts/check-project-calendar-device.mjs` (phone: link from a local ICS stub, the stored event at once after a restart, "start – end", unlink)
+- Notes: One read-only ICS event reference belongs to the Project. Linking creates no task and changes no calendar event. Ambiguous identities and incomplete feed reads offer no candidates; unavailable feeds show last-known details. Opening a Project reads the stored link first with `summary: true`, which never downloads feeds. Feeds download only when a link exists (to refresh it) or the picker is open, on core's own `projectCalendar` feed slot, so the Project never cancels a Calendar-screen load. Dates show "start – end"; an all-day end moves back one day. Archived Projects are read-only. Explicit unlink persists a null marker. Native writes freeze the selected candidate and Project snapshot before journaling, retain exact retries, and acknowledge only after durable storage.

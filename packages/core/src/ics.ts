@@ -1,4 +1,4 @@
-import { addDays, addMonths, addWeeks, differenceInCalendarDays, startOfWeek } from 'date-fns';
+import { addDays } from 'date-fns';
 import { normalizeDerivedIcsColor } from './external-calendar-colors';
 
 export interface ExternalCalendarSubscription {
@@ -19,6 +19,9 @@ export interface ExternalCalendarEvent {
     sourceId: string;
 
     nativeEventId?: string;
+    uid?: string;
+    recurrenceId?: string;
+    calendarSourceId?: string;
     title: string;
     start: string;
     end: string;
@@ -55,6 +58,7 @@ export interface ParseIcsResult {
 
 
 const MAX_CATEGORY_CALENDARS = 8;
+const DEFAULT_MAX_OCCURRENCES_PER_EVENT = 1000;
 
 const categoryCalendarPrefix = (sourceId: string): string => `${sourceId}#`;
 
@@ -85,6 +89,9 @@ type ParsedVEvent = {
 
 
     recurrenceId?: Date;
+    recurrenceIdentity?: string;
+    floating?: boolean;
+    timeZone?: string;
 
     cancelled?: boolean;
 
@@ -230,7 +237,7 @@ function getTimeZoneOffsetMillis(date: Date, timeZone: string): number {
 
     const dtf = new Intl.DateTimeFormat('en-US', {
         timeZone,
-        hour12: false,
+        hourCycle: 'h23',
         year: 'numeric',
         month: '2-digit',
         day: '2-digit',
@@ -274,7 +281,7 @@ function zonedDateTimeToInstant(
     return guess;
 }
 
-function parseIcsDateTime(value: string, params: IcsParams): { date: Date; allDay: boolean } | null {
+function parseIcsDateTime(value: string, params: IcsParams): { date: Date; allDay: boolean; timeZone?: string } | null {
     const trimmed = value.trim();
     const valueType = (params.VALUE || '').toUpperCase();
 
@@ -299,7 +306,7 @@ function parseIcsDateTime(value: string, params: IcsParams): { date: Date; allDa
     const second = parseInt(match[6], 10);
 
     if (isUtc) {
-        return { date: new Date(Date.UTC(year, month - 1, day, hour, minute, second)), allDay: false };
+        return { date: new Date(Date.UTC(year, month - 1, day, hour, minute, second)), allDay: false, timeZone: 'UTC' };
     }
 
     const tzid = params.TZID;
@@ -308,6 +315,7 @@ function parseIcsDateTime(value: string, params: IcsParams): { date: Date; allDa
             return {
                 date: zonedDateTimeToInstant({ year, month, day, hour, minute, second }, tzid),
                 allDay: false,
+                timeZone: tzid,
             };
         } catch {
 
@@ -377,23 +385,52 @@ function parseRRule(raw: string): ParsedRRule | null {
     };
 }
 
+function recurrenceDate(date: Date, timeZone?: string): Date {
+    if (timeZone) return new Date(date.getTime() + (timeZone === 'UTC' ? 0 : getTimeZoneOffsetMillis(date, timeZone)));
+    return new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate(), date.getHours(), date.getMinutes(), date.getSeconds()));
+}
+
+function recurrenceInstant(date: Date, timeZone?: string): Date {
+    const components = { year: date.getUTCFullYear(), month: date.getUTCMonth() + 1, day: date.getUTCDate(),
+        hour: date.getUTCHours(), minute: date.getUTCMinutes(), second: date.getUTCSeconds() };
+    return timeZone === 'UTC' ? date : timeZone ? zonedDateTimeToInstant(components, timeZone)
+        : new Date(components.year, components.month - 1, components.day, components.hour, components.minute, components.second);
+}
+
+function addRecurrenceDays(date: Date, days: number): Date {
+    const next = new Date(date);
+    next.setUTCDate(next.getUTCDate() + days);
+    return next;
+}
+
+function addRecurrenceMonths(date: Date, months: number): Date {
+    const next = new Date(date);
+    next.setUTCMonth(next.getUTCMonth() + months);
+    return next;
+}
+
+function recurrenceWeekStart(date: Date): Date {
+    const day = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+    return addRecurrenceDays(day, -((day.getUTCDay() + 6) % 7));
+}
+
 function getNthWeekdayOfMonth(year: number, month: number, weekday: number, ordinal: number): Date | null {
     if (!Number.isFinite(ordinal) || ordinal === 0) return null;
 
     if (ordinal > 0) {
-        const firstOfMonth = new Date(year, month, 1);
-        const offset = (weekday - firstOfMonth.getDay() + 7) % 7;
+        const firstOfMonth = new Date(Date.UTC(year, month, 1));
+        const offset = (weekday - firstOfMonth.getUTCDay() + 7) % 7;
         const day = 1 + offset + (ordinal - 1) * 7;
-        const candidate = new Date(year, month, day);
-        return candidate.getMonth() === month ? candidate : null;
+        const candidate = new Date(Date.UTC(year, month, day));
+        return candidate.getUTCMonth() === month ? candidate : null;
     }
 
-    const lastOfMonth = new Date(year, month + 1, 0);
-    const offset = (lastOfMonth.getDay() - weekday + 7) % 7;
-    const lastMatchingDay = lastOfMonth.getDate() - offset;
+    const lastOfMonth = new Date(Date.UTC(year, month + 1, 0));
+    const offset = (lastOfMonth.getUTCDay() - weekday + 7) % 7;
+    const lastMatchingDay = lastOfMonth.getUTCDate() - offset;
     const day = lastMatchingDay + (ordinal + 1) * 7;
-    const candidate = new Date(year, month, day);
-    return candidate.getMonth() === month ? candidate : null;
+    const candidate = new Date(Date.UTC(year, month, day));
+    return candidate.getUTCMonth() === month ? candidate : null;
 }
 
 function getMonthlyCandidates(
@@ -402,16 +439,16 @@ function getMonthlyCandidates(
     eventTime: { h: number; m: number; s: number; ms: number },
     fallbackMonthDay: number
 ): Date[] {
-    const year = monthCursor.getFullYear();
-    const month = monthCursor.getMonth();
+    const year = monthCursor.getUTCFullYear();
+    const month = monthCursor.getUTCMonth();
 
     if (rule.byMonthDay && rule.byMonthDay.length > 0) {
         return rule.byMonthDay
 
             .map((monthDay) => (monthDay === -1
-                ? new Date(year, month + 1, 0, eventTime.h, eventTime.m, eventTime.s, eventTime.ms)
-                : new Date(year, month, monthDay, eventTime.h, eventTime.m, eventTime.s, eventTime.ms)))
-            .filter((candidate) => candidate.getMonth() === month)
+                ? new Date(Date.UTC(year, month + 1, 0, eventTime.h, eventTime.m, eventTime.s, eventTime.ms))
+                : new Date(Date.UTC(year, month, monthDay, eventTime.h, eventTime.m, eventTime.s, eventTime.ms))))
+            .filter((candidate) => candidate.getUTCMonth() === month)
             .sort((a, b) => a.getTime() - b.getTime());
     }
 
@@ -421,17 +458,17 @@ function getMonthlyCandidates(
             if (typeof token.ordinal === 'number') {
                 const nth = getNthWeekdayOfMonth(year, month, token.weekday, token.ordinal);
                 if (!nth) continue;
-                const candidate = new Date(year, month, nth.getDate(), eventTime.h, eventTime.m, eventTime.s, eventTime.ms);
+                const candidate = new Date(Date.UTC(year, month, nth.getUTCDate(), eventTime.h, eventTime.m, eventTime.s, eventTime.ms));
                 candidates.set(candidate.getTime(), candidate);
                 continue;
             }
 
-            const firstOfMonth = new Date(year, month, 1);
-            const offset = (token.weekday - firstOfMonth.getDay() + 7) % 7;
+            const firstOfMonth = new Date(Date.UTC(year, month, 1));
+            const offset = (token.weekday - firstOfMonth.getUTCDay() + 7) % 7;
             let day = 1 + offset;
             while (true) {
-                const candidate = new Date(year, month, day, eventTime.h, eventTime.m, eventTime.s, eventTime.ms);
-                if (candidate.getMonth() !== month) break;
+                const candidate = new Date(Date.UTC(year, month, day, eventTime.h, eventTime.m, eventTime.s, eventTime.ms));
+                if (candidate.getUTCMonth() !== month) break;
                 candidates.set(candidate.getTime(), candidate);
                 day += 7;
             }
@@ -440,8 +477,8 @@ function getMonthlyCandidates(
         return Array.from(candidates.values()).sort((a, b) => a.getTime() - b.getTime());
     }
 
-    return [new Date(year, month, fallbackMonthDay, eventTime.h, eventTime.m, eventTime.s, eventTime.ms)]
-        .filter((candidate) => candidate.getMonth() === month);
+    return [new Date(Date.UTC(year, month, fallbackMonthDay, eventTime.h, eventTime.m, eventTime.s, eventTime.ms))]
+        .filter((candidate) => candidate.getUTCMonth() === month);
 }
 
 function getYearlyCandidates(
@@ -460,9 +497,9 @@ function getYearlyCandidates(
         if (rule.byMonthDay && rule.byMonthDay.length > 0) {
             for (const monthDay of rule.byMonthDay) {
                 const candidate = monthDay === -1
-                    ? new Date(year, month + 1, 0, eventTime.h, eventTime.m, eventTime.s, eventTime.ms)
-                    : new Date(year, month, monthDay, eventTime.h, eventTime.m, eventTime.s, eventTime.ms);
-                if (candidate.getMonth() === month) {
+                    ? new Date(Date.UTC(year, month + 1, 0, eventTime.h, eventTime.m, eventTime.s, eventTime.ms))
+                    : new Date(Date.UTC(year, month, monthDay, eventTime.h, eventTime.m, eventTime.s, eventTime.ms));
+                if (candidate.getUTCMonth() === month) {
                     candidates.set(candidate.getTime(), candidate);
                 }
             }
@@ -474,17 +511,17 @@ function getYearlyCandidates(
                 if (typeof token.ordinal === 'number') {
                     const nth = getNthWeekdayOfMonth(year, month, token.weekday, token.ordinal);
                     if (!nth) continue;
-                    const candidate = new Date(year, month, nth.getDate(), eventTime.h, eventTime.m, eventTime.s, eventTime.ms);
+                    const candidate = new Date(Date.UTC(year, month, nth.getUTCDate(), eventTime.h, eventTime.m, eventTime.s, eventTime.ms));
                     candidates.set(candidate.getTime(), candidate);
                     continue;
                 }
 
-                const firstOfMonth = new Date(year, month, 1);
-                const offset = (token.weekday - firstOfMonth.getDay() + 7) % 7;
+                const firstOfMonth = new Date(Date.UTC(year, month, 1));
+                const offset = (token.weekday - firstOfMonth.getUTCDay() + 7) % 7;
                 let day = 1 + offset;
                 while (true) {
-                    const candidate = new Date(year, month, day, eventTime.h, eventTime.m, eventTime.s, eventTime.ms);
-                    if (candidate.getMonth() !== month) break;
+                    const candidate = new Date(Date.UTC(year, month, day, eventTime.h, eventTime.m, eventTime.s, eventTime.ms));
+                    if (candidate.getUTCMonth() !== month) break;
                     candidates.set(candidate.getTime(), candidate);
                     day += 7;
                 }
@@ -492,8 +529,8 @@ function getYearlyCandidates(
             continue;
         }
 
-        const candidate = new Date(year, month, fallbackMonthDay, eventTime.h, eventTime.m, eventTime.s, eventTime.ms);
-        if (candidate.getMonth() === month) {
+        const candidate = new Date(Date.UTC(year, month, fallbackMonthDay, eventTime.h, eventTime.m, eventTime.s, eventTime.ms));
+        if (candidate.getUTCMonth() === month) {
             candidates.set(candidate.getTime(), candidate);
         }
     }
@@ -509,26 +546,44 @@ function createStableEventId(sourceId: string, uid: string, startIso: string): s
     return `${sourceId}:${uid}:${startIso}`;
 }
 
+function occurrenceIdentity(date: Date, allDay: boolean, floating: boolean): string {
+    if (!allDay && !floating) return date.toISOString();
+    const pad = (value: number) => String(value).padStart(2, '0');
+    const day = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+    return allDay ? `DATE:${day}` : `FLOAT:${day}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+
 function expandRecurringEvent(event: ParsedVEvent, options: ParseIcsOptions): ExternalCalendarEvent[] {
     const { sourceId, rangeStart, rangeEnd } = options;
-    const maxPerEvent = options.maxOccurrencesPerEvent ?? 1000;
+    const maxPerEvent = options.maxOccurrencesPerEvent ?? DEFAULT_MAX_OCCURRENCES_PER_EVENT;
+    const maxCandidateVisits = Math.max(maxPerEvent, DEFAULT_MAX_OCCURRENCES_PER_EVENT) + 2;
 
-    const durationMs = Math.max(0, event.end.getTime() - event.start.getTime());
-    const windowStart = new Date(rangeStart.getTime() - durationMs);
-    const windowEnd = rangeEnd;
+    const durationMs = Math.max(0, event.allDay
+        ? Date.UTC(event.end.getFullYear(), event.end.getMonth(), event.end.getDate())
+            - Date.UTC(event.start.getFullYear(), event.start.getMonth(), event.start.getDate())
+        : event.end.getTime() - event.start.getTime());
+    const recurrenceStart = recurrenceDate(event.start, event.timeZone);
+    const earliest = event.allDay ? new Date(recurrenceDate(rangeStart).getTime() - durationMs)
+        : recurrenceDate(new Date(rangeStart.getTime() - durationMs), event.timeZone);
+    const windowStart = addRecurrenceDays(earliest, -1);
+    const windowEnd = addRecurrenceDays(recurrenceDate(rangeEnd, event.timeZone), 1);
 
     const out: ExternalCalendarEvent[] = [];
 
-    const addOccurrence = (start: Date) => {
+    const addOccurrence = (candidate: Date) => {
+        if (out.length >= maxPerEvent) return;
+        const start = recurrenceInstant(candidate, event.timeZone);
 
 
         if (event.excludedStarts?.has(start.getTime())) return;
-        const end = new Date(start.getTime() + durationMs);
+        const end = event.allDay ? addDays(start, durationMs / 86_400_000) : new Date(start.getTime() + durationMs);
         if (!intersectsRange(start, end, rangeStart, rangeEnd)) return;
         const startIso = start.toISOString();
         out.push({
             id: createStableEventId(sourceId, event.uid, startIso),
             sourceId,
+            uid: event.uid,
+            ...(event.recurrenceId || event.rrule ? { recurrenceId: event.recurrenceIdentity ?? occurrenceIdentity(start, event.allDay, Boolean(event.floating)) } : {}),
             title: event.summary,
             start: startIso,
             end: end.toISOString(),
@@ -542,7 +597,7 @@ function expandRecurringEvent(event: ParsedVEvent, options: ParseIcsOptions): Ex
     const rule = event.recurrenceId ? undefined : event.rrule;
     if (!rule) {
         if (intersectsRange(event.start, event.end, rangeStart, rangeEnd)) {
-            addOccurrence(event.start);
+            addOccurrence(recurrenceStart);
         }
         return out;
     }
@@ -552,19 +607,20 @@ function expandRecurringEvent(event: ParsedVEvent, options: ParseIcsOptions): Ex
     const countLimit = rule.count;
 
     const shouldStop = (candidateStart: Date) => {
-        if (until && candidateStart.getTime() > until.getTime()) return true;
+        if (out.length >= maxPerEvent) return true;
+        if (until && recurrenceInstant(candidateStart, event.timeZone).getTime() > until.getTime()) return true;
         if (countLimit && generated >= countLimit) return true;
-        if (generated >= maxPerEvent) return true;
+        if (generated >= maxCandidateVisits) return true;
         return false;
     };
 
     if (countLimit && countLimit > 0) {
         if (rule.freq === 'DAILY') {
-            let current = event.start;
+            let current = recurrenceStart;
             while (current.getTime() <= windowEnd.getTime() && !shouldStop(current)) {
                 addOccurrence(current);
                 generated += 1;
-                current = addDays(current, rule.interval);
+                current = addRecurrenceDays(current, rule.interval);
             }
             return out;
         }
@@ -572,63 +628,63 @@ function expandRecurringEvent(event: ParsedVEvent, options: ParseIcsOptions): Ex
         if (rule.freq === 'WEEKLY') {
             const byDays = rule.byDay && rule.byDay.length > 0
                 ? Array.from(new Set(rule.byDay.map((token) => token.weekday)))
-                : [event.start.getDay()];
-            const eventTime = { h: event.start.getHours(), m: event.start.getMinutes(), s: event.start.getSeconds(), ms: event.start.getMilliseconds() };
+                : [recurrenceStart.getUTCDay()];
+            const eventTime = { h: recurrenceStart.getUTCHours(), m: recurrenceStart.getUTCMinutes(), s: recurrenceStart.getUTCSeconds(), ms: recurrenceStart.getUTCMilliseconds() };
 
-            const baseWeekStart = startOfWeek(event.start, { weekStartsOn: 1 });
+            const baseWeekStart = recurrenceWeekStart(recurrenceStart);
             let weekCursor = baseWeekStart;
 
-            while (weekCursor.getTime() <= windowEnd.getTime() && generated < maxPerEvent) {
+            while (weekCursor.getTime() <= windowEnd.getTime() && generated < maxCandidateVisits) {
                 for (const day of byDays) {
-                    const offset = (day - weekCursor.getDay() + 7) % 7;
-                    const candidate = addDays(weekCursor, offset);
-                    candidate.setHours(eventTime.h, eventTime.m, eventTime.s, eventTime.ms);
-                    if (candidate.getTime() < event.start.getTime()) continue;
+                    const offset = (day - weekCursor.getUTCDay() + 7) % 7;
+                    const candidate = addRecurrenceDays(weekCursor, offset);
+                    candidate.setUTCHours(eventTime.h, eventTime.m, eventTime.s, eventTime.ms);
+                    if (candidate.getTime() < recurrenceStart.getTime()) continue;
                     if (candidate.getTime() > windowEnd.getTime()) return out;
                     if (shouldStop(candidate)) return out;
                     addOccurrence(candidate);
                     generated += 1;
                     if (countLimit && generated >= countLimit) return out;
-                    if (generated >= maxPerEvent) return out;
+                    if (generated >= maxCandidateVisits) return out;
                 }
-                weekCursor = addWeeks(weekCursor, rule.interval);
+                weekCursor = addRecurrenceDays(weekCursor, rule.interval * 7);
             }
 
             return out;
         }
 
         if (rule.freq === 'MONTHLY') {
-            const eventTime = { h: event.start.getHours(), m: event.start.getMinutes(), s: event.start.getSeconds(), ms: event.start.getMilliseconds() };
+            const eventTime = { h: recurrenceStart.getUTCHours(), m: recurrenceStart.getUTCMinutes(), s: recurrenceStart.getUTCSeconds(), ms: recurrenceStart.getUTCMilliseconds() };
 
-            let monthCursor = new Date(event.start.getFullYear(), event.start.getMonth(), 1, 0, 0, 0, 0);
-            while (monthCursor.getTime() <= windowEnd.getTime() && generated < maxPerEvent) {
-                for (const candidate of getMonthlyCandidates(monthCursor, rule, eventTime, event.start.getDate())) {
-                    if (candidate.getTime() < event.start.getTime()) continue;
+            let monthCursor = new Date(Date.UTC(recurrenceStart.getUTCFullYear(), recurrenceStart.getUTCMonth(), 1, 0, 0, 0, 0));
+            while (monthCursor.getTime() <= windowEnd.getTime() && generated < maxCandidateVisits) {
+                for (const candidate of getMonthlyCandidates(monthCursor, rule, eventTime, recurrenceStart.getUTCDate())) {
+                    if (candidate.getTime() < recurrenceStart.getTime()) continue;
                     if (candidate.getTime() > windowEnd.getTime()) return out;
                     if (shouldStop(candidate)) return out;
                     addOccurrence(candidate);
                     generated += 1;
                     if (countLimit && generated >= countLimit) return out;
-                    if (generated >= maxPerEvent) return out;
+                    if (generated >= maxCandidateVisits) return out;
                 }
-                monthCursor = addMonths(monthCursor, rule.interval);
+                monthCursor = addRecurrenceMonths(monthCursor, rule.interval);
             }
 
             return out;
         }
 
-        const eventTime = { h: event.start.getHours(), m: event.start.getMinutes(), s: event.start.getSeconds(), ms: event.start.getMilliseconds() };
-        let yearCursor = event.start.getFullYear();
-        while (yearCursor <= windowEnd.getFullYear() && generated < maxPerEvent) {
-            const candidates = getYearlyCandidates(yearCursor, rule, eventTime, event.start.getMonth() + 1, event.start.getDate());
+        const eventTime = { h: recurrenceStart.getUTCHours(), m: recurrenceStart.getUTCMinutes(), s: recurrenceStart.getUTCSeconds(), ms: recurrenceStart.getUTCMilliseconds() };
+        let yearCursor = recurrenceStart.getUTCFullYear();
+        while (yearCursor <= windowEnd.getUTCFullYear() && generated < maxCandidateVisits) {
+            const candidates = getYearlyCandidates(yearCursor, rule, eventTime, recurrenceStart.getUTCMonth() + 1, recurrenceStart.getUTCDate());
             for (const candidate of candidates) {
-                if (candidate.getTime() < event.start.getTime()) continue;
+                if (candidate.getTime() < recurrenceStart.getTime()) continue;
                 if (candidate.getTime() > windowEnd.getTime()) return out;
                 if (shouldStop(candidate)) return out;
                 addOccurrence(candidate);
                 generated += 1;
                 if (countLimit && generated >= countLimit) return out;
-                if (generated >= maxPerEvent) return out;
+                if (generated >= maxCandidateVisits) return out;
             }
             yearCursor += rule.interval;
         }
@@ -637,22 +693,22 @@ function expandRecurringEvent(event: ParsedVEvent, options: ParseIcsOptions): Ex
     }
 
     if (rule.freq === 'DAILY') {
-        let current = event.start;
+        let current = recurrenceStart;
         if (current.getTime() < windowStart.getTime()) {
-            const diffDays = differenceInCalendarDays(windowStart, current);
+            const diffDays = Math.floor((windowStart.getTime() - current.getTime()) / 86_400_000);
             const jumps = Math.floor(diffDays / rule.interval);
-            current = addDays(current, jumps * rule.interval);
+            current = addRecurrenceDays(current, jumps * rule.interval);
             while (current.getTime() < windowStart.getTime()) {
-                current = addDays(current, rule.interval);
+                current = addRecurrenceDays(current, rule.interval);
             }
         }
 
         while (current.getTime() <= windowEnd.getTime() && !shouldStop(current)) {
-            if (current.getTime() >= event.start.getTime()) {
+            if (current.getTime() >= recurrenceStart.getTime()) {
                 addOccurrence(current);
                 generated += 1;
             }
-            current = addDays(current, rule.interval);
+            current = addRecurrenceDays(current, rule.interval);
         }
 
         return out;
@@ -661,85 +717,85 @@ function expandRecurringEvent(event: ParsedVEvent, options: ParseIcsOptions): Ex
     if (rule.freq === 'WEEKLY') {
         const byDays = rule.byDay && rule.byDay.length > 0
             ? Array.from(new Set(rule.byDay.map((token) => token.weekday)))
-            : [event.start.getDay()];
-        const eventTime = { h: event.start.getHours(), m: event.start.getMinutes(), s: event.start.getSeconds(), ms: event.start.getMilliseconds() };
+            : [recurrenceStart.getUTCDay()];
+        const eventTime = { h: recurrenceStart.getUTCHours(), m: recurrenceStart.getUTCMinutes(), s: recurrenceStart.getUTCSeconds(), ms: recurrenceStart.getUTCMilliseconds() };
 
-        const baseWeekStart = startOfWeek(event.start, { weekStartsOn: 1 });
+        const baseWeekStart = recurrenceWeekStart(recurrenceStart);
         let weekCursor = baseWeekStart;
 
         if (weekCursor.getTime() < windowStart.getTime()) {
-            const diffDays = differenceInCalendarDays(windowStart, weekCursor);
+            const diffDays = Math.floor((windowStart.getTime() - weekCursor.getTime()) / 86_400_000);
             const diffWeeks = Math.floor(diffDays / 7);
             const jumps = Math.floor(diffWeeks / rule.interval);
-            weekCursor = addWeeks(weekCursor, jumps * rule.interval);
-            while (addDays(weekCursor, 7).getTime() < windowStart.getTime()) {
-                weekCursor = addWeeks(weekCursor, rule.interval);
+            weekCursor = addRecurrenceDays(weekCursor, jumps * rule.interval * 7);
+            while (addRecurrenceDays(weekCursor, 7).getTime() < windowStart.getTime()) {
+                weekCursor = addRecurrenceDays(weekCursor, rule.interval * 7);
             }
         }
 
-        while (weekCursor.getTime() <= windowEnd.getTime() && generated < maxPerEvent) {
+        while (weekCursor.getTime() <= windowEnd.getTime() && generated < maxCandidateVisits) {
             for (const day of byDays) {
-                const offset = (day - weekCursor.getDay() + 7) % 7;
-                const candidate = addDays(weekCursor, offset);
-                candidate.setHours(eventTime.h, eventTime.m, eventTime.s, eventTime.ms);
-                if (candidate.getTime() < event.start.getTime()) continue;
+                const offset = (day - weekCursor.getUTCDay() + 7) % 7;
+                const candidate = addRecurrenceDays(weekCursor, offset);
+                candidate.setUTCHours(eventTime.h, eventTime.m, eventTime.s, eventTime.ms);
+                if (candidate.getTime() < recurrenceStart.getTime()) continue;
                 if (candidate.getTime() > windowEnd.getTime()) continue;
                 if (shouldStop(candidate)) return out;
                 addOccurrence(candidate);
                 generated += 1;
                 if (countLimit && generated >= countLimit) return out;
-                if (generated >= maxPerEvent) return out;
+                if (generated >= maxCandidateVisits) return out;
             }
-            weekCursor = addWeeks(weekCursor, rule.interval);
+            weekCursor = addRecurrenceDays(weekCursor, rule.interval * 7);
         }
 
         return out;
     }
 
     if (rule.freq === 'MONTHLY') {
-        const eventTime = { h: event.start.getHours(), m: event.start.getMinutes(), s: event.start.getSeconds(), ms: event.start.getMilliseconds() };
+        const eventTime = { h: recurrenceStart.getUTCHours(), m: recurrenceStart.getUTCMinutes(), s: recurrenceStart.getUTCSeconds(), ms: recurrenceStart.getUTCMilliseconds() };
 
-        let monthCursor = new Date(event.start.getFullYear(), event.start.getMonth(), 1, 0, 0, 0, 0);
+        let monthCursor = new Date(Date.UTC(recurrenceStart.getUTCFullYear(), recurrenceStart.getUTCMonth(), 1, 0, 0, 0, 0));
         if (monthCursor.getTime() < windowStart.getTime()) {
-            const approxMonths = (windowStart.getFullYear() - monthCursor.getFullYear()) * 12 + (windowStart.getMonth() - monthCursor.getMonth());
+            const approxMonths = (windowStart.getUTCFullYear() - monthCursor.getUTCFullYear()) * 12 + (windowStart.getUTCMonth() - monthCursor.getUTCMonth());
             const jumps = Math.floor(approxMonths / rule.interval);
-            monthCursor = addMonths(monthCursor, jumps * rule.interval);
-            while (addMonths(monthCursor, rule.interval).getTime() < windowStart.getTime()) {
-                monthCursor = addMonths(monthCursor, rule.interval);
+            monthCursor = addRecurrenceMonths(monthCursor, jumps * rule.interval);
+            while (addRecurrenceMonths(monthCursor, rule.interval).getTime() < windowStart.getTime()) {
+                monthCursor = addRecurrenceMonths(monthCursor, rule.interval);
             }
         }
 
-        while (monthCursor.getTime() <= windowEnd.getTime() && generated < maxPerEvent) {
-            for (const candidate of getMonthlyCandidates(monthCursor, rule, eventTime, event.start.getDate())) {
-                if (candidate.getTime() < event.start.getTime()) continue;
+        while (monthCursor.getTime() <= windowEnd.getTime() && generated < maxCandidateVisits) {
+            for (const candidate of getMonthlyCandidates(monthCursor, rule, eventTime, recurrenceStart.getUTCDate())) {
+                if (candidate.getTime() < recurrenceStart.getTime()) continue;
                 if (candidate.getTime() > windowEnd.getTime()) continue;
                 if (shouldStop(candidate)) return out;
                 addOccurrence(candidate);
                 generated += 1;
                 if (countLimit && generated >= countLimit) return out;
-                if (generated >= maxPerEvent) return out;
+                if (generated >= maxCandidateVisits) return out;
             }
-            monthCursor = addMonths(monthCursor, rule.interval);
+            monthCursor = addRecurrenceMonths(monthCursor, rule.interval);
         }
 
         return out;
     }
 
-    const eventTime = { h: event.start.getHours(), m: event.start.getMinutes(), s: event.start.getSeconds(), ms: event.start.getMilliseconds() };
-    let yearCursor = event.start.getFullYear();
-    if (yearCursor < windowStart.getFullYear()) {
-        const diffYears = windowStart.getFullYear() - yearCursor;
+    const eventTime = { h: recurrenceStart.getUTCHours(), m: recurrenceStart.getUTCMinutes(), s: recurrenceStart.getUTCSeconds(), ms: recurrenceStart.getUTCMilliseconds() };
+    let yearCursor = recurrenceStart.getUTCFullYear();
+    if (yearCursor < windowStart.getUTCFullYear()) {
+        const diffYears = windowStart.getUTCFullYear() - yearCursor;
         yearCursor += Math.floor(diffYears / rule.interval) * rule.interval;
     }
 
-    while (yearCursor <= windowEnd.getFullYear() && generated < maxPerEvent) {
-        for (const candidate of getYearlyCandidates(yearCursor, rule, eventTime, event.start.getMonth() + 1, event.start.getDate())) {
-            if (candidate.getTime() < event.start.getTime()) continue;
+    while (yearCursor <= windowEnd.getUTCFullYear() && generated < maxCandidateVisits) {
+        for (const candidate of getYearlyCandidates(yearCursor, rule, eventTime, recurrenceStart.getUTCMonth() + 1, recurrenceStart.getUTCDate())) {
+            if (candidate.getTime() < recurrenceStart.getTime()) continue;
             if (candidate.getTime() > windowEnd.getTime()) return out;
             if (shouldStop(candidate)) return out;
             addOccurrence(candidate);
             generated += 1;
-            if (generated >= maxPerEvent) return out;
+            if (generated >= maxCandidateVisits) return out;
         }
         yearCursor += rule.interval;
     }
@@ -813,6 +869,9 @@ export function parseIcsWithMetadata(input: string, options: ParseIcsOptions): P
                     allDay,
                     rrule: current.rrule,
                     recurrenceId: current.recurrenceId,
+                    recurrenceIdentity: current.recurrenceIdentity,
+                    floating: current.floating,
+                    timeZone: current.timeZone,
                     cancelled: current.cancelled,
                     excludedStarts: current.excludedStarts,
                     category: current.category,
@@ -857,6 +916,8 @@ export function parseIcsWithMetadata(input: string, options: ParseIcsOptions): P
             if (dt) {
                 current.start = dt.date;
                 current.allDay = dt.allDay;
+                current.floating = !dt.timeZone;
+                current.timeZone = dt.timeZone;
             }
         } else if (name === 'DTEND') {
             const dt = parseIcsDateTime(value, params);
@@ -877,7 +938,10 @@ export function parseIcsWithMetadata(input: string, options: ParseIcsOptions): P
             }
         } else if (name === 'RECURRENCE-ID') {
             const dt = parseIcsDateTime(value, params);
-            if (dt) current.recurrenceId = dt.date;
+            if (dt) {
+                current.recurrenceId = dt.date;
+                current.recurrenceIdentity = occurrenceIdentity(dt.date, dt.allDay, !dt.timeZone);
+            }
         } else if (name === 'STATUS') {
             current.cancelled = value.trim().toUpperCase() === 'CANCELLED';
         } else if (name === 'CATEGORIES' && !current.category) {
@@ -936,7 +1000,7 @@ export function parseIcsWithMetadata(input: string, options: ParseIcsOptions): P
                 : options,
         );
         for (const occ of expanded) {
-            occurrences.push(occ);
+            occurrences.push({ ...occ, calendarSourceId: options.sourceId });
             if (occurrences.length >= maxTotal) break;
         }
     }

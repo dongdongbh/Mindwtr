@@ -1,3 +1,4 @@
+import { getProjectCalendarReferenceSummary } from '@mindwtr/core';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
     buildQuickAddParseOptions,
@@ -1067,7 +1068,9 @@ export function WeeklyReviewGuideModal({ onClose }: WeeklyReviewGuideModalProps)
                                                             ? t('status.waiting')
                                                             : nextActionState === 'deferred'
                                                                 ? t('review.projectDeferred')
-                                                                : t('review.needsAction')}
+                                                                : project.calendarReference
+                                                                    ? getProjectCalendarReferenceSummary(project.calendarReference, t)
+                                                                    : t('review.needsAction')}
                                                 </div>
                                             </div>
                                         </div>

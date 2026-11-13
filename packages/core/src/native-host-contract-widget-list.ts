@@ -11,7 +11,8 @@ import {
 import { fail, isObjectRecord, isPaging, isText, page, paramsKey } from './native-host-contract-menu-views';
 import { useTaskStore } from './store';
 import type { Task } from './types';
-import { resolveWidgetListDestination } from './widget-list-destination';
+import { normalizeSavedFilters } from './saved-filters';
+import { normalizeWidgetListDestinationId, resolveWidgetListDestination } from './widget-list-destination';
 
 export type NativeWidgetListView = {
     version: typeof NATIVE_HOST_CONTRACT_VERSION;
@@ -20,6 +21,8 @@ export type NativeWidgetListView = {
     id: string;
 
     found: boolean;
+
+    contextsFilterId: string | null;
 
     title: string;
 
@@ -68,6 +71,10 @@ export function createWidgetListMethods(deps: WidgetListDeps) {
                 areas: state._allAreas?.length ? state._allAreas : state.areas,
                 settings: state.settings,
             }, deps.language(), input.id);
+            const destination = normalizeWidgetListDestinationId(input.id);
+            const savedFilterId = destination?.startsWith('filter:') && destination.length - 'filter:'.length <= 200 ? destination.slice('filter:'.length) : null;
+            const contextsFilter = savedFilterId === null ? undefined : normalizeSavedFilters(state.settings.savedFilters)
+                .find((filter) => filter.id === savedFilterId && filter.view === 'contexts' && !filter.deletedAt);
             const t = deps.t();
             const tasks = list?.tasks ?? [];
             const rows = deps.rows(page(tasks, window), now);
@@ -79,6 +86,7 @@ export function createWidgetListMethods(deps: WidgetListDeps) {
                     revision,
                     id: input.id,
                     found: Boolean(list),
+                    contextsFilterId: contextsFilter?.id ?? null,
                     title: list?.title ?? t('search.noResults'),
                     total: tasks.length,
                     rows,

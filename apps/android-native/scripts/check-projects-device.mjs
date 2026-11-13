@@ -39,7 +39,7 @@ const coreSrc = resolve(app, '../../packages/core/src');
 
 
 const run = '424242424242';
-const names = { area: `Area${run}`, sequential: `Seq${run}`, archived: `Arch${run}`, many: `Many${run}`, added: `67${run}`, sheetArea: `Sheet${run}` };
+const names = { area: `Area${run}`, sequential: `Seq${run}`, archived: `Arch${run}`, many: `Many${run}`, added: `67${run}`, sheetArea: `Sheet${run}`, peerArea: `Peer${run}` };
 
 const device = connect({ serial, pkg: PKG, uiFile: UI_FILE, adb: adbBin });
 const { adbRaw, sh, home, front, requireAppFront, pid, screen, waitFor, tap, reveal, toTop, completeUntil } = device;
@@ -302,6 +302,10 @@ const core = (db, mode, extra = {}) => JSON.parse(execFileSync('bun', ['-e', `
         }
         for (const project of live(store()._allProjects).filter((item) => [names.sequential, names.many].includes(item.title) && item.isFocused)) {
             value(await host.setProjectFocus({ id: project.id, focused: false, projectRevision: revisionOf(project) }));
+        }
+        if (live(store()._allAreas).length < 2 && !live(store()._allAreas).some((area) => area.name === names.peerArea)) {
+            await store().addArea(names.peerArea);
+            await flushPendingSave();
         }
         const areaId = () => live(store()._allAreas).find((area) => area.name === names.area)?.id;
         const find = (title) => live(store()._allProjects).filter((project) => project.title === title);

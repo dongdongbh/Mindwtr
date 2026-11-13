@@ -38157,3 +38157,31 @@ extension FoundationUITests {
         let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Markdown toolbar"; shot.lifetime = .keepAlways; add(shot)
     }
 }
+
+extension FoundationUITests {
+    func testTaskEditorSwipeDownWithUnsavedChangesAsksBeforeClosing() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = task192Arguments(UUID().uuidString.lowercased())
+        app.launch(); defer { app.terminate() }
+        boardEnabled(app.buttons["capture-open"], timeout: 40)
+        let title = "Swipe guard task"
+        processEditorCapture(app, [title])
+        let row = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label == %@", "task-title-", title)).firstMatch
+        boardEnabled(row, timeout: 30); row.tap()
+        if !app.textFields["task-editor-title"].waitForExistence(timeout: 10) { boardTap(app, "task-mode-edit") }
+        let editor = app.textFields["task-editor-title"]
+        boardEnabled(editor, timeout: 30)
+        replaceProjectNotesText(editor, with: title + " edited")
+        let header = app.buttons["task-view-close"].coordinate(withNormalizedOffset: CGVector(dx: 4, dy: 0.5))
+        header.press(forDuration: 0.1, thenDragTo: header.withOffset(CGVector(dx: 0, dy: 500)))
+        XCTAssertTrue(app.buttons["task-editor-discard"].waitForExistence(timeout: 10))
+        app.alerts.buttons["Cancel"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["task-editor-discard"].waitForNonExistence(timeout: 10))
+        XCTAssertEqual(editor.value as? String, title + " edited")
+        boardTap(app, "task-view-close"); boardTap(app, "task-editor-discard")
+        XCTAssertTrue(editor.waitForNonExistence(timeout: 20))
+        XCTAssertTrue(row.waitForExistence(timeout: 20))
+        XCTAssertFalse(app.buttons["persistence-retry"].exists)
+    }
+}

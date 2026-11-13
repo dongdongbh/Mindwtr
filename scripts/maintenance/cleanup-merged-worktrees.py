@@ -8,6 +8,7 @@ import datetime as dt
 import fcntl
 import hashlib
 import json
+import math
 import os
 from pathlib import Path, PurePosixPath
 import re
@@ -22,8 +23,12 @@ import uuid
 
 
 ARCHIVE_RESERVE_BYTES = 512 * 1024 * 1024
+DEFAULT_MIN_FREE_GB = 60
+DEFAULT_LOCK_PATH = Path.home() / ".local" / "state" / "mindwtr-worktree-cleanup.lock"
 GIT_TIMEOUT_SECONDS = 120
 PROBE_TIMEOUT_SECONDS = 60
+UNSTATTABLE_MOUNT_WARNING = re.compile(
+    rb"lsof: WARNING: can't stat\(\) [^\n]* file system ([^\n]+)\n      Output information may be incomplete\.\n")
 PROTECTED_NAMES = {"native-ios-foundation", "ios-editor-draft-recovery", "apple-ui-wda"}
 GENERATED_PREFIXES = (
     ("apps", "ios-native", ".build"),
@@ -34,8 +39,26 @@ GENERATED_PREFIXES = (
     ("apps", "android-native", ".gradle"),
     ("apps", "android-native", "build"),
     ("apps", "android-native", "app", "build"),
+    ("apps", "android-native", "android", ".gradle"),
+    ("apps", "android-native", "android", ".kotlin"),
+    ("apps", "android-native", "android", "build"),
+    ("apps", "android-native", "android", "app", "build"),
+    ("apps", "android-native", "android", "app", ".cxx"),
+    ("apps", "android-native", "android", "widget", "build"),
+    ("apps", "android-native", "android", "app", "src", "main", "assets", "core-host.js"),
+    ("apps", "ios-native", "Resources", "core-host.js"),
+    ("apps", "ios-native", "Resources", "label-keys.json"),
+    ("apps", "ios-native", "Sources", "MindwtrNativeCore", "Resources", "sandbox-host.js"),
+    ("apps", "mobile", ".expo"),
+    ("apps", "mobile", "expo-env.d.ts"),
+    ("apps", "mobile", "modules", "whisper-engine", ".tests-tmp"),
+    ("apps", "desktop", "dist"),
+    ("apps", "desktop", "src-tauri", "gen", "schemas"),
     (".gradle",),
+    (".venv-comments",),
+    ("coverage",),
 )
+PACKAGE_GENERATED_NAMES = ("node_modules", "coverage")
 
 
 class SafetyError(Exception):
@@ -80,13 +103,13 @@ def inside(path: Path, parent: Path) -> bool:
     return False
 
 
-def run_git(repo: Path, *args: str, accepted: tuple[int, ...] = (0,)) -> bytes:
-    env = dict(os.environ, GIT_OPTIONAL_LOCKS="0", GIT_NO_REPLACE_OBJECTS="1")
+def run_git(repo: Path, *args: str, accepted: tuple[int, ...] = (0,), input: bytes | None = None) -> bytes:
+    env = dict(os.environ, GIT_OPTIONAL_LOCKS="0", GIT_NO_REPLACE_OBJECTS="1", GIT_LITERAL_PATHSPECS="1")
     try:
         result = subprocess.run(
             ["git", "--no-optional-locks", "-c", "core.fsmonitor=false", "-c",
              "core.untrackedCache=false", "-C", str(repo), *args],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=GIT_TIMEOUT_SECONDS,
+            input=input, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=GIT_TIMEOUT_SECONDS,
             check=False, env=env,
         )
     except (OSError, subprocess.TimeoutExpired):
@@ -129,8 +152,10 @@ def generated_group(relative: str) -> str | None:
         return parts[0]
     if parts[0] == "node_modules":
         return "node_modules"
-    if len(parts) >= 3 and parts[0] in ("apps", "packages") and parts[2] == "node_modules":
+    if len(parts) >= 3 and parts[0] in ("apps", "packages") and parts[2] in PACKAGE_GENERATED_NAMES:
         return "/".join(parts[:3])
+    if "__pycache__" in parts[:-1]:
+        return "/".join(parts[:parts.index("__pycache__") + 1])
     for prefix in GENERATED_PREFIXES:
         if parts[:len(prefix)] == prefix:
             return "/".join(prefix)
@@ -158,7 +183,82 @@ def ignored_inventory(path: Path) -> tuple[list[str], bool]:
     return sorted(groups), evidence
 
 
-def activity_mtime(path: Path, allowed_generated_groups: list[str] | None = None) -> int:
+def status_changes(path: Path) -> list[tuple[str, str]]:
+    output = run_git(path, "status", "--porcelain=v1", "-z", "--untracked-files=all",
+                     "--ignore-submodules=none", "--no-renames")
+    return [(os.fsdecode(field[:2]), os.fsdecode(field[3:])) for field in output.split(b"\0") if field]
+
+
+def tree_entries(repo: Path, commit: str) -> dict[str, tuple[str, str]]:
+    entries: dict[str, tuple[str, str]] = {}
+    for field in run_git(repo, "ls-tree", "-r", "-z", "--full-tree", commit).split(b"\0"):
+        if field:
+            meta, _, name = field.partition(b"\t")
+            mode, _, object_id = os.fsdecode(meta).split()
+            entries[os.fsdecode(name)] = (mode, object_id)
+    return entries
+
+
+def single_sided_change(code: str) -> bool:
+    return code == "??" or (code[0] in "MAD" and code[1] == " ") or (code[0] == " " and code[1] in "MD")
+
+
+def path_signature(path: Path, relative: str) -> tuple[int, int, int, int] | None:
+    try:
+        info = (path / relative).lstat()
+    except FileNotFoundError:
+        return None
+    return info.st_ino, info.st_size, info.st_mtime_ns, info.st_mode
+
+
+def matches_tree_entry(path: Path, relative: str, entries: dict[str, tuple[str, str]],
+                       signature: tuple[int, int, int, int] | None) -> bool:
+    expected = entries.get(relative)
+    if signature is None or expected is None:
+        return signature is None and expected is None
+    if not stat.S_ISREG(signature[3]) or expected[0] != ("100755" if signature[3] & stat.S_IXUSR else "100644"):
+        return False
+    try:
+        with open_evidence_file(path, relative) as source:
+            data = source.read()
+    except SafetyError:
+        return False
+    return os.fsdecode(run_git(path, "hash-object", "--no-filters", "--stdin", input=data)).strip() == expected[1]
+
+
+def proven_signature(path: Path, relative: str,
+                     entries: dict[str, tuple[str, str]]) -> tuple[bool, tuple[int, int, int, int] | None]:
+    before = path_signature(path, relative)
+    equal = matches_tree_entry(path, relative, entries, before)
+    return equal and path_signature(path, relative) == before, before
+
+
+def has_unreachable_reflog_commit(path: Path, origin_head: str) -> bool:
+    commits = sorted(set(os.fsdecode(run_git(path, "reflog", "show", "--format=%H", "HEAD")).split()))
+    if not commits:
+        return False
+    return bool(run_git(path, "rev-list", "-n", "1", *commits, "--not", "--branches", "--tags", origin_head))
+
+
+def internal_tracked_links(path: Path) -> set[str]:
+    links: set[str] = set()
+    for field in run_git(path, "ls-files", "-s", "-z").split(b"\0"):
+        meta, _, name = field.partition(b"\t")
+        if not meta.startswith(b"120000 "):
+            continue
+        relative = os.fsdecode(name)
+        try:
+            target = os.readlink(path / relative)
+        except OSError:
+            continue
+        resolved = os.path.normpath(os.path.join(os.path.dirname(relative), target))
+        if not os.path.isabs(target) and resolved != ".." and not resolved.startswith("../"):
+            links.add(relative)
+    return links
+
+
+def activity_mtime(path: Path, allowed_generated_groups: list[str] | None = None,
+                   allowed_links: set[str] | None = None) -> int:
     newest = 0
     pending = [path]
     try:
@@ -173,7 +273,8 @@ def activity_mtime(path: Path, allowed_generated_groups: list[str] | None = None
                     if stat.S_ISLNK(info.st_mode):
                         relative = Path(entry.path).relative_to(path).as_posix()
                         group = generated_group(relative)
-                        if group is None or group not in (allowed_generated_groups or []):
+                        generated = group is not None and group in (allowed_generated_groups or [])
+                        if not generated and relative not in (allowed_links or set()):
                             raise SafetyError("symlinked_worktree_content")
 
 
@@ -189,6 +290,13 @@ def activity_mtime(path: Path, allowed_generated_groups: list[str] | None = None
     return newest
 
 
+def only_unrelated_mount_warnings(stderr: bytes, path: Path) -> bool:
+    mounts = [Path(os.fsdecode(mount)) for mount in UNSTATTABLE_MOUNT_WARNING.findall(stderr)]
+    return UNSTATTABLE_MOUNT_WARNING.sub(b"", stderr) == b"" and all(
+        mount.is_absolute() and mount != path and mount not in path.parents and path not in mount.parents
+        for mount in mounts)
+
+
 def process_active(path: Path) -> bool:
 
 
@@ -200,13 +308,11 @@ def process_active(path: Path) -> bool:
         )
     except (OSError, subprocess.TimeoutExpired):
         raise SafetyError("process_probe_unavailable") from None
-    if result.stderr or result.returncode not in (0, 1):
+    if (result.stderr and not only_unrelated_mount_warnings(result.stderr, path)) or result.returncode not in (0, 1):
         raise SafetyError("process_probe_failed")
-    if result.returncode == 0:
-        if not result.stdout:
-            raise SafetyError("process_probe_failed")
-        return True
     if result.stdout:
+        return True
+    if result.returncode == 0:
         raise SafetyError("process_probe_failed")
     return False
 
@@ -363,7 +469,8 @@ class Cleanup:
                  older_than_days: int = 10, protect: list[Path] | None = None,
                  now: Callable[[], float] = time.time,
                  probe: Callable[[Path], bool] = process_active,
-                 free_bytes: Callable[[Path], int] = lambda path: shutil.disk_usage(path).free):
+                 free_bytes: Callable[[Path], int] = lambda path: shutil.disk_usage(path).free,
+                 lock_path: Path = DEFAULT_LOCK_PATH, min_free_gb: float = DEFAULT_MIN_FREE_GB):
         self.repo = checked_path(repo)
         self.worktree_root = checked_path(worktree_root)
         self.archive_root = checked_path(archive_root, must_exist=False)
@@ -373,6 +480,12 @@ class Cleanup:
             raise SafetyError("archive_root_inside_source")
         if older_than_days < 1:
             raise SafetyError("invalid_age")
+        if not (math.isfinite(min_free_gb) and min_free_gb >= 0):
+            raise SafetyError("invalid_min_free")
+        self.lock_path = checked_path(lock_path, must_exist=False)
+        self.min_free_bytes = int(min_free_gb * 1024**3)
+        self.origin_entries: dict[str, tuple[str, str]] | None = None
+        self.proven_changes: dict[str, list[tuple[str, str, tuple[int, int, int, int] | None]]] = {}
         self.protect = [checked_path(path, must_exist=False) for path in (protect or [])]
         self.now, self.probe, self.free_bytes = now, probe, free_bytes
         self.older_than_days = older_than_days
@@ -392,8 +505,11 @@ class Cleanup:
         info = self.archive_root.lstat()
         if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o700:
             raise SafetyError("archive_root_must_be_private_owned_directory")
-        path = self.archive_root / ".cleanup.lock"
-        descriptor = os.open(path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+        checked_path(self.lock_path, must_exist=False)
+        try:
+            descriptor = os.open(self.lock_path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+        except OSError:
+            raise SafetyError("cleanup_lock_unavailable") from None
         try:
             info = os.fstat(descriptor)
             if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o600:
@@ -407,9 +523,24 @@ class Cleanup:
             os.close(descriptor)
             raise
 
+    def changes_on_origin_main(self, path: Path,
+                               changes: list[tuple[str, str]]) -> list[tuple[str, str, tuple[int, int, int, int] | None]] | None:
+        if not all(single_sided_change(code) for code, _ in changes):
+            return None
+        if self.origin_entries is None:
+            self.origin_entries = tree_entries(self.repo, self.origin_head)
+        proven = []
+        for code, relative in changes:
+            equal, signature = proven_signature(path, relative, self.origin_entries)
+            if not equal:
+                return None
+            proven.append((code, relative, signature))
+        return proven
+
     def assess(self, record: dict) -> dict:
         result = {"path": record["path"], "head": record.get("head"),
                   "branch": record.get("branch"), "decision": "skip"}
+        self.proven_changes.pop(record["path"], None)
         try:
             path = checked_path(record["path"])
             if path.samefile(self.repo):
@@ -435,22 +566,29 @@ class Cleanup:
             result["head"] = head
             if subprocess_ancestor(self.repo, head, self.origin_head) is False:
                 raise SafetyError("not_merged_into_origin_main")
+            if has_unreachable_reflog_commit(path, self.origin_head):
+                raise SafetyError("unreachable_reflog_commit")
             for entry in run_git(path, "ls-files", "-v", "-z").split(b"\0"):
                 if entry and (entry[:1] == b"S" or entry[0] in b"abcdefghijklmnopqrstuvwxyz"):
-
-
                     raise SafetyError("hidden_index_flags")
-            if run_git(path, "status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignore-submodules=none"):
+            changes = status_changes(path)
+            proven = self.changes_on_origin_main(path, changes) if changes else []
+            if proven is None:
                 raise SafetyError("dirty_or_untracked")
             groups, evidence = ignored_inventory(path)
-            newest = activity_mtime(path, groups)
+            newest = activity_mtime(path, groups, internal_tracked_links(path))
             result.update(newest_activity_utc=dt.datetime.fromtimestamp(newest / 1e9, dt.timezone.utc).isoformat(),
                           generated_group_count=len(groups), evidence_present=evidence)
             if newest > int((self.now() - self.older_than_days * 86400) * 1e9):
                 raise SafetyError("recent_activity")
             if self.probe(path):
                 raise SafetyError("active_process")
-            result.update(decision="eligible", reason="clean_merged_inactive")
+            if proven:
+                self.proven_changes[str(path)] = proven
+                result.update(decision="eligible", reason="merged_inactive_changes_on_origin_main",
+                              changed_path_count=len(proven))
+            else:
+                result.update(decision="eligible", reason="clean_merged_inactive")
         except SafetyError as error:
             result["reason"] = str(error)
         except OSError:
@@ -464,10 +602,10 @@ class Cleanup:
 
         total = 10240 + sum(1024 + ((item.get("size", 0) + 511) // 512) * 512 for item in manifest)
         estimate = total + (total + 99) // 100
-        budget = estimate + max(ARCHIVE_RESERVE_BYTES, (estimate + 9) // 10)
+        budget = estimate + max(ARCHIVE_RESERVE_BYTES, (estimate + 9) // 10) + self.min_free_bytes
         try:
             if self.free_bytes(self.archive_root) < budget:
-                raise SafetyError("insufficient_archive_space")
+                raise SafetyError("low_disk")
         except OSError:
             raise SafetyError("archive_space_probe_failed") from None
         name = worktree.name + "-" + head[:12] + "-" + uuid.uuid4().hex
@@ -506,6 +644,21 @@ class Cleanup:
         finally:
             temporary.unlink(missing_ok=True)
 
+    def discard_changes_on_origin_main(self, path: Path) -> None:
+        proven = self.proven_changes.get(str(path), [])
+        if not proven:
+            return
+        if status_changes(path) != [(code, relative) for code, relative, _ in proven]:
+            raise SafetyError("changed_before_discard")
+        for code, relative, signature in proven:
+            equal, current = proven_signature(path, relative, self.origin_entries or {})
+            if not equal or current != signature:
+                raise SafetyError("changed_before_discard")
+            if code == "??":
+                checked_path(path / relative).unlink()
+            else:
+                run_git(path, "restore", "--source=HEAD", "--staged", "--worktree", "--", relative)
+
     def retire(self, initial: dict) -> dict:
         result = dict(initial)
         path = Path(initial["path"])
@@ -525,13 +678,14 @@ class Cleanup:
             current = next((item for item in registrations(self.repo) if item["path"] == str(path)), None)
             if current is None:
                 raise SafetyError("registration_changed")
+            if evidence_manifest(path / ".orchestrator") != manifest:
+                raise SafetyError("evidence_changed")
             checked = self.assess(current)
             if checked["decision"] != "eligible":
                 raise SafetyError("recheck_" + checked.get("reason", "head_changed"))
             if checked["head"] != initial["head"]:
                 raise SafetyError("recheck_head_changed")
-            if evidence_manifest(path / ".orchestrator") != manifest:
-                raise SafetyError("evidence_changed")
+            self.discard_changes_on_origin_main(path)
             run_git(self.repo, "worktree", "remove", "--", str(path))
             result.update(decision="removed", reason="retired")
             receipt.update(status="removed", removed_at_utc=dt.datetime.fromtimestamp(self.now(), dt.timezone.utc).isoformat())
@@ -545,10 +699,22 @@ class Cleanup:
             result.update(decision="skip", reason="filesystem_operation_failed")
         return result
 
-    def run(self, *, apply: bool = False) -> dict:
+    def run(self, *, apply: bool = False, report_path: Path | None = None) -> dict:
         report = {"version": 1, "mode": "apply" if apply else "dry-run", "older_than_days": self.older_than_days,
                   "observed_at_utc": dt.datetime.fromtimestamp(self.now(), dt.timezone.utc).isoformat(),
                   "origin_main_freshly_fetched": False, "worktrees": []}
+        try:
+            self.assess_all(report, apply)
+            if report_path is not None and (not apply or self.lock_descriptor is not None):
+                validate_report_path(report_path, self.archive_root, apply=apply)
+                atomic_json(report_path, report, replace=True)
+        finally:
+            if self.lock_descriptor is not None:
+                os.close(self.lock_descriptor)
+                self.lock_descriptor = None
+        return report
+
+    def assess_all(self, report: dict, apply: bool) -> None:
         try:
             if apply:
                 self.lock()
@@ -559,6 +725,7 @@ class Cleanup:
                 report["origin_main_freshly_fetched"] = True
             self.origin_head = os.fsdecode(run_git(self.repo, "rev-parse", "--verify", "refs/remotes/origin/main^{commit}")).strip()
             report["origin_main_head"] = self.origin_head
+            self.origin_entries = None
             if not apply:
                 report["ref_freshness"] = "cached_ref_only_not_verified"
             for record in registrations(self.repo):
@@ -570,11 +737,6 @@ class Cleanup:
             report["error"] = str(error)
         except OSError:
             report["error"] = "filesystem_operation_failed"
-        finally:
-            if self.lock_descriptor is not None:
-                os.close(self.lock_descriptor)
-                self.lock_descriptor = None
-        return report
 
 
 def subprocess_ancestor(repo: Path, head: str, origin_head: str) -> bool:
@@ -599,16 +761,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--protect", type=Path, action="append", default=[])
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--report", type=Path)
+    parser.add_argument("--lock", type=Path, default=DEFAULT_LOCK_PATH)
+    parser.add_argument("--min-free-gb", type=float, default=DEFAULT_MIN_FREE_GB)
     args = parser.parse_args(argv)
     try:
         cleanup = Cleanup(args.repo, args.worktree_root, args.archive_root,
-                          older_than_days=args.older_than_days, protect=args.protect)
+                          older_than_days=args.older_than_days, protect=args.protect,
+                          lock_path=args.lock, min_free_gb=args.min_free_gb)
         if args.report:
             validate_report_path(args.report, cleanup.archive_root, apply=args.apply)
-        report = cleanup.run(apply=args.apply)
-        if args.report:
-            validate_report_path(args.report, cleanup.archive_root, apply=args.apply)
-            atomic_json(args.report, report, replace=True)
+        report = cleanup.run(apply=args.apply, report_path=args.report)
     except SafetyError as error:
         report = {"version": 1, "mode": "apply" if args.apply else "dry-run", "error": str(error), "worktrees": []}
     except OSError:

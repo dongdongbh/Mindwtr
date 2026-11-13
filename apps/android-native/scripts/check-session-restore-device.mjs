@@ -6,7 +6,7 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { check, connect, evidenced, fail, Stopped, tab, tabSelected, tagged, withDescription } from './device.mjs';
+import { button, check, connect, evidenced, fail, Stopped, tab, tabSelected, tagged, withDescription } from './device.mjs';
 
 const [serial, apkArg] = process.argv.slice(2);
 if (!serial) {
@@ -67,15 +67,33 @@ const toTabs = async () => {
     }
     return fail('the tabs did not come back');
 };
-const liveProject = () => {
+const activeProject = () => {
     const dir = resolve(work, 'db');
     mkdirSync(dir, { recursive: true });
     const present = sh(`run-as ${PKG} ls files`).split(/\s+/);
     for (const suffix of ['', '-wal', '-shm']) if (present.includes(`${DB}${suffix}`)) device.pull(`files/${DB}${suffix}`, resolve(dir, `${DB}${suffix}`));
     const row = execFileSync('sqlite3', [resolve(dir, DB), "SELECT id, title FROM projects WHERE deletedAt IS NULL AND status = 'active' ORDER BY title LIMIT 1"], { encoding: 'utf8' }).trim();
-    if (!row) return fail('the development library has no active project to open');
+    if (!row) return null;
     const [id, ...title] = row.split('|');
     return { id, title: title.join('|') };
+};
+const liveProject = async () => {
+    const found = activeProject();
+    if (found) return found;
+    const name = `sr${String(Date.now()).slice(-9)}`;
+    console.log(`note - the library has no active project; capturing a task into a new project ${name}`);
+    const nodes = await device.openCapture();
+    await device.focusAtEnd(tagged(nodes, 'capture-title') ?? fail('no capture field'));
+    requireAppFront();
+    sh(`input text 'task${name}%s+${name}'`);
+    await waitFor('the capture text', (current) => tagged(current, 'capture-title')?.text === `task${name} +${name}`, 15_000);
+    await tapExpecting(button(await screen(), en['common.save']), (current) => !tagged(current, 'capture-title'), 'the capture to close');
+    for (let wait = 0; wait < 20; wait += 1) {
+        const made = activeProject();
+        if (made) return made;
+        await sleep(1000);
+    }
+    return fail(`the capture made no project ${name}`);
 };
 
 const originalAccelerometer = sh('settings get system accelerometer_rotation');
@@ -143,7 +161,7 @@ try {
     await toTabs();
 
 
-    const project = liveProject();
+    const project = await liveProject();
     requireAppFront();
     sh(`am start -W -a android.intent.action.VIEW -d 'mindwtr-native-dev://open?project=${encodeURIComponent(project.id)}' ${PKG}`);
     await waitFor(`the project ${project.title}`, (current) => tagged(current, 'project-title-input')?.text === project.title, 30_000);

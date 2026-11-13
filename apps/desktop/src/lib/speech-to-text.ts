@@ -109,7 +109,8 @@ const normalizeLocalAsrTranscript = (value: string) => {
     return trimmed;
 };
 
-const resolveOpenAIParseModel = (value?: string) => {
+const resolveOpenAIParseModel = (value?: string, baseUrl?: string) => {
+    if (baseUrl?.trim() && value) return value;
     if (!value) return 'gpt-4o-mini';
     const lower = value.toLowerCase();
     if (lower.startsWith('gpt-5')) return 'gpt-4o-mini';
@@ -170,8 +171,9 @@ export async function processAudioCapture(
     config: SpeechToTextConfig
 ): Promise<SpeechToTextResult> {
     if (config.provider === 'openai' || config.provider === 'gemini') {
-        const parseModel = resolveOpenAIParseModel(config.parseModel);
-        const retryModel = resolveOpenAIParseModel(config.retryModel ?? 'gpt-4o-mini');
+        const parseModel = resolveOpenAIParseModel(config.parseModel, config.baseUrl);
+        const retryModel = config.baseUrl?.trim()
+            ? config.retryModel ?? parseModel : resolveOpenAIParseModel(config.retryModel ?? 'gpt-4o-mini');
         return runRemoteSpeechToTaskCapture(
             { ...config, provider: config.provider, parseModel, retryModel },
             {

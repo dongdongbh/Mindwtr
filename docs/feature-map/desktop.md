@@ -41,12 +41,12 @@ Source: `apps/desktop/src` (Tauri + React). Labels come from `packages/core/src/
 
 ## Inbox
 
-- Reach: Sidebar › Inbox. The badge shows the Inbox count. The list has an "Add Task..." input at the top.
+- Reach: Sidebar › Inbox. The badge shows the Inbox count. The list has an "Add Task..." input at the top. Completing an Inbox item reveals a collapsed "Completed in this session" group below the active list.
 - Shortcuts: `gi` (Vim, Standard), `Alt+I` (Emacs). `a` or `Insert` focuses the add-task input.
-- Selectors: `virtualized-task-list`
-- Code: `apps/desktop/src/components/views/ListView.tsx`, `apps/desktop/src/components/views/list/ListQuickAdd.tsx`, `apps/desktop/src/components/views/list/ListHeader.tsx`, `apps/desktop/src/components/views/list/GroupedTaskSections.tsx`
-- Checks: `e2e/app.spec.ts`, `e2e/unified-inbox.spec.ts`, `apps/desktop/src/components/views/ListView.test.tsx`
-- Notes: The list, counts, and processing queue ignore the global area filter. `virtualized-task-list` exists only when a long list switches to windowed rendering.
+- Selectors: `virtualized-task-list`, `inbox-session-recap`
+- Code: `apps/desktop/src/components/views/ListView.tsx`, `apps/desktop/src/components/views/list/ListQuickAdd.tsx`, `apps/desktop/src/components/views/list/ListHeader.tsx`, `apps/desktop/src/components/views/list/GroupedTaskSections.tsx`, `apps/desktop/src/components/views/inbox/InboxSessionRecap.tsx`, `apps/desktop/src/contexts/inbox-session-context.ts`
+- Checks: `e2e/app.spec.ts`, `e2e/unified-inbox.spec.ts`, `apps/desktop/src/components/views/ListView.test.tsx`, `apps/desktop/src/components/views/inbox/InboxSessionRecap.test.tsx`
+- Notes: The list, counts, and processing queue ignore the global area filter. `virtualized-task-list` exists only when a long list switches to windowed rendering. The session recap contains read-only titles of items successfully completed through Inbox rows, editors, shortcuts, bulk actions, or Process Inbox. They remain Done and do not affect the Inbox count, queue, or empty state. Reopening, undoing, deleting, or archiving removes an item from the recap. Navigation keeps the recap; switching workspaces or reloading clears it. Recurring successors and completions from other views are excluded.
 
 ## Quick Add
 
@@ -92,8 +92,10 @@ Source: `apps/desktop/src` (Tauri + React). Labels come from `packages/core/src/
 
 - Reach: Sidebar › Projects. The projects panel has New project, Active Projects, Someday / Waiting, and Closed groups, plus a Tag filter. Select a project to open its workspace (Project Notes, Add Section, Add Task, Columns layout, Complete, Duplicate, Cancel project, Convert to section…).
 - Shortcuts: `gp` (Vim, Standard), `Alt+P` (Emacs). `j`/`k` move through the project list when it has focus.
-- Code: `apps/desktop/src/components/views/ProjectsView.tsx`, `apps/desktop/src/components/views/projects/ProjectsSidebar.tsx`, `apps/desktop/src/components/views/projects/ProjectWorkspace.tsx`, `apps/desktop/src/components/views/projects/ProjectDetailsHeader.tsx`, `apps/desktop/src/components/views/projects/ProjectDetailsFields.tsx`, `apps/desktop/src/components/views/projects/ProjectNotesSection.tsx`, `apps/desktop/src/components/views/projects/ProjectToSectionDialog.tsx`, `apps/desktop/src/components/GettingStartedActions.tsx`
-- Checks: `e2e/navigation-submenus.spec.ts`, `e2e/projects-calm.spec.ts`, `e2e/projects-keyboard.spec.ts`, `e2e/archived-project-reopen.spec.ts`, `e2e/project-color-override.spec.ts`, `apps/desktop/src/components/views/ProjectsView.test.tsx`, `apps/desktop/src/components/views/projects/ProjectsSidebar.test.tsx`, `apps/desktop/src/components/views/projects/ProjectWorkspace.columns.test.tsx`, `apps/desktop/src/components/views/projects/ProjectDetailsHeader.test.tsx`, `apps/desktop/src/components/views/projects/ProjectNotesSection.test.tsx`
+- Code: `apps/desktop/src/components/views/ProjectsView.tsx`, `apps/desktop/src/components/views/projects/ProjectsSidebar.tsx`, `apps/desktop/src/components/views/projects/ProjectWorkspace.tsx`, `apps/desktop/src/components/views/projects/ProjectDetailsHeader.tsx`, `apps/desktop/src/components/views/projects/ProjectDetailsFields.tsx`, `apps/desktop/src/components/views/projects/ProjectCalendarReference.tsx`, `apps/desktop/src/components/views/projects/ProjectNotesSection.tsx`, `apps/desktop/src/components/views/projects/ProjectToSectionDialog.tsx`, `apps/desktop/src/components/GettingStartedActions.tsx`
+- Selectors: `project-calendar-reference`
+- Checks: `apps/desktop/src/components/views/projects/ProjectCalendarReference.test.tsx`, `e2e/navigation-submenus.spec.ts`, `e2e/projects-calm.spec.ts`, `e2e/projects-keyboard.spec.ts`, `e2e/archived-project-reopen.spec.ts`, `e2e/project-color-override.spec.ts`, `apps/desktop/src/components/views/ProjectsView.test.tsx`, `apps/desktop/src/components/views/projects/ProjectsSidebar.test.tsx`, `apps/desktop/src/components/views/projects/ProjectWorkspace.columns.test.tsx`, `apps/desktop/src/components/views/projects/ProjectDetailsHeader.test.tsx`, `apps/desktop/src/components/views/projects/ProjectNotesSection.test.tsx`
+- Notes: Details › Link calendar event selects an existing read-only calendar event from the next 90 days as the scheduled next step. Search by event title or calendar name across the full upcoming list; at most 200 matches are displayed. Replace and Unlink change only the reference. Elapsed events invite an outcome review; unavailable calendars preserve last known details. Archived projects cannot change links.
 - Notes: Wide windows show a separate projects pane beside global navigation. Its collapse/expand buttons preserve selection; drag its vertical divider to resize (width is remembered). Narrow workspaces use an overlay navigator. Projects without active tasks show a compact, left-aligned placeholder that remains a task drop target. A Deferred project still accepts tasks; an Archived project accepts none. Completing one task in an archived project reopens the project and its section.
 
 ## Project sections

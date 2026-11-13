@@ -8,9 +8,13 @@ import {
     type ExternalCalendarEvent,
     type NativeCalendarFeedSlot,
     type NativeCalendarHost,
+    type Task,
 } from '@mindwtr/core';
 import {
+    buildCalendarSyncTaskMap,
+    calendarPushChangedTaskIds,
     CALENDAR_PUSH_CALENDAR_ID_KEY,
+    CALENDAR_PUSH_ENABLED_KEY,
     CALENDAR_PUSH_TARGET_ID_KEY,
     type CalendarPushEventDetails,
 } from '../../../packages/core/src/calendar-push-service';
@@ -65,12 +69,16 @@ const reportRefusal = (write: Promise<unknown>, outcome: 'recreated' | 'cleared'
 });
 
 export type NativeAndroidCalendar = NativeCalendarHost & {
-    startPush(): Promise<void>;
+    startPush(): Promise<'unavailable' | 'off' | 'pushed' | 'failed'>;
+    snapshot(): string;
+    pushChanged(token: string): Promise<'unavailable' | 'off' | 'unchanged' | 'pushed' | 'failed'>;
 };
 
 export const createNativeCalendar = (keyValue: KeyValue, call: () => CalendarCall, fileCall: () => FileCall,
     sync?: () => CalendarSyncStore): NativeAndroidCalendar => {
     let lifecycle: NativeCalendarPushLifecycle | null = null;
+    const snapshots = new Map<string, Map<string, Task>>();
+    let snapshotCount = 0;
     const pushState = async () => ({
         saved: await keyValue.get(CALENDAR_PUSH_CALENDAR_ID_KEY),
         target: await keyValue.get(CALENDAR_PUSH_TARGET_ID_KEY),
@@ -115,13 +123,29 @@ export const createNativeCalendar = (keyValue: KeyValue, call: () => CalendarCal
                 try { logWarn('Calendar settings failed', { scope: context.scope, context: { error: error instanceof Error ? error.name : typeof error } }); } catch {  }
             },
         },
+        snapshot: () => {
+            const token = `calendar-${++snapshotCount}`;
+            snapshots.set(token, buildCalendarSyncTaskMap(useTaskStore.getState()._allTasks));
+            for (const stale of snapshots.keys()) if (snapshots.size > 8) snapshots.delete(stale);
+            return token;
+        },
+        pushChanged: async (token) => {
+            const before = snapshots.get(token);
+            snapshots.delete(token);
+            const bound = lifecycle;
+            if (!before || !bound) return 'unavailable';
+            if (await keyValue.get(CALENDAR_PUSH_ENABLED_KEY) !== '1') return 'off';
+            const changed = calendarPushChangedTaskIds(before, useTaskStore.getState()._allTasks);
+            if (changed.length === 0) return 'unchanged';
+            return bound.run(changed).then(() => 'pushed' as const, () => 'failed' as const);
+        },
         startPush: async () => {
             const bound = lifecycle;
-            if (!bound) return;
+            if (!bound) return 'unavailable';
             try {
                 const before = await pushState();
-                if (!await bound.start()) return;
-                const outcome = await bound.run().then(() => 'pushed', () => 'failed');
+                if (!await bound.start()) return 'off';
+                const outcome = await bound.run().then(() => 'pushed' as const, () => 'failed' as const);
                 const after = await pushState();
                 const adopted = after.target ? 'target'
                     : !after.saved ? 'none'
@@ -131,8 +155,10 @@ export const createNativeCalendar = (keyValue: KeyValue, call: () => CalendarCal
                 logInfo('Native Android calendar push started', { scope: 'calendar-push', force: true, context: {
                     releaseCheck: 'v1.3.8/native-calendar-push', outcome, adopted, rowsBefore: String(before.rows), rowsAfter: String(after.rows),
                 } });
+                return outcome;
             } catch (error) {
                 try { logWarn('Native Android calendar push did not start', { scope: 'calendar-push', context: { error: error instanceof Error ? error.name : typeof error } }); } catch {  }
+                return 'failed';
             }
         },
     };

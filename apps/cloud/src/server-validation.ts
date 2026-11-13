@@ -1,5 +1,6 @@
 import {
     filterNotDeleted,
+    isProjectCalendarReference,
     isArchiveRetentionDays,
     isTaxonomyCatalog,
     isTaskSectionProjectArchiveReference,
@@ -210,6 +211,9 @@ function validateTaskPropValues(value: Record<string, unknown>): string | null {
 }
 
 function validateProjectPropValues(value: Record<string, unknown>): string | null {
+    if (value.calendarReference != null && !isProjectCalendarReference(value.calendarReference)) {
+        return 'Invalid project calendarReference';
+    }
     if (value.perSectionFlow != null && typeof value.perSectionFlow !== 'boolean') {
         return 'Invalid project perSectionFlow';
     }

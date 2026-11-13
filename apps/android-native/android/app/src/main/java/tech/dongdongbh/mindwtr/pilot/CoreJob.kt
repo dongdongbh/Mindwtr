@@ -21,6 +21,8 @@ internal object CoreJob {
     const val WIDGET_REFRESH = "widgetRefresh"
     private val JOBS = setOf(INGEST, CONTEXT, REMINDERS, REMINDER_DONE, REMINDER_SNOOZE, SYNC, WIDGET_REFRESH)
 
+    private val TASK_CHANGING_JOBS = setOf(INGEST, REMINDER_DONE, SYNC)
+
     enum class Outcome { Success, Retry, Failure }
 
     const val LINE = "Native Android core work"
@@ -44,10 +46,16 @@ internal object CoreJob {
         fun backgroundSync(trigger: String): JSONObject = throw UnsupportedOperationException("backgroundSync")
 
         fun appActive(): Boolean = false
+
+        fun coldCalendarSnapshot(): String? = null
+
+        fun calendarSnapshot(): String? = null
+
+        fun calendarPush(job: String, snapshot: String): String = "unavailable"
     }
 
 
-    fun run(name: String?, input: Map<String, String?>, boot: () -> Calls, post: (JSONObject) -> Unit, refreshWidgets: () -> Unit,
+    fun run(name: String?, input: Map<String, String?>, boot: (snapshotBeforeReplay: Boolean) -> Calls, post: (JSONObject) -> Unit, refreshWidgets: () -> Unit,
             log: (String, JSONObject) -> Unit, syncAgain: () -> Boolean = { true }, ensureSync: () -> Boolean = { true }): Outcome {
         val line = JSONObject().put("job", name ?: JSONObject.NULL)
         if (name !in JOBS) {
@@ -55,9 +63,14 @@ internal object CoreJob {
             return Outcome.Failure
         }
         var recovered = false
+        var calls: Calls? = null
+        var snapshot: String? = null
+        var worked = false
         val outcome = try {
-            val host = boot()
-            if (!host.recover() || !host.drain()) Outcome.Retry
+            val host = boot(name in TASK_CHANGING_JOBS).also { calls = it }
+            if (name in TASK_CHANGING_JOBS && !host.appActive()) snapshot = host.coldCalendarSnapshot() ?: runCatching { host.calendarSnapshot() }.getOrNull()
+            worked = host.recover() && host.drain()
+            if (!worked) Outcome.Retry
             else when (name) {
                 WIDGET_REFRESH -> {
                     refreshWidgets()
@@ -109,6 +122,9 @@ internal object CoreJob {
         }
         log(LINE, line.put("outcome", outcome.name.lowercase()))
         if (outcome == Outcome.Success && name != WIDGET_REFRESH) refreshWidgets()
+        val taken = snapshot
+        val host = calls
+        if (worked && taken != null && host != null && !host.appActive()) runCatching { host.calendarPush(name.orEmpty(), taken) }
         return outcome
     }
 

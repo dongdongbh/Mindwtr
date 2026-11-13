@@ -1,5 +1,21 @@
 
 export const koOverrides: Record<string, string> = {
+    "projects.calendarLimit": "처음 200개의 결과를 표시합니다. 다른 일정을 찾으려면 검색하세요.",
+    "projects.calendarTitle": "캘린더",
+    "projects.calendarLink": "캘린더 일정 연결",
+    "projects.calendarReplace": "연결된 일정 바꾸기",
+    "projects.calendarUnlink": "캘린더 일정 연결 해제",
+    "projects.calendarScheduled": "예정된 다음 단계",
+    "projects.calendarElapsed": "일정 결과 검토",
+    "projects.calendarUnavailable": "캘린더를 사용할 수 없음 · 마지막으로 확인한 일정 정보",
+    "projects.calendarHelp": "기존 일정을 이 프로젝트의 예정된 다음 단계로 연결합니다. 캘린더 일정은 읽기 전용으로 유지됩니다.",
+    "projects.calendarWindow": "다가오는 일정 · 향후 90일",
+    "projects.calendarEmpty": "활성화된 캘린더 피드에 예정된 일정이 없습니다.",
+    "projects.calendarLoadFailed": "캘린더 일정을 불러오지 못했습니다. 닫고 다시 시도하세요.",
+    "projects.calendarSaveFailed": "캘린더 참조를 저장하지 못했습니다. 다시 시도하세요.",
+    "projects.calendarReviewStep": "예정된 다음 단계 검토",
+    "projects.calendarLastKnown": "마지막으로 확인한 일정 정보",
+
     "quickAdd.invalidReminderCommand": "잘못된 알림: 지원되는 기간과 명시적인 날짜 및 시간을 입력하세요",
     "taskEdit.startAdvanceReminderLabel": "시작 전",
     "settings.speechUseGemini": "Gemini 사용",
@@ -724,6 +740,7 @@ export const koOverrides: Record<string, string> = {
 
 
         'inbox.title': '수집함',
+        'inbox.completedInSession': '이번 세션에서 완료',
         'inbox.processButton': '수집함 처리',
         'inbox.projectHint': '여러 단계가 필요한 항목인가요? 처리하는 중에 「예, 프로젝트로 변환합니다」를 선택해 결과와 첫 번째 다음 행동의 이름을 정하세요.',
         'inbox.addPlaceholder': '수집함에 할 일 추가...',

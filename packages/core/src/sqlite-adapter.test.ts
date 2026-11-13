@@ -154,7 +154,7 @@ describeSqlite('SqliteAdapter', () => {
 
     it('migrates storage without the Flow mode columns and keeps never-set apart from false (#1429)', async () => {
         const legacy = SQLITE_BASE_SCHEMA
-            .replace('  viewSectionIds TEXT,\n  perSectionFlow INTEGER\n);', '  viewSectionIds TEXT\n);')
+            .replace('  viewSectionIds TEXT,\n  perSectionFlow INTEGER,\n  calendarReference TEXT\n);', '  viewSectionIds TEXT\n);')
             .replace('  projectArchivedAt TEXT,\n  isSequential INTEGER\n);', '  projectArchivedAt TEXT\n);');
         expect(legacy).not.toContain('perSectionFlow');
         expect(legacy).not.toMatch(/projectArchivedAt TEXT,\n  isSequential/);
@@ -182,6 +182,31 @@ describeSqlite('SqliteAdapter', () => {
         expect(allSql(db, 'SELECT id, isSequential FROM sections ORDER BY orderNum')).toEqual([
             { id: 'book', isSequential: 1 }, { id: 'prep', isSequential: 0 }, { id: 'later', isSequential: null },
         ]);
+    });
+
+    it('migrates and persists a calendar reference and explicit removal across reopen', async () => {
+        db.exec(SQLITE_BASE_SCHEMA.replace('  perSectionFlow INTEGER,\n  calendarReference TEXT', '  perSectionFlow INTEGER'));
+        const at = '2026-11-01T10:00:00.000Z';
+        const reference = { sourceId: 'feed', uid: 'event', sourceName: 'Calendar', title: 'Meeting',
+            start: at, end: '2026-11-01T11:00:00.000Z', allDay: false };
+        const row = { id: 'reference', title: 'Project', status: 'active' as const, color: '#6b7280',
+            order: 0, tagIds: [], calendarReference: reference, rev: 1, revBy: 'writer', createdAt: at, updatedAt: at };
+        const source: AppData = { tasks: [], projects: [row], areas: [], sections: [], settings: {} };
+        await adapter.getData();
+        await adapter.saveData(source);
+        db.close();
+        db = new RuntimeDatabase!(databasePath);
+        adapter = new SqliteAdapter(createClient(db));
+        const loaded = await adapter.getData();
+        expect(loaded.projects[0].calendarReference).toEqual(reference);
+        await adapter.saveData({ ...loaded, projects: [{ ...loaded.projects[0], calendarReference: null, rev: 2 }] });
+        db.close();
+        db = new RuntimeDatabase!(databasePath);
+        adapter = new SqliteAdapter(createClient(db));
+        expect((await adapter.getData()).projects[0].calendarReference).toBeNull();
+        expect(getSql(db, 'SELECT calendarReference FROM projects WHERE id=?', ['reference'])).toEqual({ calendarReference: 'null' });
+        await adapter.saveData(source);
+        expect((await adapter.getData()).projects[0].calendarReference).toBeNull();
     });
 
     it('persists a Project color override and a newer reset across SQLite reopen', async () => {
