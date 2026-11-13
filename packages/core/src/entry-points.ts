@@ -5,6 +5,7 @@ import {
     isEntityOpenUrl,
     isOpenFeatureUrl,
     isShortcutCaptureUrl,
+    parseEntityOpenUrl,
     parseOpenFeatureUrl,
     resolveOpenFeaturePath,
     type EntityOpenKind,
@@ -19,7 +20,8 @@ export type SystemPathRoute =
     | { kind: 'dropboxCallback'; path: string }
     | { kind: 'openFeature'; path: string }
 
-    | { kind: 'entityOpen' | 'capture'; path: '/inbox' }
+    | { kind: 'entityOpen'; path: '/inbox' | '' }
+    | { kind: 'capture'; path: '/inbox' }
 
     | { kind: 'quickCapture'; path: '/capture-modal?origin=system' }
 
@@ -40,7 +42,7 @@ export function resolveSystemPath(path: string, initial: boolean): SystemPathRou
         }
         if (isDropboxAuthCallbackUrl(path)) return { kind: 'dropboxCallback', path: DROPBOX_CALLBACK_SETTINGS_PATH };
         if (isOpenFeatureUrl(path)) return { kind: 'openFeature', path: resolveOpenFeaturePath(parseOpenFeatureUrl(path)?.feature ?? null) };
-        if (isEntityOpenUrl(path)) return { kind: 'entityOpen', path: '/inbox' };
+        if (isEntityOpenUrl(path)) return { kind: 'entityOpen', path: !initial && parseEntityOpenUrl(path) ? '' : '/inbox' };
         if (isShortcutCaptureUrl(path)) return { kind: 'capture', path: '/inbox' };
         if (isQuickCaptureUrl(path)) {
 
