@@ -35,7 +35,7 @@ struct MindwtrWidgetListEntityQuery: EntityQuery {
     private static func options() -> [MindwtrWidgetListEntity] {
         let payload = MindwtrTasksWidgetSnapshotStore.configurationPayload
         let fallbackNames = [
-            "focus": "Focus",
+            "focus": "Today",
             "inbox": "Inbox",
             "next": "Next",
             "upcoming": "Upcoming",
@@ -73,7 +73,7 @@ struct MindwtrTasksWidgetConfigurationIntent: WidgetConfigurationIntent {
 
     @Parameter(
         title: "Include available actions",
-        description: "Focus only: adds Next Actions whose start date has arrived. Not tasks marked in progress.",
+        description: "Today only: adds Next Actions whose start date has arrived. Not tasks marked in progress.",
         default: false
     )
     var includeAvailableActions: Bool

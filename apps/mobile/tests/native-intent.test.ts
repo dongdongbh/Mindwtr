@@ -146,10 +146,28 @@ describe('redirectSystemPath', () => {
         expect(redirectSystemPath({ path: 'mindwtr://open-feature', initial: false })).toBe('/inbox');
     });
 
-    it('rewrites entity-open links to inbox so there is no Unmatched Route flash (#1017)', () => {
-        expect(redirectSystemPath({ path: 'mindwtr://open?task=abc-123', initial: true })).toBe('/inbox');
-        expect(redirectSystemPath({ path: 'mindwtr:///open?project=proj-1', initial: false })).toBe('/inbox');
-        expect(redirectSystemPath({ path: 'mindwtr://open?area=area-1', initial: false })).toBe('/inbox');
+    it.each([true, false])('leaves valid entity navigation to the incoming handler (initial=%s)', async (initial) => {
+        for (const path of [
+            'mindwtr://open?task=private-task',
+            'mindwtr:///open?project=private-project',
+            'mindwtr://open?area=private-area',
+        ]) {
+            expect(redirectSystemPath({ path, initial })).toBe(initial ? '/inbox' : '');
+        }
+        await vi.dynamicImportSettled();
+        if (initial) expect(appLogMocks.logInfo).not.toHaveBeenCalled();
+        else expect(appLogMocks.logInfo).toHaveBeenCalledWith('Entity link handed to incoming handler', {
+            scope: 'routing',
+            extra: { releaseCheck: 'v1.3.9/entity-link-route-owner', delivery: 'warm' },
+            force: true,
+        });
+        expect(JSON.stringify(appLogMocks.logInfo.mock.calls)).not.toContain('private-');
+    });
+
+    it.each([true, false])('keeps malformed entity links on the Inbox fallback (initial=%s)', (initial) => {
+        for (const path of ['mindwtr://open', 'mindwtr:///open?task=', 'mindwtr://open?project=%20']) {
+            expect(redirectSystemPath({ path, initial })).toBe('/inbox');
+        }
     });
 
     it.each([true, false])('routes the detailed launcher into the in-app sheet (initial=%s)', (initial) => {

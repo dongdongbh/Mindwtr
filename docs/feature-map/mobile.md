@@ -395,10 +395,13 @@ Source: `apps/mobile`. Routes live in `apps/mobile/app` (expo-router). Labels be
 
 ## Android widgets
 
+- List scope: The compact built-in list is named Today (stored list ID `focus`) and contains Today’s Focus plus today’s schedule. Saved Focus filters use the app’s shared Focus task sections, including Next Actions, Review Due and Upcoming; unrelated Inbox/Someday tasks and blocked sequential successors remain excluded. This shared projection also serves iOS widgets. Check: `packages/core/src/widget-focus-filter.test.ts`.
+
 - Reach: Home screen › add widget: Tasks (list chooser), Compact, Quick Capture. Tap the title to open the shown list. Tap the chevron to choose a list. Tap a ring to check off a task. Tap plus to capture.
 - Shortcuts: Widget links open `mindwtr:///focus`, `mindwtr:///inbox`, `mindwtr:///waiting`, `mindwtr:///someday`, or `mindwtr:///widget-list/<list-id>`.
 - Code: `apps/mobile/modules/android-widget/README.md`, `apps/mobile/plugins/android-widget.js`, `apps/mobile/lib/widget-service.ts`, `apps/mobile/app/(drawer)/widget-list/[id].tsx`, `apps/mobile/hooks/use-widget-launch.tsx`
 - Checks: `apps/mobile/tests/use-widget-launch.test.tsx`, `apps/mobile/app/(drawer)/widget-list/widget-list-screen.test.tsx`, `apps/mobile/modules/android-widget/android/src/test/java/tech/dongdongbh/mindwtr/androidwidget/WidgetNavigationTest.kt`, `apps/mobile/hooks/root-layout/use-root-layout-pending-captures.test.tsx`
+- Notes: The Android list chooser requests a fresh snapshot when opened and updates its options when publication completes, retaining search and pending choices. Check: `WidgetChooserRefreshTest.kt`. Warm widget task links have one navigation owner; closing the task preview leaves the matching page and selected navigation item. Check: `use-root-layout-external-capture.test.tsx`.
 - Notes: Widget check-offs and captures are queued; the app applies them through the store on the next drain. Widget code never writes SQLite. Rows checked off in a row stay in place, struck through and undoable, until three seconds after the last tap; then they all leave together (`CheckoffStore.kt`, check `CheckoffStoreTest.kt`) (#1211).
 - Notes: Existing `/widget-list/filter:<id>` links for saved Contexts filters open the full Contexts controls with that filter selected after local settings load. Deleted or unknown filters show an empty result. The original widget path remains mounted for launch acknowledgment after App lock unlocks.
 - E-Ink: Present priority rings and identity dots use each Android widget's effective text foreground, including transparent light-text and dark-text modes. Missing identity stays hidden; the transparent surface stays clear.
@@ -416,7 +419,7 @@ Source: `apps/mobile`. Routes live in `apps/mobile/app` (expo-router). Labels be
 - Code: `apps/mobile/widgets-ios/MindwtrWidgetsBundle.swift`, `apps/mobile/widgets-ios/MindwtrTasksWidget.swift`, `apps/mobile/plugins/ios-widgets-and-shortcuts.js`, `apps/mobile/ios-app-intents/MindwtrSiriCaptureIntents.swift`
 - Checks: `apps/mobile/lib/ios-widget-completions.test.ts`
 - Notes: The Control Center control opens `mindwtr://capture-quick?source=control`, which routes to the full-screen capture.
-- Mindwtr widget: Edit Widget → List selects a built-in list or saved search; Focus also offers Include available actions. Normal medium widgets use a single list header and one-line task titles with date labels. Rows adapt to the widget height and Dynamic Type while keeping completion and capture controls; a sole Focus/Schedule heading is omitted, real groups remain, and VoiceOver retains task metadata. Compact and the other widget sizes keep their existing layouts.
+- Mindwtr widget: Edit Widget → List selects a built-in list or saved search; Today also offers Include available actions. Normal medium widgets use a single list header and one-line task titles with date labels. Rows adapt to the widget height and Dynamic Type while keeping completion and capture controls; a sole Focus/Schedule heading is omitted, real groups remain, and VoiceOver retains task metadata. Compact and the other widget sizes keep their existing layouts.
 
 ## Apple Watch companion
 

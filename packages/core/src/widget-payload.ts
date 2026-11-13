@@ -602,23 +602,27 @@ export function createWidgetPayloadProjection(
 
 
     const focusFilter = options?.focusFilter ?? NO_FOCUS_WIDGET_FILTER;
-    const pools = buildFocusPools({
-        tasks: undeletedActionableTasks,
-        visibleTasks: activeTasks,
-        isAreaVisible: (task) => taskMatchesAreaFilterSelection(task, areaVisibility.resolvedAreaFilter, projectById, areaVisibility.areaById),
-        projects,
-        criteria: focusFilter.criteria,
-        now,
-    });
-    const lists = deriveFocusTaskLists(pools, {
-        now,
-        projects,
-        sections: data.sections || [],
-        sortBy: focusFilter.sortBy,
-        prioritiesEnabled,
-        sortOrder: focusFilter.sortOrder,
-        focusIncludeStartDates: data.settings?.gtd?.focusIncludeStartDates,
-    });
+    const resolveFocus = (filter: FocusWidgetFilter) => {
+        const pools = buildFocusPools({
+            tasks: undeletedActionableTasks,
+            visibleTasks: activeTasks,
+            isAreaVisible: (task) => taskMatchesAreaFilterSelection(task, areaVisibility.resolvedAreaFilter, projectById, areaVisibility.areaById),
+            projects,
+            criteria: filter.criteria,
+            now,
+        });
+        const lists = deriveFocusTaskLists(pools, {
+            now,
+            projects,
+            sections: data.sections || [],
+            sortBy: filter.sortBy,
+            prioritiesEnabled,
+            sortOrder: filter.sortOrder,
+            focusIncludeStartDates: data.settings?.gtd?.focusIncludeStartDates,
+        });
+        return { pools, lists };
+    };
+    const { pools, lists } = resolveFocus(focusFilter);
 
 
     const curatedTasks = [...lists.focusedTasks, ...lists.schedule];
@@ -636,6 +640,7 @@ export function createWidgetPayloadProjection(
     const referenceTasks = tasks.filter((task) => task.status === 'reference' && !task.deletedAt
         && isTaskInActiveProject(task, projectById) && isTaskVisibleInArea(task, areaVisibility));
     const listContext = { data, activeTasks, referenceTasks, inboxTasks, now, focusLists: lists, sortBy: widgetSort, prioritiesEnabled, tr,
+        getFocusLists: (filter: FocusWidgetFilter) => resolveFocus(filter).lists,
         tokenTaskIndex: options?.listIds?.some((id) => {
             const base = parseWidgetListSelection(id)?.listId ?? '';
             return base.startsWith('context:') || base.startsWith('tag:');

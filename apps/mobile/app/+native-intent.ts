@@ -1,4 +1,4 @@
-import { resolveSystemPath } from '@mindwtr/core';
+import { parseEntityOpenUrl, resolveSystemPath } from '@mindwtr/core';
 import { recordWidgetLaunchRouting } from '@/lib/widget-launch-routing';
 
 const logShareHandoffRouted = (initial: boolean): void => {
@@ -62,6 +62,20 @@ export function redirectSystemPath({ path, initial }: { path: string; initial: b
 
 
     const route = resolveSystemPath(path, initial);
+    if (route.kind === 'entityOpen' && !initial && parseEntityOpenUrl(path)) {
+        try {
+            void import('@/lib/app-log')
+                .then(({ logInfo }) => logInfo('Entity link handed to incoming handler', {
+                    scope: 'routing',
+                    extra: { releaseCheck: 'v1.3.9/entity-link-route-owner', delivery: 'warm' },
+                    force: true,
+                }))
+                .catch(() => undefined);
+        } catch {
+
+        }
+        return '';
+    }
     if (route.kind === 'shareHandoff') logShareHandoffRouted(initial);
     if (route.kind === 'dropboxCallback') logDropboxCallbackRouted();
     if (route.kind === 'quickCapture') logControlCaptureRouted(path, initial);

@@ -1002,6 +1002,52 @@ describe('useRootLayoutExternalCapture', () => {
     });
   });
 
+  it.each([true, false])('keeps the task destination after late system interception (initial=%s)', (initial) => {
+    storeTasksById.set('task-1', { id: 'task-1', title: 'Buy milk' });
+    const url = 'mindwtr://open?task=task-1';
+    let currentRoute: unknown = initial ? redirectSystemPath({ path: url, initial }) : '/inbox';
+    router.replace.mockImplementation((route) => { currentRoute = route; });
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<TestHarness incomingUrl={url} router={router} showToast={showToast} />);
+    });
+    const target = {
+      pathname: '/focus',
+      params: expect.objectContaining({ taskId: 'task-1', taskTab: 'view' }),
+    };
+    expect(currentRoute).toEqual(target);
+    const latePath = redirectSystemPath({ path: url, initial: false });
+    if (latePath) currentRoute = latePath;
+    expect(currentRoute).toEqual(target);
+    expect(router.replace).toHaveBeenCalledTimes(1);
+    act(() => tree.unmount());
+  });
+
+  it('keeps a locked project link pending through system interception until unlock', () => {
+    storeProjectsById.set('project-1', { id: 'project-1', title: 'Private project' });
+    const url = 'mindwtr:///open?project=project-1';
+    let currentRoute: unknown = '/focus';
+    const routeHandoff = () => {
+      const path = redirectSystemPath({ path: url, initial: false });
+      if (path) currentRoute = path;
+    };
+    routeHandoff();
+    router.replace.mockImplementation((route) => { currentRoute = route; });
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<TestHarness incomingUrl={url} locked router={router} showToast={showToast} />);
+    });
+    expect(currentRoute).toBe('/focus');
+    expect(router.replace).not.toHaveBeenCalled();
+    act(() => {
+      tree.update(<TestHarness incomingUrl={url} router={router} showToast={showToast} />);
+    });
+    routeHandoff();
+    expect(currentRoute).toEqual({ pathname: '/projects-screen', params: { projectId: 'project-1' } });
+    expect(router.replace).toHaveBeenCalledTimes(1);
+    act(() => tree.unmount());
+  });
+
 
   it('holds a task link while the app is locked and opens it once after the unlock (#1475)', () => {
     storeTasksById.set('task-1', { id: 'task-1', title: 'Buy milk' });
