@@ -24,12 +24,12 @@ struct ReviewScreen: View {
                         ForEach(choices.indices, id: \.self) { index in
                             let choice = choices[index]
                             ReviewAction(title: choice.text("label"), selected: view.object("scope").text("selected") == choice.text("id"),
-                                enabled: model.reviewActionsShown, palette: palette, id: "review-scope-" + choice.text("id")) {
+                                enabled: { model.reviewActionsShown }, palette: palette, id: "review-scope-" + choice.text("id")) {
                                 Task { await model.editReviewOverview(scope: choice.text("id")) }
                             }
                         }
                         if view.object("scope").text("selected") == "all" {
-                            ReviewAction(title: model.label("nav.history"), enabled: model.reviewActionsShown, palette: palette, id: "review-history") {
+                            ReviewAction(title: model.label("nav.history"), enabled: { model.reviewActionsShown }, palette: palette, id: "review-history") {
                                 Task { await model.openHistory() }
                             }
                         }
@@ -41,11 +41,11 @@ struct ReviewScreen: View {
                 .overlay(alignment: .bottom) { palette.border.frame(height: 1) }
                 AppChipFlow {
                     ReviewAction(title: view.object("expansion").text("label"),
-                        enabled: model.reviewActionsShown && !view.object("expansion").flag("disabled"), palette: palette, id: "review-expand-cycle") {
+                        enabled: { model.reviewActionsShown && !view.object("expansion").flag("disabled") }, palette: palette, id: "review-expand-cycle") {
                         Task { await model.editReviewOverview(expansion: ["type": "cycle"]) }
                     }
                     ReviewAction(title: view.object("startReview").text("label"), selected: true,
-                        enabled: model.reviewActionsShown, palette: palette, id: "review-start") { model.openReviewPicker() }
+                        enabled: { model.reviewActionsShown }, palette: palette, id: "review-start") { model.openReviewPicker() }
                 }
                 .padding(12).frame(maxWidth: .infinity, alignment: .leading).background(palette.card)
                 Group {
@@ -78,7 +78,7 @@ struct ReviewScreen: View {
                                     ForEach(["markReviewed", "advance"], id: \.self) { name in
                                         let action = item.object("review").object(name)
                                         if !action.isEmpty {
-                                            ReviewAction(title: action.text("label"), enabled: model.reviewActionsShown,
+                                            ReviewAction(title: action.text("label"), enabled: { model.reviewActionsShown },
                                                 palette: palette, id: "review-task-" + name + "-" + item.object("row").text("id")) {
                                                 Task { await model.performReviewTaskAction(action.object("action")) }
                                             }
@@ -87,9 +87,9 @@ struct ReviewScreen: View {
                                     }
                                 }
                             }
-                            .disabled(!model.reviewActionsShown).padding(.leading, 20)
+                            .modifier(ModelDisabled { !model.reviewActionsShown }).padding(.leading, 20)
                         } else if item.text("type") == "later" {
-                            ReviewAction(title: item.text("label"), selected: item.flag("expanded"), enabled: model.reviewActionsShown,
+                            ReviewAction(title: item.text("label"), selected: item.flag("expanded"), enabled: { model.reviewActionsShown },
                                 palette: palette, id: "review-later-" + item.text("id")) {
                                 Task { await model.toggleReviewLater(item.text("id"), weekly: false) }
                             }
@@ -97,11 +97,11 @@ struct ReviewScreen: View {
                         } else { group(item) }
                     }
                     if items.count < view.number("total") {
-                        ReviewAction(title: model.label("common.more"), enabled: model.reviewActionsShown, palette: palette, id: "review-more") {
+                        ReviewAction(title: model.label("common.more"), enabled: { model.reviewActionsShown }, palette: palette, id: "review-more") {
                             Task { await model.loadMoreReview() }
                         }
                     }
-                    if model.busyShown { ProgressView().frame(maxWidth: .infinity).padding(12) }
+                    ModelShown { model.busyShown } content: { ProgressView().frame(maxWidth: .infinity).padding(12) }
                 }
                 .padding(.horizontal, 12).padding(.bottom, 10)
             }
@@ -133,7 +133,7 @@ struct ReviewScreen: View {
             .padding(14).frame(minHeight: 44).background(palette.card, in: RoundedRectangle(cornerRadius: 12))
             .overlay(RoundedRectangle(cornerRadius: 12).stroke(palette.border, lineWidth: 1)).contentShape(Rectangle())
         }
-        .buttonStyle(.plain).disabled(!model.reviewActionsShown).padding(.leading, area ? 0 : 12)
+        .buttonStyle(.plain).modifier(ModelDisabled { !model.reviewActionsShown }).padding(.leading, area ? 0 : 12)
         .accessibilityLabel(item.text("accessibilityLabel"))
         .accessibilityValue(model.label(item.flag("expanded") ? "markdown.collapse" : "markdown.expand"))
         .accessibilityAddTraits(item.flag("expanded") ? .isSelected : [])
@@ -155,13 +155,13 @@ struct ReviewStartPicker: View {
                         let choices = model.reviewOverview.object("startReview").objects("options")
                         ForEach(choices.indices, id: \.self) { index in
                             let choice = choices[index]
-                            ReviewAction(title: choice.text("label"), enabled: !model.busy && !model.retryNeeded,
+                            ReviewAction(title: choice.text("label"), enabled: { !model.busy && !model.retryNeeded },
                                 palette: palette, id: "review-start-" + choice.text("id")) {
                                 Task { await model.openReviewGuide(choice.text("id")) }
                             }
                         }
                         ReviewAction(title: model.reviewOverview.object("startReview").text("cancelLabel"),
-                            enabled: !model.busy && !model.retryNeeded, palette: palette, id: "review-start-cancel") { model.closeReviewPicker() }
+                            enabled: { !model.busy && !model.retryNeeded }, palette: palette, id: "review-start-cancel") { model.closeReviewPicker() }
                     }
                     .padding(20)
                 }
@@ -268,7 +268,7 @@ struct ReviewGuideScreen: View {
 
                     let visibleTotal = view.number("total") - (scheduledGroup && !scheduledExpanded ? content.object("scheduled").number("count") : 0)
                     if items.count < visibleTotal {
-                        ReviewAction(title: model.label("common.more"), enabled: model.reviewActionsEnabled, palette: palette, id: "review-guide-more") {
+                        ReviewAction(title: model.label("common.more"), enabled: { model.reviewActionsEnabled }, palette: palette, id: "review-guide-more") {
                             Task { await model.loadMoreReview() }
                         }
                     }
@@ -417,7 +417,7 @@ struct ReviewGuideScreen: View {
                 showFocusToggle: daily && content.text("step") == "focus", onProject: { project in Task { await model.openProject(project) } })
                 .disabled(!model.reviewActionsEnabled)
         } else if item.text("type") == "later" {
-            ReviewAction(title: item.text("label"), selected: item.flag("expanded"), enabled: model.reviewActionsEnabled,
+            ReviewAction(title: item.text("label"), selected: item.flag("expanded"), enabled: { model.reviewActionsEnabled },
                 palette: palette, id: "weekly-later-" + item.text("id")) {
                 Task { await model.toggleReviewLater(item.text("id"), weekly: true) }
             }
@@ -443,13 +443,13 @@ struct ReviewGuideScreen: View {
                 .buttonStyle(.plain).disabled(!model.reviewActionsEnabled)
                 .accessibilityAddTraits(item.flag("expanded") ? .isSelected : []).accessibilityIdentifier("review-guide-project-" + item.text("id"))
                 if !daily {
-                    ReviewAction(title: labels.text("addTask"), enabled: model.reviewActionsEnabled,
+                    ReviewAction(title: labels.text("addTask"), enabled: { model.reviewActionsEnabled },
                         palette: palette, id: "review-project-add-task-" + item.text("id")) {
                         Task { await model.openWeeklyReviewProjectTask(item.text("id")) }
                     }
                 }
                 if item.flag("expanded"), content.text("step") == "projects" {
-                    ReviewAction(title: model.label("projects.complete"), enabled: model.reviewActionsEnabled,
+                    ReviewAction(title: model.label("projects.complete"), enabled: { model.reviewActionsEnabled },
                         palette: palette, id: "review-project-complete-" + item.text("id")) {
                         Task { await model.requestWeeklyReviewProjectCompletion(item.text("id")) }
                     }
@@ -471,14 +471,14 @@ struct ReviewGuideScreen: View {
                 let visibleTasks = expanded ? tasks : Array(tasks.prefix(max(0, content.number("previewCount"))))
                 ForEach(visibleTasks.indices, id: \.self) { index in taskLink(visibleTasks[index].text("id"), title: visibleTasks[index].text("title")) }
                 if expanded && tasks.count < window.number("total") {
-                    ReviewAction(title: model.label("common.more"), enabled: model.reviewActionsEnabled, palette: palette,
+                    ReviewAction(title: model.label("common.more"), enabled: { model.reviewActionsEnabled }, palette: palette,
                         id: "review-context-more-" + item.text("context")) {
                         Task { await model.loadMoreReviewNested("contextTasks", key: context) }
                     }
                 }
                 if !item.text("moreLabel").isEmpty {
                     ReviewAction(title: expanded ? labels.text("less") : item.text("moreLabel"), selected: expanded,
-                        enabled: model.reviewActionsEnabled, palette: palette, id: "review-context-toggle-" + context) {
+                        enabled: { model.reviewActionsEnabled }, palette: palette, id: "review-context-toggle-" + context) {
                         model.toggleReviewContext(context)
                     }
                 }
@@ -495,10 +495,10 @@ struct ReviewGuideScreen: View {
                 .fixedSize(horizontal: false, vertical: true)
             AppChipFlow {
                 ReviewAction(title: labels.text(model.reviewAIWorking ? "aiRunning" : "aiRun"),
-                    enabled: model.reviewAICanRequest, palette: palette, id: "review-ai-run") { model.requestReviewAI() }
+                    enabled: { model.reviewAICanRequest }, palette: palette, id: "review-ai-run") { model.requestReviewAI() }
                 if model.reviewAIWorking {
                     ProgressView().accessibilityLabel(labels.text("aiRunning")).accessibilityIdentifier("review-ai-working")
-                    ReviewAction(title: model.label("common.cancel"), enabled: true,
+                    ReviewAction(title: model.label("common.cancel"), enabled: { true },
                         palette: palette, id: "review-ai-cancel") { model.cancelReviewAI() }
                 }
             }
@@ -538,7 +538,7 @@ struct ReviewGuideScreen: View {
             }
             if !model.reviewAISuggestions.isEmpty {
                 ReviewAction(title: labels.text("aiApply") + " (" + String(model.reviewAISelectedIDs.count) + ")",
-                    selected: true, enabled: model.reviewAICanApply, palette: palette, id: "review-ai-apply") { model.applyReviewAISelection() }
+                    selected: true, enabled: { model.reviewAICanApply }, palette: palette, id: "review-ai-apply") { model.applyReviewAISelection() }
             }
         }
         .padding(14).frame(maxWidth: .infinity, alignment: .leading)
@@ -620,7 +620,7 @@ struct ReviewGuideScreen: View {
                 .buttonStyle(.plain).disabled(!model.reviewActionsEnabled).accessibilityIdentifier("review-stale-project-" + project.text("id"))
             }
             if projects.count < window.number("total") {
-                ReviewAction(title: model.label("common.more"), enabled: model.reviewActionsEnabled, palette: palette, id: "review-stale-more") {
+                ReviewAction(title: model.label("common.more"), enabled: { model.reviewActionsEnabled }, palette: palette, id: "review-stale-more") {
                     Task { await model.loadMoreReviewNested("staleProjects") }
                 }
             }
@@ -683,12 +683,12 @@ struct ReviewGuideScreen: View {
     private var footer: some View {
         AppChipFlow {
             if !view.object("finish").isEmpty {
-                ReviewAction(title: view.object("finish").text("label"), selected: true, enabled: model.reviewActionsEnabled,
+                ReviewAction(title: view.object("finish").text("label"), selected: true, enabled: { model.reviewActionsEnabled },
                     palette: palette, id: "review-guide-finish") { Task { await model.finishReview() } }
             } else {
-                ReviewAction(title: view.object("back").text("label"), enabled: model.reviewActionsEnabled && (view.object("back")["checkpoint"] is String),
+                ReviewAction(title: view.object("back").text("label"), enabled: { model.reviewActionsEnabled && (view.object("back")["checkpoint"] is String) },
                     palette: palette, id: "review-guide-back") { Task { await model.moveReview("back") } }
-                ReviewAction(title: view.object("next").text("label"), selected: true, enabled: model.reviewActionsEnabled && !view.object("next").isEmpty,
+                ReviewAction(title: view.object("next").text("label"), selected: true, enabled: { model.reviewActionsEnabled && !view.object("next").isEmpty },
                     palette: palette, id: "review-guide-next") { Task { await model.moveReview("next") } }
             }
         }
@@ -700,18 +700,19 @@ struct ReviewGuideScreen: View {
 private struct ReviewAction: View {
     let title: String
     var selected = false
-    let enabled: Bool
+    let enabled: () -> Bool
     let palette: AppPalette
     let id: String
     let action: () -> Void
     var body: some View {
+        let isEnabled = enabled()
         Button(action: action) {
             Text(title).rnFont(14, .semibold).fixedSize(horizontal: false, vertical: true)
                 .foregroundStyle(selected ? palette.onTint : palette.text)
                 .padding(.horizontal, 14).padding(.vertical, 10).frame(minWidth: 44, minHeight: 44)
                 .background(selected ? palette.tint : palette.filter, in: RoundedRectangle(cornerRadius: 10)).contentShape(Rectangle())
         }
-        .buttonStyle(.plain).disabled(!enabled).opacity(enabled ? 1 : 0.5)
+        .buttonStyle(.plain).disabled(!isEnabled).opacity(isEnabled ? 1 : 0.5)
         .accessibilityIdentifier(id).accessibilityAddTraits(selected ? .isSelected : [])
     }
 }
@@ -722,7 +723,7 @@ private struct ReviewFailure: View {
     var body: some View {
         if let error = model.reviewError {
             Text(error).rnFont(14).foregroundStyle(palette.danger).textSelection(.enabled).accessibilityIdentifier("review-error")
-            ReviewAction(title: model.label("common.retry"), enabled: !model.busy && !model.retryNeeded, palette: palette, id: "review-retry") {
+            ReviewAction(title: model.label("common.retry"), enabled: { !model.busy && !model.retryNeeded }, palette: palette, id: "review-retry") {
                 Task { await model.retryReview() }
             }
         }

@@ -2728,6 +2728,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     #endif
 
     @ObservationIgnored private weak var inboxViewBoundaryRecordedHost: CoreHost?
+    var hostIdentity: ObjectIdentifier? { host.map { ObjectIdentifier($0) } }
     private var host: CoreHost? {
         didSet {
             if oldValue.map({ ObjectIdentifier($0) }) != host.map({ ObjectIdentifier($0) }) {
@@ -3657,7 +3658,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     var focusControlsEnabled: Bool { focusControls(shown: false) }
     var focusControlsShown: Bool { focusControls(shown: true) }
     private func focusControls(shown: Bool) -> Bool {
-        ready && selectedSurface == .focus && !focus.isEmpty && !operationBusy(shown: shown) && !retryNeeded && !taskPresented && !areaPickerPresented && !focusOrderPresented && !focusSavedFilterPresented
+        ready && (shown || selectedSurface == .focus) && !focus.isEmpty && !operationBusy(shown: shown) && !retryNeeded && (shown || (!taskPresented && !areaPickerPresented)) && !focusOrderPresented && !focusSavedFilterPresented
     }
     var focusSavedFilterPresented: Bool { !focusSavedFilterOperation.isEmpty }
     var focusSavedFilterCanConfirm: Bool {
@@ -3672,8 +3673,8 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     var reviewActionsEnabled: Bool { reviewActions(shown: false) }
     var reviewActionsShown: Bool { reviewActions(shown: true) }
     private func reviewActions(shown: Bool) -> Bool {
-        ready && selectedSurface == .review && (shown ? reviewCurrentShown : reviewCurrent) && !operationBusy(shown: shown) && !retryNeeded
-            && !taskPresented && !areaPickerPresented && !reviewPickerPresented && !mindSweepPresented
+        ready && (shown || selectedSurface == .review) && (shown ? reviewCurrentShown : reviewCurrent) && !operationBusy(shown: shown) && !retryNeeded
+            && (shown || (!taskPresented && !areaPickerPresented)) && !reviewPickerPresented && !mindSweepPresented
             && !processInboxPresented && reviewProjectCompletionOptions.isEmpty && projectLifecycleRequest == nil && reviewProjectTaskOwner == nil
     }
     var reviewRows: [CoreObject] {
@@ -18436,7 +18437,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     func dismissTaskFocusNotice() { taskFocusNotice = [:] }
 
     private(set) var taskCardPresentationGeneration = 0
-    @ObservationIgnored private var taskCardRowKeyCache: Set<TaskCardRowKey>?
+    @ObservationIgnored private var taskCardRowKeyCache: [Surface: Set<TaskCardRowKey>] = [:]
     private struct InlineChecklistOwner {
         let host: CoreHost
         let context: String
@@ -18447,8 +18448,12 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     private var inlineChecklistPending: InlineChecklistOwner?
 
     var taskCardPresentationContext: String {
+        String(taskCardPresentationGeneration) + ":" + taskCardListContext(selectedSurface)
+    }
+
+    func taskCardListContext(_ surface: Surface) -> String {
         let context: [Any]
-        switch selectedSurface {
+        switch surface {
         case .inbox: context = [inboxParams, inboxSelectionMode]
         case .focus: context = [focusState]
         case .review: context = [reviewOverviewParams, reviewGuidePresented, reviewKind, reviewGuide.object("content").text("step"), statusListSelectionMode]
@@ -18461,8 +18466,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         case .history: context = [historyTabs, historyParamsByTab, historyDoneSelectionMode]
         default: context = []
         }
-        return String(describing: selectedSurface) + ":" + String(taskCardPresentationGeneration)
-            + ":" + ((try? json([area.filter { $0.key != "revision" }, context])) ?? "")
+        return String(describing: surface) + ":" + ((try? json([area.filter { $0.key != "revision" }, context])) ?? "")
     }
 
     private var inlineChecklistContextClean: Bool {
@@ -18471,8 +18475,8 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     }
 
     private var taskCardSurfaceActionsEnabled: Bool { taskCardSurfaceActions(shown: false) }
-    private func taskCardSurfaceActions(shown: Bool) -> Bool {
-        switch selectedSurface {
+    private func taskCardSurfaceActions(shown: Bool, surface: Surface? = nil) -> Bool {
+        switch surface ?? selectedSurface {
         case .inbox: return (shown ? inboxActionsShown : inboxActionsEnabled) && !inboxSelectionMode
         case .focus: return shown ? focusActionsShown : focusActionsEnabled
         case .review: return (shown ? reviewActionsShown : reviewActionsEnabled) && !statusListSelectionMode
@@ -18487,25 +18491,25 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         }
     }
 
-    private func taskCardCurrentRow(_ displayed: CoreObject) -> Bool {
-        taskCardRowKeys().contains(TaskCardRowKey(displayed))
+    private func taskCardCurrentRow(_ displayed: CoreObject, surface: Surface? = nil) -> Bool {
+        taskCardRowKeys(surface ?? selectedSurface).contains(TaskCardRowKey(displayed))
     }
 
-    private func taskCardRowKeys() -> Set<TaskCardRowKey> {
-        if let keys = taskCardRowKeyCache { return keys }
+    private func taskCardRowKeys(_ surface: Surface) -> Set<TaskCardRowKey> {
+        if let keys = taskCardRowKeyCache[surface] { return keys }
         let keys = withObservationTracking {
-            Set(taskCardRows().map(TaskCardRowKey.init))
+            Set(taskCardRows(surface).map(TaskCardRowKey.init))
         } onChange: { [weak self] in
             guard let self else { return }
-            MainActor.assumeIsolated { self.taskCardRowKeyCache = nil }
+            MainActor.assumeIsolated { self.taskCardRowKeyCache[surface] = nil }
         }
-        taskCardRowKeyCache = keys
+        taskCardRowKeyCache[surface] = keys
         return keys
     }
 
-    private func taskCardRows() -> [CoreObject] {
+    private func taskCardRows(_ surface: Surface) -> [CoreObject] {
         let rows: [CoreObject]
-        switch selectedSurface {
+        switch surface {
         case .inbox:
             rows = inbox.objects("items").filter { $0.text("type") == "task" }.map { $0.object("row") }
         case .focus:
@@ -18532,13 +18536,13 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         return rows
     }
 
-    func inlineChecklistEnabled(_ row: CoreObject, writing: Bool = false, shown: Bool = false) -> Bool {
+    func inlineChecklistEnabled(_ row: CoreObject, writing: Bool = false, shown: Bool = false, surface: Surface? = nil) -> Bool {
         guard ready, workspaceAdmissionsOpen, !operationBusy(shown: shown), !retryNeeded, inlineChecklistPending == nil, rowQuickStatusPending == nil,
               !settingsSyncRestartRequired, !appLockRecoveryPending, !appLock.concealed, !appLock.authenticating,
               UIApplication.shared.applicationState == .active, row.text("status") != "reference",
               !row.text("id").isEmpty, !row.text("taskRevision").isEmpty,
-              taskCardSurfaceActions(shown: shown), taskCardCurrentRow(row) else { return false }
-        return !writing || (!row.flag("readOnly") && (selectedSurface != .project || !projectDetail.flag("readOnly")))
+              taskCardSurfaceActions(shown: shown, surface: surface), taskCardCurrentRow(row, surface: surface) else { return false }
+        return !writing || (!row.flag("readOnly") && ((surface ?? selectedSurface) != .project || !projectDetail.flag("readOnly")))
     }
 
     func readInlineChecklist(_ displayed: CoreObject, context: String, previous: CoreObject? = nil) async throws -> CoreObject {
@@ -18681,8 +18685,9 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     func taskRowSwipeRowCurrent(_ row: CoreObject) -> Bool {
         (selectedSurface == .reference ? referenceActionsEnabled : taskCardSurfaceActionsEnabled) && taskRowSwipeRowListed(row)
     }
-    private func taskRowSwipeRowListed(_ row: CoreObject) -> Bool {
-        guard selectedSurface == .reference else { return taskCardCurrentRow(row) }
+    private func taskRowSwipeRowListed(_ row: CoreObject, surface: Surface? = nil) -> Bool {
+        let surface = surface ?? selectedSurface
+        guard surface == .reference else { return taskCardCurrentRow(row, surface: surface) }
         return referenceCurrent && !referenceSelectionMode && reference.objects("items").contains {
             let current = $0.object("row")
             return $0.text("type") == "task" && current.text("id").utf8.elementsEqual(row.text("id").utf8)
@@ -18692,18 +18697,19 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     }
     func taskRowSwipeActionsEnabled(_ row: CoreObject) -> Bool { taskRowSwipeActionsAdmitted && taskRowSwipeRowEligible(row) }
     var taskRowSwipeActionsAdmitted: Bool { taskRowSwipeAdmission(shown: false) }
-    var taskRowSwipeActionsShown: Bool { taskRowSwipeAdmission(shown: true) }
-    private func taskRowSwipeAdmission(shown: Bool) -> Bool {
-        ready && workspaceAdmissionsOpen && !operationBusy(shown: shown) && !retryNeeded && inlineChecklistPending == nil && rowQuickStatusPending == nil
+    func taskRowSwipeActionsShown(_ surface: Surface?) -> Bool { taskRowSwipeAdmission(shown: true, surface: surface) }
+    private func taskRowSwipeAdmission(shown: Bool, surface: Surface? = nil) -> Bool {
+        let surface = surface ?? selectedSurface
+        return ready && workspaceAdmissionsOpen && !operationBusy(shown: shown) && !retryNeeded && inlineChecklistPending == nil && rowQuickStatusPending == nil
             && rowSwipeOwner == nil && !rowTaskDatesPending && !rowTaskDestinationPending && !rowTaskBackdatePending && !taskChecklistMovePending
             && !appLock.concealed && !appLock.authenticating && !settingsSyncRestartRequired && !appLockRecoveryPending
             && UIApplication.shared.applicationState == .active
-            && (selectedSurface != .project || !projectDetail.flag("readOnly"))
-            && (selectedSurface == .reference ? referenceActionsEnabled : taskCardSurfaceActions(shown: shown))
-            && notificationResponseContextIsClean(allowingReviewGuide: true, allowingProjectNotes: selectedSurface == .project)
+            && (surface != .project || !projectDetail.flag("readOnly"))
+            && (surface == .reference ? referenceActionsEnabled : taskCardSurfaceActions(shown: shown, surface: surface))
+            && (shown || notificationResponseContextIsClean(allowingReviewGuide: true, allowingProjectNotes: surface == .project))
     }
-    func taskRowSwipeRowEligible(_ row: CoreObject) -> Bool {
-        !row.flag("readOnly") && !row.text("id").isEmpty && !row.text("taskRevision").isEmpty && taskRowSwipeRowListed(row)
+    func taskRowSwipeRowEligible(_ row: CoreObject, surface: Surface? = nil) -> Bool {
+        !row.flag("readOnly") && !row.text("id").isEmpty && !row.text("taskRevision").isEmpty && taskRowSwipeRowListed(row, surface: surface)
     }
     struct TaskRowSwipeActivation {
         fileprivate let host: CoreHost
@@ -19104,7 +19110,8 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         rowTaskDatesReadTask?.cancel(); rowTaskDatesReadTask = nil
         rowTaskDatesEditTask?.cancel(); rowTaskDatesEditTask = nil; rowTaskDatesEdits = []
         rowTaskDatesReading = false; rowTaskDatesEditing = false; rowTaskDatesSaveWaiting = false
-        rowTaskDatesPresented = false; rowTaskDatesContext = nil; rowTaskDatesMenuContext = nil
+        rowTaskDatesPresented = false; rowTaskDatesContext = nil
+        if rowTaskDatesMenuContext != nil { rowTaskDatesMenuContext = nil }
         rowTaskDatesModel = [:]; rowTaskDatesScheduleBase = [:]
         if !rowTaskDatesPending { rowTaskDatesError = nil; rowTaskDatesFailureContext = nil }
     }
@@ -19410,7 +19417,8 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     }
     func retireRowTaskDestinationPresentation() {
         rowTaskDestinationReadGeneration += 1
-        rowTaskDestinationPresented = false; rowTaskDestinationContext = nil; rowTaskDestinationMenuContext = nil
+        rowTaskDestinationPresented = false; rowTaskDestinationContext = nil
+        if rowTaskDestinationMenuContext != nil { rowTaskDestinationMenuContext = nil }
         if !rowTaskDestinationPending { rowTaskDestinationError = nil; rowTaskDestinationFailureContext = nil }
     }
     func cancelRowTaskDestination() {
@@ -20287,12 +20295,12 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         }
     }
 
-    func taskFocusInputEnabled(_ row: CoreObject, checkingCurrentRow: Bool = false, shown: Bool = false) -> Bool {
-        guard ready, !operationBusy(shown: shown), !retryNeeded, taskFocusRequest == nil, !taskPresented,
-              !capturePresented, !areaPickerPresented, !morePresented, !projectRenameEditing,
+    func taskFocusInputEnabled(_ row: CoreObject, checkingCurrentRow: Bool = false, shown: Bool = false, surface: Surface? = nil) -> Bool {
+        guard ready, !operationBusy(shown: shown), !retryNeeded, taskFocusRequest == nil, shown || (!taskPresented && !capturePresented && !areaPickerPresented && !morePresented),
+              !projectRenameEditing,
               !row.flag("readOnly"), row.object("meta").flag("canFocus") else { return false }
         let rows: [CoreObject]
-        switch selectedSurface {
+        switch surface ?? selectedSurface {
         case .focus:
             guard shown ? focusActionsShown : focusActionsEnabled else { return false }
             rows = checkingCurrentRow ? focus.objects("sections").flatMap { $0.objects("rows") } : []
@@ -28876,7 +28884,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
               referenceSortRequest == nil, taskListSortCaller == nil else { return false }
         if caller == .reference { return referenceActionsEnabled }
         if caller == .contexts { return contextsActionsEnabled }
-        return selectedSurface == .inbox && (shown ? inboxCurrentShown : inboxCurrent) && !inbox.isEmpty && referencePanel.isEmpty
+        return (shown || selectedSurface == .inbox) && (shown ? inboxCurrentShown : inboxCurrent) && !inbox.isEmpty && referencePanel.isEmpty
             && somedayPanel.isEmpty && historyPanel.isEmpty
     }
 
@@ -29087,8 +29095,8 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     var inboxActionsEnabled: Bool { inboxActions(shown: false) }
     var inboxActionsShown: Bool { inboxActions(shown: true) }
     private func inboxActions(shown: Bool) -> Bool {
-        ready && selectedSurface == .inbox && (shown ? inboxCurrentShown : inboxCurrent) && !operationBusy(shown: shown) && !retryNeeded && !appLock.concealed
-            && !taskPresented && !capturePresented && !areaPickerPresented && !morePresented
+        ready && (shown || selectedSurface == .inbox) && (shown ? inboxCurrentShown : inboxCurrent) && !operationBusy(shown: shown) && !retryNeeded && !appLock.concealed
+            && (shown || (!taskPresented && !capturePresented && !areaPickerPresented && !morePresented))
             && !inboxGroupPresented && !inboxSortPresented && !inboxFiltersPresented && !inboxFilterWorkPending
             && !inboxBulkCompositionBlocked && !projectBulkCompositionBlocked
     }
@@ -39011,7 +39019,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         searchLoading = false
         searchNeedsRead = false
         searchError = nil
-        await refresh()
+        await refresh(keepsPreferences: true)
     }
 
     func setSearchQuery(_ text: String) {

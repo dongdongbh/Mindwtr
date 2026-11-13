@@ -20,97 +20,104 @@ struct InboxScreen: View {
     @Environment(\.colorScheme) private var systemScheme
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    @State private var inboxBulkDeletePresented = false
     @State private var bottomSafeInset: CGFloat = 0
     private var palette: AppPalette { AppPalette(theme: model.theme, system: systemScheme) }
-    private var focusSections: [CoreObject] { model.focus.objects("sections").filter { $0.number("total") > 0 } }
-    private var reviewProjects: [CoreObject] { model.focus.objects("reviewProjects") }
-    private var otherFocusKeys: Set<String> {
-        Set(focusSections.map { $0.text("key") }.filter { ["schedule", "next", "upcoming", "reviewDue"].contains($0) })
-            .union(reviewProjects.isEmpty ? [] : ["reviewProjects"])
-    }
-    private var otherFocusSectionsOpen: Bool { !otherFocusKeys.subtracting(model.collapsedFocusSections).isEmpty }
-    private var menuPanelPresented: Bool {
-        model.inboxSortPresented || model.contextsSortPresented || model.inboxGroupPresented || model.inboxFiltersPresented || (model.inboxBulkTagPresented || model.inboxBulkRemovePresented || model.inboxBulkOrganizePresented) || model.morePresented || !model.somedayPanel.isEmpty || !model.referencePanel.isEmpty || !model.historyPanel.isEmpty
-    }
     private var menuListPrefix: String {
         model.selectedSurface == .savedSearch ? "saved-search" : model.selectedSurface == .widgetList ? "widget-list" : model.selectedSurface == .contexts ? "contexts" : model.selectedSurface == .trash ? "trash" : model.selectedSurface == .history ? "history" : model.selectedSurface == .reference ? "reference" : model.selectedSurface == .someday ? "someday" : "waiting"
     }
 
+    private var fullScreenSurfaceShown: Bool {
+        switch model.selectedSurface {
+        case .search, .project, .contexts, .waiting, .someday, .settings, .savedSearch, .widgetList, .trash, .history, .reference: return true
+        case .focus: return model.focusOrderPresented
+        default: return false
+        }
+    }
+
+    @ViewBuilder private var fullScreenSurfaceContent: some View {
+        if model.selectedSurface == .search {
+            SearchScreen(model: model, palette: palette)
+        } else if model.selectedSurface == .project && model.projectRowAreaOverList {
+            ZStack {
+                VStack(spacing: 0) {
+                    InboxHeader(model: model, palette: palette)
+                    ProjectsScreen(model: model, palette: palette)
+                }
+                .disabled(true)
+                ProjectDetailScreen(model: model, palette: palette).opacity(0).allowsHitTesting(false).accessibilityHidden(true)
+            }
+            .onChange(of: model.projectRowAreaReturnReady) { ready in
+                if ready { Task { await model.returnFromProjectRowArea() } }
+            }
+        } else if model.selectedSurface == .project {
+            ProjectDetailScreen(model: model, palette: palette)
+        } else if model.selectedSurface == .contexts {
+            menuListHeader
+            ContextsScreen(model: model, palette: palette)
+                .accessibilityAction(.escape) {
+                    model.endContextsInput()
+                    if model.quickAccessView != "contexts" { Task { await model.closeContexts() } }
+                }
+        } else if model.selectedSurface == .waiting {
+            menuListHeader
+            WaitingScreen(model: model, palette: palette)
+                .accessibilityAction(.escape) { Task { await model.closeWaiting() } }
+        } else if model.selectedSurface == .someday {
+            menuListHeader
+            SomedayScreen(model: model, palette: palette)
+                .accessibilityAction(.escape) { Task { await model.closeSomeday() } }
+        } else if model.selectedSurface == .settings {
+            SettingsScreen(model: model, palette: palette)
+        } else if model.selectedSurface == .savedSearch {
+            menuListHeader
+            SavedSearchScreen(model: model, palette: palette)
+                .accessibilityAction(.escape) { Task { await model.closeSavedSearch() } }
+        } else if model.selectedSurface == .widgetList {
+            menuListHeader
+            WidgetListScreen(model: model, palette: palette)
+                .accessibilityAction(.escape) { Task { await model.closeWidgetList() } }
+        } else if model.selectedSurface == .trash {
+            menuListHeader
+            TrashScreen(model: model, palette: palette)
+                .accessibilityAction(.escape) { Task { await model.closeTrash() } }
+        } else if model.selectedSurface == .history {
+            menuListHeader
+            HistoryScreen(model: model, palette: palette)
+                .accessibilityAction(.escape) { Task { await model.closeHistory() } }
+        } else if model.selectedSurface == .reference {
+            menuListHeader
+            ReferenceScreen(model: model, palette: palette)
+                .accessibilityAction(.escape) { Task { await model.closeReference() } }
+        } else if model.selectedSurface == .focus && model.focusOrderPresented {
+            focusOrderContent
+        }
+    }
+
     private var primarySurfaceContent: AnyView {
-        AnyView(Group {
-            if model.selectedSurface == .search {
-                SearchScreen(model: model, palette: palette)
-            } else if model.selectedSurface == .project && model.projectRowAreaOverList {
-                ZStack {
-                    VStack(spacing: 0) {
-                        InboxHeader(model: model, palette: palette)
-                        ProjectsScreen(model: model, palette: palette)
-                    }
-                    .disabled(true)
-                    ProjectDetailScreen(model: model, palette: palette).opacity(0).allowsHitTesting(false).accessibilityHidden(true)
-                }
-                .onChange(of: model.projectRowAreaReturnReady) { ready in
-                    if ready { Task { await model.returnFromProjectRowArea() } }
-                }
-            } else if model.selectedSurface == .project {
-                ProjectDetailScreen(model: model, palette: palette)
-            } else if model.selectedSurface == .contexts {
-                menuListHeader
-                ContextsScreen(model: model, palette: palette)
-                    .accessibilityAction(.escape) {
-                        model.endContextsInput()
-                        if model.quickAccessView != "contexts" { Task { await model.closeContexts() } }
-                    }
-            } else if model.selectedSurface == .waiting {
-                menuListHeader
-                WaitingScreen(model: model, palette: palette)
-                    .accessibilityAction(.escape) { Task { await model.closeWaiting() } }
-            } else if model.selectedSurface == .someday {
-                menuListHeader
-                SomedayScreen(model: model, palette: palette)
-                    .accessibilityAction(.escape) { Task { await model.closeSomeday() } }
-            } else if model.selectedSurface == .settings {
-                SettingsScreen(model: model, palette: palette)
-            } else if model.selectedSurface == .savedSearch {
-                menuListHeader
-                SavedSearchScreen(model: model, palette: palette)
-                    .accessibilityAction(.escape) { Task { await model.closeSavedSearch() } }
-            } else if model.selectedSurface == .widgetList {
-                menuListHeader
-                WidgetListScreen(model: model, palette: palette)
-                    .accessibilityAction(.escape) { Task { await model.closeWidgetList() } }
-            } else if model.selectedSurface == .trash {
-                menuListHeader
-                TrashScreen(model: model, palette: palette)
-                    .accessibilityAction(.escape) { Task { await model.closeTrash() } }
-            } else if model.selectedSurface == .history {
-                menuListHeader
-                HistoryScreen(model: model, palette: palette)
-                    .accessibilityAction(.escape) { Task { await model.closeHistory() } }
-            } else if model.selectedSurface == .reference {
-                menuListHeader
-                ReferenceScreen(model: model, palette: palette)
-                    .accessibilityAction(.escape) { Task { await model.closeReference() } }
-            } else if model.selectedSurface == .focus && model.focusOrderPresented {
-                focusOrderContent
-            } else {
-                InboxHeader(model: model, palette: palette)
+        let fullScreen = fullScreenSurfaceShown
+        return AnyView(ZStack(alignment: .top) {
+            VStack(spacing: 0) {
+                if !fullScreen { InboxHeader(model: model, palette: palette) }
                 if model.ready {
-                    if model.selectedSurface == .inbox {
-                        AnyView(inboxContent)
-                            .onAppear { Task { await model.recordInboxViewBoundaryRendered() } }
+                    ZStack(alignment: .top) {
+                        KeptTabSurfaces(model: model, palette: palette, selected: fullScreen ? .calendar : model.selectedSurface)
+                            .id(model.hostIdentity)
+                        if !fullScreen {
+                            if model.selectedSurface == .calendar { CalendarScreen(model: model, palette: palette) }
+                            else if model.selectedSurface == .board { BoardScreen(model: model, palette: palette) }
+                            else if model.selectedSurface == .projects { ProjectsScreen(model: model, palette: palette) }
+                        }
                     }
-                    else if model.selectedSurface == .review { ReviewScreen(model: model, palette: palette) }
-                    else if model.selectedSurface == .calendar { CalendarScreen(model: model, palette: palette) }
-                    else if model.selectedSurface == .board { BoardScreen(model: model, palette: palette) }
-                    else if model.selectedSurface == .projects { ProjectsScreen(model: model, palette: palette) }
-                    else { focusContent }
                 } else {
                     Spacer()
                     ModelShown { model.busyShown } content: { ProgressView().accessibilityLabel(model.label("common.loading")) }
                     Spacer()
                 }
+            }
+            if fullScreen {
+                VStack(spacing: 0) { fullScreenSurfaceContent }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    .background(palette.bg)
             }
         })
     }
@@ -187,8 +194,8 @@ struct InboxScreen: View {
                         surfaceNotices
                     }
                     .allowsHitTesting(!model.morePresented && !model.inboxGroupPresented && !model.inboxFiltersPresented && !(model.inboxBulkTagPresented || model.inboxBulkRemovePresented || model.inboxBulkOrganizePresented))
-                    .accessibilityElement(children: menuPanelPresented ? .ignore : .contain)
-                    .accessibilityHidden(menuPanelPresented)
+                    .accessibilityElement(children: model.menuPanelPresented ? .ignore : .contain)
+                    .accessibilityHidden(model.menuPanelPresented)
                     if model.morePresented { MoreMenuSheet(model: model, palette: palette) }
                     if !model.somedayPanel.isEmpty { SomedayPanel(model: model, palette: palette) }
                     if !model.referencePanel.isEmpty { ReferencePanel(model: model, palette: palette) }
@@ -474,6 +481,213 @@ struct InboxScreen: View {
         .padding(.bottom, 8)
     }
 
+    private var focusOrderContent: some View {
+        let labels = model.focus.object("controls").object("reorder")
+        return VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                Text(labels.text("title").uppercased()).rnFont(13, .bold, maxScale: 1.2).tracking(1).lineLimit(1)
+                    .foregroundStyle(palette.text).accessibilityAddTraits(.isHeader)
+                Spacer(minLength: 4)
+                Button { model.closeFocusOrder() } label: {
+                    Text(model.label("common.done")).rnFont(14, .bold)
+                        .foregroundStyle(palette.onTint).padding(.horizontal, 18).frame(minHeight: 44)
+                        .background(palette.tint).clipShape(RoundedRectangle(cornerRadius: 20))
+                }
+                .buttonStyle(.plain).modifier(ModelDisabled { model.busy || model.retryNeeded })
+                .accessibilityIdentifier("focus-reorder-done")
+            }
+            .padding(.horizontal, 12).padding(.vertical, 12)
+            .overlay(alignment: .bottom) { Rectangle().fill(palette.border).frame(height: 1) }
+            if let error = model.focusOrderError {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(error).rnFont(13).foregroundStyle(palette.danger)
+                        .accessibilityIdentifier("focus-reorder-error")
+                    Button { Task { await model.retryFocusOrder() } } label: {
+                        Text(model.label("common.retry")).rnFont(14, .semibold).frame(minHeight: 44)
+                    }
+                    .buttonStyle(.plain).foregroundStyle(palette.tint).modifier(ModelDisabled { model.busy })
+                    .accessibilityIdentifier("focus-reorder-retry")
+                }.frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 16)
+            }
+            List {
+                ForEach(model.focusOrderView.objects("rows").map { FocusOrderItem(row: $0) }) { item in
+                    let row = item.row
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(row.text("title")).rnFont(15, .semibold).foregroundStyle(palette.text).lineLimit(1)
+                        if !row.text("secondaryLabel").isEmpty {
+                            Text(row.text("secondaryLabel")).rnFont(12).foregroundStyle(palette.secondary).lineLimit(1)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 72, alignment: .leading)
+                    .listRowInsets(EdgeInsets(top: 4, leading: 26, bottom: 4, trailing: 14))
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(RoundedRectangle(cornerRadius: 12).fill(palette.card)
+                        .overlay(RoundedRectangle(cornerRadius: 12).stroke(palette.border, lineWidth: 0.5))
+                        .padding(.horizontal, 12).padding(.vertical, 4))
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(row.text("positionLabel"))
+                    .accessibilityHint(labels.text("hint"))
+                    .accessibilityIdentifier("focus-reorder-row-" + row.text("id"))
+                    .accessibilityActions {
+                        if row["moveUp"] is [String] {
+                            Button(labels.text("moveUpLabel")) { Task { await model.moveFocusTask(row, up: true) } }
+                        }
+                        if row["moveDown"] is [String] {
+                            Button(labels.text("moveDownLabel")) { Task { await model.moveFocusTask(row, up: false) } }
+                        }
+                    }
+                    .moveDisabled(!model.focusOrderInputEnabled)
+                }
+                .onMove { source, destination in Task { await model.moveFocusTask(from: source, to: destination) } }
+                if model.focusOrderShowHint {
+                    Text(labels.text("hint")).rnFont(12).foregroundStyle(palette.secondary)
+                        .listRowBackground(Color.clear).listRowSeparator(.hidden)
+                }
+            }
+            .listStyle(.plain).scrollContentBackground(.hidden)
+            .environment(\.editMode, .constant(.active))
+            .accessibilityIdentifier("focus-reorder-list")
+            .modifier(ModelDisabled { !model.focusOrderInputEnabled })
+        }
+        .accessibilityAction(.escape) { model.closeFocusOrder() }
+    }
+
+    private var menuListHeader: some View {
+        VStack(spacing: 0) {
+            if model.selectedSurface == .widgetList {
+                HStack(spacing: 8) { menuListBack; menuListTitle }
+            } else if dynamicTypeSize.isAccessibilitySize {
+                HStack(spacing: 8) { menuListBack; menuListTitle }
+                HStack(spacing: 8) { Spacer(minLength: 0); menuListTools }
+            } else {
+                HStack(spacing: 8) { menuListBack; menuListTitle; menuListTools }
+            }
+        }
+        .padding(.horizontal, 8).frame(minHeight: 52)
+        .background(palette.card.ignoresSafeArea(edges: .top))
+        .overlay(alignment: .bottom) { palette.border.frame(height: 0.5) }
+    }
+
+    @ViewBuilder private var menuListBack: some View {
+        if model.selectedSurface != .contexts || model.quickAccessView != "contexts" {
+            Button {
+                model.endContextsInput()
+                Task {
+                    if model.selectedSurface == .contexts { await model.closeContexts() }
+                    else if model.selectedSurface == .savedSearch { await model.closeSavedSearch() }
+                    else if model.selectedSurface == .widgetList { await model.closeWidgetList() }
+                    else if model.selectedSurface == .trash { await model.closeTrash() }
+                    else if model.selectedSurface == .history { await model.closeHistory() }
+                    else if model.selectedSurface == .reference { await model.closeReference() }
+                    else if model.selectedSurface == .someday { await model.closeSomeday() }
+                    else { await model.closeWaiting() }
+                }
+            } label: {
+                AppIcon(name: "chevron", size: 24).rotationEffect(.degrees(90)).frame(width: 44, height: 44)
+            }
+            .buttonStyle(.plain).modifier(ModelDisabled { model.busy || model.retryNeeded })
+            .accessibilityLabel(model.label("common.back"))
+            .accessibilityIdentifier(menuListPrefix + "-back")
+        }
+    }
+
+    private var menuListTitle: some View {
+        Text(model.selectedSurface == .savedSearch ? (model.savedSearch.text("title").isEmpty ? model.label("search.savedSearches") : model.savedSearch.text("title")) : model.selectedSurface == .widgetList ? (model.widgetList.text("title").isEmpty ? model.label("search.noResults") : model.widgetList.text("title")) : model.selectedSurface == .reference && !model.reference.text("title").isEmpty
+             ? model.reference.text("title") : model.label(menuListPrefix == "history" || menuListPrefix == "trash" || menuListPrefix == "contexts" ? "nav." + menuListPrefix : menuListPrefix + ".title")).rnFont(17, .bold)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading).accessibilityAddTraits(.isHeader)
+            .accessibilityIdentifier(menuListPrefix + "-title")
+    }
+
+    @ViewBuilder private var menuListTools: some View {
+        Button {
+            model.endContextsInput()
+            Task { await model.openAreaPicker() }
+        } label: {
+            HStack(spacing: 4) {
+                Text(model.area.text("label")).rnFont(12, .semibold).lineLimit(1)
+                AppIcon(name: "chevron", size: 12)
+            }
+            .foregroundStyle(model.defaultAreaScope ? palette.secondary : palette.tint)
+            .frame(minHeight: 44).frame(maxWidth: 90).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain).modifier(ModelDisabled { model.busy || model.retryNeeded })
+        .accessibilityLabel(model.label("projects.areaFilter") + ": " + model.area.text("summary"))
+        .accessibilityValue(model.area.text("label")).accessibilityIdentifier("area-open")
+        Button { model.endContextsInput(); model.openSearch() } label: {
+            AppIcon(name: "search", size: 22).frame(width: 44, height: 44).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain).modifier(ModelDisabled { model.busy || model.retryNeeded })
+        .accessibilityLabel(model.label("search.title")).accessibilityIdentifier("search-open")
+        if model.selectedSurface == .reference {
+            Button { model.referencePanel = "menu" } label: {
+                Image(systemName: "ellipsis").font(.system(size: 20)).frame(width: 44, height: 44).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain).modifier(ModelDisabled { !model.referenceActionsEnabled })
+            .accessibilityLabel(model.label("taskEdit.moreOptions")).accessibilityIdentifier("reference-overflow-button")
+        } else if model.selectedSurface == .history && !model.historyArchived {
+            Button { model.setHistoryPanel("menu") } label: {
+                Image(systemName: "ellipsis").font(.system(size: 20)).frame(width: 44, height: 44).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain).modifier(ModelDisabled { !model.historyActionsEnabled })
+            .accessibilityLabel(model.label("taskEdit.moreOptions")).accessibilityIdentifier("done-overflow-button")
+        }
+    }
+
+    private func disabledIcon(_ icon: String, label: String, size: CGFloat) -> some View {
+        Button {} label: { AppIcon(name: icon, size: size).frame(width: 44, height: 44) }
+            .buttonStyle(.plain).disabled(true).accessibilityLabel(label)
+    }
+
+}
+
+private struct KeptTabSurfaces: View {
+    let model: CoreModel
+    let palette: AppPalette
+    let selected: CoreModel.Surface
+    @State private var visited: Set<CoreModel.Surface> = []
+    private static let kept: [CoreModel.Surface] = [.inbox, .review, .focus]
+
+    var body: some View {
+        TabView(selection: Binding(get: { Self.kept.contains(selected) ? selected : .calendar }, set: { _ in })) {
+            tab(.inbox) { InboxSurface(model: model, palette: palette) }
+            tab(.review) { ReviewScreen(model: model, palette: palette) }
+            tab(.focus) { FocusSurface(model: model, palette: palette) }
+            tab(.calendar) { EmptyView() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didReceiveMemoryWarningNotification)) { _ in
+            visited = [selected]
+        }
+        .onChange(of: selected, initial: true) { previous, surface in
+            if !visited.contains(surface) { visited.insert(surface) }
+            if previous != surface, Self.kept.contains(surface) {
+                UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+            }
+            if surface == .inbox { Task { await model.recordInboxViewBoundaryRendered() } }
+        }
+    }
+
+    private func tab<Content: View>(_ surface: CoreModel.Surface, @ViewBuilder content: () -> Content) -> some View {
+        Group {
+            if Self.kept.contains(surface) && (surface == selected || visited.contains(surface)) {
+                TaskCardListValuesProvider(model: model, surface: surface, content: content())
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .background(palette.bg)
+        .toolbar(.hidden, for: .tabBar)
+        .tag(surface)
+    }
+}
+
+private struct InboxSurface: View {
+    let model: CoreModel
+    let palette: AppPalette
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var inboxBulkDeletePresented = false
+
+    var body: some View { inboxContent }
+
     private var inboxRows: [(id: [String], item: CoreObject)] {
         model.items.map { (id: model.inboxItemIdentity($0), item: $0) }
     }
@@ -495,12 +709,14 @@ struct InboxScreen: View {
                         Text(error).rnFont(13).foregroundStyle(palette.danger)
                             .accessibilityIdentifier("inbox-group-error")
                         Button(model.label("common.retry")) { Task { await model.retryInboxGrouping() } }
-                            .frame(minHeight: 44).modifier(ModelDisabled { model.busyShown || model.retryNeeded || menuPanelPresented })
+                            .frame(minHeight: 44).modifier(ModelDisabled { model.busyShown || model.retryNeeded || model.menuPanelPresented })
                             .accessibilityIdentifier("inbox-group-retry")
                     }
-                    ForEach(inboxRows, id: \.id) { entry in
+                    let rows = inboxRows
+                    let pagingRows = Set(rows.suffix(5).map(\.id))
+                    ForEach(rows, id: \.id) { entry in
                         InboxListRow(model: model, item: entry.item, palette: palette).equatable()
-                            .modifier(InboxAutomaticPage(model: model, identity: entry.id))
+                            .modifier(InboxAutomaticPage(model: model, identity: entry.id, pages: pagingRows.contains(entry.id)))
                     }
                     if model.items.count < model.inbox.number("total") {
                         Button { Task { await model.loadMore() } } label: {
@@ -508,7 +724,7 @@ struct InboxScreen: View {
                                 .padding(.horizontal, 12).frame(minHeight: 44)
                                 .background(palette.filter, in: Capsule()).contentShape(Capsule())
                         }
-                        .buttonStyle(.plain).modifier(ModelDisabled { model.busyShown || model.retryNeeded || menuPanelPresented })
+                        .buttonStyle(.plain).modifier(ModelDisabled { model.busyShown || model.retryNeeded || model.menuPanelPresented })
                         .accessibilityIdentifier("inbox-more")
                     }
                     ModelShown { model.busyShown && !model.capturePresented } content: { ProgressView().frame(maxWidth: .infinity).padding(12) }
@@ -524,9 +740,9 @@ struct InboxScreen: View {
             .background { InboxAutomaticPageReplay(model: model) }
         }
         .background {
-            if let ticket = model.navigationReplayTicket(for: "inbox"), !menuPanelPresented, !inboxBulkDeletePresented {
+            if let ticket = model.navigationReplayTicket(for: "inbox"), !model.menuPanelPresented, !inboxBulkDeletePresented {
                 NavigationReplayContentEntry(model: model, ticket: ticket,
-                    uncovered: { !menuPanelPresented && !inboxBulkDeletePresented })
+                    uncovered: { !model.menuPanelPresented && !inboxBulkDeletePresented })
             }
         }
         .alert(model.archiveBulkDeleteConfirmation.text("title"), isPresented: $inboxBulkDeletePresented) {
@@ -617,8 +833,109 @@ struct InboxScreen: View {
             .contentShape(Rectangle())
     }
 
+    @ViewBuilder private var inboxFilterChips: some View {
+        let chips = model.inbox.objects("chips")
+        if !chips.isEmpty {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                ForEach(chips.indices, id: \.self) { index in
+                    let chip = chips[index]
+                    let tone = chip.flag("excluded") ? palette.danger : palette.tint
+                    Button { Task { await model.applyInboxChipAction(chip.object("action")) } } label: {
+                        HStack(spacing: 4) {
+                            Text(chip.text("label")).rnFont(12, .semibold).strikethrough(chip.flag("excluded"))
+                            AppIcon(name: "x", size: 12)
+                        }
+                        .foregroundStyle(tone).padding(.horizontal, 12).frame(minHeight: 44)
+                        .background(palette.filter, in: Capsule()).overlay(Capsule().stroke(tone, lineWidth: 1))
+                        .contentShape(Capsule())
+                    }
+                    .buttonStyle(.plain).modifier(ModelDisabled { !model.inboxActionsShown })
+                    .accessibilityLabel(chip.text("accessibilityLabel")).accessibilityAddTraits(.isSelected)
+                    .accessibilityValue(chip.flag("excluded") ? model.label("filters.excluded") : "")
+                    .accessibilityIdentifier("inbox-chip-" + chip.text("id"))
+                }
+                Button { Task { await model.editInboxFilter(model.inbox.object("filters").object("clearEdit")) } } label: {
+                    Text(model.inbox.text("clearLabel")).rnFont(12, .semibold).padding(.horizontal, 12)
+                        .frame(minHeight: 44).contentShape(Capsule())
+                }
+                .buttonStyle(.plain).foregroundStyle(palette.tint).modifier(ModelDisabled { !model.inboxActionsShown })
+                .accessibilityIdentifier("inbox-chips-clear")
+                }
+                .padding(.horizontal, 16)
+            }
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityIdentifier("inbox-chips-scroll")
+        }
+    }
+
+    private var primaryAction: some View {
+        let process = model.inbox.object("process")
+        let mindSweep = model.inbox.object("mindSweep")
+        let isMindSweep = process.isEmpty && mindSweep.text("placement") == "primary" && !mindSweep.text("label").isEmpty
+        let label = process.isEmpty ? mindSweep.text("label") : process.text("label")
+        return Button {
+            Task {
+                if isMindSweep { await model.openMindSweep() }
+                else { await model.openProcessInbox() }
+            }
+        } label: {
+            InboxActionLabel(label: label, icon: process.isEmpty ? "brain" : "checks", color: palette.tint, palette: palette)
+                .rnFont(15, .semibold).frame(maxWidth: .infinity, minHeight: 44)
+                .padding(.horizontal, 16)
+                .background(palette.material ? palette.captureBackground : palette.tint.opacity(0.16), in: RoundedRectangle(cornerRadius: 12))
+                .overlay(RoundedRectangle(cornerRadius: 12).stroke(palette.material ? .clear : palette.tint, lineWidth: 0.7))
+        }
+        .buttonStyle(.plain).modifier(ModelDisabled { label.isEmpty || !model.ready || model.busyShown || model.retryNeeded })
+        .accessibilityIdentifier(isMindSweep ? "inbox-mind-sweep-primary" : "inbox-process-primary")
+        .padding(.horizontal, 16).padding(.top, 6)
+    }
+
+    private var emptyState: some View {
+        VStack(spacing: 8) {
+            Text(model.inbox.object("empty").text("message")).rnFont(15, .semibold)
+            Text(model.inbox.object("empty").text("hint")).rnFont(13).foregroundStyle(palette.secondary.opacity(0.8))
+            Button {
+                Task {
+                    let edit = model.inbox.object("empty").object("action").object("filterEdit")
+                    if !edit.isEmpty { await model.editInboxFilter(edit) }
+                    else { await model.openCapture() }
+                }
+            } label: {
+                Text(model.inbox.object("empty").text("actionLabel"))
+                    .rnFont(13, .bold).padding(.horizontal, 16).padding(.vertical, 9)
+                    .frame(minHeight: 44).contentShape(Capsule())
+                    .overlay(Capsule().stroke(palette.text, lineWidth: 1))
+            }
+            .buttonStyle(.plain).padding(.top, 8)
+            .modifier(ModelDisabled { !model.inboxActionsShown })
+            .accessibilityIdentifier(model.inbox.object("empty").object("action").object("filterEdit").isEmpty
+                ? "inbox-empty-capture" : "inbox-empty-clear")
+        }
+        .multilineTextAlignment(.center)
+        .frame(maxWidth: .infinity).padding(.horizontal, 20).padding(.vertical, 36)
+        .background(palette.card, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(palette.border, lineWidth: 1))
+    }
+
+}
+
+private struct FocusSurface: View {
+    let model: CoreModel
+    let palette: AppPalette
+
+    var body: some View { focusContent }
+
+    private var focusSections: [CoreObject] { model.focus.objects("sections").filter { $0.number("total") > 0 } }
+    private var reviewProjects: [CoreObject] { model.focus.objects("reviewProjects") }
+    private var otherFocusKeys: Set<String> {
+        Set(focusSections.map { $0.text("key") }.filter { ["schedule", "next", "upcoming", "reviewDue"].contains($0) })
+            .union(reviewProjects.isEmpty ? [] : ["reviewProjects"])
+    }
+    private var otherFocusSectionsOpen: Bool { !otherFocusKeys.subtracting(model.collapsedFocusSections).isEmpty }
     private var focusContent: some View {
-        ScrollView {
+        let sections = focusSections, projects = reviewProjects
+        return ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
                 if let error = model.focusError {
                     Text(error).rnFont(13).foregroundStyle(palette.danger).textSelection(.enabled)
@@ -640,8 +957,8 @@ struct InboxScreen: View {
                         }
                         .multilineTextAlignment(.center).frame(maxWidth: .infinity).padding(.vertical, 40)
                     }
-                    ForEach(focusSections.indices, id: \.self) { index in
-                        let section = focusSections[index]
+                    ForEach(sections.indices, id: \.self) { index in
+                        let section = sections[index]
                         let key = section.text("key")
                         focusSectionHeader(key: key, title: section.text("title"), count: section.number("total"), first: index == 0, countLabel: section.text("countLabel"))
                         if !section.text("hiddenByAreaLabel").isEmpty {
@@ -694,12 +1011,12 @@ struct InboxScreen: View {
                             }
                         }
                     }
-                    if !reviewProjects.isEmpty {
+                    if !projects.isEmpty {
                         focusSectionHeader(key: "reviewProjects", title: model.label("agenda.reviewDueProjects"),
-                                           count: reviewProjects.count, first: focusSections.isEmpty)
+                                           count: projects.count, first: sections.isEmpty)
                         if !model.collapsedFocusSections.contains("reviewProjects") {
-                            ForEach(reviewProjects.indices, id: \.self) { index in
-                                focusReviewProject(reviewProjects[index])
+                            ForEach(projects.indices, id: \.self) { index in
+                                focusReviewProject(projects[index])
                             }
                         }
                     }
@@ -941,77 +1258,6 @@ struct InboxScreen: View {
         .padding(.top, first ? 8 : 18).padding(.bottom, 10)
     }
 
-    private var focusOrderContent: some View {
-        let labels = model.focus.object("controls").object("reorder")
-        return VStack(spacing: 0) {
-            HStack(spacing: 12) {
-                Text(labels.text("title").uppercased()).rnFont(13, .bold, maxScale: 1.2).tracking(1).lineLimit(1)
-                    .foregroundStyle(palette.text).accessibilityAddTraits(.isHeader)
-                Spacer(minLength: 4)
-                Button { model.closeFocusOrder() } label: {
-                    Text(model.label("common.done")).rnFont(14, .bold)
-                        .foregroundStyle(palette.onTint).padding(.horizontal, 18).frame(minHeight: 44)
-                        .background(palette.tint).clipShape(RoundedRectangle(cornerRadius: 20))
-                }
-                .buttonStyle(.plain).modifier(ModelDisabled { model.busy || model.retryNeeded })
-                .accessibilityIdentifier("focus-reorder-done")
-            }
-            .padding(.horizontal, 12).padding(.vertical, 12)
-            .overlay(alignment: .bottom) { Rectangle().fill(palette.border).frame(height: 1) }
-            if let error = model.focusOrderError {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(error).rnFont(13).foregroundStyle(palette.danger)
-                        .accessibilityIdentifier("focus-reorder-error")
-                    Button { Task { await model.retryFocusOrder() } } label: {
-                        Text(model.label("common.retry")).rnFont(14, .semibold).frame(minHeight: 44)
-                    }
-                    .buttonStyle(.plain).foregroundStyle(palette.tint).modifier(ModelDisabled { model.busy })
-                    .accessibilityIdentifier("focus-reorder-retry")
-                }.frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 16)
-            }
-            List {
-                ForEach(model.focusOrderView.objects("rows").map { FocusOrderItem(row: $0) }) { item in
-                    let row = item.row
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(row.text("title")).rnFont(15, .semibold).foregroundStyle(palette.text).lineLimit(1)
-                        if !row.text("secondaryLabel").isEmpty {
-                            Text(row.text("secondaryLabel")).rnFont(12).foregroundStyle(palette.secondary).lineLimit(1)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, minHeight: 72, alignment: .leading)
-                    .listRowInsets(EdgeInsets(top: 4, leading: 26, bottom: 4, trailing: 14))
-                    .listRowSeparator(.hidden)
-                    .listRowBackground(RoundedRectangle(cornerRadius: 12).fill(palette.card)
-                        .overlay(RoundedRectangle(cornerRadius: 12).stroke(palette.border, lineWidth: 0.5))
-                        .padding(.horizontal, 12).padding(.vertical, 4))
-                    .accessibilityElement(children: .ignore)
-                    .accessibilityLabel(row.text("positionLabel"))
-                    .accessibilityHint(labels.text("hint"))
-                    .accessibilityIdentifier("focus-reorder-row-" + row.text("id"))
-                    .accessibilityActions {
-                        if row["moveUp"] is [String] {
-                            Button(labels.text("moveUpLabel")) { Task { await model.moveFocusTask(row, up: true) } }
-                        }
-                        if row["moveDown"] is [String] {
-                            Button(labels.text("moveDownLabel")) { Task { await model.moveFocusTask(row, up: false) } }
-                        }
-                    }
-                    .moveDisabled(!model.focusOrderInputEnabled)
-                }
-                .onMove { source, destination in Task { await model.moveFocusTask(from: source, to: destination) } }
-                if model.focusOrderShowHint {
-                    Text(labels.text("hint")).rnFont(12).foregroundStyle(palette.secondary)
-                        .listRowBackground(Color.clear).listRowSeparator(.hidden)
-                }
-            }
-            .listStyle(.plain).scrollContentBackground(.hidden)
-            .environment(\.editMode, .constant(.active))
-            .accessibilityIdentifier("focus-reorder-list")
-            .modifier(ModelDisabled { !model.focusOrderInputEnabled })
-        }
-        .accessibilityAction(.escape) { model.closeFocusOrder() }
-    }
-
     private func focusReviewProject(_ project: CoreObject) -> some View {
         Button { Task { await model.openProject(project) } } label: {
             HStack(spacing: 12) {
@@ -1038,178 +1284,6 @@ struct InboxScreen: View {
         .buttonStyle(.plain).modifier(ModelDisabled { !model.focusActionsShown })
         .padding(.bottom, 8)
         .accessibilityIdentifier("focus-project-" + project.text("id"))
-    }
-
-    private var menuListHeader: some View {
-        VStack(spacing: 0) {
-            if model.selectedSurface == .widgetList {
-                HStack(spacing: 8) { menuListBack; menuListTitle }
-            } else if dynamicTypeSize.isAccessibilitySize {
-                HStack(spacing: 8) { menuListBack; menuListTitle }
-                HStack(spacing: 8) { Spacer(minLength: 0); menuListTools }
-            } else {
-                HStack(spacing: 8) { menuListBack; menuListTitle; menuListTools }
-            }
-        }
-        .padding(.horizontal, 8).frame(minHeight: 52)
-        .background(palette.card.ignoresSafeArea(edges: .top))
-        .overlay(alignment: .bottom) { palette.border.frame(height: 0.5) }
-    }
-
-    @ViewBuilder private var menuListBack: some View {
-        if model.selectedSurface != .contexts || model.quickAccessView != "contexts" {
-            Button {
-                model.endContextsInput()
-                Task {
-                    if model.selectedSurface == .contexts { await model.closeContexts() }
-                    else if model.selectedSurface == .savedSearch { await model.closeSavedSearch() }
-                    else if model.selectedSurface == .widgetList { await model.closeWidgetList() }
-                    else if model.selectedSurface == .trash { await model.closeTrash() }
-                    else if model.selectedSurface == .history { await model.closeHistory() }
-                    else if model.selectedSurface == .reference { await model.closeReference() }
-                    else if model.selectedSurface == .someday { await model.closeSomeday() }
-                    else { await model.closeWaiting() }
-                }
-            } label: {
-                AppIcon(name: "chevron", size: 24).rotationEffect(.degrees(90)).frame(width: 44, height: 44)
-            }
-            .buttonStyle(.plain).modifier(ModelDisabled { model.busy || model.retryNeeded })
-            .accessibilityLabel(model.label("common.back"))
-            .accessibilityIdentifier(menuListPrefix + "-back")
-        }
-    }
-
-    private var menuListTitle: some View {
-        Text(model.selectedSurface == .savedSearch ? (model.savedSearch.text("title").isEmpty ? model.label("search.savedSearches") : model.savedSearch.text("title")) : model.selectedSurface == .widgetList ? (model.widgetList.text("title").isEmpty ? model.label("search.noResults") : model.widgetList.text("title")) : model.selectedSurface == .reference && !model.reference.text("title").isEmpty
-             ? model.reference.text("title") : model.label(menuListPrefix == "history" || menuListPrefix == "trash" || menuListPrefix == "contexts" ? "nav." + menuListPrefix : menuListPrefix + ".title")).rnFont(17, .bold)
-            .fixedSize(horizontal: false, vertical: true)
-            .frame(maxWidth: .infinity, alignment: .leading).accessibilityAddTraits(.isHeader)
-            .accessibilityIdentifier(menuListPrefix + "-title")
-    }
-
-    @ViewBuilder private var menuListTools: some View {
-        Button {
-            model.endContextsInput()
-            Task { await model.openAreaPicker() }
-        } label: {
-            HStack(spacing: 4) {
-                Text(model.area.text("label")).rnFont(12, .semibold).lineLimit(1)
-                AppIcon(name: "chevron", size: 12)
-            }
-            .foregroundStyle(model.defaultAreaScope ? palette.secondary : palette.tint)
-            .frame(minHeight: 44).frame(maxWidth: 90).contentShape(Rectangle())
-        }
-        .buttonStyle(.plain).modifier(ModelDisabled { model.busy || model.retryNeeded })
-        .accessibilityLabel(model.label("projects.areaFilter") + ": " + model.area.text("summary"))
-        .accessibilityValue(model.area.text("label")).accessibilityIdentifier("area-open")
-        Button { model.endContextsInput(); model.openSearch() } label: {
-            AppIcon(name: "search", size: 22).frame(width: 44, height: 44).contentShape(Rectangle())
-        }
-        .buttonStyle(.plain).modifier(ModelDisabled { model.busy || model.retryNeeded })
-        .accessibilityLabel(model.label("search.title")).accessibilityIdentifier("search-open")
-        if model.selectedSurface == .reference {
-            Button { model.referencePanel = "menu" } label: {
-                Image(systemName: "ellipsis").font(.system(size: 20)).frame(width: 44, height: 44).contentShape(Rectangle())
-            }
-            .buttonStyle(.plain).modifier(ModelDisabled { !model.referenceActionsEnabled })
-            .accessibilityLabel(model.label("taskEdit.moreOptions")).accessibilityIdentifier("reference-overflow-button")
-        } else if model.selectedSurface == .history && !model.historyArchived {
-            Button { model.setHistoryPanel("menu") } label: {
-                Image(systemName: "ellipsis").font(.system(size: 20)).frame(width: 44, height: 44).contentShape(Rectangle())
-            }
-            .buttonStyle(.plain).modifier(ModelDisabled { !model.historyActionsEnabled })
-            .accessibilityLabel(model.label("taskEdit.moreOptions")).accessibilityIdentifier("done-overflow-button")
-        }
-    }
-
-    @ViewBuilder private var inboxFilterChips: some View {
-        let chips = model.inbox.objects("chips")
-        if !chips.isEmpty {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                ForEach(chips.indices, id: \.self) { index in
-                    let chip = chips[index]
-                    let tone = chip.flag("excluded") ? palette.danger : palette.tint
-                    Button { Task { await model.applyInboxChipAction(chip.object("action")) } } label: {
-                        HStack(spacing: 4) {
-                            Text(chip.text("label")).rnFont(12, .semibold).strikethrough(chip.flag("excluded"))
-                            AppIcon(name: "x", size: 12)
-                        }
-                        .foregroundStyle(tone).padding(.horizontal, 12).frame(minHeight: 44)
-                        .background(palette.filter, in: Capsule()).overlay(Capsule().stroke(tone, lineWidth: 1))
-                        .contentShape(Capsule())
-                    }
-                    .buttonStyle(.plain).modifier(ModelDisabled { !model.inboxActionsShown })
-                    .accessibilityLabel(chip.text("accessibilityLabel")).accessibilityAddTraits(.isSelected)
-                    .accessibilityValue(chip.flag("excluded") ? model.label("filters.excluded") : "")
-                    .accessibilityIdentifier("inbox-chip-" + chip.text("id"))
-                }
-                Button { Task { await model.editInboxFilter(model.inbox.object("filters").object("clearEdit")) } } label: {
-                    Text(model.inbox.text("clearLabel")).rnFont(12, .semibold).padding(.horizontal, 12)
-                        .frame(minHeight: 44).contentShape(Capsule())
-                }
-                .buttonStyle(.plain).foregroundStyle(palette.tint).modifier(ModelDisabled { !model.inboxActionsShown })
-                .accessibilityIdentifier("inbox-chips-clear")
-                }
-                .padding(.horizontal, 16)
-            }
-            .fixedSize(horizontal: false, vertical: true)
-            .accessibilityIdentifier("inbox-chips-scroll")
-        }
-    }
-
-    private var primaryAction: some View {
-        let process = model.inbox.object("process")
-        let mindSweep = model.inbox.object("mindSweep")
-        let isMindSweep = process.isEmpty && mindSweep.text("placement") == "primary" && !mindSweep.text("label").isEmpty
-        let label = process.isEmpty ? mindSweep.text("label") : process.text("label")
-        return Button {
-            Task {
-                if isMindSweep { await model.openMindSweep() }
-                else { await model.openProcessInbox() }
-            }
-        } label: {
-            InboxActionLabel(label: label, icon: process.isEmpty ? "brain" : "checks", color: palette.tint, palette: palette)
-                .rnFont(15, .semibold).frame(maxWidth: .infinity, minHeight: 44)
-                .padding(.horizontal, 16)
-                .background(palette.material ? palette.captureBackground : palette.tint.opacity(0.16), in: RoundedRectangle(cornerRadius: 12))
-                .overlay(RoundedRectangle(cornerRadius: 12).stroke(palette.material ? .clear : palette.tint, lineWidth: 0.7))
-        }
-        .buttonStyle(.plain).modifier(ModelDisabled { label.isEmpty || !model.ready || model.busyShown || model.retryNeeded })
-        .accessibilityIdentifier(isMindSweep ? "inbox-mind-sweep-primary" : "inbox-process-primary")
-        .padding(.horizontal, 16).padding(.top, 6)
-    }
-
-    private var emptyState: some View {
-        VStack(spacing: 8) {
-            Text(model.inbox.object("empty").text("message")).rnFont(15, .semibold)
-            Text(model.inbox.object("empty").text("hint")).rnFont(13).foregroundStyle(palette.secondary.opacity(0.8))
-            Button {
-                Task {
-                    let edit = model.inbox.object("empty").object("action").object("filterEdit")
-                    if !edit.isEmpty { await model.editInboxFilter(edit) }
-                    else { await model.openCapture() }
-                }
-            } label: {
-                Text(model.inbox.object("empty").text("actionLabel"))
-                    .rnFont(13, .bold).padding(.horizontal, 16).padding(.vertical, 9)
-                    .frame(minHeight: 44).contentShape(Capsule())
-                    .overlay(Capsule().stroke(palette.text, lineWidth: 1))
-            }
-            .buttonStyle(.plain).padding(.top, 8)
-            .modifier(ModelDisabled { !model.inboxActionsShown })
-            .accessibilityIdentifier(model.inbox.object("empty").object("action").object("filterEdit").isEmpty
-                ? "inbox-empty-capture" : "inbox-empty-clear")
-        }
-        .multilineTextAlignment(.center)
-        .frame(maxWidth: .infinity).padding(.horizontal, 20).padding(.vertical, 36)
-        .background(palette.card, in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(palette.border, lineWidth: 1))
-    }
-
-    private func disabledIcon(_ icon: String, label: String, size: CGFloat) -> some View {
-        Button {} label: { AppIcon(name: icon, size: size).frame(width: 44, height: 44) }
-            .buttonStyle(.plain).disabled(true).accessibilityLabel(label)
     }
 
 }
@@ -1545,6 +1619,10 @@ struct ModelShown<Content: View>: View {
 }
 
 private extension CoreModel {
+    var menuPanelPresented: Bool {
+        inboxSortPresented || contextsSortPresented || inboxGroupPresented || inboxFiltersPresented || (inboxBulkTagPresented || inboxBulkRemovePresented || inboxBulkOrganizePresented) || morePresented || !somedayPanel.isEmpty || !referencePanel.isEmpty || !historyPanel.isEmpty
+    }
+
     var defaultAreaScope: Bool {
         area.objects("options").first(where: { $0.text("id") == "__all__" })?.text("state") == "included"
     }
@@ -1639,8 +1717,9 @@ private struct FocusTaskRow: View, Equatable {
 private struct InboxAutomaticPage: ViewModifier {
     let model: CoreModel
     let identity: [String]
+    let pages: Bool
     func body(content: Content) -> some View {
-        content.onAppear { Task { await model.loadMore(automaticRow: identity) } }
+        content.onAppear { if pages { Task { await model.loadMore(automaticRow: identity) } } }
     }
 }
 
@@ -1872,18 +1951,26 @@ private struct TaskCardLongPressRegistrar: UIViewRepresentable {
 enum TaskRowSwipeHost { case local, list }
 
 private struct TaskCardPresentationContextKey: EnvironmentKey { static let defaultValue: String? = nil }
+private struct TaskCardSurfaceKey: EnvironmentKey { static let defaultValue: CoreModel.Surface? = nil }
 extension EnvironmentValues {
     var taskCardPresentationContext: String? {
         get { self[TaskCardPresentationContextKey.self] }
         set { self[TaskCardPresentationContextKey.self] = newValue }
     }
+    var taskCardSurface: CoreModel.Surface? {
+        get { self[TaskCardSurfaceKey.self] }
+        set { self[TaskCardSurfaceKey.self] = newValue }
+    }
 }
 
 struct TaskCardListValuesProvider<Content: View>: View {
     let model: CoreModel
+    var surface: CoreModel.Surface? = nil
     let content: Content
     var body: some View {
-        content.environment(\.taskCardPresentationContext, model.taskCardPresentationContext)
+        content
+            .environment(\.taskCardPresentationContext, surface.map { model.taskCardListContext($0) } ?? model.taskCardPresentationContext)
+            .environment(\.taskCardSurface, surface)
     }
 }
 
@@ -1954,6 +2041,7 @@ private struct TaskRowSwipeTray: ViewModifier {
     let activate: (CoreObject, String) -> Void
     var cornerRadius: CGFloat = 14
     var admission: CoreModel? = nil
+    var admissionSurface: CoreModel.Surface? = nil
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.isEnabled) private var interactionEnabled
@@ -1963,7 +2051,7 @@ private struct TaskRowSwipeTray: ViewModifier {
     @State private var width: CGFloat = 320
     private var active: Bool {
         guard let admission else { return enabled }
-        return enabled && interactionEnabled && admission.taskRowSwipeActionsShown
+        return enabled && interactionEnabled && admission.taskRowSwipeActionsShown(admissionSurface)
     }
     private var left: [CoreObject] { active ? actions.objects("swipeRight").filter { $0.flag("enabled") } : [] }
     private var right: [CoreObject] { active ? actions.objects("swipeLeft").filter { $0.flag("enabled") } : [] }
@@ -2007,7 +2095,7 @@ private struct TaskRowSwipeTray: ViewModifier {
             }
             .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
             .background(GeometryReader { geometry in
-                Color.clear.onAppear { width = geometry.size.width }
+                Color.clear.onAppear { if width != geometry.size.width { width = geometry.size.width } }
                     .onChange(of: geometry.size.width) { width = $0; close() }
             })
             .modifier(TaskRowSwipeDrag(active: !left.isEmpty || !right.isEmpty, began: dragBegan, changed: dragChanged, ended: dragEnded))
@@ -2022,7 +2110,11 @@ private struct TaskRowSwipeTray: ViewModifier {
             .onChange(of: closeGeneration) { _ in close() }
             .onChange(of: active) { if !$0 { close() } }
             .onChange(of: scenePhase) { if $0 != .active { close() } }
-            .onDisappear { offset = 0; dragAxis = 0; openingOffset = 0 }
+            .onDisappear {
+                if offset != 0 { offset = 0 }
+                if dragAxis != 0 { dragAxis = 0 }
+                if openingOffset != 0 { openingOffset = 0 }
+            }
         }
     }
     private func button(_ action: CoreObject, native: Bool) -> some View {
@@ -2181,6 +2273,7 @@ struct TaskCard: View {
     var swipeInteractionDisabled = false
     @ScaledMetric(relativeTo: .body) private var assignedToFontSize: CGFloat = 12
     @Environment(\.taskCardPresentationContext) private var listPresentationContext
+    @Environment(\.taskCardSurface) private var listSurface
     @Environment(\.layoutDirection) private var hostLayoutDirection
     @State private var swipeCloseGeneration = 0
     @State private var selectionPressStartedAt = Date.distantPast
@@ -2210,15 +2303,15 @@ struct TaskCard: View {
     private var checklistWritable: Bool {
         !readOnly && onSelection == nil && !checklistView.isEmpty && !checklistView.flag("readOnly")
             && checklistView.text("taskRevision").utf8.elementsEqual(row.text("taskRevision").utf8)
-            && model.inlineChecklistEnabled(row, writing: true)
+            && model.inlineChecklistEnabled(row, writing: true, surface: listSurface)
     }
     private var meta: CoreObject { row.object("meta") }
     private var swipeCandidate: Bool {
-        !readOnly && onSelection == nil && !swipeInteractionDisabled && model.taskRowSwipeRowEligible(row)
+        !readOnly && onSelection == nil && !swipeInteractionDisabled && model.taskRowSwipeRowEligible(row, surface: listSurface)
     }
     private var swipeEnabled: Bool { model.taskRowSwipeActionsAdmitted && swipeCandidate }
     private var swipeActions: CoreObject { swipeCandidate ? model.taskRowSwipeActions(row) : [:] }
-    private var swipeReadIdentity: String { swipeIdentity(context: model.taskCardPresentationContext) }
+    private var swipeReadIdentity: String { swipeIdentity(context: listSurface.map { model.taskCardListContext($0) } ?? model.taskCardPresentationContext) }
     private var displayedSwipeIdentity: String { swipeIdentity(context: displayedContext) }
     private func swipeIdentity(context: String) -> String {
         NativeTaskRowSwipeRead.identity(context: context, taskID: row.text("id"),
@@ -2272,7 +2365,7 @@ struct TaskCard: View {
                                         }
                                         .frame(minHeight: 44).contentShape(Rectangle())
                                     }
-                                    .buttonStyle(.plain).modifier(ModelDisabled { onSelection != nil || !model.inlineChecklistEnabled(row, shown: true) })
+                                    .buttonStyle(.plain).modifier(ModelDisabled { onSelection != nil || !model.inlineChecklistEnabled(row, shown: true, surface: listSurface) })
                                     .accessibilityValue(checklistExpanded ? model.label("common.close") : model.label("common.open"))
                                     .accessibilityIdentifier("task-inline-checklist-" + row.text("id"))
                                 } else if part.text("kind") == "completed", row.text("status") == "done", let onCompletedAt {
@@ -2357,7 +2450,8 @@ struct TaskCard: View {
         .overlay(RoundedRectangle(cornerRadius: 14).stroke(palette.border, lineWidth: 1))
         .modifier(TaskRowSwipeTray(host: swipeHost, actions: swipeActions, identity: displayedSwipeIdentity,
             rowID: row.text("id"), palette: palette, enabled: swipeCandidate,
-            closeGeneration: swipeCloseGeneration, layoutDirection: hostLayoutDirection, activate: activateSwipe, admission: model))
+            closeGeneration: swipeCloseGeneration, layoutDirection: hostLayoutDirection, activate: activateSwipe,
+            admission: model, admissionSurface: listSurface))
         .overlay(alignment: .leading) {
             if !meta.text("priority").isEmpty {
                 RoundedRectangle(cornerRadius: 2)
@@ -2634,14 +2728,14 @@ struct TaskCard: View {
             if let checklistError {
                 Text(checklistError).rnFont(14).foregroundStyle(palette.secondary)
                 Button(model.label("common.retry")) { beforeAction?(); loadInlineChecklist() }
-                    .buttonStyle(.plain).frame(minHeight: 44).disabled(!model.inlineChecklistEnabled(row))
+                    .buttonStyle(.plain).frame(minHeight: 44).disabled(!model.inlineChecklistEnabled(row, surface: listSurface))
             }
             if checklistSection.objects("items").count < checklistSection.number("total") {
                 Button(model.label("common.more")) {
                     beforeAction?(); checklistInputFocused = false
                     loadInlineChecklist(more: true)
                 }
-                .buttonStyle(.plain).frame(minHeight: 44).disabled(checklistReadTask != nil || !model.inlineChecklistEnabled(row))
+                .buttonStyle(.plain).frame(minHeight: 44).disabled(checklistReadTask != nil || !model.inlineChecklistEnabled(row, surface: listSurface))
             }
             if !readOnly && !row.flag("readOnly") && !checklistView.flag("readOnly"), !checklistSection.object("add").isEmpty {
                 let add = checklistSection.object("add")
@@ -2784,7 +2878,7 @@ struct TaskCard: View {
                         .frame(width: 44, height: 44).contentShape(Rectangle())
                 }
                 .buttonStyle(.plain).modifier(ModelDisabled { [blocked = !focusBlockedReason.isEmpty] in
-                    blocked || !model.taskFocusInputEnabled(row, shown: true)
+                    blocked || !model.taskFocusInputEnabled(row, shown: true, surface: listSurface)
                 })
                 .accessibilityLabel(focusBlockedReason.isEmpty
                     ? model.label(row.flag("isFocusedToday") ? "agenda.removeFromFocus" : "agenda.addToFocus")
