@@ -1033,7 +1033,7 @@ type AttachmentCommand = 'attachmentAddFile' | 'attachmentLinks' | 'attachmentRe
 type ProjectDetailCommand = 'projectEdit';
 
 type TaskEditorCommand = 'taskEditorAction';
-type Command = 'create' | 'complete' | 'completeUndo' | 'update' | 'saveTaskDraft' | 'resetChecklist' | 'taskFocus' | 'projectFocus' | 'createProject' | 'areaFilter'
+type Command = 'create' | 'complete' | 'completeUndo' | 'update' | 'saveTaskDraft' | 'resetChecklist' | 'taskFocus' | 'projectFocus' | 'createProject' | 'areaFilter' | 'projectCalendarReferenceCommit'
     | 'saveSearch' | 'inboxCommit' | 'inboxSkip' | 'inboxDecisionUndo' | 'quickCapture' | 'quickCaptureLines' | 'quickCapturePicker' | 'captureModal' | 'captureModalLines' | 'ingest' | 'reminderDone' | 'reminderSnooze' | MenuCommand;
 const taskResult = <T>(operation: Command, result: Parameters<typeof unwrap<T>>[0]): T => {
     const ios = globalThis.__mindwtrHostPlatform === 'ios';
@@ -5085,7 +5085,7 @@ globalThis.MindwtrHost = {
         return submit(async () => unwrap(contract.validatePreparedProjectCalendarReference(JSON.parse(json))));
     },
     projectCalendarReferenceCommit(json: string): string {
-        return submit(async () => unwrap(await contract.commitPreparedProjectCalendarReference(JSON.parse(json))));
+        return submit(async () => taskResult('projectCalendarReferenceCommit', await contract.commitPreparedProjectCalendarReference(JSON.parse(json))));
     },
     projectAreaOptions(id: string): string {
         return submit(async () => {

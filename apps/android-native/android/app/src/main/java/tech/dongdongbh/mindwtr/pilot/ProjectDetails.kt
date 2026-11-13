@@ -120,7 +120,8 @@ import android.os.Handler
 import android.os.Looper
 
 
-val PROJECT_DETAIL_KINDS = setOf("projectEdit", "projectCalendarReferenceCommit")
+val PROJECT_DETAIL_MENU_KINDS = setOf("projectEdit")
+val PROJECT_DETAIL_KINDS = PROJECT_DETAIL_MENU_KINDS + setOf("projectCalendarReferenceCommit")
 
 
 private val PROJECT_STATUSES = listOf("active" to "status.active", "waiting" to "status.waiting", "someday" to "status.someday")
@@ -1056,14 +1057,6 @@ private fun DetailsDates(model: InboxViewModel, detail: ProjectDetail, metadata:
 }
 
 
-private fun projectCalendarReferenceTime(reference: JSONObject): String = runCatching {
-    val start = reference.getString("start")
-    if (reference.getBoolean("allDay") && start.length == 10) java.time.LocalDate.parse(start)
-        .format(java.time.format.DateTimeFormatter.ofLocalizedDate(java.time.format.FormatStyle.MEDIUM))
-    else java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.MEDIUM, java.text.DateFormat.SHORT)
-        .format(java.util.Date.from(java.time.Instant.parse(start)))
-}.getOrDefault(reference.optString("start"))
-
 @Composable
 private fun ProjectCalendarReference(model: InboxViewModel, projectId: String, archived: Boolean) = with(model.projectDetails) {
     val c = LocalTheme.current.colors
@@ -1080,7 +1073,7 @@ private fun ProjectCalendarReference(model: InboxViewModel, projectId: String, a
                     else -> "projects.calendarUnavailable"
                 }), style = rnText(13, 600), color = c.secondaryText)
                 Text(reference.getString("title"), style = rnText(14, 500), color = c.text)
-                Text("${reference.getString("sourceName")} · ${projectCalendarReferenceTime(reference)}", style = rnText(13, 400), color = c.secondaryText)
+                Text("${reference.getString("sourceName")} · ${options.getString("currentDateLabel")}", style = rnText(13, 400), color = c.secondaryText)
             }
             Text(t("projects.calendarHelp"), style = rnText(12, 400), color = c.secondaryText)
             if (!archived) {
@@ -1323,8 +1316,8 @@ fun ProjectDetailsDialogs(model: InboxViewModel) = with(model.projectDetails) {
                     if (options.optInt("total") > candidates.size) Text("${candidates.size} / ${options.optInt("total")}")
                     if (!options.getBoolean("available")) Text(t("projects.calendarLoadFailed"))
                     else if (candidates.isEmpty()) Text(t("projects.calendarEmpty"))
-                    for (reference in candidates) TextButton(onClick = { setCalendarReference(reference) }, enabled = idle) {
-                        Text("${reference.getString("title")}\n${reference.getString("sourceName")} · ${projectCalendarReferenceTime(reference)}")
+                    for ((index, reference) in candidates.withIndex()) TextButton(onClick = { setCalendarReference(reference) }, enabled = idle) {
+                        Text("${reference.getString("title")}\n${reference.getString("sourceName")} · ${options.getJSONArray("candidateDateLabels").getString(index)}")
                     }
                 }
             },

@@ -2,7 +2,9 @@ import { afterEach, beforeAll, describe, expect, it } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import vm from 'node:vm';
 import { build } from 'esbuild';
-import { resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
+import { readFileSync } from 'node:fs';
+import { androidHostEntry } from '../scripts/android-host-table.mjs';
 
 let source: string;
 const fixtures: ReturnType<typeof fixture>[] = [];
@@ -21,7 +23,7 @@ beforeAll(async () => {
                 const event = { id: 'event', sourceId: 'feed', calendarSourceId: 'feed', uid: 'PRIVATE_UID', title: 'PRIVATE_EVENT',
                     start: new Date(Date.now() + 60000).toISOString(), end: new Date(Date.now() + 120000).toISOString(), allDay: false };
                 const methods = createProjectCalendarReferenceMethods({ readiness: () => ({ ok: true, value: null }),
-                    revision: () => 'revision', save: async () => { await flushPendingSave(); return { ok: true, value: null }; },
+                    revision: () => 'revision', formatDate: (reference) => 'label:' + reference.start, save: async () => { await flushPendingSave(); return { ok: true, value: null }; },
                     load: async () => ({ ok: true, value: { status: 'ready', calendars, events: [event] } }) });
                 const options = await methods.getProjectCalendarReferenceOptions({ projectId: project.id });
                 if (!options.ok) throw new Error('Missing picker');
@@ -34,7 +36,12 @@ beforeAll(async () => {
             }, flush: flushPendingSave, reset: resetForTests,
         };
     `, resolveDir: import.meta.dir, loader: 'ts' }, alias: { '@mindwtr/core': resolve(import.meta.dir, '../../../packages/core/src/index.ts') },
-        bundle: true, write: false, format: 'iife', target: 'es2022', logLevel: 'silent' });
+        bundle: true, write: false, format: 'iife', target: 'es2022', logLevel: 'silent',
+        plugins: [{ name: 'production-android-host-table', setup(builder) {
+            builder.onLoad({ filter: /bundle[\\/]host-entry\.ts$/ }, (args) => ({
+                contents: androidHostEntry(readFileSync(args.path, 'utf8')), loader: 'ts', resolveDir: dirname(args.path),
+            }));
+        } }] });
     source = built.outputFiles[0].text;
 });
 afterEach(async () => {
@@ -92,6 +99,14 @@ const fixture = (database = new Database(':memory:')) => {
 };
 
 describe('exported Android frozen Project calendar reference bridge', () => {
+    it('retains the prepared calendar write endpoints in the production Android table', async () => {
+        const built = fixture(); await built.boot();
+        for (const method of ['projectCalendarReferencePrepare', 'projectCalendarReferenceValidate', 'projectCalendarReferenceCommit']) {
+            expect(typeof built.state.MindwtrHost[method]).toBe('function');
+        }
+        expect(built.state.MindwtrHost.projectDateCommit).toBeUndefined();
+    });
+
     it('commits a previously issued frozen link after cold boot without its picker cache and replays once', async () => {
         const original = fixture(); await original.boot();
         const envelope = await original.state.fixture.issue();

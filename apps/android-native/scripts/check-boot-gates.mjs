@@ -1429,6 +1429,13 @@ assert.equal(coreHost.match(/debugFault\("language"\)/g).length, 1);
     assert.match(coreHost, /val \(plan, sha256\) = checkNotNull\(backups\)\.plan\(args\[0\] as String, args\[1\] as String\)\s+return arrayOf\(args\[0\], data\.openRead\(plan, expectedSha256 = sha256\), args\[1\], deadline\(method, args\.toList\(\)\)\)/);
 
 
+    const projectCalendarCommit = 'projectCalendarReferenceCommit';
+    assert.deepEqual(shapes[projectCalendarCommit], ['{request{},prepared{}}'], 'Project calendar reference journals both frozen request and prepared objects');
+    assert.match(coreHost, /fun prepareProjectCalendarReference\(json: String\): JSONObject \{\s*val prepared = callAsync\("projectCalendarReferencePrepare", json\)\s*if \(prepared\.getString\("kind"\) == "prepared"\) \{/);
+    assert.match(coreHost, /callAsync\("projectCalendarReferenceValidate", envelope\)\s*checkNotNull\(journal\) \{ "The write journal is not open" \}\.append\("projectCalendarReferenceCommit", listOf\(envelope\)\)\s*prepared\.put\("envelope", envelope\)/);
+    assert.match(coreHost, /fun commitProjectCalendarReference\(envelope: String\): JSONObject = callAsync\("projectCalendarReferenceCommit", envelope\)/);
+    assert.match(journalKt, /key\.endsWith\("\{\}"\) -> json\.opt\(key\.dropLast\(2\)\) is JSONObject/);
+
     const pomodoroCommit = 'pomodoroTransitionCommit';
     assert.deepEqual(shapes[pomodoroCommit], ['text', 'bool'], 'the Pomodoro commit journals its plan');
     assert.match(host, /\n    pomodoroTransitionCommit\(planJSON: string, replayOnly: boolean\): string \{/);
@@ -1465,7 +1472,7 @@ assert.equal(coreHost.match(/debugFault\("language"\)/g).length, 1);
 
         'completeReminderTask', 'snoozeReminder',
 
-        'runProjectEdit',
+        'runProjectEdit', 'commitPreparedProjectCalendarReference',
 
         'runAreaOrder', 'runAreaColor', 'runAreaRename',
 
@@ -2515,7 +2522,7 @@ assert.deepEqual([.../val ATTACHMENT_COMMANDS = setOf\(([^)]*)\)/.exec(coreHost)
 
     const attachmentKinds = [.../val ATTACHMENT_KINDS = setOf\(([^)]*)\)/.exec(source('Attachments.kt'))[1].matchAll(/"(\w+)"/g)].map(([, kind]) => kind);
 
-    const projectDetailKinds = [.../val PROJECT_DETAIL_KINDS = setOf\(([^)]*)\)/.exec(source('ProjectDetails.kt'))[1].matchAll(/"(\w+)"/g)].map(([, kind]) => kind);
+    const projectDetailKinds = [.../val PROJECT_DETAIL_MENU_KINDS = setOf\(([^)]*)\)/.exec(source('ProjectDetails.kt'))[1].matchAll(/"(\w+)"/g)].map(([, kind]) => kind);
 
     const editorMenuKinds = [.../val EDITOR_MENU_KINDS = setOf\(([^)]*)\)/.exec(source('EditorMenu.kt'))[1].matchAll(/"(\w+)"/g)].map(([, kind]) => kind);
 
@@ -2542,6 +2549,7 @@ assert.deepEqual([.../val ATTACHMENT_COMMANDS = setOf\(([^)]*)\)/.exec(coreHost)
     assert.match(hostEntry, new RegExp(`type DataCommand = ${dataKinds.map((kind) => `'${kind}'`).join(' \\| ')};`));
     assert.match(hostEntry, new RegExp(`type TaskEditorCommand = ${editorMenuKinds.map((kind) => `'${kind}'`).join(' \\| ')};`));
     assert.match(hostEntry, new RegExp(`type StartupPromptCommand = ${promptKinds.map((kind) => `'${kind}'`).join(' \\| ')};`));
+    assert.match(code(source('ProjectDetails.kt')), /val PROJECT_DETAIL_KINDS = PROJECT_DETAIL_MENU_KINDS \+ setOf\("projectCalendarReferenceCommit"\)/);
     assert.match(hostEntry, new RegExp(`type ProjectDetailCommand = ${projectDetailKinds.map((kind) => `'${kind}'`).join('\\s*\\| ')};`));
     assert.doesNotMatch(menuModel, new RegExp(`"(${projectDetailKinds.join('|')})"`), 'the Menu tab never sends a Project details command itself');
 
@@ -2560,8 +2568,8 @@ assert.deepEqual([.../val ATTACHMENT_COMMANDS = setOf\(([^)]*)\)/.exec(coreHost)
         const details = code(source('ProjectDetails.kt'));
 
 
-        assert.equal((details.match(/replies\.ticket\(/g) ?? []).length, 8, 'every Details read takes a ticket');
-        assert.equal((details.match(/replies\.current\(ticket\)/g) ?? []).length, 8, 'every Details reply checks its ticket');
+        assert.equal((details.match(/replies\.ticket\(/g) ?? []).length, 10, 'every Details read takes a ticket');
+        assert.equal((details.match(/replies\.current\(ticket\)/g) ?? []).length, 10, 'every Details reply checks its ticket');
         assert.match(details, /shell\.fresh\(mine, InboxViewModel\.Part\.ProjectDetails\)/);
         assert.match(details, /fun closeOverlays\(\) \{\s*replies\.close\(\)/);
     }
@@ -2595,7 +2603,7 @@ assert.deepEqual([.../val ATTACHMENT_COMMANDS = setOf\(([^)]*)\)/.exec(coreHost)
     assert.match(hostEntry, new RegExp(`type AIScreenCommand = ${aiKinds.map((kind) => `'${kind}'`).join('\\s*\\| ')};`));
     assert.doesNotMatch(menuModel, new RegExp(`"(${[...syncKinds, ...aiKinds].join('|')})"`), 'the Menu tab never sends a Sync or AI screen command itself');
     assert.match(hostEntry, /menuCommand\(name: string, json: string\): string \{\s*return submit\(async \(\) => \{\s*const command = MENU_COMMANDS\[name as MenuCommand\];[\s\S]{0,120}?return taskResult\(name as MenuCommand, await command\(JSON\.parse\(json\) as never\)\);/);
-    assert.match(hostEntry, /menuRead\(name: string, json: string\): string \{\s*return submit\(async \(\) => \{[\s\S]{0,300}?if \(name !== 'more'\) requireSaved\(\);\s*const read = MENU_READS\[name\];[\s\S]{0,100}?return unwrap\(read\(JSON\.parse\(json\) as never\)\);/);
+    assert.match(hostEntry, /menuRead\(name: string, json: string\): string \{\s*return submit\(async \(\) => \{[\s\S]{0,300}?if \(name !== 'more'\) requireSaved\(\);\s*if \(name === 'projectCalendarReferenceOptions'\) return unwrap\(await contract\.getProjectCalendarReferenceOptions\(JSON\.parse\(json\)\)\);\s*const read = MENU_READS\[name\];[\s\S]{0,100}?return unwrap\(read\(JSON\.parse\(json\) as never\)\);/);
     const input = code(menuModel.slice(menuModel.indexOf('private fun input(action: FailedAction)'), menuModel.indexOf('}.toString()', menuModel.indexOf('private fun input('))));
 
     const LIST_KINDS = ['archiveAction', 'contextsAction', 'trashAction', 'reviewAction', 'reviewTask'];
@@ -3138,7 +3146,7 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
         }
     }
     assert.match(model, /private val prefs = Workspace\.viewPrefs\(app, sandbox = sandboxed\)/);
-    assert.match(coreHost, /private fun settle\(entry: WriteJournal\.Entry\?, result: JSONObject, replay: Boolean\): Boolean \{\s+result\.optJSONObject\("value"\)\?\.optJSONArray\("deviceWrites"\)\?\.let \{ devices\.store\(it, entry\?\.sequence, replay\) \}\s+return entry != null && checkNotNull\(journal\)\.settle\(entry, result\.error\(\), replay\)/);
+    assert.match(coreHost, /private fun settle\(entry: WriteJournal\.Entry\?, result: JSONObject, replay: Boolean\): Boolean \{\s+result\.optJSONObject\("value"\)\?\.optJSONArray\("deviceWrites"\)\?\.let \{ devices\.store\(it, entry\?\.sequence, replay\) \}\s+val settled = entry != null && checkNotNull\(journal\)\.settle\(entry, result\.error\(\), replay\)\s+if \(entry\?\.method == "projectCalendarReferenceCommit" && result\.error\(\) == null\) \{\s+val request = JSONObject\(entry\.args\.single\(\) as String\)\.getJSONObject\("request"\)\s+Log\.i\(TAG, "Project calendar reference saved releaseCheck=v1\.3\.9\/project-calendar-reference outcome=\$\{if \(request\.isNull\("value"\)\) "unlinked" else "linked"\}"\)\s+\}\s+return settled/);
     assert.equal(coreHost.match(/(?<!\.)\bsettle\((?:call\.)?entry, /g).length, 3, 'settle(): the first send (finish), the replay, and a backup commit\'s finish (backupFinish, pass D1a)');
     assert.match(settingsModel, /runtime\.language\(prefs\.getString\(LANGUAGE_KEY, null\)\.orEmpty\(\), Locale\.getDefault\(\)\.toLanguageTag\(\)\)\s+loadLabels\(runtime\)/);
     assert.match(model, /val runtime = ProcessCoreHost\.get\(getApplication\(\), prefs\.getString\(LANGUAGE_KEY, null\), sandboxRequest\)\s+if \(!Workspace\.settled\([^\n]*\{\s+Log\.w\([^\n]*\)\s+Workspace\.restart\(getApplication\(\)\)\s+\}\) return@Thread\s+applyDeviceChoices\(runtime, prefs\)/, 'the device\'s own language and theme apply at boot, before any screen');

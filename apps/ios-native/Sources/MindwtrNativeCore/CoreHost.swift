@@ -21227,7 +21227,7 @@ private final class Engine: @unchecked Sendable {
         guard value.utf8.count <= 2_000_000,
               let request = try NativeJSON.jsonObject(with: Data(encoded.utf8)) as? [String: Any],
               let options = try NativeJSON.jsonObject(with: Data(value.utf8)) as? [String: Any],
-              Set(options.keys) == Set(["revision", "project", "canEdit", "pickerId", "status", "current", "candidates", "available", "total", "query"]),
+              Set(options.keys) == Set(["revision", "project", "canEdit", "pickerId", "status", "current", "currentDateLabel", "candidates", "candidateDateLabels", "available", "total", "query"]),
               let revision = options["revision"] as? String, !revision.isEmpty,
               let project = options["project"] as? [String: Any],
               project["id"] as? String == request["projectId"] as? String,
@@ -21237,9 +21237,11 @@ private final class Engine: @unchecked Sendable {
               (options["pickerId"] as? String).map({ UUID(uuidString: $0) != nil }) == true,
               (options["status"] as? String).map({ ["scheduled", "elapsed", "unavailable"].contains($0) }) == true,
               Self.validProjectCalendarReference(options["current"]),
+              options["currentDateLabel"] is NSNull || (options["currentDateLabel"] as? String).map({ $0.utf16.count <= 1000 }) == true,
+              let dateLabels = options["candidateDateLabels"] as? [String], dateLabels.allSatisfy({ $0.utf16.count <= 1000 }),
               let query = options["query"] as? String, query.utf16.count <= 1000,
               Self.isInteger(options["total"]), (options["total"] as? Int ?? -1) >= 0,
-              let candidates = options["candidates"] as? [[String: Any]], candidates.count <= 200,
+              let candidates = options["candidates"] as? [[String: Any]], candidates.count <= 200, dateLabels.count == candidates.count,
               candidates.allSatisfy({ Self.validProjectCalendarReference($0) }) else {
             throw HostFailure("Malformed Project calendar reference options")
         }

@@ -3028,28 +3028,6 @@ private struct ProjectSectionsMetadata: View {
 }
 
 
-private func projectCalendarReferenceDate(_ reference: CoreObject) -> String {
-    let raw = reference.text("start")
-    let formatter = DateFormatter()
-    formatter.dateStyle = .medium
-    formatter.timeStyle = .none
-    if reference.flag("allDay"), raw.count == 10 {
-        let parser = DateFormatter()
-        parser.locale = Locale(identifier: "en_US_POSIX")
-        parser.calendar = Calendar(identifier: .gregorian)
-        parser.dateFormat = "yyyy-MM-dd"
-        if let date = parser.date(from: raw) { return formatter.string(from: date) }
-        return raw
-    }
-    let parser = ISO8601DateFormatter()
-    parser.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-    var date = parser.date(from: raw)
-    parser.formatOptions = [.withInternetDateTime]
-    date = date ?? parser.date(from: raw)
-    formatter.timeStyle = .short
-    return date.map { formatter.string(from: $0) } ?? raw
-}
-
 private struct ProjectCalendarReferenceCard: View {
     @ObservedObject var model: CoreModel
     let palette: AppPalette
@@ -3063,7 +3041,7 @@ private struct ProjectCalendarReferenceCard: View {
                     : options.text("status") == "elapsed" ? "projects.calendarElapsed" : "projects.calendarUnavailable"))
                     .rnFont(13, .semibold).foregroundStyle(palette.secondary)
                 Text(reference.text("title")).rnFont(14).foregroundStyle(palette.text)
-                Text(reference.text("sourceName") + " · " + projectCalendarReferenceDate(reference))
+                Text(reference.text("sourceName") + " · " + options.text("currentDateLabel"))
                     .rnFont(13).foregroundStyle(palette.secondary)
             }
             Text(model.label("projects.calendarHelp")).rnFont(12).foregroundStyle(palette.secondary)
@@ -3125,7 +3103,7 @@ private struct ProjectCalendarReferencePicker: View {
                         Button { Task { await model.changeProjectCalendarReference(reference) } } label: {
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(reference.text("title")).rnFont(15, .semibold).foregroundStyle(palette.text)
-                                Text(reference.text("sourceName") + " · " + projectCalendarReferenceDate(reference))
+                                Text(reference.text("sourceName") + " · " + ((options["candidateDateLabels"] as? [String])?[index] ?? ""))
                                     .rnFont(13).foregroundStyle(palette.secondary)
                             }
                             .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).contentShape(Rectangle())

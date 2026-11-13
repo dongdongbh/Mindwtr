@@ -29,7 +29,7 @@ class WriteJournal(
             "backupDocumentCommit" to listOf("{id,sha256}", "id"),
 
             "pomodoroTransitionCommit" to listOf("text", "bool"),
-            "projectCalendarReferenceCommit" to listOf("text"),
+            "projectCalendarReferenceCommit" to listOf("{request{},prepared{}}"),
         )
 
         val MENU = mapOf(
@@ -197,7 +197,11 @@ class WriteJournal(
     private fun holds(arg: Any?, keys: String): Boolean {
         val json = (arg as? String)?.let { runCatching { JSONObject(it) }.getOrNull() } ?: return false
         return keys.removeSurrounding("{", "}").split(',').all { key ->
-            if (key.endsWith("[]")) json.opt(key.dropLast(2)) is JSONArray else (json.opt(key) as? String).orEmpty().isNotEmpty()
+            when {
+                key.endsWith("[]") -> json.opt(key.dropLast(2)) is JSONArray
+                key.endsWith("{}") -> json.opt(key.dropLast(2)) is JSONObject
+                else -> (json.opt(key) as? String).orEmpty().isNotEmpty()
+            }
         }
     }
 

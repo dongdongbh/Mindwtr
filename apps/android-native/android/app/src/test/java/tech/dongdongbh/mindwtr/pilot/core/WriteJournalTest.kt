@@ -49,6 +49,15 @@ class WriteJournalTest {
         assertEquals(entry.text, restored.text)
     }
 
+    @Test fun aMalformedProjectCalendarEnvelopeIsSetAsideBeforeReplay() {
+        for (envelope in listOf("{}", """{"request":"bad","prepared":{}}""", """{"request":{},"prepared":[]} """)) {
+            val dir = File(folder.root, "calendar-${envelope.hashCode()}")
+            open(dir).append("projectCalendarReferenceCommit", listOf(envelope))
+            assertTrue(open(dir).pending().isEmpty())
+            assertEquals(1, File(dir, WriteJournal.ASIDE).listFiles()?.size)
+        }
+    }
+
     @Test fun anEntryIsDurableBeforeAppendReturns() {
         val dir = File(folder.root, "journal")
         val entry = open(dir).append("complete", listOf("task-1", "3:dev:2026"))!!

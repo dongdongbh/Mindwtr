@@ -71,6 +71,7 @@ const readPrepared = (value: unknown): NativePreparedProjectCalendarReference | 
 
 export function createProjectCalendarReferenceMethods(deps: {
     readiness: () => NativeHostResult<null>; save: () => Promise<NativeHostResult<null>>; revision: () => string;
+    formatDate: (reference: ProjectCalendarReference) => string;
     load: (input: { slot: 'calendar'; start: string; end: string }) => Promise<NativeHostResult<NativeCalendarFeed>>;
 }) {
     type Picker = { id: string; projectId: string; adapter: ReturnType<typeof getStorageAdapter>; subscriptions: string;
@@ -82,9 +83,11 @@ export function createProjectCalendarReferenceMethods(deps: {
         const normalized = query.trim().toLocaleLowerCase();
         const matching = selected.candidates.filter((candidate) => !normalized
             || `${candidate.title} ${candidate.sourceName}`.toLocaleLowerCase().includes(normalized));
+        const shown = matching.slice(0, PROJECT_CALENDAR_REFERENCE_PICKER_LIMIT);
         const value = { revision: deps.revision(), project: { id: selected.projectId, ...selected.expected },
             canEdit: selected.expected.status !== 'archived', pickerId: selected.id, status: selected.status,
-            current: selected.current, candidates: matching.slice(0, PROJECT_CALENDAR_REFERENCE_PICKER_LIMIT),
+            current: selected.current, currentDateLabel: selected.current ? deps.formatDate(selected.current) : null,
+            candidates: shown, candidateDateLabels: shown.map(deps.formatDate),
             available: selected.available, total: matching.length, query };
         return isNativeJsonWithinBytes(value) ? { ok: true as const, value } : fail('INVALID_INPUT', 'Calendar picker exceeds the bounded response');
     };

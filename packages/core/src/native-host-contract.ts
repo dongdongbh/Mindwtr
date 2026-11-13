@@ -2078,6 +2078,7 @@ export function createNativeHostContract(options: {
         ...createTaskChecklistMoveMethods({ readiness, save, t: () => translate }),
         ...createProjectTasksDeleteMethods({ readiness, save, t: () => translate }),
         ...createProjectCalendarReferenceMethods({ readiness, save, revision: projectMutationRevision,
+            formatDate: (reference) => createDateFormatter(dateFormatting())(reference.start, reference.allDay ? 'P' : 'Pp', reference.start),
             load: (input) => calendarSettingsMethods.loadExternalCalendarFeed(input) }),
         ...createProjectDateMethods({ readiness, save,
             revision: projectMutationRevision }),

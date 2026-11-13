@@ -24,7 +24,7 @@ async function open(change: Partial<Project> = {}, events = [event()]) {
     } };
     setStorageAdapter(adapter);
     await useTaskStore.getState().fetchData({ throwOnError: true });
-    const methods = createProjectCalendarReferenceMethods({ readiness: () => ({ ok: true, value: null }), revision: () => 'revision',
+    const methods = createProjectCalendarReferenceMethods({ readiness: () => ({ ok: true, value: null }), revision: () => 'revision', formatDate: (reference) => `label:${reference.start}`,
         load: async () => ({ ok: true, value: feed }), save: async () => {
             try { await flushPendingSave(); return { ok: true as const, value: null }; }
             catch { return { ok: false as const, error: { code: 'SAVE_FAILED' as const, message: 'disk unavailable' } }; }
@@ -120,6 +120,8 @@ describe('native Project calendar reference command', () => {
         const fixture = await open({}, Array.from({ length: 205 }, (_, index) => event(index)));
         const first = await fixture.options();
         expect(first.candidates).toHaveLength(200); expect(first.total).toBe(205);
+        expect(first.candidateDateLabels).toEqual(first.candidates.map((reference) => `label:${reference.start}`));
+        expect(first.currentDateLabel).toBeNull();
         expect((await fixture.options('Meeting 204')).candidates).toHaveLength(1);
         const request = await fixture.request();
         useTaskStore.setState({ _allProjects: [project({ status: 'archived' })] });
