@@ -7194,6 +7194,18 @@ final class CoreHostTests: XCTestCase {
         await core.close()
     }
 
+    func testSomedayProjectMoveDialogReadPassesTheNativeMenuReadGate() async throws {
+        let id = try await seedSomedayProjectSections()
+        let core = host()
+        _ = try await core.start()
+        let dialog = try object(await core.call("menuRead", argumentsJSON: json(["moveDialog",
+            json(["projectId": id, "offset": 0, "limit": 100])])))
+        XCTAssertFalse((dialog["revision"] as? String ?? "").isEmpty)
+        let items = try XCTUnwrap((dialog["choices"] as? [String: Any])?["items"] as? [[String: Any]])
+        XCTAssertTrue(items.contains { $0["sectionId"] as? String == "later" })
+        await core.close()
+    }
+
     func testSomedayProjectSectionMoveWritesProbesAndRecoversAfterAFailedSave() async throws {
         let id = try await seedSomedayProjectSections()
         let faults = HostIOFaults()
