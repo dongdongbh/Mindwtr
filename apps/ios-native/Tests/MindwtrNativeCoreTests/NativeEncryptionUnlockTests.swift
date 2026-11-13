@@ -5,6 +5,10 @@ import Security
 import XCTest
 @testable import MindwtrNativeCore
 
+func syncArtifactAuthenticatedData(_ header: Data, cloudKey: String) -> Data {
+    let kind = cloudKey.hasPrefix("attachments/") ? "attachment" : "document"
+    return header + Data("mindwtr-sync:2\u{0}\(kind)\u{0}\(cloudKey)".utf8)
+}
 
 private final class EncryptionDAVProtocol: URLProtocol {
     private static let lock = NSLock()
@@ -215,8 +219,8 @@ final class NativeEncryptionUnlockTests: XCTestCase {
         remote = EncryptionDAVStore(expectedAuthorization: "Basic " + Data(("synthetic:" + password).utf8).base64EncodedString())
         unexpectedBefore = EncryptionDAVProtocol.unexpectedCount; EncryptionDAVProtocol.install(hostname, store: remote)
         let document: [String: Any] = ["tasks": [["id": remoteTaskID, "title": "Encrypted remote370", "status": "inbox", "contexts": [], "tags": [], "createdAt": at, "updatedAt": at, "rev": 1, "revBy": "fixture"]], "projects": [], "sections": [], "areas": [], "settings": [:]]
-        remote.seed("/sync/data.json.enc", bytes: try independentlyEncrypted(Data(json(document).utf8)))
-        remote.seed("/sync/attachments/untouched.bin", bytes: try independentlyEncrypted(Data("Untouched remote file370".utf8)))
+        remote.seed("/sync/data.json.enc", bytes: try independentlyEncrypted(Data(json(document).utf8), path: "/sync/data.json.enc"))
+        remote.seed("/sync/attachments/untouched.bin", bytes: try independentlyEncrypted(Data("Untouched remote file370".utf8), path: "/sync/attachments/untouched.bin"))
     }
     override func tearDownWithError() throws {
         XCTAssertEqual(EncryptionDAVProtocol.unexpectedCount, unexpectedBefore)
@@ -244,7 +248,11 @@ final class NativeEncryptionUnlockTests: XCTestCase {
     private func key() -> Data { Data(stride(from: 0, to: keyHex.count, by: 2).map { index in
         UInt8(keyHex[keyHex.index(keyHex.startIndex, offsetBy: index)..<keyHex.index(keyHex.startIndex, offsetBy: index + 2)], radix: 16)!
     }) }
-    private func independentlyEncrypted(_ plaintext: Data) throws -> Data {
+    private func cloudKey(_ path: String) -> String {
+        let name = String(path.dropFirst("/sync/".count))
+        return name.hasPrefix("attachments/") ? name : "data.json"
+    }
+    private func independentlyEncrypted(_ plaintext: Data, path: String) throws -> Data {
         var header = Data(repeating: 0, count: 54)
         header.replaceSubrange(0..<8, with: Data("MWENC1".utf8) + Data([2, 1]))
         func write(_ value: UInt64, _ offset: Int, _ count: Int) {
@@ -254,7 +262,7 @@ final class NativeEncryptionUnlockTests: XCTestCase {
         header.replaceSubrange(18..<34, with: Data((1...16).map { UInt8($0) }))
         let nonce = Data((33...44).map { UInt8($0) }); header.replaceSubrange(34..<46, with: nonce)
         write(UInt64(plaintext.count + 16), 46, 8)
-        let sealed = try AES.GCM.seal(plaintext, using: SymmetricKey(data: key()), nonce: AES.GCM.Nonce(data: nonce), authenticating: header)
+        let sealed = try AES.GCM.seal(plaintext, using: SymmetricKey(data: key()), nonce: AES.GCM.Nonce(data: nonce), authenticating: syncArtifactAuthenticatedData(header, cloudKey: cloudKey(path)))
         var result = header; result.append(sealed.ciphertext); result.append(sealed.tag); return result
     }
     private func core(_ supplied: HostIOFaults = HostIOFaults()) -> CoreHost {
@@ -463,7 +471,7 @@ final class NativeEncryptionUnlockTests: XCTestCase {
         XCTAssertNotEqual(changedKey, oldKey)
         for path in original.keys {
             let bytes = try XCTUnwrap(remote.bytes(encryptedPath(path)))
-            XCTAssertThrowsError(try independentlyDecrypted(bytes, key: oldKey), "Every artifact retired the old generation")
+            XCTAssertThrowsError(try independentlyDecrypted(bytes, key: oldKey, path: encryptedPath(path)), "Every artifact retired the old generation")
         }
     }
     private func assertDisableCompleted(_ original: [String: Data], since index: Int) throws {
@@ -541,9 +549,9 @@ final class NativeEncryptionUnlockTests: XCTestCase {
             for path in ["/sync/attachments/alpha.bin", "/sync/attachments/beta.bin", "/sync/data.json.enc.bak"] {
                 let changed = try XCTUnwrap(remote.bytes(path))
                 XCTAssertNotEqual(changed, initial[path]); XCTAssertEqual(changed.prefix(6), Data("MWENC1".utf8))
-                XCTAssertThrowsError(try independentlyDecrypted(changed, key: oldKey))
+                XCTAssertThrowsError(try independentlyDecrypted(changed, key: oldKey, path: path))
             }
-            XCTAssertEqual(try independentlyDecrypted(XCTUnwrap(remote.bytes("/sync/data.json.enc")), key: oldKey), enabled.original["/sync/data.json"])
+            XCTAssertEqual(try independentlyDecrypted(XCTUnwrap(remote.bytes("/sync/data.json.enc")), key: oldKey, path: "/sync/data.json.enc"), enabled.original["/sync/data.json"])
         } else {
             for path in ["/sync/attachments/alpha.bin", "/sync/attachments/beta.bin", "/sync/data.json.bak"] {
                 XCTAssertEqual(remote.bytes(path), enabled.original[path])
@@ -569,11 +577,11 @@ final class NativeEncryptionUnlockTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: localFile), localBytes); assertDrained(); await host.close()
         return (requestID, enabled.original, oldKey)
     }
-    private func independentlyDecrypted(_ bytes: Data, key: Data) throws -> Data {
+    private func independentlyDecrypted(_ bytes: Data, key: Data, path: String) throws -> Data {
         XCTAssertGreaterThanOrEqual(bytes.count, 70); XCTAssertEqual(bytes.prefix(8), Data("MWENC1".utf8) + Data([2, 1]))
         let sealed = try AES.GCM.SealedBox(nonce: AES.GCM.Nonce(data: bytes.subdata(in: 34..<46)),
             ciphertext: bytes.subdata(in: 54..<(bytes.count - 16)), tag: bytes.suffix(16))
-        return try AES.GCM.open(sealed, using: SymmetricKey(data: key), authenticating: bytes.prefix(54))
+        return try AES.GCM.open(sealed, using: SymmetricKey(data: key), authenticating: syncArtifactAuthenticatedData(bytes.prefix(54), cloudKey: cloudKey(path)))
     }
     private func assertEnableCompleted(_ original: [String: Data]) throws {
         let currentKey = try XCTUnwrap(cachedKey()), state = try storedState()
@@ -583,7 +591,7 @@ final class NativeEncryptionUnlockTests: XCTestCase {
             let encryptedPath = path == "/sync/data.json" ? "/sync/data.json.enc"
                 : path == "/sync/data.json.bak" ? "/sync/data.json.enc.bak" : path
             let encrypted = try XCTUnwrap(remote.bytes(encryptedPath))
-            XCTAssertEqual(try independentlyDecrypted(encrypted, key: currentKey), plaintext, "Conversion preserves exact domain bytes")
+            XCTAssertEqual(try independentlyDecrypted(encrypted, key: currentKey, path: encryptedPath), plaintext, "Conversion preserves exact domain bytes")
             XCTAssertEqual(encrypted.subdata(in: 18..<34).map { String(format: "%02x", $0) }.joined(), salt)
             if encryptedPath != path {
                 XCTAssertNil(remote.bytes(path))
@@ -762,7 +770,7 @@ final class NativeEncryptionUnlockTests: XCTestCase {
         _ = try await command(host, "saveSyncBackend", ["requestId": UUID().uuidString.lowercased(), "revision": try await revision(host), "webdav": fields])
         XCTAssertEqual(try stored()["@mindwtr_sync_backend"] as? String, "webdav")
         let encrypted = try XCTUnwrap(remote.bytes("/sync/data.json.enc"))
-        let document = try object(String(decoding: independentlyDecrypted(encrypted, key: material), as: UTF8.self))
+        let document = try object(String(decoding: independentlyDecrypted(encrypted, key: material, path: "/sync/data.json.enc"), as: UTF8.self))
         XCTAssertEqual(try json(XCTUnwrap(document["tasks"])), try json(expectedTasks))
         for name in ["projects", "sections", "areas", "people"] {
             XCTAssertEqual(try json(document[name] ?? []), try json(expected[name] ?? []))
@@ -835,9 +843,9 @@ final class NativeEncryptionUnlockTests: XCTestCase {
         XCTAssertEqual(firstBlob.element.condition, "none:*")
         for (_, request) in blobWrites {
             XCTAssertEqual(request.path, blobPath); XCTAssertTrue((200..<300).contains(request.status)); XCTAssertTrue(request.encryptedBody)
-            XCTAssertEqual(try independentlyDecrypted(XCTUnwrap(request.encryptedBytes), key: material), localBytes)
+            XCTAssertEqual(try independentlyDecrypted(XCTUnwrap(request.encryptedBytes), key: material, path: request.path), localBytes)
         }
-        XCTAssertEqual(try independentlyDecrypted(XCTUnwrap(remote.bytes(blobPath)), key: material), localBytes)
+        XCTAssertEqual(try independentlyDecrypted(XCTUnwrap(remote.bytes(blobPath)), key: material, path: blobPath), localBytes)
         let canonicalPaths = ["/sync/data.json", "/sync/data.json.enc", "/sync/data.json.bak", "/sync/data.json.enc.bak"]
         let documents = requests.enumerated().filter { $0.element.method == "PUT" && canonicalPaths.contains($0.element.path) }
         let firstDocument = try XCTUnwrap(documents.first)
@@ -846,13 +854,13 @@ final class NativeEncryptionUnlockTests: XCTestCase {
         for (index, request) in documents {
             XCTAssertTrue(["/sync/data.json.enc", "/sync/data.json.enc.bak"].contains(request.path)); XCTAssertTrue(request.encryptedBody)
             XCTAssertTrue((200..<300).contains(request.status))
-            let document = try object(String(decoding: independentlyDecrypted(XCTUnwrap(request.encryptedBytes), key: material), as: UTF8.self))
+            let document = try object(String(decoding: independentlyDecrypted(XCTUnwrap(request.encryptedBytes), key: material, path: request.path), as: UTF8.self))
             XCTAssertEqual(try json(XCTUnwrap(document["tasks"])), try json([expectedTask]))
             for name in ["projects", "sections", "areas", "people"] { XCTAssertEqual(try json(document[name] ?? []), try json(expected[name] ?? [])) }
 
             XCTAssertLessThan(firstBlob.offset, index)
         }
-        let finalDocument = try object(String(decoding: independentlyDecrypted(XCTUnwrap(remote.bytes("/sync/data.json.enc")), key: material), as: UTF8.self))
+        let finalDocument = try object(String(decoding: independentlyDecrypted(XCTUnwrap(remote.bytes("/sync/data.json.enc")), key: material, path: "/sync/data.json.enc"), as: UTF8.self))
         XCTAssertEqual(try json(XCTUnwrap(finalDocument["tasks"])), try json([expectedTask]))
         XCTAssertFalse(requests.contains { $0.method == "PUT" && ["/sync/data.json", "/sync/data.json.bak"].contains($0.path) })
         XCTAssertFalse(requests.contains { $0.method == "DELETE" && $0.path == blobPath })
@@ -1019,7 +1027,7 @@ final class NativeEncryptionUnlockTests: XCTestCase {
         for (path, bytes) in remote.snapshot where path != "/sync/.mindwtr-sync-fence-v1.json" && bytes.prefix(6) != Data("MWENC1".utf8) {
             let encryptedPath = path == "/sync/data.json" ? "/sync/data.json.enc"
                 : path == "/sync/data.json.bak" ? "/sync/data.json.enc.bak" : path
-            remote.seed(encryptedPath, bytes: try independentlyEncrypted(bytes))
+            remote.seed(encryptedPath, bytes: try independentlyEncrypted(bytes, path: encryptedPath))
             if encryptedPath != path { remote.removeAsPeer(path) }
         }
         let whole = remote.snapshot, requestID = UUID().uuidString.lowercased(), stamp = try await revision(host)

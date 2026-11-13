@@ -352,7 +352,7 @@ final class NativeWebDAVDownloadAdmissionTests: XCTestCase {
         var header = Data("MWENC1".utf8); header.append(contentsOf: [2,1,64,0,0,0,1,0,0,0,1,1])
         header.append(Data(count: 16)); header.append(Data(count: 12)); header.append(contentsOf: [20,0,0,0,0,0,0,0])
         XCTAssertEqual(header.count, 54)
-        let sealed = try AES.GCM.seal(plain, using: SymmetricKey(data: Data(count: 32)), nonce: AES.GCM.Nonce(data: Data(count: 12)), authenticating: header)
+        let sealed = try AES.GCM.seal(plain, using: SymmetricKey(data: Data(count: 32)), nonce: AES.GCM.Nonce(data: Data(count: 12)), authenticating: syncArtifactAuthenticatedData(header, cloudKey: "attachments/" + attachmentID + ".bin"))
         var wire = header; wire.append(sealed.ciphertext); wire.append(sealed.tag); XCTAssertEqual(wire.count, 74)
         try await seed(selected)
         let refused = try host(plans: [plan(selected, encrypted: true)], limit: wire.count - 1, bytes: wire, headers: ["Content-Length": String(wire.count)])

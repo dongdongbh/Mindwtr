@@ -173,7 +173,7 @@ final class ProjectFileDownloadHostTests: XCTestCase {
         var length = UInt64(bytes.count + 16).littleEndian
         withUnsafeBytes(of: &length) { header.append(contentsOf: $0) }
         XCTAssertEqual(header.count, 54)
-        let sealed = try AES.GCM.seal(bytes, using: SymmetricKey(data: key), nonce: AES.GCM.Nonce(data: nonce), authenticating: header)
+        let sealed = try AES.GCM.seal(bytes, using: SymmetricKey(data: key), nonce: AES.GCM.Nonce(data: nonce), authenticating: syncArtifactAuthenticatedData(header, cloudKey: "attachments/" + attachmentID + ".txt"))
         return header + sealed.ciphertext + sealed.tag
     }
     private func seedEncryption(_ stored: String?, state: String = "enabled", wireKey: Data? = nil) throws -> Data {

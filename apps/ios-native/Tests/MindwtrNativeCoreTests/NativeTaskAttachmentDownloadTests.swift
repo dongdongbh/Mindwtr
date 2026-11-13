@@ -224,7 +224,7 @@ final class NativeTaskAttachmentDownloadTests: XCTestCase {
             var length = UInt64(bytes.count + 16).littleEndian
             withUnsafeBytes(of: &length) { header.append(contentsOf: $0) }
             XCTAssertEqual(header.count, 54)
-            let box = try AES.GCM.seal(bytes, using: SymmetricKey(data: Data(count: 32)), nonce: AES.GCM.Nonce(data: Data(count: 12)), authenticating: header)
+            let box = try AES.GCM.seal(bytes, using: SymmetricKey(data: Data(count: 32)), nonce: AES.GCM.Nonce(data: Data(count: 12)), authenticating: syncArtifactAuthenticatedData(header, cloudKey: try XCTUnwrap(saved["cloudKey"] as? String)))
             remote.bytes = header + box.ciphertext + box.tag
         }
     }
@@ -1708,7 +1708,7 @@ final class NativeTaskAttachmentDownloadTests: XCTestCase {
         header.append(Data(count: 16)); header.append(Data(count: 12))
         var length = UInt64(bytes.count + 16).littleEndian
         withUnsafeBytes(of: &length) { header.append(contentsOf: $0) }
-        let box = try AES.GCM.seal(bytes, using: SymmetricKey(data: other), nonce: AES.GCM.Nonce(data: Data(count: 12)), authenticating: header)
+        let box = try AES.GCM.seal(bytes, using: SymmetricKey(data: other), nonce: AES.GCM.Nonce(data: Data(count: 12)), authenticating: syncArtifactAuthenticatedData(header, cloudKey: "attachments/" + attachmentID + ".txt"))
         remote.bytes = header + box.ciphertext + box.tag
         let selected = try suffix("""
         ;(() => { const native=__mindwtrNative,call=native.cryptoCall;
