@@ -241,15 +241,13 @@ private struct NativeSandboxContent: View {
                             TextField(model.label("projects.addPlaceholder"), text: $model.projectDraft).textFieldStyle(.roundedBorder)
                             Button(model.label("common.add")) { model.createProject() }.frame(minHeight: 44)
                         }.disabled(!model.canEdit)
-                        ForEach(model.projects.indices, id: \.self) { index in
-                            let project = model.projects[index]
+                        ForEach(Array(model.projects.enumerated()), id: \.offset) { _, project in
                             Button { model.openProject(project) } label: {
                                 Text(project.text("title")).rnFont(17, .semibold).frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                             }.disabled(!model.canEdit)
                         }
                     } else {
-                        ForEach(model.rows.indices, id: \.self) { index in
-                            let row = model.rows[index]
+                        ForEach(Array(model.rows.enumerated()), id: \.offset) { _, row in
                             HStack(spacing: 12) {
                                 Button { model.openTask(row) } label: {
                                     VStack(alignment: .leading, spacing: 4) {

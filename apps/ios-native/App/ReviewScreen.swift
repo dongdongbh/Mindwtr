@@ -510,8 +510,7 @@ struct ReviewGuideScreen: View {
                 Text(labels.text("aiEmpty")).rnFont(14).foregroundStyle(palette.secondary)
                     .fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("review-ai-empty")
             }
-            ForEach(model.reviewAISuggestions.indices, id: \.self) { index in
-                let item = model.reviewAISuggestions[index]
+            ForEach(Array(model.reviewAISuggestions.enumerated()), id: \.offset) { _, item in
                 let selected = model.reviewAISelectedIDs.contains(item.text("id"))
                 let actionable = item.flag("actionable") && !item.text("id").hasPrefix("project:")
                     && ["someday", "archive"].contains(item.text("action"))

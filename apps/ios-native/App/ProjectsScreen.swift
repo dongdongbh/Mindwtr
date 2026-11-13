@@ -480,8 +480,7 @@ private struct AreaManagerSheet: View {
                             .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                     } else {
                         VStack(spacing: 0) {
-                            ForEach(areas.indices, id: \.self) { index in
-                                let area = areas[index]
+                            ForEach(Array(areas.enumerated()), id: \.offset) { index, area in
                                 let canDelete = area.flag("canDelete")
                                 let deleteDecisionAvailable = area["canDelete"] is Bool
                                 VStack(spacing: 0) {
@@ -1315,8 +1314,7 @@ struct ProjectDetailScreen: View {
                 VStack(spacing: 8) {
                     if model.projectTaskSortPresented {
                         projectTaskSortErrors
-                        ForEach(model.projectTaskSortOptions.objects("choices").indices, id: \.self) { index in
-                            let choice = model.projectTaskSortOptions.objects("choices")[index]
+                        ForEach(Array(model.projectTaskSortOptions.objects("choices").enumerated()), id: \.offset) { _, choice in
                             Button { Task { await model.setProjectTaskSort(choice.text("id")) } } label: {
                                 HStack(spacing: 12) {
                                     Text(choice.text("label")).rnFont(16).fixedSize(horizontal: false, vertical: true)
@@ -1688,8 +1686,7 @@ struct ProjectDetailScreen: View {
                     if model.projectSectionRows.isEmpty {
                         Text(model.label("common.none")).rnFont(14).foregroundStyle(palette.secondary)
                     } else {
-                        ForEach(model.projectSectionRows.indices, id: \.self) { index in
-                            let row = model.projectSectionRows[index]
+                        ForEach(Array(model.projectSectionRows.enumerated()), id: \.offset) { _, row in
                             VStack(alignment: .leading, spacing: 0) {
                                 Text(row.text("title")).rnFont(15).foregroundStyle(palette.text)
                                     .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
@@ -1887,8 +1884,7 @@ struct ProjectDetailScreen: View {
                 ProgressView().frame(minHeight: 44)
             }
             if model.projectAttachmentsVisible {
-                ForEach(model.projectAttachmentRows.indices, id: \.self) { index in
-                    let entry = model.projectAttachmentRows[index]
+                ForEach(Array(model.projectAttachmentRows.enumerated()), id: \.offset) { _, entry in
                     VStack(alignment: .leading, spacing: 4) {
                         if ["link", "file"].contains(entry.text("kind")) {
                             Button {
@@ -2301,8 +2297,7 @@ private struct ProjectDetailViewBar: View {
         .overlay(alignment: .bottom) { palette.border.frame(height: 1) }
         if !model.projectDetail.objects("chips").isEmpty {
             AppChipFlow {
-                ForEach(model.projectDetail.objects("chips").indices, id: \.self) { index in
-                    let chip = model.projectDetail.objects("chips")[index]
+                ForEach(Array(model.projectDetail.objects("chips").enumerated()), id: \.offset) { _, chip in
                     Button {
                         onResign()
                         Task { await model.editProjectFilter(chip.object("action").object("filterEdit")) }
@@ -4038,8 +4033,7 @@ private struct ProjectBulkTagSheet: View {
                 VStack(alignment: .leading, spacing: 12) {
                     if model.projectBulkComposerRemoving {
                         AppChipFlow {
-                            ForEach(model.projectBulkRemoveItems.indices, id: \.self) { index in
-                                let option = model.projectBulkRemoveItems[index]
+                            ForEach(Array(model.projectBulkRemoveItems.enumerated()), id: \.offset) { index, option in
                                 let picked = model.projectBulkRemovePicked(option.text("value"))
                                 Button { model.toggleProjectBulkRemove(option.text("value")) } label: {
                                     Text(option.text("label")).rnFont(14).multilineTextAlignment(.leading)

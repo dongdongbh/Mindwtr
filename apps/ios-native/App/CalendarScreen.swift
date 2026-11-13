@@ -391,8 +391,7 @@ struct CalendarScreen: View {
                 VStack(spacing: 0) {
                     HStack(spacing: 0) {
                         palette.bg.frame(width: gutter, height: max(44, weekHeaderHeight)).offset(x: weekOffset).zIndex(2)
-                        ForEach(days.indices, id: \.self) { index in
-                            let day = days[index]
+                        ForEach(Array(days.enumerated()), id: \.offset) { _, day in
                             Button { navigate(day.object("opens")) } label: {
                                 VStack(spacing: 3) {
                                     Text(day.text("weekday")).rnFont(11, .semibold).foregroundStyle(palette.secondary)
@@ -410,25 +409,25 @@ struct CalendarScreen: View {
                         HStack(alignment: .top, spacing: 0) {
                             Text(text.text("allDay")).rnFont(11).foregroundStyle(palette.secondary).frame(width: gutter, height: allDayHeight)
                                 .background(palette.bg).offset(x: weekOffset).zIndex(2)
-                            ForEach(days.indices, id: \.self) { index in
-                                let items = entries.filter { $0.text("type") == "item" && $0.text("lane") == "allDay" && $0.text("dayKey") == days[index].text("key") }
+                            ForEach(Array(days.enumerated()), id: \.offset) { _, columnDay in
+                                let items = entries.filter { $0.text("type") == "item" && $0.text("lane") == "allDay" && $0.text("dayKey") == columnDay.text("key") }
                                 ScrollView {
                                     VStack(spacing: 3) {
                                         ForEach(items.indices, id: \.self) { itemIndex in
                                             CalendarItemButton(item: items[itemIndex].object("item"), model: model, palette: palette, compact: true)
                                         }
-                                        if !days[index].text("allDayMore").isEmpty {
-                                            Button { navigate(days[index].object("opens")) } label: {
-                                                Text(days[index].text("allDayMore")).rnFont(11, .semibold)
+                                        if !columnDay.text("allDayMore").isEmpty {
+                                            Button { navigate(columnDay.object("opens")) } label: {
+                                                Text(columnDay.text("allDayMore")).rnFont(11, .semibold)
                                                     .fixedSize(horizontal: false, vertical: true)
                                                     .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).contentShape(Rectangle())
                                             }
                                             .buttonStyle(.plain).foregroundStyle(palette.secondary).disabled(!model.calendarActionsEnabled)
-                                            .accessibilityIdentifier("calendar-week-all-day-more-" + days[index].text("key"))
+                                            .accessibilityIdentifier("calendar-week-all-day-more-" + columnDay.text("key"))
                                         }
                                     }.padding(2)
                                 }.frame(width: columnWidth, height: allDayHeight)
-                                    .accessibilityIdentifier("calendar-week-all-day-" + days[index].text("key"))
+                                    .accessibilityIdentifier("calendar-week-all-day-" + columnDay.text("key"))
                             }
                         }.overlay(alignment: .bottom) { palette.border.frame(height: 1) }
                     }
@@ -436,8 +435,8 @@ struct CalendarScreen: View {
                         pointsPerUnit: pixelsPerMinute, initialOffset: initialTimelineOffset, identifier: "calendar-week-timeline") {
                         HStack(alignment: .top, spacing: 0) {
                             hourGutter.background(palette.bg).offset(x: weekOffset).zIndex(2)
-                            ForEach(days.indices, id: \.self) { index in
-                                timelineColumn(dayKey: days[index].text("key"), width: columnWidth, today: days[index].flag("isToday"))
+                            ForEach(Array(days.enumerated()), id: \.offset) { _, columnDay in
+                                timelineColumn(dayKey: columnDay.text("key"), width: columnWidth, today: columnDay.flag("isToday"))
                             }
                         }.frame(height: timelineHeight + 22)
                     }
@@ -475,6 +474,7 @@ struct CalendarScreen: View {
 
     private var hourGutter: some View {
         VStack(spacing: 0) {
+            let hours = self.hours
             ForEach(hours.indices, id: \.self) { index in
                 Text(hours[index]).rnFont(10).foregroundStyle(palette.secondary)
                     .frame(width: gutter, height: index == hours.count - 1 ? 22 : 60 * pixelsPerMinute, alignment: .topTrailing)

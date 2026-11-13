@@ -241,8 +241,7 @@ private struct ReferenceBulkRemoveTagDialog: View {
     private var options: some View {
         VStack(alignment: .leading, spacing: 12) {
             AppChipFlow {
-                ForEach(model.referenceBulkRemoveItems.indices, id: \.self) { index in
-                    let item = model.referenceBulkRemoveItems[index]
+                ForEach(Array(model.referenceBulkRemoveItems.enumerated()), id: \.offset) { index, item in
                     let picked = model.referenceBulkRemovePicked(item.text("value"))
                     Button { model.toggleReferenceBulkRemove(item.text("value")) } label: {
                         Text(item.text("label")).rnFont(14).multilineTextAlignment(.leading).fixedSize(horizontal: false, vertical: true)
@@ -469,8 +468,7 @@ struct StatusListContent: View {
                 }
             }
             .confirmationDialog(referenceStatusOptions.text("title"), isPresented: $referenceStatusMenuPresented, titleVisibility: .visible) {
-                ForEach(referenceStatusOptions.objects("options").indices, id: \.self) { index in
-                    let option = referenceStatusOptions.objects("options")[index]
+                ForEach(Array(referenceStatusOptions.objects("options").enumerated()), id: \.offset) { _, option in
                     Button((option.flag("selected") ? "✓ " : "") + option.text("label")) {
                         guard referenceStatusIsCurrent, enabled, !model.busy, !model.retryNeeded else {
                             closeReferenceStatusMenu()
@@ -958,6 +956,7 @@ struct TaskRowDestinationDialog: View {
                     }
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 4) {
+                            let choices = self.choices
                             ForEach(choices.indices, id: \.self) { index in
                                 let choice = choices[index], kind = choice.text("kind")
                                 if kind != "none", index == 0 || choices[index - 1].text("kind") != kind {

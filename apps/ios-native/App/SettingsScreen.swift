@@ -1238,8 +1238,7 @@ struct SettingsScreen: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 8) {
-                    ForEach(model.appleRemindersLists.indices, id: \.self) { index in
-                        let list = model.appleRemindersLists[index]
+                    ForEach(Array(model.appleRemindersLists.enumerated()), id: \.offset) { index, list in
                         Button {
                             model.saveAppleRemindersPreference(["type": "selectedList", "id": list.text("id"),
                                 "sourceId": list.text("sourceId"), "title": list.text("title")])
@@ -1835,8 +1834,7 @@ struct SettingsScreen: View {
                     Button(model.label("common.retry")) { Task { await model.retryGtdWorkflow() } }
                         .disabled(!model.gtdWorkflowEnabled).accessibilityIdentifier("gtd-taskEditorPreset-retry")
                 }
-                ForEach(model.gtdTaskEditor.objects("groups").indices, id: \.self) { index in
-                    let group = model.gtdTaskEditor.objects("groups")[index]
+                ForEach(Array(model.gtdTaskEditor.objects("groups").enumerated()), id: \.offset) { _, group in
                     VStack(alignment: .leading, spacing: 12) {
                         let expanded = model.gtdTaskEditorExpanded[group.text("id")] ?? true
                         Button { model.toggleGtdTaskEditorGroup(group.text("id")) } label: {
@@ -2022,8 +2020,7 @@ struct SettingsScreen: View {
             }.padding(.horizontal, 16).padding(.top, 20)
             ScrollView {
                 VStack(spacing: 8) {
-                    ForEach(model.gtdCaptureAreaOptions.indices, id: \.self) { index in
-                        let option = model.gtdCaptureAreaOptions[index]
+                    ForEach(Array(model.gtdCaptureAreaOptions.enumerated()), id: \.offset) { _, option in
                         Button { Task { await model.chooseGtdCaptureArea(option.object("edit")) } } label: {
                             HStack {
                                 Text(option.text("label")).rnFont(16).foregroundStyle(palette.text)
@@ -2508,8 +2505,7 @@ struct SettingsScreen: View {
                 Button(model.label("common.cancel")) { model.cancelCalendarPushSetting() }
                     .frame(maxWidth: .infinity, minHeight: 44).contentShape(Rectangle()).accessibilityIdentifier("calendar-push-operation-cancel")
             }
-            ForEach(model.calendarPushSettingToasts.indices, id: \.self) { index in
-                let toast = model.calendarPushSettingToasts[index]
+            ForEach(Array(model.calendarPushSettingToasts.enumerated()), id: \.offset) { index, toast in
                 VStack(alignment: .leading, spacing: 4) {
                     Text(toast.text("title")).rnFont(15, .semibold)
                     Text(toast.text("message")).rnFont(13)
@@ -3336,8 +3332,7 @@ struct SettingsScreen: View {
                             }
                         }
                     }
-                    ForEach(model.manageSettings.objects("sections").indices, id: \.self) { index in
-                        let section = model.manageSettings.objects("sections")[index]
+                    ForEach(Array(model.manageSettings.objects("sections").enumerated()), id: \.offset) { index, section in
                         let someday = section.text("key") == "somedaySections"
                         let areas = section.text("key") == "areas"
                         let inventory = ["people", "contexts", "tags"].contains(section.text("key"))
@@ -3375,8 +3370,8 @@ struct SettingsScreen: View {
                                     Text(empty).rnFont(14).foregroundStyle(palette.secondary)
                                         .frame(maxWidth: .infinity, alignment: .leading).padding(16)
                                 }
-                                ForEach(model.managedAreas.indices, id: \.self) { rowIndex in
-                                    areaRow(model.managedAreas[rowIndex], index: rowIndex)
+                                ForEach(Array(model.managedAreas.enumerated()), id: \.offset) { rowIndex, area in
+                                    areaRow(area, index: rowIndex)
                                 }
                                 if model.managedAreas.count < model.managedAreasTotal {
                                     Button(model.label("common.more")) {
@@ -3398,8 +3393,8 @@ struct SettingsScreen: View {
                                         .rnFont(14).foregroundStyle(palette.secondary)
                                         .frame(maxWidth: .infinity, alignment: .leading).padding(16)
                                 } else {
-                                    ForEach(model.managedSomedaySections.indices, id: \.self) { rowIndex in
-                                        somedayRow(index: rowIndex)
+                                    ForEach(Array(model.managedSomedaySections.enumerated()), id: \.offset) { rowIndex, row in
+                                        somedayRow(row, index: rowIndex)
                                     }
                                     if model.managedSomedaySections.count < model.managedSomedayTotal {
                                         Button(model.label("common.more")) {
@@ -4087,8 +4082,7 @@ struct SettingsScreen: View {
         .interactiveDismissDisabled(model.busy || model.retryNeeded || model.unassignedAreaColorAwaitingRefresh)
     }
 
-    private func somedayRow(index: Int) -> some View {
-        let row = model.managedSomedaySections[index]
+    private func somedayRow(_ row: CoreObject, index: Int) -> some View {
         let editing = model.somedaySectionRenameIndex == index
         let layout = dynamicTypeSize.isAccessibilitySize
             ? AnyLayout(VStackLayout(alignment: .trailing, spacing: 4))

@@ -354,8 +354,7 @@ struct SearchScreen: View {
         VStack(alignment: .leading, spacing: 12) {
             sectionLabel(label)
             AppChipFlow {
-                ForEach(options.objects(key).indices, id: \.self) { index in
-                    let option = options.objects(key)[index]
+                ForEach(Array(options.objects(key).enumerated()), id: \.offset) { _, option in
                     let value = option.text("value")
                     chipButton(option.text("label"), selected: multiple ? selectedValues(field).contains(value) : model.searchFilters.text(field) == value,
                                identifier: "search-filter-" + field + "-" + value, enabled: filtersEnabled) {

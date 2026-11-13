@@ -10502,4 +10502,9 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     assert.deepEqual(hostGateGaps(resolve(app, '../ios-native')), [], 'every iOS app host read must pass its CoreHost.swift gate');
     console.log('iOS host gates admit every menuRead name the app sends and every Organize list core offers');
 }
+{
+    const { liveIndexForEachSites } = await import('../../ios-native/scripts/check-foreach-snapshots.mjs');
+    assert.deepEqual(liveIndexForEachSites(resolve(app, '../ios-native/App')), [], 'no iOS ForEach may index a live model array');
+    console.log('No iOS ForEach indexes a live model array');
+}
 console.log('Boot gates, second-read failure, failed-save refresh and editor read, and diagnostic acknowledgment passed');
