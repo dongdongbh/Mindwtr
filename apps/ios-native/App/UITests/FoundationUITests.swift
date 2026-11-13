@@ -2400,7 +2400,7 @@ final class FoundationUITests: XCTestCase {
         app.launch(); task371OpenSync(app, flow: flow)
     }
 
-    private func task322OpenSync(_ app: XCUIApplication) {
+    private func task322OpenSync(_ app: XCUIApplication, expectsOff: Bool = true) {
         if !app.buttons["settings-back"].exists {
             boardEnabled(app.buttons["tab-menu"], timeout: 30)
             boardTap(app, "tab-menu")
@@ -2416,6 +2416,7 @@ final class FoundationUITests: XCTestCase {
         revealPagedElement(app, entry, in: app.scrollViews["settings-scroll"])
         boardTap(app, "settings-sync")
         boardEnabled(app.buttons["sync-option-off"], timeout: 30)
+        guard expectsOff else { return }
         expectation(for: NSPredicate(format: "selected == true AND enabled == true"), evaluatedWith: app.buttons["sync-option-off"])
         waitForExpectations(timeout: 15)
         XCTAssertFalse(app.textFields["sync-url"].exists)
@@ -35019,7 +35020,7 @@ extension FoundationUITests {
         boardEnabled(menu, timeout: 30)
         expectation(for: NSPredicate(format: "label == %@", "Menu, Sync healthy"), evaluatedWith: menu)
         waitForExpectations(timeout: 60)
-        task322OpenSync(app)
+        task322OpenSync(app, expectsOff: false)
         boardTap(app, "sync-back")
         let row = app.buttons["settings-sync"]
         boardEnabled(row, timeout: 30)
