@@ -1188,7 +1188,7 @@ function TaskEditModalInner({
             visible={visible}
             animationType={reducedMotion ? 'none' : (adaptiveWindow.isExpanded ? 'fade' : 'slide')}
             presentationStyle={Platform.OS === 'ios' ? 'pageSheet' : 'fullScreen'}
-            allowSwipeDismissal={!submissionPending && !completionRetryPending}
+            allowSwipeDismissal={false}
             onShow={() => setIsModalShown(true)}
             onRequestClose={readOnly ? onClose : () => { if (!submissionPending && !completionRetryPending) handleAttemptClose(); }}
             onDismiss={onDismiss}

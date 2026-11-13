@@ -36,7 +36,7 @@ class CleanupTests(unittest.TestCase):
         self.git(self.repo, "config", "user.name", "Fixture")
         self.git(self.repo, "config", "user.email", "fixture@example.invalid")
         self.git(self.repo, "config", "core.excludesFile", "/dev/null")
-        (self.repo / ".gitignore").write_text("node_modules/\n.orchestrator/\n.env\n.build-task*/\napps/ios-native/.build/\napps/desktop/src-tauri/target/\napps/mobile/android/\napps/android-native/**/build/\n.gradle/\n", encoding="utf-8")
+        (self.repo / ".gitignore").write_text("node_modules/\n.orchestrator/\n.env\n.build-task*/\napps/ios-native/.build/\napps/desktop/src-tauri/target/\napps/mobile/android/\napps/android-native/**/build/\n.gradle/\n.kotlin/\n.cxx/\ncoverage/\n__pycache__/\n.venv-comments/\napps/mobile/.expo/\napps/mobile/expo-env.d.ts\napps/mobile/modules/*/.tests-tmp/\napps/desktop/dist/\napps/desktop/src-tauri/gen/schemas/\napps/ios-native/Resources/*.js*\napps/ios-native/Sources/MindwtrNativeCore/Resources/sandbox-host.js\napps/android-native/android/app/src/main/assets/\n.perf/\n", encoding="utf-8")
         (self.repo / "source.txt").write_text("committed fixture\n", encoding="utf-8")
         self.git(self.repo, "add", ".")
         self.git(self.repo, "commit", "-m", "initial fixture")
@@ -66,7 +66,8 @@ class CleanupTests(unittest.TestCase):
             os.utime(directory, (self.old, self.old), follow_symlinks=False)
 
     def service(self, **kwargs):
-        options = dict(now=lambda: self.now, probe=lambda path: False, free_bytes=lambda path: 100 * 1024**3)
+        options = dict(now=lambda: self.now, probe=lambda path: False, free_bytes=lambda path: 100 * 1024**3,
+                       lock_path=self.base / "machine cleanup.lock")
         options.update(kwargs)
         return cleanup.Cleanup(self.repo, self.root, self.archive_root, **options)
 
@@ -299,6 +300,29 @@ class CleanupTests(unittest.TestCase):
         self.age()
         self.assert_skip("symlinked_worktree_content")
 
+    def commit_link(self, relative, target):
+        link = self.worktree / relative
+        link.parent.mkdir(parents=True, exist_ok=True)
+        link.symlink_to(target, target_is_directory=True)
+        self.git(self.worktree, "add", relative)
+        self.git(self.worktree, "commit", "-m", "tracked link")
+        self.git(self.repo, "merge", "--ff-only", "retained-topic")
+        self.git(self.repo, "push", "origin", "main")
+        self.age()
+
+    def test_tracked_symlink_inside_worktree_is_unlinked_not_followed(self):
+        (self.worktree / "shared" / "res").mkdir(parents=True)
+        (self.worktree / "shared" / "res" / "layout.xml").write_text("shared resource")
+        self.git(self.worktree, "add", "shared")
+        self.commit_link("widget/src/main/res", "../../../shared/res")
+        item = self.candidate(self.run_cleanup())
+        self.assertEqual(item["decision"], "removed")
+        self.assertFalse(self.worktree.exists())
+
+    def test_tracked_relative_symlink_escaping_worktree_skips(self):
+        self.commit_link("widget/res", "../../outside")
+        self.assert_skip("symlinked_worktree_content")
+
     def test_unknown_ignored_configuration_skips_without_reading_content(self):
         self.ignored_file(".env", b"PRIVATE_FIXTURE_CONTENT")
         report = self.assert_skip("unknown_ignored_content")
@@ -308,7 +332,18 @@ class CleanupTests(unittest.TestCase):
         for path in ("node_modules/pkg/index.js", "apps/mobile/node_modules/pkg/index.js",
                      "apps/ios-native/.build/cache", ".build-task213/cache",
                      "apps/desktop/src-tauri/target/debug/cache", "apps/mobile/android/app/build/cache",
-                     "apps/android-native/app/build/cache", ".gradle/cache"):
+                     "apps/android-native/app/build/cache", ".gradle/cache",
+                     "apps/android-native/android/.gradle/cache", "apps/android-native/android/.kotlin/sessions/s",
+                     "apps/android-native/android/build/cache", "apps/android-native/android/app/build/cache",
+                     "apps/android-native/android/app/.cxx/cache", "apps/android-native/android/widget/build/cache",
+                     "apps/android-native/android/app/src/main/assets/core-host.js",
+                     "apps/ios-native/Resources/core-host.js", "apps/ios-native/Resources/label-keys.json",
+                     "apps/ios-native/Sources/MindwtrNativeCore/Resources/sandbox-host.js",
+                     "apps/mobile/.expo/types/router.d.ts", "apps/mobile/expo-env.d.ts",
+                     "apps/mobile/modules/whisper-engine/.tests-tmp/run/x", "apps/desktop/dist/index.html",
+                     "apps/desktop/src-tauri/gen/schemas/desktop-schema.json", ".venv-comments/pyvenv.cfg",
+                     "coverage/index.html", "apps/mobile/coverage/lcov.info", "packages/core/coverage/lcov.info",
+                     "scripts/ci/__pycache__/check.cpython-314.pyc", "apps/ios-native/scripts/__pycache__/x.pyc"):
             self.ignored_file(path)
         item = self.candidate(self.run_cleanup())
         self.assertEqual(item["decision"], "removed")
@@ -316,6 +351,14 @@ class CleanupTests(unittest.TestCase):
     def test_generated_native_project_source_not_allowed(self):
         self.ignored_file("apps/mobile/android/app/src/main/Generated.java")
         self.assert_skip("unknown_ignored_content")
+
+    def test_generated_lookalikes_not_allowed(self):
+        for relative in ("apps/ios-native/Resources/other.json", "apps/android-native/android/app/src/main/assets/extra.json",
+                         "apps/mobile/modules/other-module/.tests-tmp/x", "apps/other/.cxx/cache", "packages/core/.perf/run.json"):
+            with self.subTest(relative=relative):
+                path = self.ignored_file(relative)
+                self.assert_skip("unknown_ignored_content")
+                path.unlink()
 
     def test_unknown_root_build_task_suffix_not_allowed(self):
         self.ignored_file(".build-task213-personal/cache")
@@ -357,8 +400,29 @@ class CleanupTests(unittest.TestCase):
 
     def test_archive_low_space_preserves_source(self):
         self.ignored_file(".orchestrator/result.md")
-        self.assert_skip("insufficient_archive_space", free_bytes=lambda path: cleanup.ARCHIVE_RESERVE_BYTES)
+        self.assert_skip("low_disk", free_bytes=lambda path: cleanup.ARCHIVE_RESERVE_BYTES, min_free_gb=0)
         self.assertEqual(list(self.archive_root.glob("*.tar.gz")), [])
+
+    def test_archive_refused_when_it_would_cross_free_space_floor(self):
+        self.ignored_file(".orchestrator/result.md")
+        floor = 60 * 1024**3
+        self.assert_skip("low_disk", free_bytes=lambda path: floor + cleanup.ARCHIVE_RESERVE_BYTES)
+        self.assertEqual(list(self.archive_root.glob("*.tar.gz")), [])
+        roomy = floor + 2 * cleanup.ARCHIVE_RESERVE_BYTES
+        self.assertEqual(self.candidate(self.run_cleanup(free_bytes=lambda path: roomy))["decision"], "removed")
+
+    def test_free_space_floor_is_configurable_and_validated(self):
+        self.ignored_file(".orchestrator/result.md")
+        self.assert_skip("low_disk", free_bytes=lambda path: 9 * 1024**3, min_free_gb=10)
+        self.assertEqual(self.candidate(self.run_cleanup(free_bytes=lambda path: 11 * 1024**3, min_free_gb=10))["decision"], "removed")
+        for value in (-1, float("inf"), float("nan")):
+            with self.subTest(value=value), self.assertRaisesRegex(cleanup.SafetyError, "invalid_min_free"):
+                self.service(min_free_gb=value)
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            result = cleanup.main(["--repo", str(self.repo), "--worktree-root", str(self.root),
+                                   "--archive-root", str(self.archive_root), "--min-free-gb", "inf"])
+        self.assertEqual((result, json.loads(output.getvalue())["error"]), (1, "invalid_min_free"))
 
     def test_archive_space_probe_failure_preserves_source(self):
         self.ignored_file(".orchestrator/result.md")
@@ -532,6 +596,199 @@ class CleanupTests(unittest.TestCase):
         report = self.run_cleanup()
         self.assertNotIn(str(self.worktree), [item["path"] for item in report["worktrees"]])
 
+    def test_machine_lock_is_shared_across_archive_roots(self):
+        holder = cleanup.Cleanup(self.repo, self.root, self.base / "other archives", now=lambda: self.now,
+                                 probe=lambda path: False, lock_path=self.base / "machine cleanup.lock")
+        holder.lock()
+        try:
+            report = self.run_cleanup()
+            self.assertEqual(report["error"], "cleanup_already_running")
+            self.assertTrue(self.worktree.exists())
+        finally:
+            os.close(holder.lock_descriptor)
+            holder.lock_descriptor = None
+        self.assertEqual(self.candidate(self.run_cleanup())["decision"], "removed")
+
+    def test_unavailable_or_unsafe_machine_lock_fails_closed(self):
+        report = self.run_cleanup(lock_path=self.base / "missing parent" / "cleanup.lock")
+        self.assertEqual(report["error"], "cleanup_lock_unavailable")
+        shared = self.base / "machine cleanup.lock"
+        shared.write_bytes(b"")
+        shared.chmod(0o644)
+        self.assertEqual(self.run_cleanup()["error"], "cleanup_lock_unsafe")
+        self.assertTrue(self.worktree.exists())
+
+    def test_default_lock_is_outside_any_archive_root(self):
+        self.assertEqual(cleanup.DEFAULT_LOCK_PATH, Path.home() / ".local" / "state" / "mindwtr-worktree-cleanup.lock")
+        self.assertEqual(self.service(lock_path=cleanup.DEFAULT_LOCK_PATH).lock_path, cleanup.DEFAULT_LOCK_PATH)
+
+    def land_on_main(self, files):
+        for relative, data in files.items():
+            (self.repo / relative).write_bytes(data)
+        self.git(self.repo, "add", ".")
+        self.git(self.repo, "commit", "-m", "landed on main")
+        self.git(self.repo, "push", "origin", "main")
+
+    def test_dirty_changes_byte_equal_to_origin_main_are_retired(self):
+        self.land_on_main({"source.txt": b"landed source\n", "landed.txt": b"landed new file\n", "staged.txt": b"staged\n"})
+        (self.worktree / "source.txt").write_bytes(b"landed source\n")
+        (self.worktree / "landed.txt").write_bytes(b"landed new file\n")
+        (self.worktree / "staged.txt").write_bytes(b"staged\n")
+        self.git(self.worktree, "add", "staged.txt")
+        self.age()
+        preview = self.candidate(self.run_cleanup(apply=False))
+        self.assertEqual((preview["decision"], preview["reason"], preview["changed_path_count"]),
+                         ("eligible", "merged_inactive_changes_on_origin_main", 3))
+        self.assertEqual((self.worktree / "landed.txt").read_bytes(), b"landed new file\n")
+        item = self.candidate(self.run_cleanup())
+        self.assertEqual(item["decision"], "removed")
+        self.assertFalse(self.worktree.exists())
+        self.assertEqual(self.git(self.repo, "rev-parse", "retained-topic"), self.git(self.repo, "rev-parse", "HEAD~1"))
+
+    def test_dirty_changes_that_differ_from_origin_main_skip(self):
+        self.land_on_main({"source.txt": b"landed source\n", "landed.txt": b"landed new file\n"})
+        for relative, data in (("landed.txt", b"landed new file, local edit\n"), ("source.txt", b"local only\n")):
+            with self.subTest(relative=relative):
+                (self.worktree / relative).write_bytes(data)
+                self.age()
+                self.assert_skip("dirty_or_untracked")
+                self.assertEqual((self.worktree / relative).read_bytes(), data)
+                self.git(self.worktree, "checkout", "--", "source.txt")
+                (self.worktree / "landed.txt").unlink(missing_ok=True)
+
+    def test_mode_change_not_on_origin_main_skips(self):
+        (self.worktree / "source.txt").chmod(0o755)
+        self.age()
+        self.assert_skip("dirty_or_untracked")
+
+    def test_diff_whose_hunk_is_on_origin_main_but_file_differs_skips(self):
+        lines = [b"line %d\n" % number for number in range(20)]
+        self.land_on_main({"source.txt": b"".join(lines)})
+        self.git(self.worktree, "merge", "--ff-only", "origin/main")
+        topic_change = lines.copy()
+        topic_change[2] = b"topic change\n"
+        self.land_on_main({"source.txt": b"".join(topic_change[:-1] + [b"later main change\n"])})
+        (self.worktree / "source.txt").write_bytes(b"".join(topic_change))
+        self.age()
+        self.assert_skip("dirty_or_untracked")
+
+    def test_staged_content_that_differs_from_worktree_is_never_disposable(self):
+        self.land_on_main({"source.txt": b"landed\n"})
+        (self.worktree / "source.txt").write_bytes(b"staged unique work\n")
+        self.git(self.worktree, "add", "source.txt")
+        (self.worktree / "source.txt").write_bytes(b"landed\n")
+        self.age()
+        self.assertEqual(self.git(self.worktree, "status", "--porcelain")[:2], b"MM")
+        self.assert_skip("dirty_or_untracked")
+        self.assertEqual(self.git(self.worktree, "show", ":source.txt"), b"staged unique work\n")
+
+    def test_staged_new_file_deleted_from_disk_is_never_disposable(self):
+        (self.worktree / "new.txt").write_bytes(b"staged new file\n")
+        self.git(self.worktree, "add", "new.txt")
+        (self.worktree / "new.txt").unlink()
+        self.age()
+        self.assertEqual(self.git(self.worktree, "status", "--porcelain")[:2], b"AD")
+        self.assert_skip("dirty_or_untracked")
+        self.assertEqual(self.git(self.worktree, "show", ":new.txt"), b"staged new file\n")
+
+    def test_conflicted_path_matching_origin_main_is_never_disposable(self):
+        self.git(self.worktree, "checkout", "-b", "side")
+        (self.worktree / "source.txt").write_bytes(b"side change\n")
+        self.git(self.worktree, "commit", "-am", "side")
+        self.git(self.worktree, "checkout", "retained-topic")
+        self.land_on_main({"source.txt": b"main change\n"})
+        self.git(self.worktree, "merge", "--ff-only", "origin/main")
+        subprocess.run(["git", "-C", str(self.worktree), "merge", "side"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        (self.worktree / "source.txt").write_bytes(b"main change\n")
+        self.age()
+        self.assertEqual(self.git(self.worktree, "status", "--porcelain")[:2], b"UU")
+        self.assert_skip("dirty_or_untracked")
+
+    def test_change_made_after_proof_prevents_discard(self):
+        self.land_on_main({"landed.txt": b"landed new file\n"})
+        (self.worktree / "landed.txt").write_bytes(b"landed new file\n")
+        self.age()
+        service = self.service()
+        archive = service.archive
+        def archive_then_edit(*args):
+            result = archive(*args)
+            (self.worktree / "landed.txt").write_bytes(b"edited after proof\n")
+            self.age()
+            return result
+        service.archive = archive_then_edit
+        item = self.candidate(service.run(apply=True))
+        self.assertEqual(item["reason"], "recheck_dirty_or_untracked")
+        self.assertEqual((self.worktree / "landed.txt").read_bytes(), b"edited after proof\n")
+
+    def test_edit_during_evidence_recheck_survives(self):
+        self.land_on_main({"landed.txt": b"landed new file\n"})
+        (self.worktree / "landed.txt").write_bytes(b"landed new file\n")
+        self.age()
+        original = cleanup.evidence_manifest
+        calls = []
+        def manifest(root):
+            calls.append(root)
+            if len(calls) == 2:
+                (self.worktree / "landed.txt").write_bytes(b"unique edit during evidence recheck\n")
+            return original(root)
+        with patch.object(cleanup, "evidence_manifest", manifest):
+            item = self.candidate(self.run_cleanup())
+        self.assertEqual(item["decision"], "skip")
+        self.assertEqual((self.worktree / "landed.txt").read_bytes(), b"unique edit during evidence recheck\n")
+
+    def test_edit_after_final_recheck_survives_discard(self):
+        self.land_on_main({"landed.txt": b"landed new file\n", "source.txt": b"landed source\n"})
+        (self.worktree / "source.txt").write_bytes(b"landed source\n")
+        cases = {"same size edit": lambda: (self.worktree / "landed.txt").write_bytes(b"landed NEW file\n"),
+                 "new untracked file": lambda: (self.worktree / "late.txt").write_bytes(b"late work\n")}
+        for name, edit in cases.items():
+            with self.subTest(name=name):
+                (self.worktree / "landed.txt").write_bytes(b"landed new file\n")
+                (self.worktree / "late.txt").unlink(missing_ok=True)
+                self.age()
+                calls = []
+                def probe(path):
+                    calls.append(path)
+                    if len(calls) == 2:
+                        edit()
+                        self.age()
+                    return False
+                item = self.candidate(self.run_cleanup(probe=probe))
+                self.assertEqual((item["decision"], item["reason"]), ("skip", "changed_before_discard"))
+                self.assertTrue(self.worktree.exists())
+        self.assertEqual((self.worktree / "late.txt").read_bytes(), b"late work\n")
+
+    def test_commit_reachable_only_from_head_reflog_skips(self):
+        self.git(self.worktree, "checkout", "--detach")
+        (self.worktree / "source.txt").write_text("detached work\n")
+        self.git(self.worktree, "commit", "-am", "detached only")
+        detached = self.git(self.worktree, "rev-parse", "HEAD").strip()
+        self.git(self.worktree, "checkout", "retained-topic")
+        self.age()
+        self.assert_skip("unreachable_reflog_commit")
+        self.git(self.repo, "branch", "keep-detached", detached.decode())
+        self.assertEqual(self.candidate(self.run_cleanup())["decision"], "removed")
+
+    def test_report_is_written_under_the_machine_lock(self):
+        self.archive_root.mkdir(mode=0o700)
+        report_path = self.archive_root / "latest-apply.json"
+        arguments = ["--repo", str(self.repo), "--worktree-root", str(self.root), "--archive-root", str(self.archive_root),
+                     "--apply", "--report", str(report_path)]
+        with patch.object(cleanup, "Cleanup", return_value=self.service()), contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(cleanup.main(arguments), 0)
+        first = report_path.read_bytes()
+        holder = self.service()
+        holder.lock()
+        try:
+            output = io.StringIO()
+            with patch.object(cleanup, "Cleanup", return_value=self.service()), contextlib.redirect_stdout(output):
+                self.assertEqual(cleanup.main(arguments), 1)
+            self.assertEqual(json.loads(output.getvalue())["error"], "cleanup_already_running")
+            self.assertEqual(report_path.read_bytes(), first)
+        finally:
+            os.close(holder.lock_descriptor)
+            holder.lock_descriptor = None
+
     def test_git_remove_never_uses_force(self):
         commands = []
         original = cleanup.run_git
@@ -603,7 +860,8 @@ class CleanupTests(unittest.TestCase):
 
     def test_lsof_no_match_active_and_uncertain_exit_contract(self):
         for code, stdout, stderr, expected in [(1, b"", b"", False), (0, b"p123\0", b"", True),
-                                               (1, b"", b"warning", "process_probe_failed"),
+                                               (1, b"", b"warning", "process_probe_failed"), (0, b"", b"", "process_probe_failed"),
+                                               (1, b"p123\0", b"warning", "process_probe_failed"),
                                                (2, b"", b"", "process_probe_failed")]:
             with self.subTest(code=code, stderr=stderr), patch.object(cleanup.subprocess, "run", return_value=subprocess.CompletedProcess([], code, stdout, stderr)):
                 if isinstance(expected, bool):
@@ -612,6 +870,23 @@ class CleanupTests(unittest.TestCase):
                     with self.assertRaisesRegex(cleanup.SafetyError, expected):
                         cleanup.process_active(self.worktree)
 
+
+    def test_lsof_warnings_only_tolerated_for_unrelated_unstattable_mounts(self):
+        def warning(mount):
+            return b"lsof: WARNING: can't stat() overlay file system " + os.fsencode(mount) + b"\n      Output information may be incomplete.\n"
+        docker = warning("/var/lib/docker/rootfs/overlayfs/abc") + warning("/run/docker/netns/49619eb775ba")
+        for stderr, expected in [(docker, False), (warning(self.worktree / "mounted"), "process_probe_failed"),
+                                 (warning("/"), "process_probe_failed"), (warning(self.worktree), "process_probe_failed"),
+                                 (docker + b"lsof: other warning\n", "process_probe_failed")]:
+            with self.subTest(stderr=stderr), patch.object(cleanup.subprocess, "run", return_value=subprocess.CompletedProcess([], 1, b"", stderr)):
+                if expected is False:
+                    self.assertFalse(cleanup.process_active(self.worktree))
+                else:
+                    with self.assertRaisesRegex(cleanup.SafetyError, expected):
+                        cleanup.process_active(self.worktree)
+        for code in (0, 1):
+            with patch.object(cleanup.subprocess, "run", return_value=subprocess.CompletedProcess([], code, b"p123\0", docker)):
+                self.assertTrue(cleanup.process_active(self.worktree))
 
 if __name__ == "__main__":
     unittest.main()

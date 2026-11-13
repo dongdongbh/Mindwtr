@@ -44,6 +44,14 @@ class TaskEditorChecklistTest {
 
         assertEquals(JSONArray(opened).toString(), JSONObject(reloaded.checklistSave).getJSONArray("base").toString())
     }
+    @Test fun aiStepsWithoutAStatusChangeQueueAnEmptyEditBesidePendingChecklistEdits() {
+        val editor = TaskEditor.open(model(opened), "task")
+            .queued(JSONObject().put("checklist", JSONObject().put("kind", "move").put("from", 0).put("to", 0)).toString(), null)
+        val withSteps = editor.withChecklist(renamed).queued("", null)
+        assertEquals(listOf("move", ""), withSteps.pending.map { checklistEditOf(it.edit)?.getString("kind") ?: it.edit })
+        assertEquals(true, withSteps.checklistStructurePending)
+    }
+
     @Test fun lateInputAndImeSubmitCannotCrossAPendingPositionChange() {
         val threeRows = """[{"id":"a","title":"A","isCompleted":false},{"id":"b","title":"B","isCompleted":false},{"id":"c","title":"C","isCompleted":false}]"""
         val editor = TaskEditor.open(model(threeRows), "task")

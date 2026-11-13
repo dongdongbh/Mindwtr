@@ -1,3 +1,4 @@
+import { isProjectCalendarReference } from './project-calendar-reference-schema';
 import { isValidProjectColorOverride } from './color-constants';
 import { isNativeJsonWithinBytes, record } from './native-json';
 export { exact, record } from './native-json';
@@ -27,6 +28,7 @@ const optionalStrings = ['supportNotes', 'dueDate', 'startDate', 'reviewAt', 'ca
     'areaId', 'areaTitle', 'revBy', 'deletedAt', 'purgedAt'] as const;
 export const validProject = (value: unknown, projectId: string): value is Project => {
     if (!record(value) || Object.keys(value).some((key) => !projectKeys.has(key as keyof Project))
+        || (value.calendarReference != null && !isProjectCalendarReference(value.calendarReference))
         || value.id !== projectId || typeof value.title !== 'string'
         || !['active', 'someday', 'waiting', 'archived'].includes(String(value.status))
         || !isValidProjectColorOverride(value.colorOverride) || typeof value.color !== 'string' || typeof value.order !== 'number' || !Number.isFinite(value.order)

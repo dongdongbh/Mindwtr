@@ -107,6 +107,15 @@ describe('native host contract: widget list screen', () => {
         });
     });
 
+    it('names a live saved Contexts filter so the link opens the Contexts screen, and only that kind (#1485)', async () => {
+        const filter = (id: string, view: 'contexts' | 'next', fields = {}) => ({ id, name: id, view, criteria: {}, createdAt: now, updatedAt: now, ...fields });
+        const host = await open({ tasks: [task('a')], settings: { savedFilters: [filter('desk', 'contexts'), filter('focus', 'next'), filter('gone', 'contexts', { deletedAt: now }), filter('x'.repeat(201), 'contexts')] } });
+        expect(value(host.getWidgetListView({ id: 'filter:desk' })).contextsFilterId).toBe('desk');
+        for (const id of ['filter:focus', 'filter:gone', 'filter:missing', 'next', 'context:@desk', `filter:${'x'.repeat(201)}`]) {
+            expect(value(host.getWidgetListView({ id })).contextsFilterId).toBeNull();
+        }
+    });
+
     it('fails closed for a route ID that names no list', async () => {
         const host = await open({ tasks: [task('hidden')] });
         for (const id of ['', 'focus', 'filter:', 'filter: ', 'next/extra', 'inbox', 'next\u0000']) {

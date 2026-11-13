@@ -73,9 +73,9 @@ test('dense deadline labels stay separate and scroll within their group', async 
     await expect(markers).toHaveCount(10);
     await markers.first().scrollIntoViewIfNeeded();
     const gutter = page.locator('[data-calendar-hour-gutter]');
-    const gutterBox = await gutter.boundingBox();
-    expect(gutterBox).not.toBeNull();
-    expect(gutterBox!.x).toBeGreaterThanOrEqual(0);
-    expect(gutterBox!.x + gutterBox!.width).toBeLessThan(1280);
+    await expect.poll(async () => {
+        const gutterBox = await gutter.boundingBox();
+        return gutterBox !== null && gutterBox.x >= 0 && gutterBox.x + gutterBox.width < 1280;
+    }).toBe(true);
     await page.screenshot({ path: testInfo.outputPath('deadline-stack-week.png') });
 });

@@ -771,6 +771,7 @@ const nativeCalendar = nativeSync && typeof globalThis.__mindwtrCalendarCall ===
         return bootAdapter;
     })
     : null;
+const CALENDAR_BACKGROUND_PUSH_MS = 20_000;
 let readSyncSettingsRetirementStatus: (() => { pending: boolean; uncertain: boolean }) | null = null;
 const contract = createNativeHostContract({
     ...(globalThis.__mindwtrHostPlatform === 'ios' ? {
@@ -1035,7 +1036,7 @@ type AttachmentCommand = 'attachmentAddFile' | 'attachmentLinks' | 'attachmentRe
 type ProjectDetailCommand = 'projectEdit';
 
 type TaskEditorCommand = 'taskEditorAction';
-type Command = 'create' | 'complete' | 'completeUndo' | 'update' | 'saveTaskDraft' | 'resetChecklist' | 'taskFocus' | 'projectFocus' | 'createProject' | 'areaFilter'
+type Command = 'create' | 'complete' | 'completeUndo' | 'update' | 'saveTaskDraft' | 'resetChecklist' | 'taskFocus' | 'projectFocus' | 'createProject' | 'areaFilter' | 'projectCalendarReferenceCommit'
     | 'saveSearch' | 'inboxCommit' | 'inboxSkip' | 'inboxDecisionUndo' | 'quickCapture' | 'quickCaptureLines' | 'quickCapturePicker' | 'captureModal' | 'captureModalLines' | 'ingest' | 'reminderDone' | 'reminderSnooze' | MenuCommand;
 const taskResult = <T>(operation: Command, result: Parameters<typeof unwrap<T>>[0]): T => {
     const ios = globalThis.__mindwtrHostPlatform === 'ios';
@@ -5120,6 +5121,31 @@ globalThis.MindwtrHost = {
     projectDateCommit(json: string): string {
         return submit(async () => unwrap(await contract.commitPreparedProjectDate(JSON.parse(json))));
     },
+    projectCalendarReferenceOptions(json: string): string {
+        return submit(async () => {
+            requireSaved();
+            return unwrap(await contract.getProjectCalendarReferenceOptions(JSON.parse(json)));
+        });
+    },
+    projectCalendarReferenceRetryOutcome(json: string): string {
+        return submit(async () => {
+            requireSaved();
+            return unwrap(contract.probeProjectCalendarReferenceOutcome(JSON.parse(json)));
+        });
+    },
+
+    projectCalendarReferencePrepare(json: string): string {
+        return submit(async () => {
+            requireSaved();
+            return unwrap(contract.prepareProjectCalendarReference(JSON.parse(json)));
+        });
+    },
+    projectCalendarReferenceValidate(json: string): string {
+        return submit(async () => unwrap(contract.validatePreparedProjectCalendarReference(JSON.parse(json))));
+    },
+    projectCalendarReferenceCommit(json: string): string {
+        return submit(async () => taskResult('projectCalendarReferenceCommit', await contract.commitPreparedProjectCalendarReference(JSON.parse(json))));
+    },
     projectAreaOptions(id: string): string {
         return submit(async () => {
             requireSaved();
@@ -7020,6 +7046,7 @@ globalThis.MindwtrHost = {
 
 
             if (name !== 'more') requireSaved();
+            if (name === 'projectCalendarReferenceOptions') return unwrap(await contract.getProjectCalendarReferenceOptions(JSON.parse(json)));
             const read = MENU_READS[name];
             if (!read) throw new Error(`INVALID_INPUT: no menu read ${name}`);
             return unwrap(read(JSON.parse(json) as never));
@@ -7034,6 +7061,20 @@ globalThis.MindwtrHost = {
             gmailLifecycle(() => nativeGmail?.start(appState));
             void nativeCalendar?.startPush();
             return state;
+        });
+    },
+
+    calendarPushSnapshot(): string {
+        return submit(async () => ({ token: !nativeCalendar || isSandboxMode() ? null : nativeCalendar.snapshot() }));
+    },
+
+    calendarPushBackground(token: string): string {
+        return submit(async () => {
+            if (!nativeCalendar || isSandboxMode() || typeof token !== 'string') return { outcome: 'unavailable' };
+            let limit: ReturnType<typeof setTimeout> | undefined;
+            const outcome = await Promise.race([nativeCalendar.pushChanged(token),
+                new Promise<'timeout'>((done) => { limit = setTimeout(() => done('timeout'), CALENDAR_BACKGROUND_PUSH_MS); })]).finally(() => clearTimeout(limit));
+            return { outcome };
         });
     },
 

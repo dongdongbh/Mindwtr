@@ -33,6 +33,7 @@ import {
 import type { AIResponseAction } from '../ai-response-modal';
 import { buildAIConfig, isAIKeyRequired, loadAIKey } from '../../lib/ai-config';
 import { logTaskError, logTaskWarn } from './task-edit-modal.utils';
+import { logInfo } from '../../lib/app-log';
 import { openProjectScreen, openTaskScreen } from '../../lib/task-meta-navigation';
 import { settleStoreAction } from '../store-action-result';
 import { type TaskDraftSetter } from '@mindwtr/core/task-draft';
@@ -204,6 +205,10 @@ export function useTaskEditActions({
             return;
         }
 
+        void logInfo('Mobile task editor close decision requested', {
+            scope: 'task-edit',
+            extra: { releaseCheck: 'v1.3.9/mobile-editor-sheet-close', outcome: 'prompt-requested' },
+        });
         Alert.alert(
             t('taskEdit.discardChanges'),
             t('taskEdit.discardChangesDesc'),

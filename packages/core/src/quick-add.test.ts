@@ -1076,6 +1076,28 @@ describe('quick-add', () => {
         expect(result.projectTitle).toBe('NewProject');
     });
 
+    it.each([
+        ['+cafe1234', 'cafe1234'],
+        ['+BD366867235451', 'BD366867235451'],
+    ])('captures hex-looking %s as a new project title on an empty library', (token, projectTitle) => {
+        const now = new Date('2025-01-01T10:00:00Z');
+        for (const projects of [undefined, []]) {
+            const result = parseQuickAdd(`Call back ${token}`, projects, now);
+            expect(result.title).toBe('Call back');
+            expect(result.props.projectId).toBeUndefined();
+            expect(result.projectTitle).toBe(projectTitle);
+        }
+    });
+
+    it.each(['!cafe1234', '/area:cafe1234'])('leaves hex-looking %s in the text on a library with no areas', (token) => {
+        const now = new Date('2025-01-01T10:00:00Z');
+        for (const areas of [undefined, []]) {
+            const result = parseQuickAdd(`Call back ${token}`, undefined, now, areas);
+            expect(result.props.areaId).toBeUndefined();
+            expect(result.title).toBe(`Call back ${token}`);
+        }
+    });
+
     it('captures multi-word project titles', () => {
         const now = new Date('2025-01-01T10:00:00Z');
         const projects = [

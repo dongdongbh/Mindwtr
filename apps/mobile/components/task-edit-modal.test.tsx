@@ -262,7 +262,7 @@ describe('TaskEditModal', () => {
     await act(async () => { tree = renderer.create(<TaskEditModal visible task={task} onClose={onClose} onSave={onSave} />); });
     const modal = () => tree.root.findAllByType(Modal)[0];
     const preview = () => tree.root.find((node) => typeof node.props.onComplete === 'function');
-    expect(modal().props.allowSwipeDismissal).toBe(true);
+    expect(modal().props.allowSwipeDismissal).toBe(false);
     act(() => { preview().props.onComplete(); });
     expect(modal().props.allowSwipeDismissal).toBe(false);
     act(() => { modal().props.onRequestClose(); });
@@ -276,6 +276,82 @@ describe('TaskEditModal', () => {
     expect(onSave).toHaveBeenCalledOnce();
     expect(onClose).toHaveBeenCalledOnce();
     act(() => tree.unmount());
+  });
+
+  it.each(['stay', 'discard', 'save', 'failed-save'] as const)(
+    'keeps the preview checklist sheet presented until the guarded swipe decision: %s', async (decision) => {
+      const task: Task = {
+        id: 'swipe-checklist', title: 'Original', status: 'next', contexts: [], tags: [],
+        checklist: [{ id: 'item', title: 'Item', isCompleted: false }],
+        createdAt: '2026-11-12T00:00:00.000Z', updatedAt: '2026-11-12T00:00:00.000Z',
+      };
+      const originalPlatform = Platform.OS;
+      Object.defineProperty(Platform, 'OS', { configurable: true, value: 'ios' });
+      try {
+        const onSave = vi.fn().mockResolvedValue({ success: decision !== 'failed-save' });
+        const onClose = vi.fn();
+        const alert = vi.spyOn(Alert, 'alert');
+        const Owner = () => {
+          const [selected, setSelected] = React.useState<Task | null>(task);
+          return <TaskEditModal visible={Boolean(selected)} task={selected} defaultTab="view"
+            onClose={() => { onClose(); setSelected(null); }} onSave={onSave} />;
+        };
+        let tree!: renderer.ReactTestRenderer;
+        await act(async () => { tree = renderer.create(<Owner />); });
+        const modal = () => tree.root.findAllByType(Modal)[0];
+        const preview = () => tree.root.find((node) => node.props.mergedTask?.id === task.id
+          && typeof node.props.applyChecklistUpdate === 'function');
+        act(() => preview().props.applyChecklistUpdate([{ ...task.checklist![0], isCompleted: true }]));
+        expect(modal().props.presentationStyle).toBe('pageSheet');
+        expect(modal().props.allowSwipeDismissal).toBe(false);
+        act(() => modal().props.onRequestClose());
+        expect(alert).toHaveBeenCalledWith('taskEdit.discardChanges', 'taskEdit.discardChangesDesc',
+          expect.any(Array), { cancelable: true });
+        expect(onClose).not.toHaveBeenCalled();
+        expect(onSave).not.toHaveBeenCalled();
+        expect(preview().props.mergedTask.checklist[0].isCompleted).toBe(true);
+        const action = decision === 'stay' ? 'common.cancel' : decision === 'discard' ? 'common.discard' : 'common.save';
+        await act(async () => { alert.mock.calls.at(-1)?.[2]?.find((button) => button.text === action)?.onPress?.(); });
+        if (decision === 'save' || decision === 'discard') {
+          expect(onClose).toHaveBeenCalledOnce();
+          expect(tree.toJSON()).toBeNull();
+          expect(taskEditStore.current!.unlockEditing).toHaveBeenCalledOnce();
+        } else {
+          expect(onClose).not.toHaveBeenCalled();
+          expect(modal().props.visible).toBe(true);
+          expect(taskEditStore.current!.unlockEditing).not.toHaveBeenCalled();
+          expect(preview().props.mergedTask.checklist[0].isCompleted).toBe(true);
+        }
+        if (decision === 'save' || decision === 'failed-save') {
+          expect(onSave).toHaveBeenCalledWith(task.id, expect.objectContaining({
+            checklist: [{ id: 'item', title: 'Item', isCompleted: true }],
+          }));
+        } else expect(onSave).not.toHaveBeenCalled();
+        expect(task.checklist![0].isCompleted).toBe(false);
+        await act(async () => tree.unmount());
+      } finally {
+        Object.defineProperty(Platform, 'OS', { configurable: true, value: originalPlatform });
+      }
+    },
+  );
+
+  it.each([false, true])('closes a clean sheet through the guarded swipe request (readOnly=%s)', async (readOnly) => {
+    const task: Task = {
+      id: 'clean-swipe', title: 'Original', status: 'next', contexts: [], tags: [],
+      createdAt: '2026-11-12T00:00:00.000Z', updatedAt: '2026-11-12T00:00:00.000Z',
+    };
+    const onSave = vi.fn();
+    const onClose = vi.fn();
+    const alert = vi.spyOn(Alert, 'alert');
+    let tree!: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(<TaskEditModal visible task={task} readOnly={readOnly} onClose={onClose} onSave={onSave} />);
+    });
+    act(() => tree.root.findAllByType(Modal)[0].props.onRequestClose());
+    expect(onClose).toHaveBeenCalledOnce();
+    expect(onSave).not.toHaveBeenCalled();
+    expect(alert).not.toHaveBeenCalled();
+    await act(async () => tree.unmount());
   });
 
   describe('owner navigation', () => {

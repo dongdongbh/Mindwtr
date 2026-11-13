@@ -1,6 +1,7 @@
 import { normalizeBulkTaskTokenInput, type BulkTaskTokenField } from './bulk-task-tokens';
 import { getUsedTaskTokens } from './task-token-usage';
-import type { FocusTaskLists } from './focus-sections';
+import { buildFocusTaskSections, DEFAULT_FOCUS_SORT_BY, type FocusTaskLists } from './focus-sections';
+import type { FocusWidgetFilter } from './focus-widget-filter';
 import { compareSomedayTasks, compareWaitingTasks } from './menu-views-model';
 import { applyFilter, normalizeSavedFilters } from './saved-filters';
 import { logInfo } from './logger';
@@ -87,7 +88,7 @@ export function buildWidgetTokenTaskIndex(tasks: Task[]): Map<string, Task[]> {
 }
 
 const LIST_TITLE_KEYS: Record<WidgetFixedListId, [string, string]> = {
-    focus: ['nav.agenda', 'Focus'],
+    focus: ['focus.schedule', 'Today'],
     inbox: ['nav.inbox', 'Inbox'],
     next: ['nav.next', 'Next Actions'],
     waiting: ['nav.waiting', 'Waiting For'],
@@ -129,6 +130,7 @@ export interface WidgetListContext {
 
     inboxTasks: Task[];
     focusLists: FocusTaskLists;
+    getFocusLists: (filter: FocusWidgetFilter) => FocusTaskLists;
     sortBy: TaskSortBy;
     prioritiesEnabled: boolean;
     now?: Date;
@@ -157,6 +159,15 @@ const savedFilterStatus: Partial<Record<SavedFilter['view'], Task['status']>> = 
 
 function buildSavedFilterList(filter: SavedFilter, context: WidgetListContext): WidgetTaskList {
     const { data, activeTasks, sortBy, prioritiesEnabled } = context;
+    if (filter.view === 'focus') {
+        const lists = context.getFocusLists({ criteria: filter.criteria,
+            sortBy: filter.sortBy ?? DEFAULT_FOCUS_SORT_BY, sortOrder: filter.sortOrder });
+        const tasks = [...new Map(buildFocusTaskSections(lists, (key) => context.tr[key])
+            .flatMap((section) => section.items).map((task) => [task.id, task])).values()];
+        logInfo('Saved Focus filter projected for widget', { scope: 'widget-lists', category: 'unknown', force: true,
+            context: { releaseCheck: 'v1.3.9/widget-focus-filter-scope', count: tasks.length, outcome: 'projected' } });
+        return { title: filter.name, tasks, groupBy: filter.groupBy, showStatus: true };
+    }
     const status = savedFilterStatus[filter.view];
     const includeReference = (filter.view === 'contexts' || filter.view === 'all') && filter.criteria.statuses?.includes('reference');
     const pool = status ? activeTasks.filter((task) => task.status === status)

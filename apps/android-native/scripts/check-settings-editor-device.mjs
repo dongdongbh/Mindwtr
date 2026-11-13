@@ -100,6 +100,8 @@ const core = (mode, db = pullDatabase()) => JSON.parse(execFileSync('bun', ['-e'
                 general: { title: general.title, language: { label: general.language.label, value: general.language.value },
                     options: general.language.options.map((option) => ({ id: option.value, label: option.label, selected: option.selected })),
                     regional: { label: general.regional.label, summary: general.regional.summary },
+                    quickAccess: { label: general.appearance.quickAccess.label,
+                        options: general.appearance.quickAccess.options.map((option) => ({ value: option.value, label: option.label, selected: option.selected })) },
                     weekStart: { label: general.regional.weekStart.label, value: general.regional.weekStart.value,
                         options: general.regional.weekStart.options.map((option) => ({ label: option.label, selected: option.selected })) } },
                 strings };
@@ -193,6 +195,12 @@ const pickLanguage = async (labels, label) => {
     let nodes = await screen();
     nodes = await tapExpecting(withPrefix(nodes, `${labels.general.language.label}: `) ?? fail('no Language row'), (current) => Boolean(tagged(current, 'settings-picker')), 'the language picker');
     return tapExpecting(withDescription(nodes, label) ?? fail(`no language "${label}"`), (current) => !tagged(current, 'settings-picker'), 'the picker to close');
+};
+
+const pickQuickAccess = async (labels, label) => {
+    const row = await device.revealNode((current) => withPrefix(current, `${labels.general.quickAccess.label}: `), 'the Quick access row');
+    const nodes = await tapExpecting(row, (current) => Boolean(tagged(current, 'settings-picker')), 'the quick access picker');
+    return tapExpecting(withDescription(nodes, label) ?? fail(`no quick access "${label}"`), (current) => !tagged(current, 'settings-picker'), 'the picker to close');
 };
 
 const revealTagged = async (tag, description, match = () => true, required = true) => {
@@ -331,6 +339,21 @@ try {
     nodes = await waitFor('the English words', (current) => Boolean(withDescription(current, english.strings['common.back'])) && current.some((node) => node.text === english.general.title), 20_000);
     undo.pop();
     check(core('views').english.general.options.find((option) => option.id === 'en').selected, '(c) English is back: the header and core\'s words read English again');
+
+
+    const quickFrom = english.general.quickAccess.options.find((option) => option.selected) ?? fail('core shows no quick access view');
+    const quickTo = english.general.quickAccess.options.find((option) => option.value === (quickFrom.value === 'projects' ? 'review' : 'projects'));
+    saves = commands('generalSetting');
+    await pickQuickAccess(english, quickTo.label);
+    undo.push({ name: `quick access "${quickFrom.label}"`, run: async () => { await openSettings(english, 'general', 'general'); await pickQuickAccess(english, quickFrom.label); } });
+    await waitFor('the quick access write', () => commands('generalSetting') === saves + 1, 15_000);
+    await toTabs(english);
+    await waitFor(`the "${quickTo.label}" tab without the More sheet`, (current) => !sheetOpen(current) && Boolean(tab(current, quickTo.label)) && !tab(current, quickFrom.label), 10_000);
+    check(true, `(c) Quick access "${quickTo.label}" replaces the "${quickFrom.label}" tab at once, without opening the More sheet (RN's tab bar)`);
+    await openSettings(english, 'general', 'general');
+    await pickQuickAccess(english, quickFrom.label);
+    await waitFor('the quick access back', () => commands('generalSetting') === saves + 2, 15_000);
+    undo.pop();
 
 
     nodes = await openSettings(english, 'manage', 'manage');

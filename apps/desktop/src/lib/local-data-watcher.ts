@@ -13,6 +13,7 @@ import { invokeNative } from './tauri-invoke';
 import { getDesktopTimerHost, isTauriRuntime } from './runtime';
 import { hashString, toStableJson } from './sync-service-utils';
 import { logInfo, logWarn } from './app-log';
+import { isFileContentChange } from './file-change-event';
 
 const IGNORE_WINDOW_MS = 2000;
 const DEBOUNCE_MS = 750;
@@ -31,6 +32,7 @@ const WATCH_REGISTRATION_RETRY_COOLDOWN_MS = 1_000;
 const timerHost = getDesktopTimerHost();
 
 type FsEvent = {
+    type?: unknown;
     path?: string;
     paths?: string[];
 };
@@ -1146,6 +1148,8 @@ export const createLocalDataWatcherController = (
         return registerWatchChannel(channel);
     };
 
+    let reportedIgnoredSqliteAccess = false;
+
     async function start(dataPath: string, dbPath?: string): Promise<void> {
         if (!isTauriRuntime()) return;
         const registrations: Array<Promise<void>> = [
@@ -1153,6 +1157,7 @@ export const createLocalDataWatcherController = (
                 dataWatchChannel,
                 dataPath,
                 (event) => {
+                    if (!isFileContentChange(event)) return;
                     const paths = normalizePathsFromEvent(event);
                     if (paths.length === 0) return;
 
@@ -1173,8 +1178,16 @@ export const createLocalDataWatcherController = (
                     dbWatchPath,
                     (event) => {
                         const paths = normalizePathsFromEvent(event);
-                        if (paths.length === 0) return;
-                        if (!isRelevantSqliteEvent(paths, dbPath)) return;
+                        if (paths.length === 0 || !isRelevantSqliteEvent(paths, dbPath)) return;
+                        if (!isFileContentChange(event)) {
+                            if (!reportedIgnoredSqliteAccess) {
+                                reportedIgnoredSqliteAccess = true;
+                                localDataWatcherDependencies.logInfo('[local-data-watcher] Ignored SQLite access-only event', {
+                                    releaseCheck: 'v1.3.9/sqlite-access-event-filter', outcome: 'ignored',
+                                });
+                            }
+                            return;
+                        }
                         void handleSqliteChange({ paths });
                     },
                     '[local-data-watcher] Started watching SQLite directory ' + dbWatchPath,

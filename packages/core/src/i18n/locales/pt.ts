@@ -1,5 +1,21 @@
 
 export const ptOverrides: Record<string, string> = {
+    "projects.calendarLimit": "Exibindo os primeiros 200 resultados. Pesquise para encontrar outro evento.",
+    "projects.calendarTitle": "Calendário",
+    "projects.calendarLink": "Vincular evento do calendário",
+    "projects.calendarReplace": "Substituir evento vinculado",
+    "projects.calendarUnlink": "Desvincular evento do calendário",
+    "projects.calendarScheduled": "Próximo passo agendado",
+    "projects.calendarElapsed": "Revisar resultado do evento",
+    "projects.calendarUnavailable": "Calendário indisponível · Últimos detalhes conhecidos",
+    "projects.calendarHelp": "Vincule um evento existente como próximo passo agendado deste projeto. Os eventos permanecem somente leitura.",
+    "projects.calendarWindow": "Próximos eventos · próximos 90 dias",
+    "projects.calendarEmpty": "Nenhum evento futuro nos calendários ativados.",
+    "projects.calendarLoadFailed": "Não foi possível carregar os eventos. Feche e tente novamente.",
+    "projects.calendarSaveFailed": "Não foi possível salvar a referência ao calendário. Tente novamente.",
+    "projects.calendarReviewStep": "Revisar próximo passo agendado",
+    "projects.calendarLastKnown": "Últimos detalhes conhecidos do evento",
+
     "quickAdd.invalidReminderCommand": "Lembrete inválido: use uma duração compatível e data e hora explícitas",
     'task.copyDetails': "Copiar detalhes da tarefa",
     "taskEdit.startAdvanceReminderLabel": "Antes do início",
@@ -541,6 +557,7 @@ export const ptOverrides: Record<string, string> = {
 
 
         'inbox.title': 'Caixa de entrada',
+        'inbox.completedInSession': 'Concluídas nesta sessão',
         'inbox.processButton': 'Processar Caixa de entrada',
         'inbox.projectHint': 'Algo que exige mais de uma ação? Ao processar, escolha «Sim, faça disso um projeto» para nomear o resultado e a sua primeira próxima ação.',
         'inbox.addPlaceholder': 'Adicionar tarefa à Caixa de entrada...',

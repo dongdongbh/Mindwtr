@@ -1,3 +1,4 @@
+import { isFileContentChange } from './file-change-event';
 
 import {
     AppData,
@@ -3161,6 +3162,7 @@ export class SyncService {
         try {
             const { watch } = await import('@tauri-apps/plugin-fs');
             const unwatch = await watch(watchPath, (event: any) => {
+                if (!isFileContentChange(event)) return;
                 const paths = Array.isArray(event?.paths)
                     ? event.paths
                     : event?.path

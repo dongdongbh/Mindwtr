@@ -93,7 +93,10 @@ vi.mock('../../contexts/language-context', () => ({
 }));
 
 
+vi.mock('../../lib/external-calendar', () => ({ fetchExternalCalendarEvents: vi.fn() }));
+
 const storeActions = vi.hoisted(() => ({
+    settings: { externalCalendars: [] },
     _allProjects: [] as Project[],
     _projectsById: new Map<string, Project>(),
     _allSections: [] as Section[],

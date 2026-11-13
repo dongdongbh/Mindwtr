@@ -164,7 +164,7 @@ describe('task date saved filters', () => {
         setLogger((payload) => receipts.push(payload));
         try {
             const list = buildWidgetTaskList('filter:dates', {
-                data: source, activeTasks: source.tasks, inboxTasks: [], focusLists: {} as never,
+                data: source, activeTasks: source.tasks, inboxTasks: [], focusLists: {} as never, getFocusLists: () => { throw new Error('Unexpected Focus filter'); },
                 sortBy: 'title', prioritiesEnabled: true, tr: {}, now: new Date('2020-01-01T12:00:00-05:00'),
             });
             expect(list?.tasks.map(({ id }) => id)).toEqual(['pinned']);

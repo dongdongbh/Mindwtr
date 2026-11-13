@@ -193,7 +193,7 @@ const TEXT_LIMITS: Record<BulkOrganizeTextField, number> = {
 const DRAFT_KEYS = new Set(Object.keys(EMPTY_BULK_ORGANIZE_DRAFT));
 const PARAM_ONLY_KEYS = ['filterEdit', 'offset', 'limit', 'revision'];
 const REVIEW_PARAMS = ['scope', 'expandedAreaIds', 'expandedProjectIds', 'expandedLaterProjectIds'];
-const CONTEXTS_PARAMS = ['tokens', 'matchMode', 'searchQuery', 'filters', 'savedFilterId', 'preservedCriteria'];
+const CONTEXTS_PARAMS = ['tokens', 'matchMode', 'searchQuery', 'filters', 'savedFilterId', 'preservedCriteria', 'sortOverride'];
 
 
 

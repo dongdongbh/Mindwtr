@@ -89,6 +89,9 @@ val LABEL_KEYS = listOf(
     "attachments.linkPlaceholder", "attachments.linkInputHint", "attachments.linkBatchHint", "common.validationRequired", "common.share",
     "share.unavailable", "common.play", "common.pause", "audio.loading", "quickAdd.audioNoteTitle", "quickAdd.audioErrorBody",
 
+    "projects.calendarTitle", "projects.calendarLink", "projects.calendarReplace", "projects.calendarUnlink", "projects.calendarScheduled",
+    "projects.calendarElapsed", "projects.calendarUnavailable", "projects.calendarLastKnown", "projects.calendarHelp", "projects.calendarWindow",
+    "projects.calendarEmpty", "projects.calendarLoadFailed", "projects.calendarSaveFailed", "projects.calendarLimit",
     "projects.statusLabel", "projects.projectTypeLabel", "projects.projectTypeHelpLabel", "projects.projectTypeHelpText", "projects.sequentialScope",
     "projects.sequentialAcrossSections", "projects.sequentialWithinSections", "projects.sequentialScopeHelpLabel", "projects.sequentialScopeHelpText",
     "projects.sectionsLabel", "settings.manage", "projects.addSection", "projects.areaLabel", "project.notes", "projects.notesPlaceholder",

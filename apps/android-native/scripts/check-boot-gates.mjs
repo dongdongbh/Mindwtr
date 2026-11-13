@@ -627,6 +627,22 @@ globalThis.cryptoGate = { prims: createHostSyncCrypto(globalThis.__mindwtrCrypto
 const coreHost = readFileSync(resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/core/CoreHost.kt'), 'utf8');
 const sqliteBridge = readFileSync(resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/core/SqliteBridge.kt'), 'utf8');
 const hostEntry = readFileSync(resolve(app, 'bundle/host-entry.ts'), 'utf8');
+assert.match(hostEntry, /calendarPushSnapshot\(\): string \{\s+return submit\(async \(\) => \(\{ token: !nativeCalendar \|\| isSandboxMode\(\) \? null : nativeCalendar\.snapshot\(\) \}\)\);\s+\},\s+calendarPushBackground\(token: string\): string \{\s+return submit\(async \(\) => \{\s+if \(!nativeCalendar \|\| isSandboxMode\(\) \|\| typeof token !== 'string'\) return \{ outcome: 'unavailable' \};[\s\S]*?Promise\.race\(\[nativeCalendar\.pushChanged\(token\),[\s\S]*?setTimeout\(\(\) => done\('timeout'\), CALENDAR_BACKGROUND_PUSH_MS\)/,
+    'a background job pushes only the tasks it changed, never in a sandbox, under its own limit that stays below the host call deadline (C4d)');
+assert.ok(Number(/const CALENDAR_BACKGROUND_PUSH_MS = ([\d_]+);/.exec(hostEntry)[1].replace(/_/g, '')) < Number(/OPERATION_DEADLINE_MS = ([\d_]+)L?/.exec(coreHost)[1].replace(/_/g, '')),
+    'a slow background calendar push answers timeout before the host call deadline cancels other host calls');
+assert.match(readFileSync(resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/CoreJob.kt'), 'utf8'),
+    /private val TASK_CHANGING_JOBS = setOf\(INGEST, REMINDER_DONE, SYNC\)[\s\S]*?val host = boot\(name in TASK_CHANGING_JOBS\)\.also \{ calls = it \}\s+if \(name in TASK_CHANGING_JOBS && !host\.appActive\(\)\) snapshot = host\.coldCalendarSnapshot\(\) \?: runCatching \{ host\.calendarSnapshot\(\) \}\.getOrNull\(\)\s+worked = host\.recover\(\) && host\.drain\(\)[\s\S]*?if \(outcome == Outcome\.Success && name != WIDGET_REFRESH\) refreshWidgets\(\)\s+val taken = snapshot\s+val host = calls\s+if \(worked && taken != null && host != null && !host\.appActive\(\)\) runCatching \{ host\.calendarPush\(name\.orEmpty\(\), taken\) \}\s+return outcome/,
+    'after a capture or check-off ingest, a notification Done or a background sync, a closed app pushes the calendar; an open app pushes through its own subscription');
+assert.match(readFileSync(resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/CoreWork.kt'), 'utf8'),
+    /override fun calendarPush\(job: String, snapshot: String\): String \{\s+val outcome = runCatching \{ host\.calendarPushBackground\(snapshot\) \}\.getOrDefault\("failed"\)\s+if \(outcome == "pushed" \|\| outcome == "failed" \|\| outcome == "timeout"\) host\.logLine\("Native Android calendar push after background work releaseCheck=v1\.3\.9\/native-calendar-push-background"/,
+    'the background push logs only a push that ran, never while push is off or when nothing changed');
+assert.match(readFileSync(resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/ProcessCoreHost.kt'), 'utf8'),
+    /beforeReplay\?\.let \{ hook -> runCatching \{ hook\(runtime\) \} \}\s+if \(replay\(runtime\)\) recovered\(app, runtime, deferSync = true\)/,
+    'a worker that starts the process notes the tasks before the start replays the journal and drains the captures, so a killed-app capture is still pushed (C4d)');
+assert.match(readFileSync(resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/CoreWork.kt'), 'utf8'),
+    /ProcessCoreHost\.get\(app, language, beforeReplay = \{ runtime: CoreHost -> coldSnapshot = runtime\.calendarPushSnapshot\(\) \}\.takeIf \{ snapshotBeforeReplay \}\)/,
+    'CoreWork takes the pre-replay snapshot only when CoreJob asks for it');
 assert.match(hostEntry, /new ValidatedSqliteAdapter\(sqlite, \{ rejectConcurrentWrites: true \}\)/);
 
 assert.equal(/const nativeSyncBindings: NativeSyncBindings = \{[\s\S]*?localData:/.exec(hostEntry)?.[0].match(/__mindwtrSyncSecrets/g)?.length, 3, 'sync binds the unrefused secrets');
@@ -915,6 +931,7 @@ assert.match(editorUi, /internal fun PickerDialog[\s\S]{0,400}?windowScrim\(them
 assert.match(rowUi, /if \(!details && meta\.parts\.any \{ it\.kind == "recurrence" \}\)/, 'a row with details shows its repeat only as a meta part, as RN does');
 assert.match(rowUi, /description\.getJSONObject\("labels"\), c\.tint, c\.secondaryText, c\.cardBg\) \{ target -> followMarkdownLink\(context, target\) \}/, 'a description-line link opens its project, task or URL, as RN\'s does');
 assert.match(editorUi, /destinationMatches\(destinationQuery, it\.title\)/, 'the editor Destination search filters with the shared rule');
+assert.match(source('DailyReviewScreen.kt'), /Modifier\.size\(48\.dp\)\.fade\(rnLucideStyleAlpha\(0\.9f\)\)/, 'the Daily Review empty icon is as faint as RN\'s lucide icon with style opacity 0.9, which renders at 0.9 cubed');
 assert.match(source('MenuWidgets.kt'), /onLongClick = moveLabel\?\.let \{ \{ if \(enabled\) menu\.openProjectMove\(id, revision\) \} \}/);
 assert.match(source('SomedayScreen.kt'), /ParkedProject\(model, item\.json\.getJSONObject\("project"\), item\.json\.getString\("activateLabel"\), view\.getJSONObject\("text"\)\.getString\("moveToSection"\)\)/);
 assert.doesNotMatch(code(rowUi + activity), /IconButton\(onClick = \{ complete\(/, 'no visible Done button: RN has none');
@@ -963,6 +980,7 @@ assert.match(model, /fun refreshFocus\(\) \{\s+if \(focus == null && busy\) retu
 
 
 assert.match(model, /fun refreshProjects\(\) \{\s+if \(busy\) return menu\.whenIdle\(::refreshProjects\)\s+val at = depth\(\)\s+background\(/);
+assert.match(menuModel, /internal fun readMore\(\): Unit = whenIdle \{\s+val deep = more\?\.deep\.orEmpty\(\)\s+shell\.background\(listOf\(Part\.More\)/, 'a quick access pick reads the More view once the write is idle');
 assert.match(model, /private fun refreshAll\(synced: Boolean = false\) \{\s+val at = depth\(\)\s+if \(synced\) \{\s+background\(Part\.entries, \{ runtime -> applySyncedChoices\(runtime, prefs\); read\(runtime, at\) \}, apply = ::showLists\)/);
 
 assert.match(model, /AfterCommandReads\.Read\.AllLists -> background\(Part\.entries, \{ runtime -> read\(runtime, at\) \}, done, ::showLists\)/);
@@ -1072,7 +1090,7 @@ assert.match(guard, /check\(blocked == null\)[^\n]*\n(?:(?!return Opened\()[\s\S
 }
 
 
-assert.match(owner, /loadTheme\(runtime, legacy\?\.theme\)\s*recoverInstalls\(installer\)\s*if \(replay\(runtime\)\) recovered\(app, runtime, deferSync = true\)/);
+assert.match(owner, /loadTheme\(runtime, legacy\?\.theme\)\s*recoverInstalls\(installer\)\s*beforeReplay\?\.let \{ hook -> runCatching \{ hook\(runtime\) \} \}\s*if \(replay\(runtime\)\) recovered\(app, runtime, deferSync = true\)/);
 assert.match(readFileSync(resolve(app, 'android/app/build.gradle.kts'), 'utf8'), /include\(listOf\("AttachmentFileInstallerCore", "AndroidAttachmentInstallerFileOps"\)\.map \{ "main\/java\/\$installer\/\$it\.kt" \}\)/);
 
 assert.match(readFileSync(resolve(app, 'android/app/build.gradle.kts'), 'utf8'), /include\(listOf\("AttachmentFileInstallerCoreTest", "AndroidAttachmentInstallerFileOpsTest"\)\.map \{ "test\/java\/\$installer\/\$it\.kt" \}\)/);
@@ -1398,7 +1416,7 @@ assert.match(coreHost, /failCommits = debugFault\("fail_commit"\) == "1"/);
 assert.equal([activity, model, owner, editorUi, focusUi, projectsUi, labelsKt].join('\n').match(/failCommits|debugFault|getprop/g), null);
 
 assert.match(coreHost, /fun language\(stored: String, system: String\): JSONObject =\s*callAsync\("language", debugFault\("language"\)\.ifEmpty \{ stored \}, system\)/);
-assert.equal(coreHost.match(/debugFault\("language"\)/g).length, 1);
+assert.equal(coreHost.match(/debugFault\("language"\)/g).length, 2);
 
 
 {
@@ -1428,6 +1446,13 @@ assert.equal(coreHost.match(/debugFault\("language"\)/g).length, 1);
 
     assert.match(coreHost, /val \(plan, sha256\) = checkNotNull\(backups\)\.plan\(args\[0\] as String, args\[1\] as String\)\s+return arrayOf\(args\[0\], data\.openRead\(plan, expectedSha256 = sha256\), args\[1\], deadline\(method, args\.toList\(\)\)\)/);
 
+
+    const projectCalendarCommit = 'projectCalendarReferenceCommit';
+    assert.deepEqual(shapes[projectCalendarCommit], ['{request{},prepared{}}'], 'Project calendar reference journals both frozen request and prepared objects');
+    assert.match(coreHost, /fun prepareProjectCalendarReference\(json: String\): JSONObject \{\s*val prepared = callAsync\("projectCalendarReferencePrepare", json\)\s*if \(prepared\.getString\("kind"\) == "prepared"\) \{/);
+    assert.match(coreHost, /callAsync\("projectCalendarReferenceValidate", envelope\)\s*checkNotNull\(journal\) \{ "The write journal is not open" \}\.append\("projectCalendarReferenceCommit", listOf\(envelope\)\)\s*prepared\.put\("envelope", envelope\)/);
+    assert.match(coreHost, /fun commitProjectCalendarReference\(envelope: String\): JSONObject = callAsync\("projectCalendarReferenceCommit", envelope\)/);
+    assert.match(journalKt, /key\.endsWith\("\{\}"\) -> json\.opt\(key\.dropLast\(2\)\) is JSONObject/);
 
     const pomodoroCommit = 'pomodoroTransitionCommit';
     assert.deepEqual(shapes[pomodoroCommit], ['text', 'bool'], 'the Pomodoro commit journals its plan');
@@ -1465,7 +1490,7 @@ assert.equal(coreHost.match(/debugFault\("language"\)/g).length, 1);
 
         'completeReminderTask', 'snoozeReminder',
 
-        'runProjectEdit',
+        'runProjectEdit', 'commitPreparedProjectCalendarReference',
 
         'runAreaOrder', 'runAreaColor', 'runAreaRename',
 
@@ -1750,7 +1775,7 @@ assert.equal(coreHost.match(/debugFault\("language"\)/g).length, 1);
     assert.match(owner, /private fun replay\(runtime: CoreHost\): Boolean \{\s+val replay = runtime\.replayJournal\(\)\s+replay\.owed\?\.let \{ recordFailure\(PendingFailure\(FailedAction\("journal", ""\), it, null\)\); return false \}\s+if \(replay\.left > 0\) return true\s+val pruneStarted = SystemClock\.elapsedRealtime\(\)\s+runCatching \{ runtime\.pruneReceipts\(\) \}[\s\S]*?return true\s+\}/);
 
 
-    assert.match(owner, /loadTheme\(runtime, legacy\?\.theme\)\s+recoverInstalls\(installer\)\s+if \(replay\(runtime\)\) recovered\(app, runtime, deferSync = true\)\s+deferredWidgets\.hold\(runtime\)\s+return runtime/);
+    assert.match(owner, /loadTheme\(runtime, legacy\?\.theme\)\s+recoverInstalls\(installer\)\s+beforeReplay\?\.let \{ hook -> runCatching \{ hook\(runtime\) \} \}\s+if \(replay\(runtime\)\) recovered\(app, runtime, deferSync = true\)\s+deferredWidgets\.hold\(runtime\)\s+return runtime/);
     assert.equal([activity, model, owner, menuModel].join('\n').match(/syncStart\(/g).length, 1, 'one start of the triggers, in startSync');
     assert.equal([activity, model, owner, menuModel].join('\n').match(/startSync\(app, runtime\)/g).length, 3, 'startSync only in recovered, after the drain (held for the first screen\'s content, or CoreWork\'s through startSyncWithScreen)');
 
@@ -2010,7 +2035,7 @@ assert.match(labelsKt, /strings = LABEL_KEYS\.filter\(values::has\)\.associateWi
 assert.match(labelsKt, /if \(logged\.add\(name\)\) Log\.w\(/, 'a missing key is logged once');
 assert.equal(kotlinFiles.join('\n').match(/Labels\.load\(/g).length, 1);
 assert.match(owner, /runtime\.language\(stored \?: "", Locale\.getDefault\(\)\.toLanguageTag\(\)\)\s+loadLabels\(runtime\)/);
-assert.match(owner, /runtime\.start\([^\n]*\)\s+if \(legacy != null\) \{\s+runtime\.logLine\([^}]*\}\s+setLanguage\(runtime, language \?: legacy\?\.language\)\s+loadTheme\(runtime, legacy\?\.theme\)\s+recoverInstalls\(installer\)\s+if \(replay\(runtime\)\) recovered\(app, runtime, deferSync = true\)\s+deferredWidgets\.hold\(runtime\)\s+return runtime/);
+assert.match(owner, /runtime\.start\([^\n]*\)\s+if \(legacy != null\) \{\s+runtime\.logLine\([^}]*\}\s+setLanguage\(runtime, language \?: legacy\?\.language\)\s+loadTheme\(runtime, legacy\?\.theme\)\s+recoverInstalls\(installer\)\s+beforeReplay\?\.let \{ hook -> runCatching \{ hook\(runtime\) \} \}\s+if \(replay\(runtime\)\) recovered\(app, runtime, deferSync = true\)\s+deferredWidgets\.hold\(runtime\)\s+return runtime/);
 
 
 assert.match(owner, /fun recovered\(app: Application, runtime: CoreHost, deferSync: Boolean = false\): Boolean = isSandbox\(runtime\) \|\| StartOrder\.afterReplay\(\s+drain = \{ drain\(runtime, queue\(app\), app\) \},\s+owe = \{ message -> recordFailure\(PendingFailure\(FailedAction\("journal", ""\), message, null\)\) \},\s+retryLater = \{ runCatching \{ CoreWork\.retryDrain\(app\) \}[^\n]*\},\s+startSync = \{\s+if \(deferSync\) deferredSync\.set \{\s+startSync\(app, runtime\)\s+startReminders\(runtime\)\s+startAppSearch\(runtime\)\s+\} else \{\s+startSyncWithScreen\(app, runtime\)\s+startReminders\(runtime\)\s+if \(screenShown\) startAppSearch\(runtime\)\s+\}\s+\},\s+refreshWidgets = \{ refreshWidgets\(runtime\) \},\s+\)/);
@@ -2515,7 +2540,7 @@ assert.deepEqual([.../val ATTACHMENT_COMMANDS = setOf\(([^)]*)\)/.exec(coreHost)
 
     const attachmentKinds = [.../val ATTACHMENT_KINDS = setOf\(([^)]*)\)/.exec(source('Attachments.kt'))[1].matchAll(/"(\w+)"/g)].map(([, kind]) => kind);
 
-    const projectDetailKinds = [.../val PROJECT_DETAIL_KINDS = setOf\(([^)]*)\)/.exec(source('ProjectDetails.kt'))[1].matchAll(/"(\w+)"/g)].map(([, kind]) => kind);
+    const projectDetailKinds = [.../val PROJECT_DETAIL_MENU_KINDS = setOf\(([^)]*)\)/.exec(source('ProjectDetails.kt'))[1].matchAll(/"(\w+)"/g)].map(([, kind]) => kind);
 
     const editorMenuKinds = [.../val EDITOR_MENU_KINDS = setOf\(([^)]*)\)/.exec(source('EditorMenu.kt'))[1].matchAll(/"(\w+)"/g)].map(([, kind]) => kind);
 
@@ -2542,6 +2567,7 @@ assert.deepEqual([.../val ATTACHMENT_COMMANDS = setOf\(([^)]*)\)/.exec(coreHost)
     assert.match(hostEntry, new RegExp(`type DataCommand = ${dataKinds.map((kind) => `'${kind}'`).join(' \\| ')};`));
     assert.match(hostEntry, new RegExp(`type TaskEditorCommand = ${editorMenuKinds.map((kind) => `'${kind}'`).join(' \\| ')};`));
     assert.match(hostEntry, new RegExp(`type StartupPromptCommand = ${promptKinds.map((kind) => `'${kind}'`).join(' \\| ')};`));
+    assert.match(code(source('ProjectDetails.kt')), /val PROJECT_DETAIL_KINDS = PROJECT_DETAIL_MENU_KINDS \+ setOf\("projectCalendarReferenceCommit"\)/);
     assert.match(hostEntry, new RegExp(`type ProjectDetailCommand = ${projectDetailKinds.map((kind) => `'${kind}'`).join('\\s*\\| ')};`));
     assert.doesNotMatch(menuModel, new RegExp(`"(${projectDetailKinds.join('|')})"`), 'the Menu tab never sends a Project details command itself');
 
@@ -2560,8 +2586,8 @@ assert.deepEqual([.../val ATTACHMENT_COMMANDS = setOf\(([^)]*)\)/.exec(coreHost)
         const details = code(source('ProjectDetails.kt'));
 
 
-        assert.equal((details.match(/replies\.ticket\(/g) ?? []).length, 8, 'every Details read takes a ticket');
-        assert.equal((details.match(/replies\.current\(ticket\)/g) ?? []).length, 8, 'every Details reply checks its ticket');
+        assert.equal((details.match(/replies\.ticket\(/g) ?? []).length, 10, 'every Details read takes a ticket');
+        assert.equal((details.match(/replies\.current\(ticket\)/g) ?? []).length, 12, 'every Details reply checks its ticket; the calendar feed read checks it again before it clears its loading state and before its one rerun');
         assert.match(details, /shell\.fresh\(mine, InboxViewModel\.Part\.ProjectDetails\)/);
         assert.match(details, /fun closeOverlays\(\) \{\s*replies\.close\(\)/);
     }
@@ -2595,7 +2621,7 @@ assert.deepEqual([.../val ATTACHMENT_COMMANDS = setOf\(([^)]*)\)/.exec(coreHost)
     assert.match(hostEntry, new RegExp(`type AIScreenCommand = ${aiKinds.map((kind) => `'${kind}'`).join('\\s*\\| ')};`));
     assert.doesNotMatch(menuModel, new RegExp(`"(${[...syncKinds, ...aiKinds].join('|')})"`), 'the Menu tab never sends a Sync or AI screen command itself');
     assert.match(hostEntry, /menuCommand\(name: string, json: string\): string \{\s*return submit\(async \(\) => \{\s*const command = MENU_COMMANDS\[name as MenuCommand\];[\s\S]{0,120}?return taskResult\(name as MenuCommand, await command\(JSON\.parse\(json\) as never\)\);/);
-    assert.match(hostEntry, /menuRead\(name: string, json: string\): string \{\s*return submit\(async \(\) => \{[\s\S]{0,300}?if \(name !== 'more'\) requireSaved\(\);\s*const read = MENU_READS\[name\];[\s\S]{0,100}?return unwrap\(read\(JSON\.parse\(json\) as never\)\);/);
+    assert.match(hostEntry, /menuRead\(name: string, json: string\): string \{\s*return submit\(async \(\) => \{[\s\S]{0,300}?if \(name !== 'more'\) requireSaved\(\);\s*if \(name === 'projectCalendarReferenceOptions'\) return unwrap\(await contract\.getProjectCalendarReferenceOptions\(JSON\.parse\(json\)\)\);\s*const read = MENU_READS\[name\];[\s\S]{0,100}?return unwrap\(read\(JSON\.parse\(json\) as never\)\);/);
     const input = code(menuModel.slice(menuModel.indexOf('private fun input(action: FailedAction)'), menuModel.indexOf('}.toString()', menuModel.indexOf('private fun input('))));
 
     const LIST_KINDS = ['archiveAction', 'contextsAction', 'trashAction', 'reviewAction', 'reviewTask'];
@@ -2949,7 +2975,9 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     assert.doesNotMatch(code(kotlinFiles.join('\n') + inboxUi + bulkUi + focusControlsUi + focusModelKt), /inboxWindow|callAsync\("window"|InboxPage|Part\.Inbox/, 'no getInboxWindow read is left in Kotlin');
     assert.match(model, /private class Lists\(val focus: FocusView\?, val projects: ProjectsView\?, val projectId: String\?, val project: ProjectDetail\?, val areas: AreaFilter\)/);
     assert.match(menuModel, /if \(list != this\.list\) return\s+shell\.readSucceeded\(\)/, 'the Inbox view\'s (or a Menu list\'s) success clears a read\'s failure');
-    assert.match(menuModel, /"reference", "inbox", "contexts" -> send\(FailedAction\("taskListSort", value\)\)/);
+    assert.match(menuModel, /"reference", "inbox" -> send\(FailedAction\("taskListSort", value\)\)/);
+    assert.match(menuModel, /"contexts" -> contextsSortOverride\(page\?\.view, value\)\?\.let \{ editOwn\(list\) \{ put\("sortOverride", it\) \}; reload\(\) \} \?: send\(FailedAction\("taskListSort", value\)\)/, 'a Contexts sort under a saved filter is a temporary override, never a global taskListSort write (#1485)');
+    assert.match(menuModel, /internal fun contextsSortOverride\(view: JSONObject\?, value: String\): String\? = value\.takeIf \{ view\?\.isNull\("savedFilterId"\) == false \}/);
     assert.match(menuModel, /"inbox" -> kept\(listOf\("groupBy", "filters"\)\)\.put\("collapsedGroupIds", GroupCollapse\.axis\(prefs, "inbox", own\.optString\("groupBy", "none"\), 200\)\)/);
     assert.match(menuModel, /if \(list == "inbox" && collapse != null\) GroupCollapse\.keep\(prefs, list, axis, collapse\.getJSONArray\("collapsedGroupIds"\)\)/);
     assert.match(menuUi, /Choice\(option\.getString\("label"\), option\.getBoolean\("selected"\)\) \{ sort\(option\.optJSONObject\("edit"\)\?\.getString\("sortBy"\) \?: option\.getString\("value"\)\) \}/);
@@ -3032,7 +3060,7 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     assert.match(menuModel, /first\.optJSONObject\("bulk"\)\?\.takeIf \{ list == "review" \}/);
     assert.match(menuModel, /JSONObject\(params\.toString\(\)\)\.apply \{\s+remove\("organize"\); remove\("picker"\)/, 'later windows go without the dialog\'s inputs');
     for (const list of ['review']) assert.match(menuModel, new RegExp(`"${list}" -> kept\\([\\s\\S]{0,240}?\\.also \\{ dialogInputs\\(list, it\\) \\}`), `${list}'s read carries its open dialog`);
-    assert.match(menuModel, /"contexts" -> kept\(listOf\("tokens", "matchMode", "searchQuery", "filters", "preservedCriteria", "savedFilterId"\)\)[\s\S]{0,120}\.also \{\s+if \(dialog\?\.optString\("kind"\) == "filters"\) it\.put\("filterSheetOpen", true\)\s+dialogInputs\(list, it\)\s+\}/, 'Contexts carries the filter sheet and its open dialog');
+    assert.match(menuModel, /"contexts" -> kept\(listOf\("tokens", "matchMode", "searchQuery", "filters", "preservedCriteria", "savedFilterId"\)\)\s+\.put\("sortOverride", own\.opt\("sortOverride"\) \?: JSONObject\.NULL\)[\s\S]{0,120}\.also \{\s+if \(dialog\?\.optString\("kind"\) == "filters"\) it\.put\("filterSheetOpen", true\)\s+dialogInputs\(list, it\)\s+\}/, 'Contexts carries the filter sheet and its open dialog');
     assert.match(menuModel, /if \(list == "review"\) bulkEdit\?\.optJSONObject\("organizeEdit"\)\?\.let \{ params\.optJSONObject\("organize"\)\?\.put\("edit", it\) \}/);
     assert.match(organizeKt, /into\.put\("organize", JSONObject\(\)\.put\("draft", open\.optJSONObject\("draft"\) \?: JSONObject\(\)\)\)/);
     assert.match(bulkUi, /val bulk = page\?\.bulk\?\.takeIf \{ list in BULK_LISTS \} \?: return/, 'the lists\' bar never draws Review\'s');
@@ -3136,7 +3164,7 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
         }
     }
     assert.match(model, /private val prefs = Workspace\.viewPrefs\(app, sandbox = sandboxed\)/);
-    assert.match(coreHost, /private fun settle\(entry: WriteJournal\.Entry\?, result: JSONObject, replay: Boolean\): Boolean \{\s+result\.optJSONObject\("value"\)\?\.optJSONArray\("deviceWrites"\)\?\.let \{ devices\.store\(it, entry\?\.sequence, replay\) \}\s+return entry != null && checkNotNull\(journal\)\.settle\(entry, result\.error\(\), replay\)/);
+    assert.match(coreHost, /private fun settle\(entry: WriteJournal\.Entry\?, result: JSONObject, replay: Boolean\): Boolean \{\s+result\.optJSONObject\("value"\)\?\.optJSONArray\("deviceWrites"\)\?\.let \{ devices\.store\(it, entry\?\.sequence, replay\) \}\s+val settled = entry != null && checkNotNull\(journal\)\.settle\(entry, result\.error\(\), replay\)\s+if \(entry\?\.method == "projectCalendarReferenceCommit" && result\.error\(\) == null\) \{\s+val request = JSONObject\(entry\.args\.single\(\) as String\)\.getJSONObject\("request"\)\s+Log\.i\(TAG, "Project calendar reference saved releaseCheck=v1\.3\.9\/project-calendar-reference outcome=\$\{if \(request\.isNull\("value"\)\) "unlinked" else "linked"\}"\)\s+\}\s+return settled/);
     assert.equal(coreHost.match(/(?<!\.)\bsettle\((?:call\.)?entry, /g).length, 3, 'settle(): the first send (finish), the replay, and a backup commit\'s finish (backupFinish, pass D1a)');
     assert.match(settingsModel, /runtime\.language\(prefs\.getString\(LANGUAGE_KEY, null\)\.orEmpty\(\), Locale\.getDefault\(\)\.toLanguageTag\(\)\)\s+loadLabels\(runtime\)/);
     assert.match(model, /val runtime = ProcessCoreHost\.get\(getApplication\(\), prefs\.getString\(LANGUAGE_KEY, null\), sandboxRequest\)\s+if \(!Workspace\.settled\([^\n]*\{\s+Log\.w\([^\n]*\)\s+Workspace\.restart\(getApplication\(\)\)\s+\}\) return@Thread\s+applyDeviceChoices\(runtime, prefs\)/, 'the device\'s own language and theme apply at boot, before any screen');
@@ -3352,6 +3380,14 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     assert.match(entryKt, /route\.startsWith\("\/widget-list\/"\) -> menu\.openWidgetList\(Uri\.decode\(route\.removePrefix\("\/widget-list\/"\)\)\)/);
     assert.match(menuModel, /"widgetList" -> JSONObject\(\)\.put\("id", own\.optString\("id"\)\)/);
     assert.match(menuModel, /MenuScreen\.WidgetList -> "widgetList"/);
+    assert.match(menuModel, /shell\.readSucceeded\(\)\s+if \(list == "widgetList"\) widgetContextsFilterId\(next\.view\)\?\.let \{ return openWidgetContextsFilter\(it\) \}/, 'a saved Contexts filter link opens the Contexts screen (#1485)');
+    assert.match(menuModel, /private fun openWidgetContextsFilter\(id: String\) \{\s+keepContextsSavedFilter\(id\)\s+editOwn\("contexts"\) \{ remove\("searchQuery"\); remove\("selected"\) \}\s+open\(MenuScreen\.Contexts\)\s+shell\.anyTime\(\{ it\.logLine\("Native Android widget Contexts filter selected releaseCheck=v1\.3\.9\/widget-contexts-filter"/);
+    assert.match(menuModel, /private fun keepContextsSavedFilter\(id: String\?\) = keepOwn\("contexts", contextsWithSavedFilter\(own\("contexts"\), id\)\)/, 'choosing a saved filter drops the temporary sort');
+    assert.match(menuModel, /internal fun contextsWithSavedFilter\(own: JSONObject, id: String\?\): JSONObject = JSONObject\(own\.toString\(\)\)\s+\.put\("savedFilterId", id \?: JSONObject\.NULL\)\.put\("tokens", JSONArray\(\)\)\.put\("matchMode", "all"\)\.put\("filters", JSONObject\(\)\)\s+\.apply \{ remove\("preservedCriteria"\); remove\("sortOverride"\) \}/);
+    assert.match(menuModel, /if \(action\.kind == "focusSave" && JSONObject\(action\.title\)\.optString\("view"\) == "contexts"\) \{\s+keepOwn\("contexts", contextsAfterSave\(own\("contexts"\), reply\.getJSONObject\("controls"\)\.getString\("savedFilterId"\)\)\)/, 'a saved Contexts filter drops the temporary sort (#1485 D1)');
+    assert.match(menuModel, /internal fun contextsAfterSave\(own: JSONObject, savedFilterId: String\): JSONObject = JSONObject\(own\.toString\(\)\)\s+\.put\("savedFilterId", savedFilterId\)\.put\("tokens", JSONArray\(\)\)\.apply \{ remove\("preservedCriteria"\); remove\("sortOverride"\) \}/);
+    assert.match(menuModel, /private fun leave\(back: MenuScreen\?\) \{\s+shell\.closeRowChecklists\(\)\s+if \(leavesSavedContexts\(screen, back, own\("contexts"\)\)\) keepContextsSavedFilter\(null\)/, 'leaving the stacked Contexts screen drops its saved filter and temporary sort, as RN unmounts it (#1485 D2)');
+    assert.match(menuModel, /internal fun leavesSavedContexts\(from: MenuScreen\?, to: MenuScreen\?, own: JSONObject\) =\s+from == MenuScreen\.Contexts && to != MenuScreen\.Contexts && !own\.isNull\("savedFilterId"\)/);
     const widgetListKt = source('WidgetListScreen.kt');
     assert.match(widgetListKt, /TaskRowItem\(model, it, status = RowStatus\.Badge, details = true\)/);
     assert.doesNotMatch(code(widgetListKt), /getString\("(id|status|title)"\)|filter\s*\{|sorted/, 'the screen draws core\'s list, no policy of its own');
@@ -4045,7 +4081,7 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     assert.match(nativeContext, /if \(context\.length > MAX_TRIGGER_TEXT\) return "too-long"\s+return if \(runCatching \{ enqueue\(mapOf\("action" to action, "context" to context\)\) \}\.isSuccess\) "queued" else "failed"/);
 
     const coreJob = source('CoreJob.kt');
-    assert.match(coreJob, /val host = boot\(\)\s+if \(!host\.recover\(\) \|\| !host\.drain\(\)\) Outcome\.Retry/);
+    assert.match(coreJob, /val host = boot\(name in TASK_CHANGING_JOBS\)\.also \{ calls = it \}\s+if \(name in TASK_CHANGING_JOBS && !host\.appActive\(\)\) snapshot = host\.coldCalendarSnapshot\(\) \?: runCatching \{ host\.calendarSnapshot\(\) \}\.getOrNull\(\)\s+worked = host\.recover\(\) && host\.drain\(\)\s+if \(!worked\) Outcome\.Retry/);
     assert.match(owner, /fun recover\(runtime: CoreHost\): Boolean \{\s+val owed = failure \?: return true\s+if \(owed\.action\.kind != "journal"\) return false\s+runtime\.replayJournal\(\)\.owed\?\.let \{ return false \}\s+clearFailure\(owed\.action\)\s+return true\s+\}/);
     assert.match(source('CoreWork.kt'), /override fun recover\(\) = ProcessCoreHost\.recover\(host\)\s+override fun drain\(\) = ProcessCoreHost\.recovered\(app, host\)/, 'CoreWork drains through the start order');
 
@@ -4058,7 +4094,7 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     assert.match(coreWork, /else if \(Build\.VERSION\.SDK_INT >= Build\.VERSION_CODES\.S\) setExpedited\(OutOfQuotaPolicy\.RUN_AS_NON_EXPEDITED_WORK_REQUEST\)/);
     assert.match(coreWork, /fun enqueue\(context: Context, job: String, input: Map<String, String> = emptyMap\(\)\): Operation = enqueue\(context, job, input, ExistingWorkPolicy\.REPLACE\)/, 'a new drain request never waits behind a back-off');
     assert.match(coreWork, /work\.enqueueUniqueWork\(INGEST_WORK, policy, request\)/);
-    assert.match(coreWork, /val host = ProcessCoreHost\.get\(app, language\)/, 'the job runs on this process\'s one host');
+    assert.match(coreWork, /val host = ProcessCoreHost\.get\(app, language, beforeReplay = /, 'the job runs on this process\'s one host');
 
     const pendingTs = readFileSync(resolve(app, '../../packages/core/src/pending-captures.ts'), 'utf8');
     assert.equal(/const val DIRECTORY = "([^"]+)"/.exec(rnWidget('PendingCaptureWriter.kt'))[1], /export const PENDING_CAPTURES_DIRECTORY = '([^']+)'/.exec(pendingTs)[1]);
@@ -8950,7 +8986,7 @@ assert.deepEqual(ready.languageInputs, ['{"storedLanguage":null,"systemLocale":"
     assert.match(viewModelKt, /if \(synced\) \{\s+background\(Part\.entries, \{ runtime -> applySyncedChoices\(runtime, prefs\);/);
 
     assert.match(settingsKt, /if \(reply\.optString\("language"\) != Labels\.language\) loadLabels\(runtime\)/);
-    assert.match(coreHost, /fun languageSaved\(stored: String, system: String\): JSONObject = callAsync\("languageSaved", stored, system\)/);
+    assert.match(coreHost, /fun languageSaved\(stored: String, system: String\): JSONObject =\s+debugFault\("language"\)\.takeIf \{ it\.isNotEmpty\(\) \}\?\.let \{ callAsync\("language", it, system\) \} \?: callAsync\("languageSaved", stored, system\)/);
 }
 
 {

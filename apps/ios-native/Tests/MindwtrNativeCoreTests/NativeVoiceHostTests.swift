@@ -475,19 +475,36 @@ final class NativeVoiceHostTests: XCTestCase {
         XCTAssertEqual(state.count, 2); try assertPrivateBytesAbsent()
     }
 
-    func testKeylessCustomOpenAIRecorderAvailabilityAndTranscription() async throws {
+    func testKeylessCustomOpenAIRecorderAvailabilityAndSmartParse() async throws {
         try Data(json(["mindwtr-ai-key:gemini": sentinel]).utf8).write(to: manifest)
         try await seed(provider: "openai", retain: false, baseURL: "http://speech.local:8123/v1", language: "en-US", model: "whisper-1")
         let core = host(); _ = try await core.start(); let runtime = try await core.readVoiceRuntime()
         XCTAssertTrue(runtime.available); XCTAssertFalse(runtime.credentialAvailable)
         let (handle, raw) = try await recording(core), id = try job(await core.stopVoiceCapture(handle, requestJSON: raw, readmission: { true }))
-        openAIReplies([try openAITranscript("Synthetic keyless recording")])
+        openAIReplies([try openAITranscript("Synthetic keyless recording"), try openAIParse(["transcript": "Synthetic parsed recording", "title": "Synthetic parsed recording"])])
         let outcome = try await core.completeVoiceSpeech(jobID: id, readmission: { _ in true })
-        XCTAssertEqual(outcome, .applied); XCTAssertEqual(state.count, 1)
+        XCTAssertEqual(outcome, .applied); XCTAssertEqual(state.count, 2)
         let request = try XCTUnwrap(state.sentRequests.first)
         XCTAssertEqual(request.url, "http://speech.local:8123/v1/audio/transcriptions"); XCTAssertNil(request.authorization)
         XCTAssertTrue(String(decoding: request.body, as: UTF8.self).contains("name=\"language\"\r\n\r\nen\r\n"))
-        XCTAssertEqual(try rows("SELECT title FROM tasks").first?["title"] as? String, "Synthetic keyless recording")
+        XCTAssertEqual(state.sentRequests.map(\.url), ["http://speech.local:8123/v1/audio/transcriptions", "http://speech.local:8123/v1/responses"])
+        XCTAssertTrue(state.sentRequests.allSatisfy { $0.authorization == nil })
+        XCTAssertEqual(try rows("SELECT title FROM tasks").first?["title"] as? String, "Synthetic parsed recording")
+    }
+
+    func testCustomOpenAIRecorderParseFallbackKeepsEndpointModelAndCredential() async throws {
+        try await seed(provider: "openai", baseURL: "https://speech.local/prefix/v1/audio/transcriptions/")
+        let core = host(); _ = try await core.start(); let (handle, raw) = try await recording(core)
+        let id = try job(await core.stopVoiceCapture(handle, requestJSON: raw, readmission: { true }))
+        openAIReplies([try openAITranscript("Synthetic custom phone fallback"), nil, Data("{}".utf8), nil, Data("{}".utf8)])
+        let outcome = try await core.completeVoiceSpeech(jobID: id, readmission: { _ in true })
+        XCTAssertEqual(outcome, .applied)
+        XCTAssertEqual(state.sentRequests.map(\.url), ["https://speech.local/prefix/v1/audio/transcriptions", "https://speech.local/prefix/v1/responses",
+            "https://speech.local/prefix/v1/chat/completions", "https://speech.local/prefix/v1/responses", "https://speech.local/prefix/v1/chat/completions"])
+        XCTAssertTrue(state.sentRequests.allSatisfy { $0.authorization == "Bearer " + openAISentinel })
+        let models = try state.sentRequests.dropFirst().map { try object(String(decoding: $0.body, as: UTF8.self))["model"] as? String }
+        XCTAssertEqual(models, Array(repeating: "gpt-test-primary", count: 4))
+        XCTAssertEqual(try rows("SELECT title FROM tasks").first?["title"] as? String, "Synthetic custom phone fallback")
     }
 
     func testInvalidOpenAIEndpointRemainsUnavailableAndRecordingAudioIsPreserved() async throws {

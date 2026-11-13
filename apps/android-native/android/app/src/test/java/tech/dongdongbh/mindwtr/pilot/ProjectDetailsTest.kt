@@ -95,4 +95,12 @@ class ProjectDetailsTest {
         for (picked in listOf("parallel", "sequential")) assertEquals(picked, flowModeEdit(shown = "perSection", picked = picked)?.getString("mode"))
         assertEquals("perSection", flowModeEdit(shown = "sequential", picked = "perSection")?.getString("mode"))
     }
+
+    @Test fun aCalendarRefreshCutOffByAProjectEditRerunsOnce() {
+        assertTrue(rerunsCalendarFeed("STALE_REVISION: Project or calendars changed while loading", null, retried = false))
+        assertFalse(rerunsCalendarFeed("STALE_REVISION: Project or calendars changed while loading", null, retried = true))
+        assertFalse(rerunsCalendarFeed("STALE_REVISION: Project or calendars changed while loading", "kick", retried = false))
+        assertFalse(rerunsCalendarFeed("SAVE_FAILED: disk", null, retried = false))
+        assertFalse(rerunsCalendarFeed(null, null, retried = false))
+    }
 }

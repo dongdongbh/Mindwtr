@@ -8,7 +8,7 @@ import { resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { box, button, check, connect, evidenced, fail, inboxCount, inEditor, inList, isOn, linesAfter, logStamp, Stopped, switchOn, tab, tabSelected, tagged, withDescription } from './device.mjs';
 import { cleanupOnExit } from './check-net-device.mjs';
-import { removeNowhereFiles } from './nowhere-files.mjs';
+import { projectFiles, removeNowhereFiles } from './nowhere-files.mjs';
 import { hostDevice, serveWebdav, webdavDocument } from './sync-harness.mjs';
 
 const [serial, apkArg] = process.argv.slice(2);
@@ -180,34 +180,7 @@ const capture = async (text) => {
     await tapExpecting(button(await screen(), en['common.save']) ?? fail('no Save'), onInbox, 'the capture to close the popup');
 };
 
-const projectList = async () => {
-    let nodes = await toTabs();
-    nodes = await tapExpecting(tab(nodes, en['nav.projects']), (current) => tabSelected(current, en['nav.projects']), 'Projects');
-    const inProject = (current) => current.some((node) => /(^|\/)project-(title-input|details-[a-z]+|attachment-add-link)$/.test(node['resource-id'] ?? ''));
-    for (let step = 0; step < 4 && inProject(nodes); step += 1) {
-        await hideKeyboard();
-        requireAppFront();
-        sh('input keyevent KEYCODE_BACK');
-        await sleep(1000);
-        nodes = await screen();
-    }
-    return inProject(nodes) ? fail('the project list did not come back') : nodes;
-};
-
-const removeProjectFile = async (project, file) => {
-    await projectList();
-    let nodes = await device.reveal(project);
-    nodes = await tapExpecting(inList(nodes, project) ?? fail(`no project row ${project}`), (current) => Boolean(tagged(current, 'project-details-toggle')), 'the project');
-    if (!tagged(nodes, 'project-attachment-add-link')) {
-        nodes = await tapExpecting(tagged(nodes, 'project-details-toggle'), (current) => Boolean(tagged(current, 'project-attachment-add-link')), 'the project Details');
-    }
-    const row = await reveal((current) => current.find((node) => node.text === file), file, false);
-    nodes = await screen();
-    const [, top, , bottom] = box(row);
-    const remove = nodes.find((node) => node.text === en['attachments.remove'] && box(node)[1] <= (top + bottom) / 2 && box(node)[3] >= (top + bottom) / 2);
-    await tapExpecting(remove ?? fail(`no Remove beside ${file}`), (current) => !current.some((node) => node.text === file), `${file} removed`);
-    await projectList();
-};
+const { removeProjectFile } = projectFiles({ device, en, toTabs, hideKeyboard });
 const until = async (description, holds, timeoutMs = 120_000, everyMs = 2_000) => {
     const deadline = Date.now() + timeoutMs;
     for (;;) {
@@ -448,7 +421,7 @@ try {
     check(secondCopy(pdf.id, '.pdf') === sha256(pdfBytes) && secondCopy(png.id, '.png') === sha256(pngBytes), '(5) the second device downloaded both files byte for byte');
 
 
-    nodes = await toTabs();
+    nodes = await device.projectsTab(toTabs);
     nodes = await tapExpecting(tab(nodes, en['nav.projects']), (current) => tabSelected(current, en['nav.projects']), 'Projects');
     nodes = await device.reveal(names.project);
 
@@ -461,8 +434,8 @@ try {
     await tapExpecting(tagged(await screen(), 'attachment-link-save'), (current) => !tagged(current, 'attachment-link-sheet'), 'the project link saved');
     await until('the project link stored', () => live(stored('projects', names.project)).some((a) => a.uri === projectLink), 15_000, 1_000);
     check(true, '(6) the project card\'s Add link wrote the link at once');
-    nodes = await waitFor('the project link row', (current) => Boolean(withDescription(current, linkRow(projectLink))), 15_000);
-    const [, pt, , pb] = box(withDescription(nodes, linkRow(projectLink)));
+    const [, pt, , pb] = box(await reveal((current) => withDescription(current, linkRow(projectLink)), 'the project link row', false));
+    nodes = await screen();
     const projectRemove = nodes.filter((node) => node.text === en['attachments.remove'] && box(node)[1] <= (pt + pb) / 2 && box(node)[3] >= (pt + pb) / 2)[0];
     await tapExpecting(projectRemove ?? fail('no Remove beside the project link'), (current) => !withDescription(current, linkRow(projectLink)), 'the project link removed');
     await until('the project link soft-deleted', () => stored('projects', names.project).find((a) => a.uri === projectLink)?.deletedAt, 15_000, 1_000);
@@ -560,8 +533,17 @@ try {
     console.error(error instanceof Stopped ? `STOPPED: ${error.message}` : `FAIL: ${error.message}`);
     process.exitCode = error instanceof Stopped ? 3 : 1;
 } finally {
-
-
+    try {
+        const query = (sql) => sqlite(pullFile(`files/${DB}`, 'db'), sql);
+        if (['tasks', 'projects'].some((table) => query(`SELECT 1 FROM ${table} o, json_each(o.attachments) j WHERE o.deletedAt IS NULL `
+            + `AND j.value->>'kind' = 'file' AND j.value->>'deletedAt' IS NULL AND (j.value->>'localStatus' = 'missing' OR coalesce(j.value->>'uri', '') = '') AND o.title IN (${quote(names.task)}, ${quote(names.project)})`).length)) {
+            if (!front().includes(`${PKG}/`)) device.launch(ACTIVITY);
+            await removeNowhereFiles({ query, removeProjectFile });
+        }
+    } catch (error) {
+        console.log(`warn - this run's missing files could not be removed: ${error.message}`);
+        process.exitCode ||= 1;
+    }
     if (process.exitCode === 1 && dav) {
         try {
             if (!front().includes(`${PKG}/`)) device.launch(ACTIVITY);

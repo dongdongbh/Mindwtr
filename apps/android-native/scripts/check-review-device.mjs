@@ -116,7 +116,7 @@ const core = (ids = []) => JSON.parse(execFileSync('bun', ['-e', `
         weekly: step(weekly), first: { title: weekly.rail[0].title, id: weekly.rail[0].id }, inboxStep: step(inboxStep), nextStep: step(nextStep),
         daily: { title: daily.step.title, label: daily.step.label, close: daily.closeLabel },
         start: { daily: 'daily', weekly: 'weekly' },
-        inboxSwipe: inboxRow?.meta.swipe ?? null,
+        inboxListed: Boolean(inboxRow),
         stored,
     }));
     process.exit(0);
@@ -320,15 +320,15 @@ try {
         nodes = await tapExpecting(backButton, (current) => onWeekly(current) && stepTitle(current) !== shown, 'the step before');
     }
     check(stepTitle(nodes) === seen.first.title && stepIndicator(nodes)?.startsWith('1/'), `(c) Back leads to core's first step ("${seen.first.title}")`);
-    const swipe = seen.inboxSwipe ?? fail('core gives this run\'s Inbox task no swipe action');
+    check(seen.inboxListed, `(c) core lists ${titles.inbox} in the Inbox step`);
     {
-        const before = commands('reviewAction');
-        const action = await drag(titles.inbox, 450, en['task.aria.action'].replace('{{action}}', swipe.label));
+        const action = await drag(titles.inbox, 450, en['task.aria.action'].replace('{{action}}', en['common.done']));
         await tapExpecting(action, (current) => !taskRow(current, titles.inbox), `${titles.inbox} to leave the Inbox step`);
-        await waitFor('the review write', () => commands('reviewAction') === before + 1, 10_000);
     }
+    await waitFor('the done write', () => core().stored[titles.inbox][0]?.status === 'done', 15_000);
     seen = core();
-    check(seen.stored[titles.inbox][0].status === swipe.target, `(c) the swipe stored core's ${swipe.target} once`);
+    check(seen.stored[titles.inbox].length === 1 && seen.stored[titles.inbox][0].status === 'done',
+        '(c) the Inbox row\'s swipe right shows RN\'s tray (review-modal.tsx renders SwipeableTaskItem; core buildTaskRowSwipeActions gives an Inbox task Done and Focus), and its Done stored the task as done once');
     const next = seen.nextStep ?? fail('core has no step after the Inbox');
     nodes = await tapExpecting(withDescription(await screen(), seen.inboxStep.next) ?? fail('no Next'), (current) => stepTitle(current) === next.title, 'core\'s next step');
     check(stepIndicator(nodes) === next.indicator, `(c) Next shows core's next step ("${next.title}", ${next.indicator})`);

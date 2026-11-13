@@ -43,4 +43,20 @@ class ChecklistDragTest {
         assertTrue(checklistEdgeScroll(205f, 200f, 800f, 72f) < 0)
         assertTrue(checklistEdgeScroll(795f, 200f, 800f, 72f) > 0)
     }
+
+    @Test fun neighboursBetweenTheDraggedRowAndItsSlotShiftByOneRow() {
+        assertEquals(listOf(0f, -50f, -50f, 0f), (0..3).map { checklistPreviewShift(it, 0, 2, 50f) })
+        assertEquals(listOf(0f, 50f, 50f, 0f), (0..3).map { checklistPreviewShift(it, 3, 1, 50f) })
+        assertEquals(listOf(0f, 0f, 0f), (0..2).map { checklistPreviewShift(it, 1, 1, 50f) })
+        assertEquals(0f, checklistPreviewShift(1, 0, -1, 50f))
+    }
+
+    @Test fun aDroppedRowKeepsItsPreviewUntilTheMoveLandsOrIsRefused() {
+        val before = listOf("a", "b", "c")
+        assertTrue(checklistDropPreviewHeld(null, before, false))
+        assertTrue(checklistDropPreviewHeld(before, before, true))
+        assertFalse(checklistDropPreviewHeld(before, listOf("b", "c", "a"), true))
+        assertFalse(checklistDropPreviewHeld(before, listOf("b", "c", "a"), false))
+        assertFalse(checklistDropPreviewHeld(before, before, false))
+    }
 }

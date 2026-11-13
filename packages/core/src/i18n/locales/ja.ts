@@ -2,6 +2,22 @@
 
 
 export const jaOverrides: Record<string, string> = {
+    "projects.calendarLimit": "最初の200件を表示しています。別の予定を探すには検索してください。",
+    "projects.calendarTitle": "カレンダー",
+    "projects.calendarLink": "カレンダーの予定を関連付ける",
+    "projects.calendarReplace": "関連付けた予定を置き換える",
+    "projects.calendarUnlink": "予定の関連付けを解除",
+    "projects.calendarScheduled": "予定された次のステップ",
+    "projects.calendarElapsed": "予定の結果を振り返る",
+    "projects.calendarUnavailable": "カレンダーを利用できません · 最後に確認した予定の詳細",
+    "projects.calendarHelp": "既存の予定を、このプロジェクトの予定された次のステップとして関連付けます。カレンダーの予定は読み取り専用です。",
+    "projects.calendarWindow": "今後90日間の予定",
+    "projects.calendarEmpty": "有効なカレンダーフィードに今後の予定はありません。",
+    "projects.calendarLoadFailed": "予定を読み込めませんでした。閉じてから再試行してください。",
+    "projects.calendarSaveFailed": "カレンダーの参照を保存できませんでした。再試行してください。",
+    "projects.calendarReviewStep": "予定された次のステップを確認",
+    "projects.calendarLastKnown": "最後に確認した予定の詳細",
+
     "quickAdd.invalidReminderCommand": "無効なリマインダー：対応する期間と明確な日付・時刻を指定してください",
     "taskEdit.startAdvanceReminderLabel": "開始前",
     "taskEdit.advanceReminderLabel": "事前リマインダー",
@@ -749,6 +765,7 @@ export const jaOverrides: Record<string, string> = {
         'recurrence.nextCalendarPreview': '次回のカレンダー表示',
 
         'inbox.title': 'インボックス',
+        'inbox.completedInSession': 'このセッションで完了',
         'inbox.processButton': 'インボックスを処理',
         'inbox.projectHint': '複数の行動が必要そうなものですか？処理の途中で「はい、プロジェクトにする」を選ぶと、目指す結果と最初の次のアクションに名前を付けられます。',
         'inbox.addPlaceholder': 'インボックスにタスクを追加…',

@@ -6,7 +6,7 @@ import { createHash, randomInt, randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { check, connect, evidenced, fail, inboxCount, inEditor, isOn, linesAfter, logStamp, Stopped, switchOn, tab, tabSelected, tagged, taskRows, withDescription } from './device.mjs';
+import { check, connect, evidenced, fail, inboxCount, inEditor, isOn, linesAfter, logStamp, Stopped, switchOn, tab, tabSelected, tagged, taskRow, withDescription } from './device.mjs';
 import { cleanupOnExit } from './check-net-device.mjs';
 import { serveWebdav, webdavDocument } from './sync-harness.mjs';
 
@@ -42,6 +42,7 @@ const DAYS = 7000;
 const DAY = 24 * 60 * 60 * 1000;
 const OLD = { id: randomUUID(), title: `Retention old ${run}`, days: 7300 };
 const RECENT = { id: randomUUID(), title: `Retention recent ${run}`, days: 5 };
+const OPEN = { id: randomUUID(), title: `Retention open ${run}` };
 
 const device = connect({ serial, pkg: PKG, uiFile: UI_FILE, adb: adbBin });
 const { sh, adbRaw, home, front, requireAppFront, pid, screen, waitFor, tap, tapExpecting } = device;
@@ -217,7 +218,8 @@ try {
     const stamp = (days) => new Date(Date.now() - days * DAY).toISOString();
     const task = ({ id, title, days }) => ({ id, title, status: 'archived', tags: [], contexts: [], createdAt: stamp(days), updatedAt: stamp(days),
         archivedAt: stamp(days), completedAt: stamp(days), rev: 1, revBy: `retention-check-${run}` });
-    document.tasks = [...(document.tasks ?? []), task(OLD), task(RECENT)];
+    document.tasks = [...(document.tasks ?? []), task(OLD), task(RECENT),
+        { id: OPEN.id, title: OPEN.title, status: 'inbox', tags: [], contexts: [], createdAt: stamp(0), updatedAt: stamp(0), rev: 1, revBy: `retention-check-${run}` }];
     dav.state.files.set(path, { body: Buffer.from(JSON.stringify(document)), etag: `"retention-${run}"` });
     since = logStamp(allLogs());
     await tapTag('sync-now', () => commands('syncNow', since) > 0, 'Sync now', 240_000);
@@ -255,7 +257,7 @@ try {
 
     dav.state.down = false;
     nodes = await toTabs();
-    const row = taskRows(nodes)[0] ?? fail('no task row in the Inbox to open an editor on');
+    const row = taskRow(nodes, OPEN.title) ?? (await device.revealNode((current) => taskRow(current, OPEN.title), `the seeded Inbox task ${OPEN.title}`));
     await tapExpecting(row, inEditor, 'a task editor');
     since = logStamp(allLogs());
     await leaveAndReturn();

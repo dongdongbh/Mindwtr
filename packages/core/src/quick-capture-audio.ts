@@ -1,10 +1,10 @@
 import type { AudioCaptureMode, AudioFieldStrategy } from './ai/types';
-import { OPENAI_DEFAULT_MODEL } from './ai/catalog';
 import { DEFAULT_GEMINI_STT_MODEL, DEFAULT_OPENAI_STT_MODEL } from './ai-settings-model';
 import { DEFAULT_PROJECT_COLOR } from './color-constants';
 import { safeFormatDate } from './date';
 import { findSelectableProjectByTitleAndArea } from './project-utils';
 import {
+    resolveOpenAIParseModel,
     runRemoteSpeechToTaskCapture,
     runSpeechToTaskCapture,
     type OpenAISpeechUpload,
@@ -109,15 +109,6 @@ const assertSpeechProviderAllowedForRuntime = (provider: SpeechProvider, fossBui
     throw new Error(REMOTE_SPEECH_TO_TEXT_FOSS_ERROR);
 };
 
-const resolveOpenAIParseModel = (value?: string) => {
-
-
-    if (!value) return OPENAI_DEFAULT_MODEL;
-    const lower = value.toLowerCase();
-    if (lower.startsWith('gpt-4o')) return OPENAI_DEFAULT_MODEL;
-    return value;
-};
-
 export type SpeechCapturePorts = {
 
     readBytes: () => Promise<{ bytes: Uint8Array; mimeType: string }>;
@@ -138,8 +129,9 @@ export async function dispatchSpeechCapture(
 ): Promise<SpeechToTaskResult> {
     assertSpeechProviderAllowedForRuntime(config.provider, isFossBuild, ports.logWarn);
     if (config.provider === 'openai' || config.provider === 'gemini') {
-        const parseModel = resolveOpenAIParseModel(config.parseModel);
-        const retryModel = resolveOpenAIParseModel(config.retryModel ?? 'gpt-4o-mini');
+        const parseModel = resolveOpenAIParseModel(config.parseModel, config.baseUrl);
+        const retryModel = config.baseUrl?.trim()
+            ? config.retryModel ?? parseModel : resolveOpenAIParseModel(config.retryModel ?? 'gpt-4o-mini');
         return runRemoteSpeechToTaskCapture(
             { ...config, provider: config.provider, parseModel, retryModel },
             {

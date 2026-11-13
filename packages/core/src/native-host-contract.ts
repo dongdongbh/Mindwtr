@@ -24,7 +24,7 @@ import {
 } from './project-task-list-model';
 import { buildProjectTaskReorderModel, projectTaskOrderIdentities, projectTaskOrderToken } from './project-task-reorder';
 import { buildProjectGroups, getProjectMoveOptions, type ProjectAreaGroup, type ProjectTagFilter } from './project-grouping';
-import { isTaskFutureFocusCandidate, resolveTaskSortByForFeatures, sortTasksBy, sortTasksBySavedPreference, splitTodayTasksByStartTime } from './task-utils';
+import { isTaskFutureFocusCandidate, resolveTaskSortByForFeatures, sortTasksBy, splitTodayTasksByStartTime, sortTasksBySavedPreference } from './task-utils';
 import { isCustomTimeEstimate, TIME_ESTIMATE_OPTIONS } from './calendar-scheduling';
 import { isRecurrenceRule, parseRRuleString } from './recurrence';
 import { createTaskDraft, isTaskDraftDateInputBaseline, resolveTaskDraftTitle, serializeTaskDraftTokens, TASK_DRAFT_FIELD_KEYS, type TaskDraft, type TaskDraftField } from './task-draft';
@@ -354,6 +354,7 @@ import { createArchivedTasksRestoreMethods } from './native-host-contract-archiv
 import { createProjectTasksDeleteMethods } from './native-host-contract-project-bulk-delete';
 import { createTaskChecklistMoveMethods } from './native-host-contract-task-checklist-move';
 import { createArchivedTasksDeleteMethods } from './native-host-contract-archive-bulk-delete';
+import { createProjectCalendarReferenceMethods, projectCalendarReferenceDateLabel } from './native-host-contract-project-calendar-reference';
 import { createProjectDateMethods } from './native-host-contract-project-date';
 import { createProjectEditMethods } from './native-host-contract-project-edit';
 import { createProjectAreaMethods } from './native-host-contract-project-area';
@@ -1054,7 +1055,7 @@ export const NATIVE_CONTRACT_SYNC_SCREEN_METHODS: ReadonlySet<string> = new Set(
 export const NATIVE_CONTRACT_NETWORK_READS: ReadonlySet<string> = new Set([
     'loadAIModels', 'requestTaskEditorCopilot', 'requestAICopilot', 'requestTaskEditorClarify', 'requestTaskEditorBreakdown',
     'requestInboxClarify', 'requestWeeklyReviewAnalysis', 'runAboutUpdateCheck', 'submitAboutFeedback', 'sendAboutHeartbeat',
-    'testCalendarFeeds', 'loadExternalCalendarFeed',
+    'testCalendarFeeds', 'loadExternalCalendarFeed', 'getProjectCalendarReferenceOptions',
 ]);
 
 
@@ -1698,7 +1699,9 @@ export function createNativeHostContract(options: {
             sequentialSectionKeys: derived.sequentialSectionKeys,
             now,
         });
-        return {
+
+
+    return {
             version: NATIVE_HOST_CONTRACT_VERSION,
             revision: `${revision()}:${displayRevision(now)}`,
             id: task.id,
@@ -1784,6 +1787,9 @@ export function createNativeHostContract(options: {
     const taskChecklistMethods = createTaskChecklistSaveMethods({ readiness, save, receipts, language: () => language,
         validateField: (field, value) => DRAFT_VALUE_CHECKS[field](value), isReadOnly: isInArchivedProject }, readTaskDraft);
     let self: Record<string, unknown> | null = null;
+    const calendarSettingsMethods = createCalendarSettingsMethods({ readiness, save, t: () => translate,
+        language: () => language, requestIdPattern: CAPTURE_ID_PATTERN, host: () => options.calendar ?? null });
+
     const contract = {
         version: NATIVE_HOST_CONTRACT_VERSION,
         getTaskRowSwipeActions(input: NativeTaskRowSwipeActionsInput) { return nativeTaskRowSwipeActions(input, translate); },
@@ -1973,14 +1979,7 @@ export function createNativeHostContract(options: {
             host: () => options.syncSettings ?? null,
         }),
 
-        ...createCalendarSettingsMethods({
-            readiness,
-            save,
-            t: () => translate,
-            language: () => language,
-            requestIdPattern: CAPTURE_ID_PATTERN,
-            host: () => options.calendar ?? null,
-        }),
+        ...calendarSettingsMethods,
 
 
         ...createTaskViewMethods({ readiness, save, t: () => translate, dateFormatting, revision: (now) => `${revision()}:${displayRevision(now)}`, isReadOnly: isInArchivedProject, readDraft: readTaskDraft }),
@@ -2089,6 +2088,9 @@ export function createNativeHostContract(options: {
         ...createArchivedTasksDeleteMethods({ readiness, save, t: () => translate, shown: bulkSelectionShown }),
         ...createTaskChecklistMoveMethods({ readiness, save, t: () => translate }),
         ...createProjectTasksDeleteMethods({ readiness, save, t: () => translate }),
+        ...createProjectCalendarReferenceMethods({ readiness, save, revision: projectMutationRevision,
+            formatDate: (reference) => projectCalendarReferenceDateLabel(reference, createDateFormatter(dateFormatting())),
+            load: (input) => calendarSettingsMethods.loadExternalCalendarFeed(input) }),
         ...createProjectDateMethods({ readiness, save,
             revision: projectMutationRevision }),
         ...createProjectAreaMethods({ readiness, save,
@@ -4907,7 +4909,7 @@ function createListViewMethods(deps: ListViewDeps) {
         getContextsView(input: {
             tokens?: string[]; matchMode?: ContextOrTagMatchMode; searchQuery?: string; selectedIds?: string[];
             filters?: Partial<ListFilterState>; filterEdit?: ListFilterEdit; savedFilterId?: string | null;
-            preservedCriteria?: FilterCriteria; filterSheetOpen?: boolean; savedFilterSortOverride?: TaskSortBy;
+            preservedCriteria?: FilterCriteria; filterSheetOpen?: boolean; sortOverride?: TaskSortBy | null;
             filterPicker?: { name: 'projects' | 'tokens'; query?: string; offset?: number; limit?: number; revision?: string };
             savedFiltersWindow?: { offset: number; limit: number; revision?: string };
             picker?: { field: BulkTaskTokenField; mode: BulkTaskTokenMode; query?: string; offset?: number; limit?: number; revision?: string };
@@ -4924,7 +4926,7 @@ function createListViewMethods(deps: ListViewDeps) {
                 || (input.savedFilterId !== undefined && input.savedFilterId !== null && (typeof input.savedFilterId !== 'string' || input.savedFilterId.length > 200))
                 || (input.preservedCriteria !== undefined && !isPreservedFilterCriteria(input.preservedCriteria))
                 || (input.filterSheetOpen !== undefined && typeof input.filterSheetOpen !== 'boolean')
-                || (input.savedFilterSortOverride !== undefined && !TASK_LIST_SORT_OPTIONS.includes(input.savedFilterSortOverride))
+                || (input.sortOverride !== undefined && input.sortOverride !== null && !TASK_LIST_SORT_OPTIONS.includes(input.sortOverride))
                 || (filterPicker !== undefined && !(isObjectRecord(filterPicker)
                     && (filterPicker.name === 'projects' || filterPicker.name === 'tokens')
                     && (filterPicker.query === undefined || (typeof filterPicker.query === 'string' && filterPicker.query.length <= 500))
@@ -4958,7 +4960,7 @@ function createListViewMethods(deps: ListViewDeps) {
                 const offset = picker.offset ?? 0;
                 return { field, mode, total: items.length, items: items.slice(offset, offset + (picker.limit ?? NATIVE_HOST_MAX_WINDOW)) };
             };
-            const view = cached('contexts', JSON.stringify([revision, tokens, matchMode, input.searchQuery ?? '', selectedIds, filters, input.filterEdit, input.savedFilterId, input.preservedCriteria, input.filterSheetOpen, input.savedFilterSortOverride]), () => {
+            const view = cached('contexts', JSON.stringify([revision, tokens, matchMode, input.searchQuery ?? '', selectedIds, filters, input.filterEdit, input.savedFilterId, input.preservedCriteria, input.filterSheetOpen, input.sortOverride === undefined, input.sortOverride]), () => {
                 const { state, areaById, projectById, selection } = areaScope();
                 const filter = buildContextsFilterModel({
                     tasks: state.tasks.filter((task) => isTaskVisibleInArea(task, { areaById, projectById, resolvedAreaFilter: selection })),
@@ -4968,16 +4970,16 @@ function createListViewMethods(deps: ListViewDeps) {
                     savedFilterId: input.savedFilterId, preservedCriteria: input.preservedCriteria, t,
                 });
                 const index = buildContextsTokenIndex(filter.tasks, { includeFinished: true });
-                const unsorted = buildContextsViewModel({ index, settings: state.settings, selectedTokens: tokens, matchMode, searchQuery: input.searchQuery ?? '' });
-                const saved = filter.activeSavedFilter;
-                const savedSortOverride = saved ? input.savedFilterSortOverride : undefined;
-                const savedSort = saved?.sortBy && saved.sortBy !== 'default' ? saved.sortBy : undefined;
-                const sortBy = savedSortOverride ?? savedSort ?? unsorted.sortBy;
-                const selectedSort = TASK_LIST_SORT_OPTIONS.find((option) => option === sortBy) ?? unsorted.sortBy;
-                const model = { ...unsorted, tasks: savedSortOverride ? sortTasksBy(unsorted.tasks, savedSortOverride)
-                    : savedSort ? sortTasksBySavedPreference(unsorted.tasks, savedSort, {
-                        projects: state.projects, prioritizeByPriority: resolveFeatureFlags(state.settings).priorities, sortOrder: saved?.sortOrder,
-                    }) : unsorted.tasks };
+                const model = buildContextsViewModel({ index, settings: state.settings, selectedTokens: tokens, matchMode, searchQuery: input.searchQuery ?? '' });
+                const savedSortFilter = input.sortOverride === undefined ? null : filter.activeSavedFilter;
+                const sortOverride = savedSortFilter ? input.sortOverride ?? null : null;
+                const savedSort = savedSortFilter?.sortBy && savedSortFilter.sortBy !== 'default' ? savedSortFilter.sortBy : null;
+                const sortBy = sortOverride ?? savedSort ?? model.sortBy;
+                const shownSort = TASK_LIST_SORT_OPTIONS.find((option) => option === sortBy) ?? model.sortBy;
+                const tasks = sortOverride ? sortTasksBy(model.tasks, sortOverride)
+                    : savedSort ? sortTasksBySavedPreference(model.tasks, savedSort, {
+                        projects: state.projects, prioritizeByPriority: resolveTaskRowFeatures(state.settings).priorities, sortOrder: savedSortFilter?.sortOrder,
+                    }) : model.tasks;
                 const next = (nextTokens: string[], nextMode: ContextOrTagMatchMode) => ({ tokens: nextTokens, matchMode: resolveContextsMatchMode(nextTokens, nextMode) });
                 const labels = getContextsMatchModeLabels(t);
                 const onScreen = new Set(model.tasks.map((task) => task.id));
@@ -4986,6 +4988,8 @@ function createListViewMethods(deps: ListViewDeps) {
                 const chipLabels = model.filterSections.flatMap((section) => getContextsChipLabels(section.tokens));
                 return {
                     model,
+                    tasks,
+                    sortOverride,
                     filter,
                     selected,
                     taskRevisions: taskRevisionsOf(selected),
@@ -5009,7 +5013,7 @@ function createListViewMethods(deps: ListViewDeps) {
                             sortByLabel: getTaskSortByLabel(sortBy, t), hasActiveFilters: false, filterActiveCount: 0, t,
                         }).sortAccessibilityLabel,
                         options: getVisibleTaskSortOptions(TASK_LIST_SORT_OPTIONS, state.settings)
-                            .map((value) => ({ value, label: getTaskSortByLabel(value, t), selected: value === selectedSort })),
+                            .map((value) => ({ value, label: getTaskSortByLabel(value, t), selected: value === shownSort })),
                     },
                     empty: model.tasks.length === 0 ? getContextsEmptyState({ hasTokens: model.hasTokens, selectedTokens: tokens }, t) : null,
                     bulk: selected.length === 0 ? null : {
@@ -5053,7 +5057,8 @@ function createListViewMethods(deps: ListViewDeps) {
                 saveControls: (() => {
                     const criteria = getContextsSaveCriteria(view.filter.criteria, tokens, matchMode, [input.searchQuery ?? '', view.filter.resolved.searchQuery]);
                     return criteria && !(input.searchQuery ?? '').trim() && !view.filter.resolved.searchQuery.trim()
-                        ? { ...DEFAULT_FOCUS_CONTROL_STATE, preservedCriteria: criteria, sortBy: view.model.sortBy } : null;
+                        ? { ...DEFAULT_FOCUS_CONTROL_STATE, preservedCriteria: criteria,
+                            ...(input.sortOverride === undefined ? { sortBy: view.model.sortBy } : view.sortOverride ? { sortBy: view.sortOverride } : {}) } : null;
                 })(),
                 filterPicker: filterPicker ? (() => {
                     const query = filterPicker.query ?? '';
@@ -5069,8 +5074,8 @@ function createListViewMethods(deps: ListViewDeps) {
                 chips: view.chips,
                 matchMode: view.matchMode,
                 sort: view.sort,
-                total: view.model.tasks.length,
-                rows: view.model.tasks.slice(input.offset, input.offset + input.limit).map((task) => toNativeTaskRow(task, view.titles, deps.rowMeta(task, now))),
+                total: view.tasks.length,
+                rows: view.tasks.slice(input.offset, input.offset + input.limit).map((task) => toNativeTaskRow(task, view.titles, deps.rowMeta(task, now))),
                 empty: view.empty,
                 selectedIds: view.selected,
                 taskRevisions: view.taskRevisions,

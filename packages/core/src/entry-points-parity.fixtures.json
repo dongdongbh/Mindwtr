@@ -6,7 +6,8 @@
   "rendering": "Platform.OS is android. useRootLayoutExternalCapture runs under react-test-renderer with canonical data ready, one delivery per link or share, and a router that cannot go back; the store holds `store`. resolveText is core's translateWithFallback over the English strings. A share is read by expo-share-intent's parseShareIntent from the payload its Android module sends for ACTION_SEND text/plain.",
   "amendments": [
    "shares: the email share (subject 'Subject', body 'Body with https://example.com/doc') no longer repeats the body's link in the description (RN bug fix after the capture: buildShareCaptureDraft adds the link only when the body does not hold it).",
-   "urls: the two task links that open no task (mindwtr:///open?task=t-deleted, mindwtr://open?task=missing) now show the error toast 'This task is not in this library...' (#1368 a7941b1c6 added it); recaptured at capturedAt, no other observation changed."
+   "urls: the two task links that open no task (mindwtr:///open?task=t-deleted, mindwtr://open?task=missing) now show the error toast 'This task is not in this library...' (#1368 a7941b1c6 added it); recaptured at capturedAt, no other observation changed.",
+   "urls: #1553 changes redirectWarm to an empty path for the eight valid entity links so the incoming handler owns navigation; redirectCold and all other observations stay unchanged. Amended after 6876ac0fe6e04ec66665255e462e3fe35a7d8db7 and verified by the RN and core entry-point replay tests."
   ]
  },
  "timeZone": "UTC",
@@ -841,7 +842,7 @@
     "id": "t-live"
    },
    "redirectCold": "/inbox",
-   "redirectWarm": "/inbox",
+   "redirectWarm": "",
    "delivered": {
     "router": [
      [
@@ -874,7 +875,7 @@
     "id": "t-deleted"
    },
    "redirectCold": "/inbox",
-   "redirectWarm": "/inbox",
+   "redirectWarm": "",
    "delivered": {
     "router": [
      [
@@ -903,7 +904,7 @@
     "id": "missing"
    },
    "redirectCold": "/inbox",
-   "redirectWarm": "/inbox",
+   "redirectWarm": "",
    "delivered": {
     "router": [
      [
@@ -932,7 +933,7 @@
     "id": "p-live"
    },
    "redirectCold": "/inbox",
-   "redirectWarm": "/inbox",
+   "redirectWarm": "",
    "delivered": {
     "router": [
      [
@@ -961,7 +962,7 @@
     "id": "p-deleted"
    },
    "redirectCold": "/inbox",
-   "redirectWarm": "/inbox",
+   "redirectWarm": "",
    "delivered": {
     "router": [
      [
@@ -985,7 +986,7 @@
     "id": "a-live"
    },
    "redirectCold": "/inbox",
-   "redirectWarm": "/inbox",
+   "redirectWarm": "",
    "delivered": {
     "router": [
      [
@@ -1011,7 +1012,7 @@
     "id": "a-deleted"
    },
    "redirectCold": "/inbox",
-   "redirectWarm": "/inbox",
+   "redirectWarm": "",
    "delivered": {
     "router": [
      [
@@ -1035,7 +1036,7 @@
     "id": "p-live"
    },
    "redirectCold": "/inbox",
-   "redirectWarm": "/inbox",
+   "redirectWarm": "",
    "delivered": {
     "router": [
      [

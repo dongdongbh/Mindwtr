@@ -22,7 +22,7 @@ const { en } = await import(resolve(app, '../../packages/core/src/i18n/locales/e
 const { STARTER_SEED_STRINGS } = await import(resolve(app, '../../packages/core/src/i18n/starter-seed-strings.ts'));
 const STARTER_TITLE = STARTER_SEED_STRINGS.en['starter.projectTitle'];
 
-const device = connect({ serial, pkg: PKG, uiFile: UI_FILE, adb: process.env.ADB ?? '/home/dd/Android/Sdk/platform-tools/adb' });
+const device = connect({ serial, pkg: PKG, uiFile: UI_FILE, adb: process.env.ADB ?? '/home/dd/Android/Sdk/platform-tools/adb', keepWelcome: true });
 const { adbRaw, sh, home, front, requireAppFront, screen, waitFor, tap, tapExpecting } = device;
 const setProp = (name, value) => sh(`setprop debug.mindwtr.native.${name} '${value}'`);
 const runAs = (command) => sh(`run-as ${PKG} ${command}`);

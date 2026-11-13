@@ -62,6 +62,7 @@ import { useTaskItemEditState } from './Task/useTaskItemEditState';
 import { useTaskItemProjectContext } from './Task/useTaskItemProjectContext';
 import { useTaskItemFieldLayout } from './Task/useTaskItemFieldLayout';
 import { useTaskItemSubmit } from './Task/useTaskItemSubmit';
+import { useInboxCompletion } from '../contexts/inbox-session-context';
 import { formatTaskMarkedDoneMessage, formatTaskMovedMessage } from '@mindwtr/core';
 import { dispatchNavigateEvent } from '../lib/navigation-events';
 import { usePomodoroStore } from '../store/pomodoro-store';
@@ -149,6 +150,7 @@ export const TaskItem = memo(function TaskItem({
     projectDeadlineLabel,
     onMoveToSomedaySection,
 }: TaskItemProps) {
+    const trackInboxCompletion = useInboxCompletion();
     const [isEditing, setIsEditing] = useState(false);
     const [autoFocusTitle, setAutoFocusTitle] = useState(false);
     const showObsidianNoteAttachment = useObsidianStore((state) => state.config.enabled);
@@ -1257,7 +1259,7 @@ export const TaskItem = memo(function TaskItem({
                 updates.timeSpentMinutes = timeSpentMinutes;
             }
             if (!getLiveMutableTask(expectedTaskId)) return;
-            void updateTask(expectedTaskId, updates)
+            void trackInboxCompletion([expectedTaskId], () => updateTask(expectedTaskId, updates))
                 .then((result) => {
                     if (!result.success) {
                         throw new Error(result.error || 'Failed to complete task');
@@ -1278,7 +1280,7 @@ export const TaskItem = memo(function TaskItem({
                 }
             })
             .catch((error) => reportError('Failed to update completion time', error));
-    }, [completedAtPrompt, getLiveMutableTask, handleSubmit, handleTaskCompleted, task.id, task.isFocusedToday, task.status, timeSpentEnabled, updateTask]);
+    }, [completedAtPrompt, getLiveMutableTask, handleSubmit, handleTaskCompleted, task.id, task.isFocusedToday, task.status, timeSpentEnabled, trackInboxCompletion, updateTask]);
     const handleStatusChange = useCallback((nextStatus: TaskStatus) => {
         if (nextStatus === 'waiting' && task.status !== 'waiting') {
             setShowWaitingAssignmentPrompt(true);
@@ -1286,7 +1288,9 @@ export const TaskItem = memo(function TaskItem({
         }
         const previousStatus = task.status;
         const wasFocusedToday = task.isFocusedToday === true;
-        void moveTask(task.id, nextStatus)
+        void (nextStatus === 'done'
+            ? trackInboxCompletion([task.id], () => moveTask(task.id, nextStatus))
+            : moveTask(task.id, nextStatus))
             .then((result) => {
                 if (!result.success) {
                     throw new Error(result.error || 'Failed to change task status');
@@ -1316,6 +1320,7 @@ export const TaskItem = memo(function TaskItem({
             .catch((error) => reportError('Failed to change task status', error));
     }, [
         handleTaskCompleted,
+        trackInboxCompletion,
         moveTask,
         showToast,
         t,

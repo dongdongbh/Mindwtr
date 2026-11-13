@@ -13,6 +13,7 @@ import android.widget.Button
 import android.widget.CheckBox
 import android.widget.RadioButton
 import android.content.Context
+import android.content.SharedPreferences
 import android.view.ViewGroup
 import android.widget.BaseAdapter
 import android.widget.ListView
@@ -32,6 +33,11 @@ class WidgetConfigureActivity : AppCompatActivity() {
   private var kind = WidgetKind.TASKS
   private var pendingBackground = WidgetBackground.DEFAULT
   private var pendingFocusAvailable = false
+  private var payloadPreferences: SharedPreferences? = null
+  private var lastPayload: String? = null
+  private val payloadListener = SharedPreferences.OnSharedPreferenceChangeListener { _, name ->
+    if (name == WidgetPayloadStore.KEY_PAYLOAD) refreshChooser()
+  }
 
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
@@ -62,7 +68,8 @@ class WidgetConfigureActivity : AppCompatActivity() {
       findViewById<View>(R.id.mindwtr_widget_configure_title).visibility = View.GONE
       findViewById<View>(R.id.mindwtr_widget_configure_background_row).visibility = View.GONE
     }
-    val payload = WidgetPayloadStore.read(this)
+    lastPayload = WidgetPayloadStore.readRaw(this)
+    val payload = lastPayload?.let { WidgetPayload.parse(it) } ?: WidgetPayload.EMPTY
     groupingOptions = WidgetListStore.GROUPINGS.filter { it != "priority" || payload.prioritiesEnabled }
     val palette = payload.resolvedPalette(this)
     val current = WidgetListStore.read(this, appWidgetId)
@@ -145,6 +152,30 @@ class WidgetConfigureActivity : AppCompatActivity() {
       setOnClickListener { save() }
     }
     palette?.let { applyPalette(it, textColor) }
+    if (kind == WidgetKind.TASKS) {
+      payloadPreferences = getSharedPreferences(WidgetPayloadStore.PREFS_NAME, Context.MODE_PRIVATE)
+      payloadPreferences?.registerOnSharedPreferenceChangeListener(payloadListener)
+      refreshChooser()
+      CaptureSyncHeadlessService.startWidgetRefresh(this)
+    }
+  }
+
+  override fun onDestroy() {
+    payloadPreferences?.unregisterOnSharedPreferenceChangeListener(payloadListener)
+    payloadPreferences = null
+    super.onDestroy()
+  }
+
+  private fun refreshChooser() {
+    val raw = WidgetPayloadStore.readRaw(this)
+    if (raw == lastPayload) return
+    val payload = raw?.let { WidgetPayload.parse(it) } ?: return
+    lastPayload = raw
+    val groups = chooserGroups(payload)
+    val search = findViewById<EditText>(R.id.mindwtr_widget_configure_search)
+    val adapter = findViewById<ListView>(R.id.mindwtr_widget_configure_lists).adapter as ChooserAdapter
+    adapter.replaceGroups(groups, search.text.toString())
+    search.visibility = if (groups.sumOf { it.second.size } > 12 || search.text.isNotEmpty()) View.VISIBLE else View.GONE
   }
 
   override fun onSaveInstanceState(outState: Bundle) {
@@ -202,7 +233,7 @@ class WidgetConfigureActivity : AppCompatActivity() {
 
   internal class ChooserAdapter(
     private val context: Context,
-    private val groups: List<Pair<String?, List<Pair<String, String>>>>,
+    private var groups: List<Pair<String?, List<Pair<String, String>>>>,
     private val textColor: Int,
     private val mutedColor: Int,
     private val rowHeight: Int,
@@ -211,6 +242,12 @@ class WidgetConfigureActivity : AppCompatActivity() {
   ) : BaseAdapter() {
     private var rows: List<Pair<String?, String>> = emptyList()
     init { search("") }
+
+    fun replaceGroups(next: List<Pair<String?, List<Pair<String, String>>>>, query: String) {
+      if (next == groups) return
+      groups = next
+      search(query)
+    }
 
     fun search(query: String) {
       val needle = query.trim()
@@ -269,7 +306,7 @@ class WidgetConfigureActivity : AppCompatActivity() {
     )
 
     internal fun fixedOptions(titles: Map<String, String>): List<Pair<String, String>> =
-      listOf("focus" to "Focus", "inbox" to "Inbox", "next" to "Next Actions", "upcoming" to "Upcoming", "waiting" to "Waiting For", "someday" to "Someday/Maybe")
+      listOf("focus" to "Today", "inbox" to "Inbox", "next" to "Next Actions", "upcoming" to "Upcoming", "waiting" to "Waiting For", "someday" to "Someday/Maybe")
         .map { (id, fallback) -> id to (titles[id] ?: fallback) }
   }
 }

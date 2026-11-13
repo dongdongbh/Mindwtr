@@ -10,9 +10,9 @@ import { check, connect, evidenced, fail, inboxCount, inEditor, linesAfter, logS
 import { cleanupOnExit } from './check-net-device.mjs';
 import { hostDevice, serveWebdav, webdavDocument } from './sync-harness.mjs';
 
-const [serial, apkArg] = process.argv.slice(2);
+const [serial, apkArg, fossApkArg] = process.argv.slice(2);
 if (!serial) {
-    console.error('usage: node check-bgsync-device.mjs <adb-serial> [apk]');
+    console.error('usage: node check-bgsync-device.mjs <adb-serial> [apk] [foss-apk]');
     process.exit(2);
 }
 const app = resolve(import.meta.dirname, '..');
@@ -369,7 +369,7 @@ try {
     await toTabs();
 
 
-    const fossApk = resolve(app, 'android/app/build/outputs/apk/foss/debug/app-foss-debug.apk');
+    const fossApk = fossApkArg ?? resolve(app, 'android/app/build/outputs/apk/foss/debug/app-foss-debug.apk');
     for (const [channel, file] of [['FOSS', fossApk], ['Play', apk]]) {
         console.log(`info - ${channel} apk sha256: ${createHash('sha256').update(readFileSync(file)).digest('hex')}`);
         if (front().includes(`${PKG}/`)) sh('input keyevent KEYCODE_HOME');

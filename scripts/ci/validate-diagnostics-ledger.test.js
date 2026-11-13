@@ -192,7 +192,10 @@ const sources = (await Promise.all([
 const codeSites = sources.flatMap((entry) => collectCodeSlugs({ ...entry, formatterSources: sources }));
 function findUnemittedSlugs(slugs, sites) {
   const emittedSlugs = new Set(sites.map(({ slug }) => slug));
-  return slugs.filter((slug) => !emittedSlugs.has(slug));
+  return slugs.filter((slug) => !emittedSlugs.has(slug)).map((slug) => `no code site for ${slug}: put releaseCheck=${slug} in a literal string inside the log call. `
+    + `The validator finds only: TypeScript logInfo/logWarn context { releaseCheck: '${slug}' } or a same-file const; `
+    + `Kotlin Log.i/Log.w/.logLine("... releaseCheck=${slug} ..."); Rust log::info!/log::warn!("... extra.releaseCheck=${slug} ..."); `
+    + `Swift NSLog("... releaseCheck=${slug} ...") or a literal logLine JSON context. A slug passed in through a variable, parameter or callback is not found.`);
 }
 const ledgerSource = await readFile(
   path.join(root, "docs/release-notes/diagnostics-ledger.md"), "utf8",
@@ -276,10 +279,25 @@ describe("release diagnostics ledger", () => {
       const CHECK = 'v1.2.8/unused-check';
       logInfo('accepted', {});
     ` }];
-    expect(findUnemittedSlugs([slug], sources.flatMap(collectCodeSlugs))).toEqual([slug]);
+    expect(findUnemittedSlugs([slug], sources.flatMap(collectCodeSlugs))).toEqual([expect.stringContaining(`no code site for ${slug}:`)]);
     expect(findUnemittedSlugs([slug], [{
       ...sources[0], source: sources[0].source + "logInfo('accepted', { releaseCheck: CHECK });",
     }].flatMap(collectCodeSlugs))).toEqual([]);
+  });
+
+  it("tells the author that a Kotlin slug passed through a callback must move into a literal logLine string", () => {
+    const slug = "v1.3.9/android-callback";
+    const file = "apps/android-native/android/app/src/main/java/Example.kt";
+    const callback = `
+      const val CHECK = "releaseCheck=v1.3.9/android-callback"
+      emit { runtime.logLine("Held publication $CHECK", JSONObject()) }
+    `;
+    const [message] = findUnemittedSlugs([slug], collectCodeSlugs({ file, source: callback }));
+    expect(message).toContain(`no code site for ${slug}: put releaseCheck=${slug} in a literal string inside the log call.`);
+    expect(message).toContain(`Kotlin Log.i/Log.w/.logLine("... releaseCheck=${slug} ...")`);
+    expect(message).toContain("through a variable, parameter or callback is not found");
+    expect(findUnemittedSlugs([slug], collectCodeSlugs({ file,
+      source: `runtime.logLine("Held publication releaseCheck=${slug}", JSONObject())` }))).toEqual([]);
   });
 
   it("resolves native Rust diagnostic fields only inside log macros", () => {

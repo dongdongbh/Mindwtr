@@ -5,6 +5,7 @@ import { TokenAutocompleteInput } from '../../Task/TokenAutocompleteInput';
 import { DateField } from '../../ui/DateField';
 import { useEffect, useRef, useState } from 'react';
 import { AreaColorPicker } from './AreaColorPicker';
+import { ProjectCalendarReference } from './ProjectCalendarReference';
 
 type ProjectDetailsFieldsProps = {
     project: Project;
@@ -307,6 +308,7 @@ export function ProjectDetailsFields({
                 {t('projects.reviewAtHint')}
             </p>
             </fieldset>
+            <ProjectCalendarReference key={project.id} project={project} readOnly={readOnly} t={t} />
         </section>
     );
 }

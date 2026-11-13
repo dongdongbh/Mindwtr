@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useInboxCompletion } from '../../../contexts/inbox-session-context';
 import {
     advanceProcessInboxSession,
     addBreadcrumb,
@@ -91,6 +92,7 @@ export function useInboxProcessingController({
     isProcessing,
     setIsProcessing,
 }: UseInboxProcessingControllerParams): UseInboxProcessingControllerResult {
+    const trackInboxCompletion = useInboxCompletion();
     const showToast = useUiStore((state) => state.showToast);
     const projectConversionInFlightRef = useRef(false);
     const allTasks = useTaskStore((state) => state._allTasks);
@@ -361,8 +363,12 @@ export function useInboxProcessingController({
             ...updates,
             ...(decision.type !== 'skip' && pendingLinks.length > 0 ? { attachments: [...(updates.attachments ?? base.attachments ?? []), ...pendingLinks] } : {}),
         }, {
-            write: (taskId, merged): Promise<StoreActionResult> | StoreActionResult => (Object.keys(merged).length > 0
-                ? updateTask(taskId, merged) : { success: true, id: taskId }),
+            write: (taskId, merged): Promise<StoreActionResult> | StoreActionResult => {
+                if (Object.keys(merged).length === 0) return { success: true, id: taskId };
+                return merged.status === 'done'
+                    ? trackInboxCompletion([taskId], () => updateTask(taskId, merged))
+                    : updateTask(taskId, merged);
+            },
             keepUntouched: true,
         });
         try {
@@ -412,6 +418,7 @@ export function useInboxProcessingController({
         selectedTags,
         showToast,
         t,
+        trackInboxCompletion,
         updateTask,
     ]);
 

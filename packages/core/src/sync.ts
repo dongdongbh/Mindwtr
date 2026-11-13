@@ -1164,6 +1164,12 @@ export function* mergeAppDataWithStatsPass(local: AppData, incoming: AppData, op
     );
 
 
+    const keepProjectCalendarReferenceFromPeer = (winner: Project, other: Project): Project => (
+        winner.calendarReference !== undefined || other.calendarReference === undefined || winner.purgedAt
+            ? winner
+            : { ...winner, calendarReference: other.calendarReference }
+    );
+
     const keepProjectFlowFromPeer = (winner: Project, other: Project): Project => (
         winner.perSectionFlow !== undefined || other.perSectionFlow === undefined || winner.purgedAt
             ? winner
@@ -1232,7 +1238,10 @@ export function* mergeAppDataWithStatsPass(local: AppData, incoming: AppData, op
                 incomingProject,
                 withMergedAttachments(
                     keepProjectFlowFromPeer(
-                        keepViewSectionIdsFromPeer(winner, winner === localProject ? incomingProject : localProject),
+                        keepProjectCalendarReferenceFromPeer(
+                            keepViewSectionIdsFromPeer(winner, winner === localProject ? incomingProject : localProject),
+                            winner === localProject ? incomingProject : localProject,
+                        ),
                         winner === localProject ? incomingProject : localProject,
                     ),
                     attachments,

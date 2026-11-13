@@ -16,6 +16,7 @@ import {
 import { reportError } from '../../../lib/report-error';
 import { registerUndoableAction } from '../../../lib/undo-registry';
 import { useSelectedTasksCsvExport } from './useSelectedTasksCsvExport';
+import { useInboxCompletion } from '../../../contexts/inbox-session-context';
 
 type TaskUpdate = { id: string; updates: Partial<Task> };
 type TaskLookup = Map<string, Task> | Record<string, Task | undefined>;
@@ -83,6 +84,7 @@ export function useTaskSelection(
     visibleIds: string[],
     actions: TaskSelectionActions = {},
 ) {
+    const trackInboxCompletion = useInboxCompletion();
     const {
         batchDeleteTasks,
         batchMoveTasks,
@@ -215,10 +217,12 @@ export function useTaskSelection(
         if (!batchMoveTasks) return Promise.resolve(false);
         return runSelectedTaskAction(
             'move',
-            (taskIds) => batchMoveTasks(taskIds, newStatus),
+            (taskIds) => newStatus === 'done'
+                ? trackInboxCompletion(taskIds, () => batchMoveTasks(taskIds, newStatus))
+                : batchMoveTasks(taskIds, newStatus),
             options,
         );
-    }, [batchMoveTasks, runSelectedTaskAction]);
+    }, [batchMoveTasks, runSelectedTaskAction, trackInboxCompletion]);
 
     const deleteSelectedTasks = useCallback((options?: RunActionOptions) => {
         if (!batchDeleteTasks) return Promise.resolve(false);
@@ -265,12 +269,16 @@ export function useTaskSelection(
         if (!batchUpdateTasks) return Promise.resolve(false);
         return runSelectedTaskAction(
             'update',
-            (taskIds) => batchUpdateTasks(
-                typeof updates === 'function' ? updates(taskIds) : updates,
-            ),
+            (taskIds) => {
+                const changes = typeof updates === 'function' ? updates(taskIds) : updates;
+                const completedIds = changes.filter((change) => change.updates.status === 'done').map((change) => change.id);
+                return completedIds.length > 0
+                    ? trackInboxCompletion(completedIds, () => batchUpdateTasks(changes))
+                    : batchUpdateTasks(changes);
+            },
             options,
         );
-    }, [batchUpdateTasks, runSelectedTaskAction]);
+    }, [batchUpdateTasks, runSelectedTaskAction, trackInboxCompletion]);
 
     const moveSelectedTasksToDestination = useCallback((destination: TaskMoveDestination) => {
         if (!tasksById) return Promise.resolve(false);
@@ -306,13 +314,16 @@ export function useTaskSelection(
 
         return runSelectedTaskAction(
             'organize',
-            (taskIds) => batchUpdateTasksFromLatest(taskIds, (task) => {
-                const latest = buildBulkOrganizeTaskUpdate(task, input);
-                return Object.keys(latest).length > 0 ? latest : null;
-            }),
+            (taskIds) => {
+                const write = () => batchUpdateTasksFromLatest(taskIds, (task) => {
+                    const latest = buildBulkOrganizeTaskUpdate(task, input);
+                    return Object.keys(latest).length > 0 ? latest : null;
+                });
+                return input.status === 'done' ? trackInboxCompletion(taskIds, write) : write();
+            },
             options,
         );
-    }, [batchUpdateTasks, runSelectedTaskAction, selectedIdsArray, tasksById]);
+    }, [batchUpdateTasks, runSelectedTaskAction, selectedIdsArray, tasksById, trackInboxCompletion]);
 
     const updateSelectedTaskTokens = useCallback((
         field: 'tags' | 'contexts',

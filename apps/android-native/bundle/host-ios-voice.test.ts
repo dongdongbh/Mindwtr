@@ -249,12 +249,37 @@ describe('private Watch OpenAI speech bridge', () => {
             .toEqual({ ok: true, value: { transcript: 'Spoken task' } });
         for (const api of ['responses','chat']) {
             const built = await f.call('iosVoiceOpenAIParseBuild', { api, model: 'gpt-4o-mini', transcript: 'Spoken task',
-                config: { language: 'en', fieldStrategy: 'smart', now: AT, timeZone: 'UTC' } });
+                config: { language: 'en', fieldStrategy: 'smart', now: AT, timeZone: 'UTC', baseUrl: 'https://api.openai.com/v1/audio/transcriptions' } });
             expect(built).toMatchObject({ ok: true, value: { method: 'POST', headers: [['Content-Type','application/json']], timeoutMs: 30000 } });
             const response = api === 'responses' ? { output_text: '{"transcript":"Final spoken task","title":"Parsed"}' }
                 : { choices: [{ message: { content: '{"transcript":"Final spoken task","title":"Parsed"}' } }] };
             expect(await f.call('iosVoiceOpenAIParseDecode', { api, response }))
                 .toMatchObject({ ok: true, value: { transcript: 'Final spoken task', title: 'Parsed' } });
+        }
+        expect(f.effects).toEqual([]); expect(f.writes).toEqual([]); expect(f.log()).toBe('');
+    });
+    it('keeps custom server models and derives both parse APIs from the transcription endpoint', async () => {
+        const f = await fixture(); const selected = seed();
+        selected.settings.ai.provider = 'openai'; selected.settings.ai.model = 'gpt-4o-local-audio';
+        selected.settings.ai.speechToText = { ...selected.settings.ai.speechToText, provider: 'openai',
+            baseUrl: 'https://speech.example.org/prefix/v1/audio/transcriptions/' };
+        await f.boot(selected);
+        const runtime = await f.poll(f.host.iosWatchOpenAIRuntime());
+        expect(runtime).toMatchObject({ ok: true, value: { parseModel: 'gpt-4o-local-audio', retryModel: 'gpt-4o-local-audio',
+            endpoint: 'https://speech.example.org/prefix/v1/audio/transcriptions' } });
+        for (const api of ['responses', 'chat']) {
+            const result = await f.call('iosVoiceOpenAIParseBuild', { api, model: runtime.value.parseModel, transcript: 'Spoken task',
+                config: { language: 'en', fieldStrategy: 'smart', now: AT, timeZone: 'UTC', baseUrl: runtime.value.endpoint } });
+            expect(result).toMatchObject({ ok: true, value: { url: 'https://speech.example.org/prefix/v1/'
+                + (api === 'responses' ? 'responses' : 'chat/completions'), headers: [['Content-Type', 'application/json']] } });
+            expect(JSON.parse(result.value.body).model).toBe('gpt-4o-local-audio');
+            expect(JSON.stringify(result)).not.toContain('api.openai.com');
+            expect(JSON.stringify(result)).not.toContain(PRIVATE);
+        }
+        const config = { language: 'en', fieldStrategy: 'smart', now: AT, timeZone: 'UTC' };
+        for (const badConfig of [config, { ...config, baseUrl: runtime.value.endpoint, apiKey: PRIVATE }]) {
+            expect((await f.call('iosVoiceOpenAIParseBuild', { api: 'responses', model: 'gpt-4o-local-audio',
+                transcript: 'Spoken task', config: badConfig })).ok).toBe(false);
         }
         expect(f.effects).toEqual([]); expect(f.writes).toEqual([]); expect(f.log()).toBe('');
     });

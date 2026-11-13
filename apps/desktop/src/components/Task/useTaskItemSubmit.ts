@@ -11,6 +11,7 @@ import {
     type TaskStatus,
 } from '@mindwtr/core';
 import { webAttachmentUploadMessage } from '../../lib/web-attachment-upload';
+import { useInboxCompletion } from '../../contexts/inbox-session-context';
 
 type UseTaskItemSubmitParams = {
     baselineTask: Task;
@@ -75,6 +76,7 @@ export function useTaskItemSubmit({
     cancelAttachmentSaveBeforeStoreUpdate,
     settlePersistedAttachmentSave,
 }: UseTaskItemSubmitParams) {
+    const trackInboxCompletion = useInboxCompletion();
 
     const savedRef = useRef<{ opened: Task; saved: Task } | null>(null);
     const inFlightRef = useRef<Promise<StoreActionResult | undefined> | null>(null);
@@ -114,58 +116,63 @@ export function useTaskItemSubmit({
                 patch.timeSpentMinutes = options.timeSpentMinutesOverride;
             }
 
-            const base = savedRef.current?.opened === baselineTask ? savedRef.current.saved : baselineTask;
-            const attachmentSaveRequiresDurability = beginAttachmentSave();
-            try { retainWebAttachmentsBeforeStore?.(preparedAttachments ?? []); }
-            catch (error) {
-                cancelAttachmentSaveBeforeStoreUpdate();
-                const message = webAttachmentUploadMessage(error, t);
-                setAttachmentError?.(message);
-                showToast(message, 'error');
-                return { success: false, error: message };
-            }
-            let outcome: Awaited<ReturnType<typeof saveDraftOnLatest>>;
-            try {
-                outcome = await saveDraftOnLatest(task.id, base, patch, () => {
-                    if (!isCurrent()) throw new Error('attachments.webUploadChanged');
-                    retainWebAttachmentsBeforeStore?.(preparedAttachments ?? []);
-                });
-            } catch (error) {
-                if (!isCurrent()) return;
-                const message = webAttachmentUploadMessage(error, t);
-                setAttachmentError?.(message);
-                showToast(message, 'error');
-                return { success: false, error: message };
-            }
-            const { result, saved } = outcome;
-            if (!isCurrent()) return result;
-            if (!result.success) {
-                cancelAttachmentSaveBeforeStoreUpdate();
-                showToast(result.error || t('task.updateFailed'), 'error');
-                return result;
-            }
-            if (saved) savedRef.current = { opened: baselineTask, saved };
-            if (attachmentSaveRequiresDurability) {
-                try {
-                    await flushPendingSave();
-                } catch (error) {
-                    if (!isCurrent()) return;
-                    const message = error instanceof Error ? error.message : String(error || t('task.updateFailed'));
+            const savePreparedDraft = async () => {
+                const base = savedRef.current?.opened === baselineTask ? savedRef.current.saved : baselineTask;
+                const attachmentSaveRequiresDurability = beginAttachmentSave();
+                try { retainWebAttachmentsBeforeStore?.(preparedAttachments ?? []); }
+                catch (error) {
+                    cancelAttachmentSaveBeforeStoreUpdate();
+                    const message = webAttachmentUploadMessage(error, t);
+                    setAttachmentError?.(message);
                     showToast(message, 'error');
                     return { success: false, error: message };
                 }
-                if (!isCurrent()) return result;
-                settlePersistedAttachmentSave(saved?.attachments ?? editAttachments ?? task.attachments ?? []);
-            }
-            const changedDuringSave = latestRef.current.draft !== latest.draft
-                || latestRef.current.editAttachments !== latest.editAttachments;
-            if (!options?.keepEditing && !changedDuringSave) {
-                setIsEditing(false);
-                if (editingTaskId === task.id) {
-                    setEditingTaskId(null);
+                let outcome: Awaited<ReturnType<typeof saveDraftOnLatest>>;
+                try {
+                    outcome = await saveDraftOnLatest(task.id, base, patch, () => {
+                        if (!isCurrent()) throw new Error('attachments.webUploadChanged');
+                        retainWebAttachmentsBeforeStore?.(preparedAttachments ?? []);
+                    });
+                } catch (error) {
+                    if (!isCurrent()) return;
+                    const message = webAttachmentUploadMessage(error, t);
+                    setAttachmentError?.(message);
+                    showToast(message, 'error');
+                    return { success: false, error: message };
                 }
-            }
-            return result;
+                const { result, saved } = outcome;
+                if (!isCurrent()) return result;
+                if (!result.success) {
+                    cancelAttachmentSaveBeforeStoreUpdate();
+                    showToast(result.error || t('task.updateFailed'), 'error');
+                    return result;
+                }
+                if (saved) savedRef.current = { opened: baselineTask, saved };
+                if (attachmentSaveRequiresDurability) {
+                    try {
+                        await flushPendingSave();
+                    } catch (error) {
+                        if (!isCurrent()) return;
+                        const message = error instanceof Error ? error.message : String(error || t('task.updateFailed'));
+                        showToast(message, 'error');
+                        return { success: false, error: message };
+                    }
+                    if (!isCurrent()) return result;
+                    settlePersistedAttachmentSave(saved?.attachments ?? editAttachments ?? task.attachments ?? []);
+                }
+                const changedDuringSave = latestRef.current.draft !== latest.draft
+                    || latestRef.current.editAttachments !== latest.editAttachments;
+                if (!options?.keepEditing && !changedDuringSave) {
+                    setIsEditing(false);
+                    if (editingTaskId === task.id) {
+                        setEditingTaskId(null);
+                    }
+                }
+                return result;
+            };
+            return patch.status === 'done'
+                ? trackInboxCompletion([task.id], savePreparedDraft)
+                : savePreparedDraft();
         };
         const running = operation().finally(() => { if (inFlightRef.current === running) inFlightRef.current = null; });
         inFlightRef.current = running;
@@ -188,5 +195,6 @@ export function useTaskItemSubmit({
         showToast,
         t,
         task,
+        trackInboxCompletion,
     ]);
 }
