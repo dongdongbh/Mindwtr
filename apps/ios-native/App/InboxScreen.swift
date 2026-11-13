@@ -967,10 +967,9 @@ private struct FocusSurface: View {
                         }
                         if !model.collapsedFocusSections.contains(key) {
                             let rows = section.objects("rows")
-                            ForEach(rows.indices, id: \.self) { rowIndex in
+                            ForEach(Array(zip(rows.indices, rows.map { $0.text("id") })), id: \.1) { entry in
+                                let rowIndex = entry.0
                                 let row = rows[rowIndex]
-
-
                                 VStack(alignment: .leading, spacing: 0) {
                                     let groups = section.objects("groups").filter { $0.number("start") == rowIndex }
                                     ForEach(groups.indices, id: \.self) { groupIndex in
@@ -996,7 +995,7 @@ private struct FocusSurface: View {
                                             .padding(.bottom, 8).modifier(ModelDisabled { !model.focusActionsShown })
                                     }
                                 }
-                                .id(key + ":" + String(rowIndex) + ":" + row.text("id"))
+                                .id(key + ":" + row.text("id"))
                             }
                             if rows.count < section.number("rowTotal") {
                                 Button { Task { await model.loadMoreFocus(key) } } label: {
