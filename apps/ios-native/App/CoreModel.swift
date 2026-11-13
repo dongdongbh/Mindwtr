@@ -8987,7 +8987,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         _ = try? await original.call("logLine", argumentsJSON: json([
             "Native iOS personal intake check failed", try json([
                 "releaseCheck": "v1.3.9/ios-intake-check", "operation": "intake-check",
-                "check": marker.check, "outcome": marker.outcome]),
+                "check": marker.check, "outcome": marker.outcome, "unfinished": String(marker.unfinished)]),
         ]))
     }
     private func recordIntakeSameTreeReopenDiagnostic(host original: CoreHost, startupToken: UUID) async {

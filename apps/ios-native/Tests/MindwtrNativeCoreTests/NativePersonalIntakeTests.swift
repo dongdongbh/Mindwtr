@@ -984,7 +984,7 @@ final class NativePersonalIntakeTests: XCTestCase {
         XCTAssertEqual(page.items.first?.event?.response, response)
     }
 
-    func testForeignRootLockHeaderAndRecordCorruptionRefuseWithoutRepair() async throws {
+    func testForeignRootLockHeaderAndRecordCorruptionRefuseAndCopiedRootIsQuarantined() async throws {
         let store = try open(), first = try event(); _ = try await store.capture(first)
         XCTAssertThrowsError(try NativePersonalIntake(route: route, diagnostic: { _ in }))
         let original = try Data(contentsOf: state), foreign = try replacement(state)
@@ -999,8 +999,13 @@ final class NativePersonalIntakeTests: XCTestCase {
         let moved = root.deletingLastPathComponent().appendingPathComponent("retained-original")
         try FileManager.default.moveItem(at: root, to: moved)
         try FileManager.default.copyItem(at: moved, to: root)
-        XCTAssertThrowsError(try open())
-        XCTAssertEqual(try Data(contentsOf: state), original)
+        let copied = try finishEvidence(root).mapValues(\.bytes)
+        let fresh = try open()
+        let kept = try XCTUnwrap(quarantined(root).first)
+        XCTAssertEqual(try finishEvidence(kept).mapValues(\.bytes), copied)
+        XCTAssertEqual(try Data(contentsOf: moved.appendingPathComponent("state.json")), original)
+        let page = try await fresh.pendingPage()
+        XCTAssertTrue(page.items.isEmpty)
     }
 
     func testCorruptOrMissingCommittedOrderAndOversizedEnvelopeNeverBecomeEmpty() async throws {
@@ -1045,6 +1050,11 @@ final class NativePersonalIntakeTests: XCTestCase {
         }
     }
 
+    private func quarantined(_ root: URL) throws -> [URL] {
+        let parent = root.deletingLastPathComponent(), prefix = root.lastPathComponent + ".quarantined-"
+        return try FileManager.default.contentsOfDirectory(atPath: parent.path).filter { $0.hasPrefix(prefix) }
+            .map { parent.appendingPathComponent($0, isDirectory: true) }
+    }
     private func futureRenamedHome() throws -> URL {
         let result = home.deletingLastPathComponent().deletingLastPathComponent()
             .appendingPathComponent(UUID().uuidString.lowercased(), isDirectory: true)
@@ -1113,7 +1123,7 @@ final class NativePersonalIntakeTests: XCTestCase {
     func testColdFullHomeRenameReopensSameIsolatedTreeWithoutRewritingHeader() async throws {
         try await exerciseColdFullHomeRename(isolated: true)
     }
-    func testColdHomeChangeRejectsByteIdenticalCopiedTreeWithoutRepair() async throws {
+    func testColdHomeChangeQuarantinesByteIdenticalCopiedTreeWithUnfinishedCapture() async throws {
         let original = try open(); _ = try await original.capture(event())
         let before = try finishEvidence(root), originalInode = try inode(root)
         await original.close()
@@ -1122,11 +1132,13 @@ final class NativePersonalIntakeTests: XCTestCase {
         let currentRoute = try NativePersonalIntakeRoute.fixture(home: copiedHome)
         let currentRoot = currentRoute.components.reduce(copiedHome) { $0.appendingPathComponent($1) }
         XCTAssertNotEqual(try inode(currentRoot), originalInode)
-        let copied = try finishEvidence(currentRoot), diagnostics = Diagnostics()
-        XCTAssertThrowsError(try NativePersonalIntake.openExisting(route: currentRoute, diagnostic: diagnostics.receive))
-        XCTAssertEqual(try finishEvidence(currentRoot), copied)
+        let copied = try finishEvidence(currentRoot).mapValues(\.bytes), diagnostics = Diagnostics()
+        XCTAssertNil(try NativePersonalIntake.openExisting(route: currentRoute, diagnostic: diagnostics.receive))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: currentRoot.path))
+        XCTAssertEqual(try finishEvidence(XCTUnwrap(quarantined(currentRoot).first)).mapValues(\.bytes), copied)
         XCTAssertEqual(try finishEvidence(root), before)
-        XCTAssertEqual(diagnostics.events.map(\.outcome), ["refused"])
+        XCTAssertEqual(diagnostics.events.map(\.outcome), ["quarantined"])
+        XCTAssertEqual(diagnostics.events.first?.unfinished, 1)
     }
     func testColdRestoredCopyWithOnlySettledRecordsIsReboundOnceAndNamesTheFailedChecks() async throws {
         let original = try open(), captured = try await original.capture(event())
@@ -1156,21 +1168,33 @@ final class NativePersonalIntakeTests: XCTestCase {
         stores.append(third)
         XCTAssertTrue(again.events.filter { $0.operation == "intake-check" }.isEmpty)
     }
-    func testColdRestoredCopyWithUnfinishedWorkIsRefusedWithoutRepairAndNamesTheFailedChecks() async throws {
+    func testColdRestoredCopyWithUnfinishedWorkIsQuarantinedAndAFreshIntakeTakesNewCaptures() async throws {
         let original = try open(); _ = try await original.capture(event())
         await original.close()
         let restoredHome = try futureRenamedHome()
         try FileManager.default.copyItem(at: home, to: restoredHome)
+        try FileManager.default.removeItem(at: home)
         let restoredRoute = try NativePersonalIntakeRoute.fixture(home: restoredHome)
         let restoredRoot = restoredRoute.components.reduce(restoredHome) { $0.appendingPathComponent($1) }
-        let before = try finishEvidence(restoredRoot), diagnostics = Diagnostics()
-        XCTAssertThrowsError(try NativePersonalIntake.openExisting(route: restoredRoute, diagnostic: diagnostics.receive))
-        XCTAssertEqual(try finishEvidence(restoredRoot), before)
-        XCTAssertEqual(diagnostics.events.map(\.operation), ["intake-check"])
-        XCTAssertEqual(diagnostics.events.first?.outcome, "refused")
-        XCTAssertEqual(diagnostics.events.first?.check, "directory,records,order,lease")
+        let before = try finishEvidence(restoredRoot).mapValues(\.bytes), diagnostics = Diagnostics()
+        let fresh = try NativePersonalIntake(route: restoredRoute, diagnostic: diagnostics.receive); stores.append(fresh)
+        let kept = try quarantined(restoredRoot)
+        XCTAssertEqual(kept.count, 1)
+        XCTAssertEqual(try finishEvidence(XCTUnwrap(kept.first)).mapValues(\.bytes), before, "The quarantined copy keeps its bytes")
+        let checks = diagnostics.events.filter { $0.operation == "intake-check" }
+        XCTAssertEqual(checks.map(\.outcome), ["quarantined"])
+        XCTAssertEqual(checks.first?.check, "directory,records,order,lease")
+        XCTAssertEqual(checks.first?.unfinished, 1)
+        let empty = try await fresh.pendingPage()
+        XCTAssertTrue(empty.items.isEmpty, "Nothing from the quarantined copy is replayed")
+        let laterEvent = try event("after-quarantine", seconds: 102)
+        let later = try await fresh.capture(laterEvent)
+        XCTAssertEqual(later.sequence, 1)
+        let page = try await fresh.pendingPage()
+        XCTAssertEqual(page.items.map(\.event), [laterEvent])
+        XCTAssertEqual(try finishEvidence(XCTUnwrap(kept.first)).mapValues(\.bytes), before)
     }
-    func testColdHomeRenameRejectsReplacedLeaseWithoutRepair() async throws {
+    func testColdHomeRenameQuarantinesReplacedLeaseWithUnfinishedCapture() async throws {
         let original = try open(); _ = try await original.capture(event())
         let directories = try intakeDirectoryEvidence(root)
         await original.close()
@@ -1178,12 +1202,14 @@ final class NativePersonalIntakeTests: XCTestCase {
         let currentRoute = try NativePersonalIntakeRoute.fixture(home: renamedHome)
         let currentRoot = currentRoute.components.reduce(renamedHome) { $0.appendingPathComponent($1) }
         let replacementInode = try replacement(currentRoot.appendingPathComponent(".lock"))
-        let before = try finishEvidence(currentRoot), diagnostics = Diagnostics()
+        let before = try finishEvidence(currentRoot).mapValues(\.bytes), diagnostics = Diagnostics()
         XCTAssertEqual(try intakeDirectoryEvidence(currentRoot), directories)
-        XCTAssertThrowsError(try NativePersonalIntake.openExisting(route: currentRoute, diagnostic: diagnostics.receive))
-        XCTAssertEqual(try inode(currentRoot.appendingPathComponent(".lock")), replacementInode)
-        XCTAssertEqual(try finishEvidence(currentRoot), before)
+        XCTAssertNil(try NativePersonalIntake.openExisting(route: currentRoute, diagnostic: diagnostics.receive))
+        let kept = try XCTUnwrap(quarantined(currentRoot).first)
+        XCTAssertEqual(try inode(kept.appendingPathComponent(".lock")), replacementInode)
+        XCTAssertEqual(try finishEvidence(kept).mapValues(\.bytes), before)
         XCTAssertEqual(diagnostics.events.map(\.check), ["lease"])
+        XCTAssertEqual(diagnostics.events.map(\.outcome), ["quarantined"])
     }
     func testColdHomeRenameRejectsForeignNamespaceOnSamePhysicalTree() async throws {
         let original = try open(); _ = try await original.capture(event())

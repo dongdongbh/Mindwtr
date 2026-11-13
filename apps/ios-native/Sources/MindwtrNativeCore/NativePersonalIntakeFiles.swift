@@ -387,6 +387,18 @@ final class NativePersonalIntakeFiles {
         do { directories.append(.init(name: name, fd: fd, identity: .init(try Self.directoryStat(fd)))) }
         catch { Darwin.close(fd); throw error }; return made
     }
+    func quarantineRoot() throws {
+        guard !closed, !poisoned, attempt == nil, directories.count >= 2, let leaf = route.components.last else {
+            throw NativePersonalIntakeError.unavailable
+        }
+        let parent = directories[directories.count - 2].fd
+        var named = stat()
+        guard fstatat(parent, leaf, &named, AT_SYMLINK_NOFOLLOW) == 0, named.st_mode & S_IFMT == S_IFDIR,
+              IntakeDirectoryIdentity(named) == (try rootIdentity) else { throw NativePersonalIntakeError.unavailable }
+        let name = leaf + ".quarantined-" + UUID().uuidString.lowercased()
+        guard renameat(parent, leaf, parent, name) == 0, fsync(parent) == 0 else { throw NativePersonalIntakeError.unavailable }
+        poisoned = true
+    }
     private func rootFD() throws -> Int32 {
         guard let root = directories.last else { throw NativePersonalIntakeError.unavailable }; return root.fd
     }

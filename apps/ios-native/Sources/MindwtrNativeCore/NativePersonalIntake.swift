@@ -49,6 +49,7 @@ public actor NativePersonalIntake {
         public let operation: String
         public let outcome: String
         public private(set) var check = ""
+        public private(set) var unfinished = 0
         init() {
             message = "Native iOS personal intake capture confirmed"
             releaseCheck = "v1.3.9/ios-personal-intake"
@@ -74,10 +75,10 @@ public actor NativePersonalIntake {
             releaseCheck = "v1.3.9/ios-navigation-finish-settlement"
             operation = "finish-settlement"; self.outcome = outcome.rawValue
         }
-        fileprivate init(intakeCheck check: String, outcome: String) {
+        fileprivate init(intakeCheck check: String, outcome: String, unfinished: Int = 0) {
             message = "Native iOS personal intake check failed"
             releaseCheck = "v1.3.9/ios-intake-check"
-            operation = "intake-check"; self.outcome = outcome; self.check = check
+            operation = "intake-check"; self.outcome = outcome; self.check = check; self.unfinished = unfinished
         }
         fileprivate init(sameTreeReopen: Void) {
             message = "Native iOS personal intake reopened after container relocation"
@@ -128,6 +129,7 @@ public actor NativePersonalIntake {
     }
 
     public init(route: NativePersonalIntakeRoute, diagnostic: @escaping DiagnosticSink) throws {
+        NativePersonalIntake.quarantineUnsettledCopy(route: route, diagnostic: diagnostic)
         let files = try NativePersonalIntakeFiles(route: route)
         self.files = files; self.diagnostic = diagnostic
         do {
@@ -139,7 +141,7 @@ public actor NativePersonalIntake {
                 _ = try files.publish(IntakeWire.encode(initial, limit: IntakeWire.headerLimit), to: .header, before: nil, exclusive: true)
             } else {
                 guard let snapshot = files.headerSnapshot else { throw NativePersonalIntakeError.unavailable }
-                let existing = try Self.openHeader(snapshot, files: files, diagnostic: diagnostic)
+                let existing = try NativePersonalIntake.openHeader(snapshot, files: files, diagnostic: diagnostic)
                 self.header = existing
                 if existing.origin != route.descriptor { diagnostic(.init(sameTreeReopen: ())) }
             }
@@ -147,6 +149,7 @@ public actor NativePersonalIntake {
     }
 
     public static func openExisting(route: NativePersonalIntakeRoute, diagnostic: @escaping DiagnosticSink) throws -> NativePersonalIntake? {
+        quarantineUnsettledCopy(route: route, diagnostic: diagnostic)
         guard try NativePersonalIntakeFiles.hasExistingRoot(route: route) else { return nil }
         return try NativePersonalIntake(existingRoute: route, diagnostic: diagnostic)
     }
@@ -155,7 +158,7 @@ public actor NativePersonalIntake {
         self.files = files; self.diagnostic = diagnostic
         do {
             guard let snapshot = files.headerSnapshot else { throw NativePersonalIntakeError.unavailable }
-            let existing = try Self.openHeader(snapshot, files: files, diagnostic: diagnostic)
+            let existing = try NativePersonalIntake.openHeader(snapshot, files: files, diagnostic: diagnostic)
             header = existing
             if existing.origin != route.descriptor { diagnostic(.init(sameTreeReopen: ())) }
         } catch { files.close(); throw NativePersonalIntakeError.unavailable }
@@ -173,6 +176,34 @@ public actor NativePersonalIntake {
         _ = try files.publish(IntakeWire.encode(restored, limit: IntakeWire.headerLimit), to: .header, before: snapshot, exclusive: false)
         diagnostic(.init(intakeCheck: check, outcome: "rebound"))
         return restored
+    }
+    private static func quarantineUnsettledCopy(route: NativePersonalIntakeRoute, diagnostic: DiagnosticSink) {
+        guard (try? NativePersonalIntakeFiles.hasExistingRoot(route: route)) == true,
+              let files = try? NativePersonalIntakeFiles(route: route, requireExisting: true) else { return }
+        defer { files.close() }
+        guard let snapshot = files.headerSnapshot,
+              let header = try? IntakeWire.decode(IntakeHeader.self, snapshot.bytes, limit: IntakeWire.headerLimit),
+              header.version == 1, IntakeWire.uuid(header.root), files.route.matchesStoredOrigin(header.origin),
+              let stale = try? header.identityMismatches(files: files), !stale.isEmpty,
+              let restored = try? header.rebound(files: files),
+              (try? settledRestoredTree(restored, files: files)) != true else { return }
+        let unfinished = unfinishedCaptures(restored, files: files)
+        guard (try? files.quarantineRoot()) != nil else { return }
+        diagnostic(.init(intakeCheck: stale.joined(separator: ","), outcome: "quarantined", unfinished: unfinished))
+    }
+    private static func unfinishedCaptures(_ header: IntakeHeader, files: NativePersonalIntakeFiles) -> Int {
+        var count = header.legacy.map { max(0, $0.activeCount - $0.imported) } ?? 0
+        var sequence: Int64 = 1
+        while sequence < header.nextSequence && sequence <= 4_096 {
+            if let order = try? files.read(.order(sequence)),
+               let slot = try? IntakeWire.decode(IntakeOrder.self, order.bytes, limit: IntakeWire.recordLimit),
+               IntakeWire.uuid(slot.id), let snapshot = try? files.read(.record(slot.id)),
+               let record = try? IntakeWire.decode(IntakeRecord.self, snapshot.bytes, limit: IntakeWire.recordLimit) {
+                if record.stage != .terminal { count += 1 }
+            } else if header.pending?.sequence == sequence { count += 1 }
+            sequence += 1
+        }
+        return count
     }
     private static func settledRestoredTree(_ header: IntakeHeader, files: NativePersonalIntakeFiles) throws -> Bool {
         guard header.pending == nil, header.legacy == nil, header.navigationReservation == nil,

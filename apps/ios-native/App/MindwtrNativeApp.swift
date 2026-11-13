@@ -94,7 +94,7 @@ private final class NativeNavigationFinishRelay: @unchecked Sendable {
         }
         if value.operation == "intake-check" {
             guard value.message == "Native iOS personal intake check failed", value.releaseCheck == "v1.3.9/ios-intake-check",
-                  ["rebound", "refused"].contains(value.outcome) else { return }
+                  ["rebound", "refused", "quarantined"].contains(value.outcome) else { return }
             lock.lock(); defer { lock.unlock() }
             if intakeCheckMarker == nil { intakeCheckMarker = value }
             return
