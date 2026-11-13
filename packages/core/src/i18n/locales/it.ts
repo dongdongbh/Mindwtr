@@ -582,6 +582,7 @@ export const itOverrides: Record<string, string> = {
 
 
         'inbox.title': 'Entrata',
+        'inbox.completedInSession': 'Completate in questa sessione',
         'inbox.processButton': 'Elabora Entrata',
         'inbox.projectHint': 'Qualcosa che richiede più di un’azione? Durante l’elaborazione scegli «Sì, trasformalo in progetto» per dare un nome all’esito e alla sua prima azione successiva.',
         'inbox.addPlaceholder': 'Aggiungi attività all\'Entrata...',

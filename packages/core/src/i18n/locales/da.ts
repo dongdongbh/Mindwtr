@@ -735,6 +735,7 @@ export const daOverrides: Record<string, string> = {
         'Forhåndsvisning kun til planlægning; den næste opgave er stadig oprettet, når denne er fuldført.',
     'recurrence.nextCalendarPreview': 'Næste forhåndsvisning af kalenderen',
     'inbox.title': 'Indbakke',
+    'inbox.completedInSession': 'Fuldført i denne session',
     'inbox.processButton': 'Behandl indbakken',
     'inbox.projectHint':
         'Noget, der kræver mere end én handling? Under behandlingen skal du vælge "Ja, gør det til et projekt" for at navngive resultatet og dets første næste handling.',

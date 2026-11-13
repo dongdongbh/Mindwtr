@@ -609,6 +609,7 @@ export const frOverrides: Record<string, string> = {
 
 
         'inbox.title': 'Boîte de réception',
+        'inbox.completedInSession': 'Terminées pendant cette session',
         'inbox.processButton': 'Traiter la boîte de réception',
         'inbox.projectHint': 'Quelque chose qui demande plus d’une action ? Pendant le traitement, choisissez « Oui, fais-en un projet » pour nommer le résultat et sa première prochaine action.',
         'inbox.addPlaceholder': 'Ajouter une tâche à la boîte de réception…',

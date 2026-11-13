@@ -732,6 +732,7 @@ export const ukOverrides: Record<string, string> = {
     "recurrence.showFutureInCalendarHint": "Попередній перегляд лише для планування; наступне завдання все ще створюється, коли це завершено.",
     "recurrence.nextCalendarPreview": "Попередній перегляд наступного календаря",
     "inbox.title": "Вхідні",
+    'inbox.completedInSession': 'Завершено в цьому сеансі',
     "inbox.processButton": "Обробити вхідні",
     "inbox.projectHint": "Щось, що вимагає кількох дій? Під час обробки виберіть «Так, зробити це проектом», щоб назвати результат і його першу наступну дію.",
     "inbox.addPlaceholder": "Додати завдання до вхідних...",

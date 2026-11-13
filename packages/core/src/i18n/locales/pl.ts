@@ -539,6 +539,7 @@ export const plOverrides: Record<string, string> = {
         'recurrence.afterCompletion': 'Powtórz po zakończeniu',
         'recurrence.afterCompletionShort': 'po ukończeniu',
         'inbox.title': 'Skrzynka odbiorcza',
+        'inbox.completedInSession': 'Ukończone w tej sesji',
         'inbox.processButton': 'Przetwarzaj skrzynkę odbiorczą',
         'inbox.projectHint': 'Coś, co wymaga więcej niż jednej czynności? Podczas przetwarzania wybierz „Tak, zamień to w projekt”, aby nazwać cel i jego pierwszą następną czynność.',
         'inbox.addPlaceholder': 'Dodaj zadanie do skrzynki odbiorczej...',

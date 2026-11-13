@@ -551,6 +551,7 @@ export const arOverrides: Record<string, string> = {
         'recurrence.afterCompletion': 'كرر بعد الانتهاء',
         'recurrence.afterCompletionShort': 'بعد الانتهاء',
         'inbox.title': 'البريد الوارد',
+        'inbox.completedInSession': 'المكتملة في هذه الجلسة',
         'inbox.processButton': 'علبة الوارد للعملية',
         'inbox.projectHint': 'هل يتطلب الأمر أكثر من إجراء واحد؟ أثناء المعالجة اختر «نعم اجعله مشروعا» لتسمية النتيجة وأول إجراء تالٍ لها.',
         'inbox.addPlaceholder': 'إضافة مهمة إلى البريد الوارد...',

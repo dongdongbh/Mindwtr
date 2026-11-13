@@ -539,6 +539,7 @@ export const hiOverrides: Record<string, string> = {
         'recurrence.afterCompletion': 'पूरा होने के बाद दोहराएँ',
         'recurrence.afterCompletionShort': 'पूरा होने के बाद',
         'inbox.title': 'इनबॉक्स',
+        'inbox.completedInSession': 'इस सत्र में पूरे हुए',
         'inbox.processButton': 'प्रक्रिया इनबॉक्स',
         'inbox.projectHint': 'ऐसा कुछ जिसमें एक से अधिक कार्रवाई लगे? प्रोसेस करते समय «हां, इसे एक प्रोजेक्ट बनाएं» चुनें और परिणाम तथा उसकी पहली अगली कार्रवाई का नाम दें.',
         'inbox.addPlaceholder': 'इनबॉक्स में कार्य जोड़ें...',

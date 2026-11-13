@@ -549,6 +549,7 @@ export const trOverrides: Record<string, string> = {
         'recurrence.showFutureInCalendar': 'Gelecek tekrarları Takvimde göster',
         'recurrence.showFutureInCalendarHint': 'Yalnızca planlama önizlemesi; gerçek sonraki görev bu görev tamamlandığında oluşturulur.',
         'inbox.title': 'Gelen kutusu',
+        'inbox.completedInSession': 'Bu oturumda tamamlananlar',
         'inbox.processButton': 'Gelen Kutusunu İşle',
         'inbox.projectHint': 'Birden fazla eylem gerektiren bir şey mi? İşlerken “Evet, bunu bir proje haline getir” seçeneğini seçip sonucu ve ilk sonraki eylemini adlandırın.',
         'inbox.addPlaceholder': 'Görevi gelen kutusuna ekle...',

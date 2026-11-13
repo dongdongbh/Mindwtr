@@ -8,10 +8,12 @@ import { showUndoToast } from '../../../lib/undo-registry';
 import { undoTaskCompletion } from '../../../lib/undo-task-completion';
 import { requestTaskRowAction, type TaskRowAction } from '../../../lib/task-row-actions';
 import { copyTaskTitles } from '../../../lib/task-clipboard';
+import { useInboxCompletion, type InboxCompletionTracker } from '../../../contexts/inbox-session-context';
 
 type TranslateFn = (key: string) => string;
 
 export type TaskListScopeDeps = {
+    trackCompletion?: InboxCompletionTracker;
 
     getTasks: () => Task[];
     getSelectedIndex: () => number;
@@ -93,6 +95,10 @@ function assertStoreActionSucceeded(result: unknown, fallbackMessage: string): v
 
 export function createTaskListScope(deps: TaskListScopeDeps): TaskListScope {
     const translate = (key: string, fallback: string) => translateWithFallback(deps.t, key, fallback);
+    const moveTask = (taskId: string, status: TaskStatus) => {
+        const write = () => useTaskStore.getState().moveTask(taskId, status);
+        return status === 'done' && deps.trackCompletion ? deps.trackCompletion([taskId], write) : write();
+    };
 
 
     const resolveIndex = (tasks: Task[]): number => {
@@ -174,7 +180,7 @@ export function createTaskListScope(deps: TaskListScopeDeps): TaskListScope {
             const previousStatus = task.status;
             const nextStatus: TaskStatus = previousStatus === 'done' ? 'inbox' : 'done';
             const wasFocusedToday = task.isFocusedToday === true;
-            void Promise.resolve(useTaskStore.getState().moveTask(task.id, nextStatus))
+            void Promise.resolve(moveTask(task.id, nextStatus))
                 .then((result) => {
                     assertStoreActionSucceeded(result, 'Failed to change task status');
                     if (nextStatus !== 'done' || previousStatus === 'done') return;
@@ -229,7 +235,7 @@ export function createTaskListScope(deps: TaskListScopeDeps): TaskListScope {
             if (!task || task.status === status) return;
             const previousStatus = task.status;
             const wasFocusedToday = task.isFocusedToday === true;
-            void Promise.resolve(useTaskStore.getState().moveTask(task.id, status))
+            void Promise.resolve(moveTask(task.id, status))
                 .then((result) => {
                     assertStoreActionSucceeded(result, 'Failed to change task status');
                     showUndoToast(
@@ -273,11 +279,13 @@ export function useRegisteredTaskListScope(
     register: (scope: TaskListScope | null) => void,
     deps: TaskListScopeDeps & { enabled?: boolean },
 ): void {
+    const trackCompletion = useInboxCompletion();
     const depsRef = useRef(deps);
     depsRef.current = deps;
     const enabled = deps.enabled !== false;
 
     const scope = useMemo(() => createTaskListScope({
+        trackCompletion,
         getTasks: () => depsRef.current.getTasks(),
         getSelectedIndex: () => depsRef.current.getSelectedIndex(),
         getSelectedIds: () => depsRef.current.getSelectedIds?.(),
@@ -288,7 +296,7 @@ export function useRegisteredTaskListScope(
         revealSelected: depsRef.current.revealSelected && ((task) => depsRef.current.revealSelected?.(task)),
         focusSelected: depsRef.current.focusSelected && (() => depsRef.current.focusSelected?.() ?? false),
         toggleSelect: depsRef.current.toggleSelect && ((task) => depsRef.current.toggleSelect?.(task)),
-    }), []);
+    }), [trackCompletion]);
 
     useEffect(() => {
         if (!enabled) return;

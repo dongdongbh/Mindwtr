@@ -538,6 +538,7 @@ export const ruOverrides: Record<string, string> = {
         'recurrence.showFutureInCalendar': 'Показывать будущие повторения в календаре',
         'recurrence.showFutureInCalendarHint': 'Только предварительный просмотр для планирования; настоящая следующая задача будет создана после завершения текущей.',
         'inbox.title': 'Входящие',
+        'inbox.completedInSession': 'Завершено в этом сеансе',
         'inbox.processButton': 'Обработка входящих сообщений',
         'inbox.projectHint': 'Что-то требует нескольких действий? При обработке выберите «Да, сделайте это проектом», чтобы назвать результат и его первое следующее действие.',
         'inbox.addPlaceholder': 'Добавить задачу во входящие...',

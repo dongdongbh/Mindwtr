@@ -721,6 +721,7 @@ export const huOverrides: Record<string, string> = {
     'recurrence.showFutureInCalendarHint': 'Csak tervezési előnézet; a következő feladat továbbra is akkor jön létre, amikor ez befejeződik.',
     'recurrence.nextCalendarPreview': 'Következő naptár-előnézet',
     'inbox.title': 'Beérkezett elemek',
+    'inbox.completedInSession': 'Ebben a munkamenetben befejezve',
     'inbox.processButton': 'Beérkezett elemek feldolgozása',
     'inbox.projectHint': 'Olyasmi, ami több lépést is igényel? Feldolgozás közben válassza az „Igen, legyen belőle projekt” lehetőséget, hogy elnevezze a végeredményt és az első következő teendőjét.',
     'inbox.addPlaceholder': 'Feladat hozzáadása a Beérkezett elemekhez…',

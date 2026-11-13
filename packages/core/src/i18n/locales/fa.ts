@@ -737,6 +737,7 @@ export const faOverrides: Record<string, string> = {
         'recurrence.nextCalendarPreview': 'پیش‌نمایش تقویم بعدی',
 
         'inbox.title': 'صندوق ورودی',
+        'inbox.completedInSession': 'تکمیل‌شده در این جلسه',
         'inbox.processButton': 'پردازش صندوق ورودی',
         'inbox.projectHint': 'کاری که بیش از یک اقدام لازم دارد؟ هنگام پردازش «بله، آن را پروژه کن» را انتخاب کنید تا نتیجه و نخستین اقدام بعدی آن را نام‌گذاری کنید.',
         'inbox.addPlaceholder': 'افزودن کار به صندوق ورودی...',

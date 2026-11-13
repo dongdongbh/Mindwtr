@@ -748,6 +748,7 @@ export const zhHans: Record<string, string> = {
         'recurrence.showFutureInCalendar': '在日历中显示未来重复',
         'recurrence.showFutureInCalendarHint': '仅用于规划预览；完成当前任务后才会创建真正的下一个任务。',
         'inbox.title': '收集箱',
+        'inbox.completedInSession': '本次会话中已完成',
         'inbox.processButton': '处理收集箱',
         'inbox.projectHint': '有些事需要不止一个行动？处理时选择「是，设为项目」，为这个结果和它的第一个下一步行动命名。',
         'inbox.addPlaceholder': '添加任务到收集箱...',

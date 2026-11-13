@@ -747,6 +747,7 @@ export const en: Record<string, string> = {
 
 
         'inbox.title': 'Inbox',
+        'inbox.completedInSession': 'Completed in this session',
         'inbox.processButton': 'Process Inbox',
         'inbox.projectHint': 'Something that takes more than one action? While processing, choose “Yes, make it a project” to name the outcome and its first next action.',
         'inbox.addPlaceholder': 'Add task to inbox...',

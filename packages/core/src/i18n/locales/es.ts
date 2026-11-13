@@ -719,6 +719,7 @@ export const esOverrides: Record<string, string> = {
 'recurrence.showFutureInCalendarHint': "Vista previa solo de planificación; la siguiente tarea se crea igualmente cuando completes esta.",
 'recurrence.nextCalendarPreview': "Próxima vista previa del calendario",
 'inbox.title': "Bandeja",
+'inbox.completedInSession': 'Completadas en esta sesión',
 'inbox.processButton': "Procesar bandeja",
 'inbox.projectHint': "¿Algo que requiere más de una acción? Al procesarlo, elige «Sí, convertir en proyecto» para nombrar el resultado y su primera siguiente acción.",
 'inbox.addPlaceholder': "Capturar...",

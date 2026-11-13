@@ -734,6 +734,7 @@ export const svOverrides: Record<string, string> = {
         'recurrence.nextCalendarPreview': 'Nästa kalenderförhandsvisning',
 
         'inbox.title': 'Inkorg',
+        'inbox.completedInSession': 'Slutförda under den här sessionen',
         'inbox.processButton': 'Bearbeta inkorgen',
         'inbox.projectHint': 'Något som kräver mer än en handling? Välj ”Ja, gör det till ett projekt” när du bearbetar, så namnger du resultatet och dess första nästa handling.',
         'inbox.addPlaceholder': 'Lägg till uppgift i inkorgen...',

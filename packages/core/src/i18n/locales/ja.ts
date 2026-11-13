@@ -749,6 +749,7 @@ export const jaOverrides: Record<string, string> = {
         'recurrence.nextCalendarPreview': '次回のカレンダー表示',
 
         'inbox.title': 'インボックス',
+        'inbox.completedInSession': 'このセッションで完了',
         'inbox.processButton': 'インボックスを処理',
         'inbox.projectHint': '複数の行動が必要そうなものですか？処理の途中で「はい、プロジェクトにする」を選ぶと、目指す結果と最初の次のアクションに名前を付けられます。',
         'inbox.addPlaceholder': 'インボックスにタスクを追加…',

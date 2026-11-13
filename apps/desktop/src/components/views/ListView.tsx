@@ -118,6 +118,8 @@ import {
 import { QuickAddSyntaxHint } from '../ui/QuickAddSyntaxHint';
 import { useFutureStartRevealTick, useLocalDayKey } from '../../hooks/useLocalDayKey';
 import { resolveDoneTaskSortBy, resolveNonDoneTaskSortBy } from '@mindwtr/core';
+import { InboxSessionContext } from '../../contexts/inbox-session-context';
+import { InboxSessionRecap } from './inbox/InboxSessionRecap';
 
 
 interface ListViewProps {
@@ -158,7 +160,15 @@ export function reportArchivedTaskQueryFailure(error: unknown, showToast: ShowTo
     showToast(message, 'error');
 }
 
-export const ListView = memo(function ListView({ title, statusFilter }: ListViewProps) {
+export const ListView = memo(function ListView(props: ListViewProps) {
+    return (
+        <InboxSessionContext.Provider value={props.statusFilter === 'inbox'}>
+            <ListViewContent {...props} />
+        </InboxSessionContext.Provider>
+    );
+});
+
+const ListViewContent = memo(function ListViewContent({ title, statusFilter }: ListViewProps) {
     const perf = usePerformanceMonitor('ListView');
     const {
         tasks,
@@ -1578,6 +1588,7 @@ export const ListView = memo(function ListView({ title, statusFilter }: ListView
                         renderTask={renderListTask}
                     />
                 )}
+                {isInbox && !isProcessing && <InboxSessionRecap />}
                 <div data-list-end className={LIST_END_GAP} aria-hidden="true" />
             </div>
         </div>

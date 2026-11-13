@@ -653,6 +653,7 @@ export const viOverrides: Record<string, string> = {
 
 
         'inbox.title': 'Hộp thư đến',
+        'inbox.completedInSession': 'Đã hoàn thành trong phiên này',
         'inbox.processButton': 'Xử lý hộp thư đến',
         'inbox.projectHint': 'Việc cần nhiều hơn một hành động? Khi xử lý, hãy chọn “Có, tạo thành dự án” để đặt tên cho kết quả và hành động kế tiếp đầu tiên của nó.',
         'inbox.addPlaceholder': 'Thêm nhiệm vụ vào hộp thư đến...',

@@ -612,6 +612,7 @@ export const deOverrides: Record<string, string> = {
 
 
         'inbox.title': 'Eingang',
+        'inbox.completedInSession': 'In dieser Sitzung erledigt',
         'inbox.processButton': 'Eingang verarbeiten',
         'inbox.projectHint': 'Etwas, das mehrere Handlungen erfordert? Wähle beim Verarbeiten „Ja, erstelle ein Projekt“, um das Ergebnis und dessen erste nächste Aktion zu benennen.',
         'inbox.addPlaceholder': 'Eine Aufgabe zum Eingang hinzufügen …',
