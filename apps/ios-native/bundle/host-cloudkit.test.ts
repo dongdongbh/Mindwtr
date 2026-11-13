@@ -18,19 +18,20 @@ const snapshot = (value = data()): Record<string, unknown> => ({
     MindwtrSettings: [{ id: 'settings', payload: value.settings, updatedAt: at }],
 });
 const fixture = (remote: Record<string, unknown> = snapshot(),
-    reply?: (request: NativeCloudKitRequest, signal: AbortSignal) => unknown | Promise<unknown>) => {
+    reply?: (request: NativeCloudKitRequest, signal: AbortSignal) => unknown | Promise<unknown>,
+    onSubscriptionFailure?: (error: unknown) => void) => {
     const calls: NativeCloudKitRequest[] = [], signals: AbortSignal[] = [];
     const call: NativeCloudKitCall = async (request, signal) => {
         calls.push(request); signals.push(signal);
         if (reply) return JSON.stringify(await reply(request, signal));
         switch (request.op) {
         case 'accountStatus': return JSON.stringify('available');
-        case 'ensureZone': case 'deleteRecords': return 'null';
+        case 'ensureZone': case 'ensureSubscription': case 'deleteRecords': return 'null';
         case 'fetchAllRecords': return JSON.stringify(remote[request.recordType]);
         case 'saveRecords': return '[]';
         }
     };
-    return { port: createNativeCloudKitRecords(call), calls, signals };
+    return { port: createNativeCloudKitRecords(call, onSubscriptionFailure), calls, signals };
 };
 const recordTypes = ['MindwtrTask', 'MindwtrProject', 'MindwtrSection', 'MindwtrArea', 'MindwtrPerson', 'MindwtrSettings'];
 
@@ -43,10 +44,12 @@ describe('foreground native CloudKit records adapter', () => {
         expect(signals.every((signal) => signal === controller.signal)).toBe(true);
     });
 
-    it('checks an explicit account and zone without subscription, token, or implicit setup', async () => {
+    it('checks an explicit account and zone, and saves RN\'s zone change subscription once per runtime', async () => {
         const { port, calls } = fixture();
         await port.ensureReady();
-        expect(calls).toEqual([{ op: 'accountStatus' }, { op: 'ensureZone' }]);
+        expect(calls).toEqual([{ op: 'accountStatus' }, { op: 'ensureZone' }, { op: 'ensureSubscription' }]);
+        await port.ensureReady();
+        expect(calls.slice(3)).toEqual([{ op: 'accountStatus' }, { op: 'ensureZone' }]);
         expect(await port.accountStatus()).toBe('available');
         for (const status of ['noAccount', 'restricted', 'temporarilyUnavailable', 'unknown', 'not-a-status', null]) {
             const blocked = fixture({}, async (request) => request.op === 'accountStatus' ? status : null);
@@ -55,6 +58,34 @@ describe('foreground native CloudKit records adapter', () => {
         }
         const failedZone = fixture({}, async (request) => request.op === 'accountStatus' ? 'available' : true);
         await expect(failedZone.port.ensureReady()).rejects.toThrow('invalid');
+    });
+
+    it('keeps a failed subscription non-fatal, reports it, and retries it on the next cycle as RN does', async () => {
+        const failures: unknown[] = [];
+        let refuse = true;
+        const { port, calls } = fixture({}, async (request) => {
+            if (request.op === 'accountStatus') return 'available';
+            if (request.op === 'ensureSubscription' && refuse) throw new Error('Synthetic subscription refusal');
+            return null;
+        }, (error) => failures.push(error));
+        await port.ensureReady();
+        expect(failures).toHaveLength(1);
+        refuse = false;
+        await port.ensureReady();
+        await port.ensureReady();
+        expect(calls.filter((request) => request.op === 'ensureSubscription')).toHaveLength(2);
+        expect(failures).toHaveLength(1);
+    });
+
+    it('rethrows a cancellation that lands during the subscription instead of reporting it', async () => {
+        const controller = new AbortController(), reason = new Error('Retired during subscription'), failures: unknown[] = [];
+        const { port } = fixture({}, async (request) => {
+            if (request.op === 'accountStatus') return 'available';
+            if (request.op === 'ensureSubscription') { controller.abort(reason); throw new Error('cancelled'); }
+            return null;
+        }, (error) => failures.push(error));
+        await expect(port.ensureReady({ signal: controller.signal })).rejects.toBe(reason);
+        expect(failures).toEqual([]);
     });
 
     it('rejects malformed or incomplete entity arrays rather than publishing an empty or partial snapshot', async () => {

@@ -28,6 +28,7 @@ private actor CloudKitHostSDK {
         switch request {
         case .accountStatus: calls.append("accountStatus"); return try cloudKitHostJSON(status)
         case .ensureZone: calls.append("ensureZone"); return "null"
+        case .ensureSubscription: calls.append("ensureSubscription"); return "null"
         case .fetchAllRecords(let type):
             calls.append("fetch:" + type.rawValue)
             if type == .task, readFault == .held {

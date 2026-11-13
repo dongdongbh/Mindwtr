@@ -8,6 +8,7 @@ enum NativeCloudKitRequest: Sendable {
     }
     case accountStatus
     case ensureZone
+    case ensureSubscription
     case fetchAllRecords(recordType: RecordType)
     case saveRecords(recordType: RecordType, recordsJSON: String)
     case deleteRecords(recordType: RecordType, recordIDs: [String])
@@ -28,6 +29,9 @@ enum NativeCloudKitRequest: Sendable {
         case "ensureZone":
             guard fields == ["op"] else { throw Self.invalid }
             self = .ensureZone
+        case "ensureSubscription":
+            guard fields == ["op"] else { throw Self.invalid }
+            self = .ensureSubscription
         case "fetchAllRecords":
             guard fields == ["op", "recordType"], let type = Self.recordType(input["recordType"]), type != .attachment else { throw Self.invalid }
             self = .fetchAllRecords(recordType: type)

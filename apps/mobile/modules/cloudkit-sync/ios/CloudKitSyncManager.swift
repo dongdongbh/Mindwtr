@@ -21,7 +21,7 @@ final class CloudKitSyncManager {
     private var subscriptionTask: Task<Void, Error>?
 
     init(containerIdentifier: String = "iCloud.tech.dongdongbh.mindwtr", zoneName: String = "MindwtrZone",
-         subscriptionID: String = "MindwtrZoneSubscription", operationScheduler: ((CKDatabaseOperation) -> Void)? = nil) {
+         subscriptionID: String = NativeCloudKitTransport.zoneSubscriptionID, operationScheduler: ((CKDatabaseOperation) -> Void)? = nil) {
         containerID = containerIdentifier; self.zoneName = zoneName; self.subscriptionID = subscriptionID
         self.operationScheduler = operationScheduler
     }

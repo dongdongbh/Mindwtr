@@ -183,6 +183,10 @@ final class NativeForegroundSyncTests: XCTestCase {
         try await assertStoredSkip(backend: "off", command: "syncChange")
     }
 
+    func testPushOffSkipsWithoutNetworkSecretsOrConfigurationWritesAcrossColdOpen() async throws {
+        try await assertStoredSkip(backend: "off", command: "syncPush")
+    }
+
     func testSyncChangeScheduleWithoutARemoteBackendSchedulesNothing() async throws {
         let (host, state) = try host(backend: "off")
         let before = try Data(contentsOf: manifest)
@@ -215,7 +219,7 @@ final class NativeForegroundSyncTests: XCTestCase {
         let (host, state) = try host(backend: "webdav")
         _ = try await host.start()
         let before = try Data(contentsOf: manifest)
-        for command in ["syncStored", "syncResume", "syncLeave", "syncChange", "syncPull"] {
+        for command in ["syncStored", "syncResume", "syncLeave", "syncChange", "syncPush", "syncPull"] {
             for input in ["[]", "null", "{\"manual\":false}", "{\"revision\":\"synthetic\"}",
                           "{\"webdav\":{\"url\":\"https://native-fixture.invalid/data.json\",\"password\":\"synthetic-only\"}}"] {
                 do {
@@ -235,7 +239,7 @@ final class NativeForegroundSyncTests: XCTestCase {
         let (host, state) = try host(backend: "cloudkit")
         let before = try Data(contentsOf: manifest)
         _ = try await host.start()
-        for command in ["syncStored", "syncResume", "syncLeave", "syncChange", "syncPull"] {
+        for command in ["syncStored", "syncResume", "syncLeave", "syncChange", "syncPush", "syncPull"] {
             let response = try object(await host.foregroundSync(command: command, requestJSON: "{}"))
             XCTAssertEqual(response["ok"] as? Bool, false)
             XCTAssertEqual((response["error"] as? [String: Any])?["code"] as? String, "ACTION_FAILED")

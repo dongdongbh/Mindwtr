@@ -4,7 +4,7 @@ import { isObjectRecord, isValidTimestamp, parseSyncDocument, toRemoteSyncDocume
 export type NativeCloudKitRecordType = 'MindwtrTask' | 'MindwtrProject' | 'MindwtrSection'
     | 'MindwtrArea' | 'MindwtrPerson' | 'MindwtrSettings';
 export type NativeCloudKitRequest =
-    | { op: 'accountStatus' | 'ensureZone' }
+    | { op: 'accountStatus' | 'ensureZone' | 'ensureSubscription' }
     | { op: 'fetchAllRecords'; recordType: NativeCloudKitRecordType }
     | { op: 'saveRecords'; recordType: NativeCloudKitRecordType; recordsJSON: string }
     | { op: 'deleteRecords'; recordType: NativeCloudKitRecordType; recordIDs: string[] };
@@ -49,7 +49,8 @@ const document = (value: unknown, source: 'local' | 'remote'): AppData => {
     return parsed.data;
 };
 
-export const createNativeCloudKitRecords = (call: NativeCloudKitCall) => {
+export const createNativeCloudKitRecords = (call: NativeCloudKitCall, onSubscriptionFailure?: (error: unknown) => void) => {
+    let subscribed = false;
     const request = async (input: NativeCloudKitRequest, signal: AbortSignal): Promise<unknown> => {
         abort(signal);
         let raw: string;
@@ -75,6 +76,14 @@ export const createNativeCloudKitRecords = (call: NativeCloudKitCall) => {
             const signal = options.signal ?? new AbortController().signal;
             if (await accountStatus({ signal }) !== 'available') throw new Error('Native CloudKit account is unavailable');
             await done({ op: 'ensureZone' }, signal);
+            if (subscribed) return;
+            try {
+                await done({ op: 'ensureSubscription' }, signal);
+                subscribed = true;
+            } catch (error) {
+                abort(signal);
+                onSubscriptionFailure?.(error);
+            }
         },
         read: async (options: Options = {}): Promise<AppData> => {
             const signal = options.signal ?? new AbortController().signal;

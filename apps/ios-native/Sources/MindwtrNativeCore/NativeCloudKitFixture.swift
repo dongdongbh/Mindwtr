@@ -13,6 +13,8 @@ actor NativeCloudKitFixture {
         case .ensureZone:
             guard account == "available" else { throw HostFailure("Fixture account is unavailable") }
             return "null"
+        case .ensureSubscription:
+            return "null"
         case .fetchAllRecords(let type):
             return records[type.rawValue] ?? "[]"
         case .saveRecords(let type, let value):

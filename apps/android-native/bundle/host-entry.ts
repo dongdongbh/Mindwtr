@@ -614,7 +614,11 @@ const iosCloudKitCall: NativeCloudKitTransportCall = (request, signal) => {
     iosCloudKitTail = result.catch(() => {});
     return result;
 };
-const iosCloudKitRecords = createNativeCloudKitRecords(iosCloudKitCall);
+const iosCloudKitRecords = createNativeCloudKitRecords(iosCloudKitCall, () => {
+    void (async () => diagnosticsLog.append({ ts: new Date().toISOString(), level: 'warn', scope: 'native-ios',
+        message: 'Native iOS CloudKit change subscription setup failed (non-fatal)',
+        context: { releaseCheck: 'v1.3.9/ios-cloudkit-push', operation: 'subscribe', outcome: 'failed' } }, { force: true }))().catch(() => {});
+});
 let iosDropboxControl: ((requestJSON: string) => unknown) | null = null;
 let iosDropboxRequestId: string | null = null;
 let iosDropboxSignal: AbortSignal | undefined;
@@ -7258,7 +7262,7 @@ globalThis.MindwtrHost = {
         return submit(async () => {
             try {
                 logInfo(message, { scope: globalThis.__mindwtrHostPlatform === 'ios' ? 'native-ios' : 'native-android',
-                    ...(['Native iOS capture copilot completed', 'Native iOS ordinary project next action confirmed', 'Native Whisper model store initialized', 'Native Whisper model operation failed', 'Native Android sandbox switch requested', 'Native Android sandbox closed'].includes(message) ? { force: true } : {}), context: JSON.parse(contextJson) as Record<string, unknown> });
+                    ...(['Native iOS capture copilot completed', 'Native iOS ordinary project next action confirmed', 'Native iOS CloudKit change notification received', 'Native Whisper model store initialized', 'Native Whisper model operation failed', 'Native Android sandbox switch requested', 'Native Android sandbox closed'].includes(message) ? { force: true } : {}), context: JSON.parse(contextJson) as Record<string, unknown> });
             } catch {                                                    }
             return {};
         });
@@ -8960,12 +8964,12 @@ globalThis.MindwtrHost = {
         return submit(async (signal) => {
             if (iosForegroundFailure) throw iosForegroundFailure;
             const unavailable = () => new Error('NOT_READY: Foreground sync is unavailable');
-            const IOS_STORED_SYNC_COMMANDS = ['syncStored', 'syncResume', 'syncLeave', 'syncChange', 'syncPull'];
+            const IOS_STORED_SYNC_COMMANDS = ['syncStored', 'syncResume', 'syncLeave', 'syncChange', 'syncPush', 'syncPull'];
             if (globalThis.__mindwtrHostPlatform !== 'ios' || !localAttachments || nativeSync || !bootAdapter
                 || iosCleanupCallback || iosTaskAttachmentPreparation || iosProjectFilePreparation || typeof cleanup !== 'function' || isSandboxMode() || isWorkspaceTransitionActive()
                 || typeof native().kvMultiGet !== 'function' || (name !== 'archiveRetention' && !globalThis.__mindwtrSyncSecrets)) throw unavailable();
             const commands = ['syncSettings', 'openSyncSettings', 'closeSyncSettings', 'selectSyncBackend',
-                'saveSyncBackend', 'syncNow', 'testSyncConnection', 'syncStored', 'syncResume', 'syncLeave', 'syncChange', 'syncPull', 'archiveRetention', 'projectAttachmentDownload', 'runSyncEncryptionAction', 'connectDropbox', 'disconnectDropbox',
+                'saveSyncBackend', 'syncNow', 'testSyncConnection', 'syncStored', 'syncResume', 'syncLeave', 'syncChange', 'syncPush', 'syncPull', 'archiveRetention', 'projectAttachmentDownload', 'runSyncEncryptionAction', 'connectDropbox', 'disconnectDropbox',
                 'answerSyncMissingFiles', 'continueSyncWithoutFiles'];
             if (currentTargetURI !== undefined && (name !== 'projectAttachmentDownload' || typeof currentTargetURI !== 'string'
                 || !currentTargetURI.startsWith('file:///') || currentTargetURI.length > 16_384 || !currentTargetURI.includes('/'))) {
@@ -9144,7 +9148,7 @@ globalThis.MindwtrHost = {
                 if (IOS_STORED_SYNC_COMMANDS.includes(name)) {
                     const answer = name === 'syncPull' ? await iosManualSync!.performStoredManualSync()
                         : await iosManualSync!.performStoredAutomaticSync(name === 'syncStored' ? 'startup'
-                            : name === 'syncLeave' ? 'leave' : name === 'syncChange' ? 'change' : 'resume');
+                            : name === 'syncLeave' ? 'leave' : name === 'syncChange' ? 'change' : name === 'syncPush' ? 'push' : 'resume');
                     await flushPendingSave();
                     requireSaved();
                     const after = getPersistenceStatus();
@@ -9164,7 +9168,7 @@ globalThis.MindwtrHost = {
                             || option === 'cloudkit' && iosCloudKitAvailable() || option === 'dropbox' && !!dropboxConfig);
                     }
                 }
-                if (currentTargetURI === undefined && !(name === 'syncChange' && storedResult?.skipped)
+                if (currentTargetURI === undefined && !((name === 'syncChange' || name === 'syncPush') && storedResult?.skipped)
                     && (name !== 'projectAttachmentDownload' || result.ok && result.value && typeof result.value === 'object'
                     && 'status' in result.value && result.value.status === 'available')) try {
                     const diagnostic = name === 'projectAttachmentDownload' ? { message: 'Native iOS Project file availability settled', releaseCheck: 'v1.3.5/ios-project-file-download' }
@@ -9173,11 +9177,12 @@ globalThis.MindwtrHost = {
                         : name === 'syncResume' ? { message: 'Native iOS resume Sync command settled', releaseCheck: 'v1.3.5/ios-resume-sync' }
                         : name === 'syncLeave' ? { message: 'Native iOS automatic Sync trigger settled', releaseCheck: 'v1.3.9/ios-sync-triggers' }
                         : name === 'syncChange' ? { message: 'Native iOS local change Sync settled', releaseCheck: 'v1.3.9/ios-change-sync' }
+                        : name === 'syncPush' ? { message: 'Native iOS CloudKit push Sync settled', releaseCheck: 'v1.3.9/ios-cloudkit-push' }
                         : { message: 'Native iOS foreground Sync command settled', releaseCheck: 'v1.3.5/ios-foreground-sync-owned' };
                     await diagnosticsLog.append({ ts: new Date().toISOString(), level: 'info', scope: 'native-ios',
                         message: diagnostic.message,
                         context: { releaseCheck: diagnostic.releaseCheck, operation: name, outcome: name === 'projectAttachmentDownload' ? 'available'
-                            : (name === 'syncLeave' || name === 'syncChange') && storedResult ? (!storedResult.success ? 'failed' : storedResult.skipped ? 'skipped' : 'synced') : 'settled' },
+                            : (name === 'syncLeave' || name === 'syncChange' || name === 'syncPush') && storedResult ? (!storedResult.success ? 'failed' : storedResult.skipped ? 'skipped' : 'synced') : 'settled' },
                     }, { force: true });
                 } catch {                                                              }
                 return result;

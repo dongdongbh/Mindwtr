@@ -2106,7 +2106,7 @@ assert.match(owner, /\.put\("error", message\.substringBefore\(':'\)\)\)\s+Start
 assert.match(owner, /runtime\.logLine\("Native Android queue drain", JSONObject\(\)\.put\("outcome", "drained"\)\.put\("ingested", ingested\)\)/);
 assert.match(owner, /runtime\.logLine\("Native Android queue drain", JSONObject\(\)\.put\("outcome", "failed"\)\.put\("error", message\.substringBefore\(':'\)\)\)/);
 assert.match(coreHost, /fun logLine\(message: String, context: JSONObject\) \{\s+runCatching \{ callAsync\("logLine", message, context\.toString\(\)\) \}\.onFailure \{ Log\.i\(TAG, "\$message \$context"\) \}/);
-assert.match(hostEntry, /logLine\(message: string, contextJson: string\): string \{\s+return submit\(async \(\) => \{\s+try \{\s+logInfo\(message, \{ scope: globalThis\.__mindwtrHostPlatform === 'ios' \? 'native-ios' : 'native-android',\s+\.\.\.\(\['Native iOS capture copilot completed', 'Native iOS ordinary project next action confirmed', 'Native Whisper model store initialized', 'Native Whisper model operation failed', 'Native Android sandbox switch requested', 'Native Android sandbox closed'\]\.includes\(message\) \? \{ force: true \} : \{\}\), context: JSON\.parse\(contextJson\) as Record<string, unknown> \}\);/);
+assert.match(hostEntry, /logLine\(message: string, contextJson: string\): string \{\s+return submit\(async \(\) => \{\s+try \{\s+logInfo\(message, \{ scope: globalThis\.__mindwtrHostPlatform === 'ios' \? 'native-ios' : 'native-android',\s+\.\.\.\(\['Native iOS capture copilot completed', 'Native iOS ordinary project next action confirmed', 'Native iOS CloudKit change notification received', 'Native Whisper model store initialized', 'Native Whisper model operation failed', 'Native Android sandbox switch requested', 'Native Android sandbox closed'\]\.includes\(message\) \? \{ force: true \} : \{\}\), context: JSON\.parse\(contextJson\) as Record<string, unknown> \}\);/);
 assert.match(coreHost, /fun ingestPendingCaptures\(requestId: String\): JSONObject = callAsync\("ingest", requestId\)/);
 assert.equal(kotlinFiles.join('\n').match(/runtime\.language\(|runtime\.strings\(/g).length, 2);
 
@@ -6430,7 +6430,7 @@ export function createNativeSync() {
             assert.equal((await foregroundCommand(name, value)).value.ok, true);
             assert.deepEqual(JSON.parse(JSON.stringify(foreground.foregroundInputs.at(-1))), [name, value]);
         }
-        for (const [name, reason] of [['syncStored', 'startup'], ['syncResume', 'resume'], ['syncChange', 'change']]) {
+        for (const [name, reason] of [['syncStored', 'startup'], ['syncResume', 'resume'], ['syncChange', 'change'], ['syncPush', 'push']]) {
             assert.deepEqual((await foregroundCommand(name, {})).value.value, { success: true, skipped: false });
             assert.deepEqual(JSON.parse(JSON.stringify(foreground.foregroundInputs.at(-1))), ['stored', reason]);
         }
@@ -6440,7 +6440,7 @@ export function createNativeSync() {
     assert(!(foreground.logText ?? '').includes('synthetic398'), 'Owned command marker contains no endpoint or token');
     for (const [name, value] of [['selectSyncBackend', { requestId: request.requestId, option: 'selfhosted' }],
         ...['saveSyncBackend', 'syncNow', 'testSyncConnection'].map(name => [name, { ...request, selfHosted: selfHostedFields }]),
-        ['syncStored', {}], ['syncResume', {}], ['syncChange', {}]]) {
+        ['syncStored', {}], ['syncResume', {}], ['syncChange', {}], ['syncPush', {}]]) {
         foreground.incompleteTransition = true;
         const prior = foreground.foregroundInputs.length;
         const priorDownloads = foreground.attachmentInputs.length;

@@ -17,6 +17,7 @@ CLOUDKIT_OUTPUT = "MindwtrNativeDevCloudKit.generated.xcodeproj"
 WATCH_OUTPUT = "MindwtrNativeDevWatch.generated.xcodeproj"
 WATCH_CLOUDKIT_OUTPUT = "MindwtrNativeDevCloudKitWatch.generated.xcodeproj"
 CLOUDKIT_CONTAINER = "iCloud." + APP
+PRODUCTION_DEVICE_SETTINGS = ("CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*]", "MINDWTR_CLOUDKIT_CONTAINER[sdk=iphoneos*]")
 WATCH_ROOT = "../mobile/targets/watch"
 WATCH_GROUP = GROUP + ".watch"
 WATCH_ICON_SOURCE_SHA256 = "eea612902042cf79ebe1faf68fef668c9454a62400bd498273578e2cda9f953a"
@@ -113,6 +114,8 @@ def overlay(project, locales):
         settings = configuration["buildSettings"]
         require(settings.get("PRODUCT_BUNDLE_IDENTIFIER") == "tech.dongdongbh.mindwtr", "Unexpected base App identity")
         settings["PRODUCT_BUNDLE_IDENTIFIER"] = APP
+        for production_only in PRODUCTION_DEVICE_SETTINGS:
+            settings.pop(production_only, None)
         settings["MINDWTR_URL_SCHEME"] = "mindwtr-native-dev"
         settings["INFOPLIST_KEY_CFBundleDisplayName"] = "Mindwtr Native Dev"
         settings["CODE_SIGN_ENTITLEMENTS"] = "App/NativeShareDev.entitlements"
@@ -329,9 +332,10 @@ def watch_overlay(project, native_root, output, generated_files):
     root["knownRegions"] = list(dict.fromkeys([*root.get("knownRegions", []), *languages]))
 
 
-def generate(native_root, output, *, cloudkit=False, watch=False, dropbox_app_key=None, dropbox_redirect_uri=None):
+def generate(native_root, output, *, cloudkit=False, cloudkit_push=False, watch=False, dropbox_app_key=None, dropbox_redirect_uri=None):
     native_root = native_root.resolve(strict=True)
     output = output.absolute()
+    require(cloudkit or not cloudkit_push, "CloudKit push requires the CloudKit project")
     require(output.suffix == ".xcodeproj" and output.parent.resolve() == native_root, "Output must be a sibling .xcodeproj")
     if output.exists() or output.is_symlink():
         raise FileExistsError("Output already exists; it is preserved: " + str(output))
@@ -353,6 +357,8 @@ def generate(native_root, output, *, cloudkit=False, watch=False, dropbox_app_ke
         claims = {"com.apple.developer.icloud-container-identifiers": [CLOUDKIT_CONTAINER],
                   "com.apple.developer.icloud-services": ["CloudKit"],
                   "com.apple.developer.icloud-container-environment": "Development"}
+        if cloudkit_push:
+            claims["aps-environment"] = "development"
         for name, source in [("App.entitlements", "NativeShareDev.entitlements"),
                              ("Simulator.entitlements", "NativeShareDevSimulator.entitlements")]:
             entitlements = plistlib.loads((native_root / "App" / source).read_bytes())
@@ -421,6 +427,8 @@ def main():
     parser = argparse.ArgumentParser(description="Generate a fresh sibling native.dev Xcode project. Does not build, sign or install.")
     parser.add_argument("--output-project", type=Path, help="fresh sibling .xcodeproj; otherwise use a separate default for each --cloudkit/--watch variant")
     parser.add_argument("--cloudkit", action="store_true", help="opt in to the isolated native.dev CloudKit Development container")
+    parser.add_argument("--cloudkit-push", action="store_true",
+                        help="with --cloudkit, also request the Development push entitlement; the App ID must have Push enabled")
     parser.add_argument("--watch", action="store_true", help="opt in to the maintained Watch companion in a separate generated project")
     parser.add_argument("--dropbox-app-key", help="explicit public Dropbox app key; requires redirect URI")
     parser.add_argument("--dropbox-redirect-uri", help="registered dev callback URI; does not register it with Dropbox")
@@ -429,7 +437,7 @@ def main():
     default_output = (WATCH_CLOUDKIT_OUTPUT if args.cloudkit else WATCH_OUTPUT) if args.watch else (CLOUDKIT_OUTPUT if args.cloudkit else DEFAULT_OUTPUT)
     output = args.output_project or native_root / default_output
     try:
-        print(generate(native_root, output, cloudkit=args.cloudkit, watch=args.watch,
+        print(generate(native_root, output, cloudkit=args.cloudkit, cloudkit_push=args.cloudkit_push, watch=args.watch,
                        dropbox_app_key=args.dropbox_app_key, dropbox_redirect_uri=args.dropbox_redirect_uri))
     except (OSError, ValueError, KeyError, StopIteration, subprocess.CalledProcessError) as error:
         parser.exit(1, "Dev project generation failed: " + str(error) + "\n")

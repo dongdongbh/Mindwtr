@@ -30273,7 +30273,7 @@ private final class Engine: @unchecked Sendable {
         return { try await NativeCloudKitBridge.accountStatus(containerIdentifier: container) }
     }
 
-    private static let changeSyncDeferred = CoreHostRejection(message: "NOT_READY: The local change sync waits for the current operation")
+    private static let changeSyncDeferred = CoreHostRejection(message: "NOT_READY: The automatic sync waits for the current operation")
 
     private func changeSyncEngineIdle() throws -> Bool {
         try started && !closed && lockFD >= 0 && context != nil && !recoveryActivationPending && !invoking
@@ -30291,11 +30291,11 @@ private final class Engine: @unchecked Sendable {
 
     func foregroundSync(command: String, requestJSON: String, cancellation: NativeAttachmentCancellation) throws -> String {
         dispatchPrecondition(condition: .onQueue(queue))
-        if command == "syncChange", (try? changeSyncEngineIdle()) != true { throw Self.changeSyncDeferred }
+        if ["syncChange", "syncPush"].contains(command), (try? changeSyncEngineIdle()) != true { throw Self.changeSyncDeferred }
         var cancelSettled = false
         do {
             try denyCleanupOwner()
-            guard ["syncSettings", "openSyncSettings", "closeSyncSettings", "selectSyncBackend", "saveSyncBackend", "connectDropbox", "disconnectDropbox", "syncNow", "testSyncConnection", "syncStored", "syncResume", "syncLeave", "syncChange", "syncPull", "archiveRetention", "projectAttachmentDownload", "runSyncEncryptionAction",
+            guard ["syncSettings", "openSyncSettings", "closeSyncSettings", "selectSyncBackend", "saveSyncBackend", "connectDropbox", "disconnectDropbox", "syncNow", "testSyncConnection", "syncStored", "syncResume", "syncLeave", "syncChange", "syncPush", "syncPull", "archiveRetention", "projectAttachmentDownload", "runSyncEncryptionAction",
                    "answerSyncMissingFiles", "continueSyncWithoutFiles"].contains(command),
                   requestJSON.utf8.count <= 128 * 1024,
                   let requestObject = try? NativeJSON.jsonObject(with: Data(requestJSON.utf8)) as? [String: Any],

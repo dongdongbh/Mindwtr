@@ -1,5 +1,5 @@
 enum NativeSyncTurnCancellation {
-    static let commands: Set<String> = ["syncStored", "syncResume", "syncLeave", "syncChange", "syncPull"]
+    static let commands: Set<String> = ["syncStored", "syncResume", "syncLeave", "syncChange", "syncPush", "syncPull"]
 
     static func isClean(_ error: Error, command: String, cleanupOwed: Bool, settled: Bool) -> Bool {
         settled && !cleanupOwed && commands.contains(command) && error is CancellationError
