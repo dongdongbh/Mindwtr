@@ -17,6 +17,7 @@ CLOUDKIT_OUTPUT = "MindwtrNativeDevCloudKit.generated.xcodeproj"
 WATCH_OUTPUT = "MindwtrNativeDevWatch.generated.xcodeproj"
 WATCH_CLOUDKIT_OUTPUT = "MindwtrNativeDevCloudKitWatch.generated.xcodeproj"
 CLOUDKIT_CONTAINER = "iCloud." + APP
+PRODUCTION_DEVICE_SETTINGS = ("CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*]", "MINDWTR_CLOUDKIT_CONTAINER[sdk=iphoneos*]")
 WATCH_ROOT = "../mobile/targets/watch"
 WATCH_GROUP = GROUP + ".watch"
 WATCH_ICON_SOURCE_SHA256 = "eea612902042cf79ebe1faf68fef668c9454a62400bd498273578e2cda9f953a"
@@ -113,6 +114,8 @@ def overlay(project, locales):
         settings = configuration["buildSettings"]
         require(settings.get("PRODUCT_BUNDLE_IDENTIFIER") == "tech.dongdongbh.mindwtr", "Unexpected base App identity")
         settings["PRODUCT_BUNDLE_IDENTIFIER"] = APP
+        for production_only in PRODUCTION_DEVICE_SETTINGS:
+            settings.pop(production_only, None)
         settings["MINDWTR_URL_SCHEME"] = "mindwtr-native-dev"
         settings["INFOPLIST_KEY_CFBundleDisplayName"] = "Mindwtr Native Dev"
         settings["CODE_SIGN_ENTITLEMENTS"] = "App/NativeShareDev.entitlements"

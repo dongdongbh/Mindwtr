@@ -45,6 +45,8 @@ def base_project():
                 if scope == "app":
                     settings.update(MARKETING_VERSION="1.3.3", CURRENT_PROJECT_VERSION="42")
                     settings["MINDWTR_URL_SCHEME"] = "mindwtr"
+                    settings.update({"CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*]": "App/Mindwtr.entitlements",
+                                     "MINDWTR_CLOUDKIT_CONTAINER[sdk=iphoneos*]": "iCloud.tech.dongdongbh.mindwtr"})
                     if name == "Debug":
                         settings.update({"CODE_SIGNING_ALLOWED[sdk=iphonesimulator*]": "YES", "CODE_SIGN_IDENTITY[sdk=iphonesimulator*]": "-",
                                          "SWIFT_ACTIVE_COMPILATION_CONDITIONS": ["$(inherited)", "KEEP_ME"]})
@@ -55,14 +57,38 @@ def base_project():
 
 
 class DevProjectTests(unittest.TestCase):
+    def test_production_device_entitlements_match_rn_cloudkit_plugin_keys_exactly(self):
+        claims = plistlib.loads((HERE.parent / "App/Mindwtr.entitlements").read_bytes())
+        self.assertEqual(claims, {"com.apple.developer.icloud-services": ["CloudKit"],
+                                  "com.apple.developer.icloud-container-identifiers": ["iCloud.tech.dongdongbh.mindwtr"],
+                                  "aps-environment": "production"})
+        plugin = (HERE.parent.parent / "mobile/plugins/ios-cloudkit-sync.js").read_text()
+        self.assertIn("const CLOUDKIT_CONTAINER = 'iCloud.tech.dongdongbh.mindwtr';", plugin)
+        self.assertIn("entitlements['com.apple.developer.icloud-services'] = ['CloudKit'];", plugin)
+        self.assertIn("entitlements['aps-environment'] = 'production';", plugin)
+        base = (HERE.parent / generator.BASE / "project.pbxproj").read_text()
+        for configuration in ["A00000000000000000000062", "A00000000000000000000063"]:
+            line = next(item for item in base.splitlines() if configuration + " = " in item)
+            self.assertIn('"CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*]" = App/Mindwtr.entitlements;', line)
+            self.assertIn('"MINDWTR_CLOUDKIT_CONTAINER[sdk=iphoneos*]" = iCloud.tech.dongdongbh.mindwtr;', line)
+            self.assertNotIn("CODE_SIGN_ENTITLEMENTS = ", line, "Production entitlements stay device-only")
+            self.assertNotIn("MINDWTR_CLOUDKIT_CONTAINER = ", line, "The simulator production app gets no container")
+
     def test_production_scheme_is_not_registered_by_the_dev_overlay(self):
         original = base_project()
         result = generator.overlay(original, generator.asset_locales(HERE.parent))
         info = plistlib.loads((HERE.parent / "App/Info.plist").read_bytes())
         self.assertEqual(info["CFBundleURLTypes"][0]["CFBundleURLSchemes"], ["$(MINDWTR_URL_SCHEME)"])
+        self.assertEqual(info["NativeCloudKitContainer"], "$(MINDWTR_CLOUDKIT_CONTAINER)")
         for name in ["Debug", "Release"]:
             self.assertEqual(original["objects"]["app-" + name]["buildSettings"]["MINDWTR_URL_SCHEME"], "mindwtr")
             self.assertEqual(result["objects"]["app-" + name]["buildSettings"]["MINDWTR_URL_SCHEME"], "mindwtr-native-dev")
+            production = original["objects"]["app-" + name]["buildSettings"]
+            self.assertEqual(production["CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*]"], "App/Mindwtr.entitlements")
+            self.assertEqual(production["MINDWTR_CLOUDKIT_CONTAINER[sdk=iphoneos*]"], "iCloud.tech.dongdongbh.mindwtr")
+            for key in generator.PRODUCTION_DEVICE_SETTINGS:
+                self.assertNotIn(key, result["objects"]["app-" + name]["buildSettings"],
+                                 "native.dev must not inherit production device signing or the production container")
 
     def test_overlay_preserves_base_and_builds_exact_dev_targets_and_membership(self):
         original = base_project()
@@ -220,7 +246,7 @@ class DevProjectTests(unittest.TestCase):
             info = plistlib.loads(originals[Path("App/Info.plist")])
             self.assertEqual(plistlib.loads((output / "CloudKit/Info.plist").read_bytes()),
                              {**info, "NativeCloudKitContainer": container})
-            self.assertNotIn("NativeCloudKitContainer", info)
+            self.assertEqual(info["NativeCloudKitContainer"], "$(MINDWTR_CLOUDKIT_CONTAINER)")
             self.assertEqual(info["UIBackgroundModes"], ["processing", "remote-notification"])
             self.assertFalse((normal / "CloudKit").exists())
             for enabled_cloudkit in [False, True]:

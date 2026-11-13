@@ -2,12 +2,18 @@ import Foundation
 import CloudKitAttachmentErrorClassifier
 
 final class NativeCloudKitBridge: @unchecked Sendable {
+    static let containersByBundle = [
+        "tech.dongdongbh.mindwtr": "iCloud.tech.dongdongbh.mindwtr",
+        "tech.dongdongbh.mindwtr.native.dev": "iCloud.tech.dongdongbh.mindwtr.native.dev",
+    ]
     static var configuredContainer: String? {
-        let bundle = Bundle.main
-        guard bundle.bundleIdentifier == "tech.dongdongbh.mindwtr.native.dev",
-              let identifier = bundle.object(forInfoDictionaryKey: "NativeCloudKitContainer") as? String,
-              identifier == "iCloud.tech.dongdongbh.mindwtr.native.dev" else { return nil }
-        return identifier
+        container(bundleIdentifier: Bundle.main.bundleIdentifier,
+                  declared: Bundle.main.object(forInfoDictionaryKey: "NativeCloudKitContainer"))
+    }
+    static func container(bundleIdentifier: String?, declared: Any?) -> String? {
+        guard let bundleIdentifier, let expected = containersByBundle[bundleIdentifier],
+              let declared = declared as? String, declared == expected else { return nil }
+        return expected
     }
     static func accountStatus(containerIdentifier: String) async throws -> String {
         try await NativeCloudKitTransport(containerIdentifier: containerIdentifier, zoneName: "MindwtrZone").accountStatus()
