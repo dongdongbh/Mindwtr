@@ -26,73 +26,94 @@ struct InboxScreen: View {
         model.selectedSurface == .savedSearch ? "saved-search" : model.selectedSurface == .contexts ? "contexts" : model.selectedSurface == .trash ? "trash" : model.selectedSurface == .history ? "history" : model.selectedSurface == .reference ? "reference" : model.selectedSurface == .someday ? "someday" : "waiting"
     }
 
+    private var fullScreenSurfaceShown: Bool {
+        switch model.selectedSurface {
+        case .search, .project, .contexts, .waiting, .someday, .settings, .savedSearch, .trash, .history, .reference: return true
+        case .focus: return model.focusOrderPresented
+        default: return false
+        }
+    }
+
+    @ViewBuilder private var fullScreenSurfaceContent: some View {
+        if model.selectedSurface == .search {
+            SearchScreen(model: model, palette: palette)
+        } else if model.selectedSurface == .project && model.projectRowAreaOverList {
+            ZStack {
+                VStack(spacing: 0) {
+                    InboxHeader(model: model, palette: palette)
+                    ProjectsScreen(model: model, palette: palette)
+                }
+                .disabled(true)
+                ProjectDetailScreen(model: model, palette: palette).opacity(0).allowsHitTesting(false).accessibilityHidden(true)
+            }
+            .onChange(of: model.projectRowAreaReturnReady) { ready in
+                if ready { Task { await model.returnFromProjectRowArea() } }
+            }
+        } else if model.selectedSurface == .project {
+            ProjectDetailScreen(model: model, palette: palette)
+        } else if model.selectedSurface == .contexts {
+            menuListHeader
+            ContextsScreen(model: model, palette: palette)
+                .accessibilityAction(.escape) {
+                    model.endContextsInput()
+                    if model.quickAccessView != "contexts" { Task { await model.closeContexts() } }
+                }
+        } else if model.selectedSurface == .waiting {
+            menuListHeader
+            WaitingScreen(model: model, palette: palette)
+                .accessibilityAction(.escape) { Task { await model.closeWaiting() } }
+        } else if model.selectedSurface == .someday {
+            menuListHeader
+            SomedayScreen(model: model, palette: palette)
+                .accessibilityAction(.escape) { Task { await model.closeSomeday() } }
+        } else if model.selectedSurface == .settings {
+            SettingsScreen(model: model, palette: palette)
+        } else if model.selectedSurface == .savedSearch {
+            menuListHeader
+            SavedSearchScreen(model: model, palette: palette)
+                .accessibilityAction(.escape) { Task { await model.closeSavedSearch() } }
+        } else if model.selectedSurface == .trash {
+            menuListHeader
+            TrashScreen(model: model, palette: palette)
+                .accessibilityAction(.escape) { Task { await model.closeTrash() } }
+        } else if model.selectedSurface == .history {
+            menuListHeader
+            HistoryScreen(model: model, palette: palette)
+                .accessibilityAction(.escape) { Task { await model.closeHistory() } }
+        } else if model.selectedSurface == .reference {
+            menuListHeader
+            ReferenceScreen(model: model, palette: palette)
+                .accessibilityAction(.escape) { Task { await model.closeReference() } }
+        } else if model.selectedSurface == .focus && model.focusOrderPresented {
+            focusOrderContent
+        }
+    }
+
     private var primarySurfaceContent: AnyView {
-        AnyView(Group {
-            if model.selectedSurface == .search {
-                SearchScreen(model: model, palette: palette)
-            } else if model.selectedSurface == .project && model.projectRowAreaOverList {
-                ZStack {
-                    VStack(spacing: 0) {
-                        InboxHeader(model: model, palette: palette)
-                        ProjectsScreen(model: model, palette: palette)
-                    }
-                    .disabled(true)
-                    ProjectDetailScreen(model: model, palette: palette).opacity(0).allowsHitTesting(false).accessibilityHidden(true)
-                }
-                .onChange(of: model.projectRowAreaReturnReady) { ready in
-                    if ready { Task { await model.returnFromProjectRowArea() } }
-                }
-            } else if model.selectedSurface == .project {
-                ProjectDetailScreen(model: model, palette: palette)
-            } else if model.selectedSurface == .contexts {
-                menuListHeader
-                ContextsScreen(model: model, palette: palette)
-                    .accessibilityAction(.escape) {
-                        model.endContextsInput()
-                        if model.quickAccessView != "contexts" { Task { await model.closeContexts() } }
-                    }
-            } else if model.selectedSurface == .waiting {
-                menuListHeader
-                WaitingScreen(model: model, palette: palette)
-                    .accessibilityAction(.escape) { Task { await model.closeWaiting() } }
-            } else if model.selectedSurface == .someday {
-                menuListHeader
-                SomedayScreen(model: model, palette: palette)
-                    .accessibilityAction(.escape) { Task { await model.closeSomeday() } }
-            } else if model.selectedSurface == .settings {
-                SettingsScreen(model: model, palette: palette)
-            } else if model.selectedSurface == .savedSearch {
-                menuListHeader
-                SavedSearchScreen(model: model, palette: palette)
-                    .accessibilityAction(.escape) { Task { await model.closeSavedSearch() } }
-            } else if model.selectedSurface == .trash {
-                menuListHeader
-                TrashScreen(model: model, palette: palette)
-                    .accessibilityAction(.escape) { Task { await model.closeTrash() } }
-            } else if model.selectedSurface == .history {
-                menuListHeader
-                HistoryScreen(model: model, palette: palette)
-                    .accessibilityAction(.escape) { Task { await model.closeHistory() } }
-            } else if model.selectedSurface == .reference {
-                menuListHeader
-                ReferenceScreen(model: model, palette: palette)
-                    .accessibilityAction(.escape) { Task { await model.closeReference() } }
-            } else if model.selectedSurface == .focus && model.focusOrderPresented {
-                focusOrderContent
-            } else {
-                InboxHeader(model: model, palette: palette)
+        let fullScreen = fullScreenSurfaceShown
+        return AnyView(ZStack(alignment: .top) {
+            VStack(spacing: 0) {
+                if !fullScreen { InboxHeader(model: model, palette: palette) }
                 if model.ready {
                     ZStack(alignment: .top) {
-                        KeptTabSurfaces(model: model, palette: palette, selected: model.selectedSurface)
-                        if model.selectedSurface == .calendar { CalendarScreen(model: model, palette: palette) }
-                        else if model.selectedSurface == .board { BoardScreen(model: model, palette: palette) }
-                        else if model.selectedSurface == .projects { ProjectsScreen(model: model, palette: palette) }
+                        KeptTabSurfaces(model: model, palette: palette, selected: fullScreen ? .calendar : model.selectedSurface)
+                            .id(model.hostIdentity)
+                        if !fullScreen {
+                            if model.selectedSurface == .calendar { CalendarScreen(model: model, palette: palette) }
+                            else if model.selectedSurface == .board { BoardScreen(model: model, palette: palette) }
+                            else if model.selectedSurface == .projects { ProjectsScreen(model: model, palette: palette) }
+                        }
                     }
                 } else {
                     Spacer()
                     ModelShown { model.busyShown } content: { ProgressView().accessibilityLabel(model.label("common.loading")) }
                     Spacer()
                 }
+            }
+            if fullScreen {
+                VStack(spacing: 0) { fullScreenSurfaceContent }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    .background(palette.bg)
             }
         })
     }
@@ -615,6 +636,9 @@ private struct KeptTabSurfaces: View {
             tab(.review) { ReviewScreen(model: model, palette: palette) }
             tab(.focus) { FocusSurface(model: model, palette: palette) }
             tab(.calendar) { EmptyView() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didReceiveMemoryWarningNotification)) { _ in
+            visited = [selected]
         }
         .onChange(of: selected, initial: true) { previous, surface in
             if !visited.contains(surface) { visited.insert(surface) }

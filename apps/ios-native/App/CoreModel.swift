@@ -2660,6 +2660,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     #endif
 
     @ObservationIgnored private weak var inboxViewBoundaryRecordedHost: CoreHost?
+    var hostIdentity: ObjectIdentifier? { host.map { ObjectIdentifier($0) } }
     private var host: CoreHost? {
         didSet {
             if oldValue.map({ ObjectIdentifier($0) }) != host.map({ ObjectIdentifier($0) }) {
