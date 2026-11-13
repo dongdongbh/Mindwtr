@@ -2596,6 +2596,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     private var notificationResponseDeferredUntilClean = false
     private var notificationResponseRetryRequested = false
     private var notificationResponseRetry: NotificationResponseRetry?
+    @ObservationIgnored private weak var notificationResponseSettledHost: CoreHost?
     private enum EntityLinkInput {
         case url(String), searchTask(String)
         var bytes: Data {
@@ -8572,6 +8573,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         #endif
         guard workspaceAdmissionsOpen, reminderCaptureHandoverOwner == nil,
               notificationResponseTask == nil, entityLinkTask == nil, notificationResponseWakePending, !busy,
+              notificationResponseSettledHost !== host,
               !settingsSyncRestartRequired, !appLockRecoveryPending,
               !retryNeeded || notificationResponseRetryRequested,
               !notificationResponseDeferredUntilClean || notificationResponseContextClean else { return }
@@ -8637,8 +8639,10 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
                 }
                 if retrying, let original = self.notificationResponseRetry?.item {
                     if !(try await self.drainNotificationResponse(original, owner: owner)) {
-                        self.retryNeeded = true
-                        self.error = "The notification action could not be confirmed. Try again."
+                        if self.notificationResponseRetry != nil {
+                            self.retryNeeded = true
+                            self.error = "The notification action could not be confirmed. Try again."
+                        }
                         self.deferNotificationResponses(); return
                     }
                 }
@@ -8658,7 +8662,13 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
             } catch {
                 guard self.host === owner.host, self.completedStartupToken == owner.token else { return }
                 if self.notificationResponseRetry == nil && error is CancellationError { return }
-                if self.notificationResponseRetry == nil { self.notificationResponseRetry = .init(item: nil, terminalOutcome: nil) }
+                let taken = self.notificationResponseRetry?.item
+                switch NativeReminderResponseFailure.resolve(retrying: retrying, responseTaken: taken != nil,
+                                                             cancelled: error is CancellationError) {
+                case .transient: self.notificationResponseRetry = nil; return
+                case .settle: await self.settleNotificationResponse(owner, taken: taken); return
+                case .confirmRetry: break
+                }
                 self.retryNeeded = true
                 self.error = "The notification action could not be confirmed. Try again."
                 if Task.isCancelled, let action = self.notificationResponseRetry?.item?.response.action {
@@ -8669,6 +8679,28 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
                 }
             }
         }
+    }
+
+    private func settleNotificationResponse(_ owner: NotificationResponseOwner, taken: NativeReminderInbox.Item?) async {
+        notificationResponseRetry = nil
+        var outcome = "suspended"
+        if let taken {
+            let admitting: NativeReminderInbox.Item?
+            if taken.stage == .admitting { admitting = taken }
+            else { admitting = try? await NativeNotificationResponses.shared.markAdmitting(taken.response.requestID) }
+            if let admitting, let heldReplay = try? await NativeNotificationResponses.shared.finish(admitting, outcome: "refused") {
+                if heldReplay { await NativeNotificationResponses.shared.acknowledgedHeldReminder(admitting) }
+                outcome = "dropped"
+            }
+        }
+        if outcome == "dropped" { notificationResponseWakePending = true }
+        else { notificationResponseSettledHost = owner.host }
+        guard host === owner.host, completedStartupToken == owner.token else { return }
+        _ = try? await owner.host.call("logLine", argumentsJSON: json([
+            "Native iOS reminder response settled",
+            try json(["releaseCheck": "v1.3.9/ios-reminder-response-settled",
+                      "action": taken?.response.action.rawValue ?? "none", "outcome": outcome]),
+        ]))
     }
 
     private func deferNotificationResponses() {

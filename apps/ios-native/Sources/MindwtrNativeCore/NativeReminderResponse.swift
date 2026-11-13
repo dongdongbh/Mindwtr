@@ -178,3 +178,12 @@ public struct NativeReminderResponse: Codable, Equatable, Sendable {
                            bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15])).uuidString.lowercased()
     }
 }
+
+public enum NativeReminderResponseFailure: Equatable, Sendable {
+    case transient, confirmRetry, settle
+
+    public static func resolve(retrying: Bool, responseTaken: Bool, cancelled: Bool) -> Self {
+        if cancelled { return responseTaken ? .confirmRetry : .transient }
+        return retrying || !responseTaken ? .settle : .confirmRetry
+    }
+}
