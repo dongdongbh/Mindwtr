@@ -7134,7 +7134,10 @@ final class CoreHostTests: XCTestCase {
         XCTAssertEqual(replayedOutcome["changed"] as? Bool, true)
     }
 
-    private func seedSomedayProjectSections() throws -> String {
+    private func seedSomedayProjectSections() async throws -> String {
+        let schema = host()
+        _ = try await schema.start()
+        await schema.close()
         var settings = try calendarPreferenceSettings()
         var gtd = settings["gtd"] as? [String: Any] ?? [:]
         var sections = gtd["viewSections"] as? [String: Any] ?? [:]
@@ -7173,7 +7176,7 @@ final class CoreHostTests: XCTestCase {
     }
 
     func testSomedayProjectSectionMoveWritesProbesAndRecoversAfterAFailedSave() async throws {
-        let id = try seedSomedayProjectSections()
+        let id = try await seedSomedayProjectSections()
         let faults = HostIOFaults()
         var saved: [String] = []
         faults.commandDiagnostic = { saved.append($0) }
