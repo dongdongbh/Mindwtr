@@ -10461,4 +10461,9 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     assert.match(activity, /if \(event == Lifecycle\.Event\.ON_STOP && !isChangingConfigurations\) \{ VoiceCapture\.recorder\?\.leave\(\); model\.voice\.left\(\) \}/);
     assert.match(source('EntryPoints.kt'), /openedCapture\(it, capture\.getString\("text"\), AutoRecord\.forCaptureLink\(url\)\)/);
 }
+{
+    const { hostGateGaps } = await import('../../ios-native/scripts/check-host-gates.mjs');
+    assert.deepEqual(hostGateGaps(resolve(app, '../ios-native')), [], 'every iOS app host read must pass its CoreHost.swift gate');
+    console.log('iOS host gates admit every menuRead name the app sends and every Organize list core offers');
+}
 console.log('Boot gates, second-read failure, failed-save refresh and editor read, and diagnostic acknowledgment passed');
