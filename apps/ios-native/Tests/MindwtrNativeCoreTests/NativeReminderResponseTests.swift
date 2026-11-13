@@ -431,3 +431,25 @@ final class NativeReminderResponseTests: XCTestCase {
     }
 
 }
+
+final class NativeReminderResponseFailureTests: XCTestCase {
+    func testAFailureBeforeAnyResponseIsTakenSettlesWithoutAskingTheUser() {
+        XCTAssertEqual(NativeReminderResponseFailure.resolve(retrying: false, responseTaken: false, cancelled: false), .settle)
+    }
+
+    func testAFailedTryAgainSettlesInsteadOfAskingAgain() {
+        XCTAssertEqual(NativeReminderResponseFailure.resolve(retrying: true, responseTaken: true, cancelled: false), .settle)
+        XCTAssertEqual(NativeReminderResponseFailure.resolve(retrying: true, responseTaken: false, cancelled: false), .settle)
+    }
+
+    func testAFirstFailureAfterAResponseWasTakenAsksForOneTryAgain() {
+        XCTAssertEqual(NativeReminderResponseFailure.resolve(retrying: false, responseTaken: true, cancelled: false), .confirmRetry)
+    }
+
+    func testCancellationNeverDropsATakenResponse() {
+        XCTAssertEqual(NativeReminderResponseFailure.resolve(retrying: false, responseTaken: true, cancelled: true), .confirmRetry)
+        XCTAssertEqual(NativeReminderResponseFailure.resolve(retrying: true, responseTaken: true, cancelled: true), .confirmRetry)
+        XCTAssertEqual(NativeReminderResponseFailure.resolve(retrying: true, responseTaken: false, cancelled: true), .transient)
+        XCTAssertEqual(NativeReminderResponseFailure.resolve(retrying: false, responseTaken: false, cancelled: true), .transient)
+    }
+}
