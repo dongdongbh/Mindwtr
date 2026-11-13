@@ -7,6 +7,16 @@ import { readFileSync } from 'node:fs';
 import { androidHostEntry } from '../scripts/android-host-table.mjs';
 
 let source: string;
+const pollReply = async (read: () => string | null, timeoutMs = 10_000) => {
+    const deadline = performance.now() + timeoutMs;
+    while (true) {
+        const answer = read();
+        if (answer !== null) return JSON.parse(answer);
+        const remaining = deadline - performance.now();
+        if (remaining <= 0) throw new Error('Calendar reference bridge did not settle');
+        await new Promise(done => setTimeout(done, Math.min(10, remaining)));
+    }
+};
 const fixtures: ReturnType<typeof fixture>[] = [];
 beforeAll(async () => {
     const built = await build({ stdin: { contents: `
@@ -83,14 +93,7 @@ const fixture = (database = new Database(':memory:')) => {
         },
     };
     vm.runInNewContext(source, state);
-    const poll = async (ticket: string) => {
-        for (let i = 0; i < 2000; i++) {
-            const answer = state.MindwtrHost.poll(ticket);
-            if (answer !== null) return JSON.parse(answer);
-            await new Promise(done => setTimeout(done, 0));
-        }
-        throw new Error('Calendar reference bridge did not settle');
-    };
+    const poll = (ticket: string) => pollReply(() => state.MindwtrHost.poll(ticket));
     const f = { state, database, writes, reject: (value: boolean) => { rejected = value; },
         call: (name: string, input: unknown) => poll(state.MindwtrHost[name](JSON.stringify(input))),
         boot: async (cold = false) => { expect(await poll(state.MindwtrHost[cold ? 'bootRecovery' : 'boot']('', '', 'journaled'))).toMatchObject({ ok: true }); writes.length = 0; },
@@ -99,6 +102,16 @@ const fixture = (database = new Database(':memory:')) => {
 };
 
 describe('exported Android frozen Project calendar reference bridge', () => {
+    it('waits for a delayed reply within its elapsed deadline', async () => {
+        const readyAt = performance.now() + 30;
+        expect(await pollReply(() => performance.now() >= readyAt ? '{"ok":true}' : null, 1000))
+            .toEqual({ ok: true });
+    });
+
+    it('bounds a bridge that never settles', async () => {
+        await expect(pollReply(() => null, 20)).rejects.toThrow('Calendar reference bridge did not settle');
+    }, 1000);
+
     it('retains the prepared calendar write endpoints in the production Android table', async () => {
         const built = fixture(); await built.boot();
         for (const method of ['projectCalendarReferencePrepare', 'projectCalendarReferenceValidate', 'projectCalendarReferenceCommit']) {
@@ -127,8 +140,11 @@ describe('exported Android frozen Project calendar reference bridge', () => {
         const original = fixture(); await original.boot();
         const envelope = await original.state.fixture.issue();
         const before = original.database.query('SELECT * FROM projects ORDER BY id').all();
+        original.writes.length = 0;
         original.reject(true);
         expect(await original.call('projectCalendarReferenceCommit', envelope)).toMatchObject({ ok: false, error: expect.stringContaining('SAVE_FAILED') });
+        expect(original.writes.filter(sql => sql.trim().toUpperCase() === 'COMMIT')).toHaveLength(5);
+        expect(original.writes.filter(sql => sql.trim().toUpperCase() === 'ROLLBACK')).toHaveLength(5);
         expect(original.database.query('SELECT * FROM projects ORDER BY id').all()).toEqual(before);
         original.reject(false);
         const cold = fixture(original.database); await cold.boot(true);
@@ -136,5 +152,5 @@ describe('exported Android frozen Project calendar reference bridge', () => {
         const stored = cold.database.query<{ calendarReference: string; rev: number }, [string]>('SELECT calendarReference, rev FROM projects WHERE id=?').get(envelope.request.projectId)!;
         expect(JSON.parse(stored.calendarReference)).toEqual(envelope.request.value);
         expect(stored.rev).toBe(envelope.prepared.scope.project.rev + 1);
-    });
+    }, 20_000);
 });
