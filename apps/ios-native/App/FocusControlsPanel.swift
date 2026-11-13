@@ -478,8 +478,7 @@ struct PomodoroTimerPanel: View {
                     if !panel.flag("collapsed") {
                         clock.frame(maxWidth: .infinity)
                         AppChipFlow {
-                            ForEach(panel.objects("presets").indices, id: \.self) { index in
-                                let preset = panel.objects("presets")[index]
+                            ForEach(Array(panel.objects("presets").enumerated()), id: \.offset) { _, preset in
                                 Button(preset.text("label")) {
                                     Task { await model.performPomodoroAction("setDurations", values: ["durations": [
                                         "focusMinutes": preset.number("focusMinutes"), "breakMinutes": preset.number("breakMinutes")]]) }
@@ -541,8 +540,7 @@ struct PomodoroTimerPanel: View {
                         }
                         .accessibilityAddTraits(selectedTaskID.isEmpty ? .isSelected : [])
                         .accessibilityIdentifier("pomodoro-task-none")
-                        ForEach(model.pomodoroTasks.indices, id: \.self) { index in
-                            let task = model.pomodoroTasks[index]
+                        ForEach(Array(model.pomodoroTasks.enumerated()), id: \.offset) { _, task in
                             let selected = selectedTaskID == task.text("id")
                             Button { Task { await model.choosePomodoroTask(task.text("id")) } } label: {
                                 HStack {

@@ -378,7 +378,7 @@ struct TaskViewSheet: View {
                         if editing && !readOnly {
                             editorFields
                         } else {
-                            ForEach(rows.indices, id: \.self) { index in row(rows[index]) }
+                            ForEach(Array(rows.enumerated()), id: \.offset) { _, entry in row(entry) }
                                 .background {
                                     if !busy, error == nil, !rows.isEmpty, navigationReplayUncovered,
                                        let ticket = model.navigationReplayTicket(for: "task") {
@@ -1566,8 +1566,7 @@ struct TaskViewSheet: View {
     private var attachmentEditor: some View {
         VStack(alignment: .leading, spacing: 10) {
             label(strings.text("attachments.title"))
-            ForEach(model.taskAttachmentRows.indices, id: \.self) { index in
-                let entry = model.taskAttachmentRows[index]
+            ForEach(Array(model.taskAttachmentRows.enumerated()), id: \.offset) { _, entry in
                 HStack(spacing: 8) {
                     Image(systemName: entry.text("kind") == "link" ? "link" : "paperclip")
                         .foregroundStyle(palette.secondary).accessibilityHidden(true)
@@ -2253,8 +2252,7 @@ private struct TaskScheduleField: View {
                 }
             }
             AppChipFlow {
-                ForEach(part.objects("quickDates").indices, id: \.self) { index in
-                    let choice = part.objects("quickDates")[index]
+                ForEach(Array(part.objects("quickDates").enumerated()), id: \.offset) { _, choice in
                     chip(choice.text("label"), selected: choice.flag("selected"), id: prefix + "-quick-" + choice.text("preset")) {
                         pickerID = ""
                         model.editTaskDate(field, action: "quick", preset: choice.text("preset"))
@@ -2286,8 +2284,7 @@ private struct TaskScheduleField: View {
         VStack(alignment: .leading, spacing: 8) {
             Text(reminders.text("policyLabel")).rnFont(14).foregroundStyle(palette.text).accessibilityAddTraits(.isHeader)
             AppChipFlow {
-                ForEach(reminders.objects("policyOptions").indices, id: \.self) { index in
-                    let option = reminders.objects("policyOptions")[index]
+                ForEach(Array(reminders.objects("policyOptions").enumerated()), id: \.offset) { _, option in
                     chip(option.text("label"), selected: option.flag("selected"), id: "task-reminder-policy-" + option.text("value")) {
                         model.setTaskReminderPolicy(option.text("value"))
                     }
@@ -2413,8 +2410,7 @@ private struct TaskScheduleField: View {
                     HStack(spacing: 8) { amountInput.frame(width: 74); beforeDue }
                 }
                 AppChipFlow {
-                    ForEach(relative.objects("units").indices, id: \.self) { index in
-                        let unit = relative.objects("units")[index]
+                    ForEach(Array(relative.objects("units").enumerated()), id: \.offset) { _, unit in
                         chip(unit.text("label"), selected: model.taskRelativeUnitInput == unit.text("unit"), id: "task-start-relative-unit-" + unit.text("unit")) {
                             model.setTaskRelativeUnit(unit.text("unit"))
                         }
@@ -3147,6 +3143,7 @@ private struct TaskWaitingAssignmentDialog: View {
                                 .accessibilityHint(model.label("process.waitingForDesc"))
                                 .accessibilityIdentifier("task-waiting-assignment-input").disabled(frozen)
                             if !suggestions.isEmpty {
+                                let suggestions = self.suggestions
                                 ForEach(suggestions.indices, id: \.self) { index in
                                     Button {
                                         input = suggestions[index].text("text")
@@ -3335,8 +3332,7 @@ private struct TaskMonthlyCustomDialog: View {
                 }
             }
             AppChipFlow {
-                ForEach(weekdays.indices, id: \.self) { index in
-                    let day = weekdays[index]
+                ForEach(Array(weekdays.enumerated()), id: \.offset) { _, day in
                     choice(day.text("label"), selected: custom.text("weekday") == day.text("day"), id: "weekday-" + day.text("day")) {
                         custom["weekday"] = day.text("day")
                     }
@@ -3551,8 +3547,7 @@ private struct TaskDestinationPicker: View {
                                         choice(entry.value, kind: entry.kind, groupLabel: "")
                                     }
                                 } else {
-                                    ForEach(field.objects("groups").indices, id: \.self) { index in
-                                        let group = field.objects("groups")[index]
+                                    ForEach(Array(field.objects("groups").enumerated()), id: \.offset) { _, group in
                                         if !group.text("label").isEmpty {
                                             Text(group.text("label")).rnFont(16, .bold).foregroundStyle(palette.secondary)
                                                 .padding(.horizontal, 14).padding(.vertical, 10).accessibilityAddTraits(.isHeader)

@@ -25,8 +25,7 @@ struct HistoryScreen: View {
         ZStack {
             VStack(spacing: 0) {
                 HStack(spacing: 0) {
-                    ForEach(model.historyTabs.objects("tabs").indices, id: \.self) { index in
-                        let tab = model.historyTabs.objects("tabs")[index]
+                    ForEach(Array(model.historyTabs.objects("tabs").enumerated()), id: \.offset) { _, tab in
                         Button {
                             searchFocused = false
                             Task { await model.selectHistoryTab(tab.text("id")) }
@@ -180,8 +179,7 @@ struct HistoryScreen: View {
     private var archiveContent: some View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
-                ForEach(model.history.objects("segments").indices, id: \.self) { index in
-                    let segment = model.history.objects("segments")[index]
+                ForEach(Array(model.history.objects("segments").enumerated()), id: \.offset) { _, segment in
                     Button {
                         searchFocused = false
                         Task { await model.setHistoryOption("segment", value: segment.text("id")) }
@@ -320,8 +318,7 @@ struct HistoryScreen: View {
                 .accessibilityIdentifier("done-bulk-count")
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
-                    ForEach(model.historyDoneBulk.object("bar").objects("statuses").indices, id: \.self) { index in
-                        let option = model.historyDoneBulk.object("bar").objects("statuses")[index]
+                    ForEach(Array(model.historyDoneBulk.object("bar").objects("statuses").enumerated()), id: \.offset) { _, option in
                         Button { Task { await model.restoreSelectedArchiveTasks(doneStatus: option.text("status")) } } label: {
                             Text(option.text("label")).rnFont(13, .semibold)
                                 .fixedSize(horizontal: true, vertical: false)
@@ -784,8 +781,7 @@ private struct HistoryDoneBulkRemoveTagDialog: View {
                                 .accessibilityLabel(model.doneBulkRemoveOptions.text("placeholder"))
                                 .accessibilityIdentifier("done-bulk-remove-tag-input")
                             AppChipFlow {
-                                ForEach(model.doneBulkRemoveItems.indices, id: \.self) { index in
-                                    let item = model.doneBulkRemoveItems[index]
+                                ForEach(Array(model.doneBulkRemoveItems.enumerated()), id: \.offset) { index, item in
                                     let picked = model.doneBulkRemovePicked(item.text("value"))
                                     Button { model.toggleDoneBulkRemove(item.text("value")) } label: {
                                         Text(item.text("label")).rnFont(14).multilineTextAlignment(.leading).fixedSize(horizontal: false, vertical: true)
@@ -1000,8 +996,7 @@ struct HistoryPanel: View {
                     }
                 }
             } else {
-                ForEach(submenu.objects("options").indices, id: \.self) { index in
-                    let option = submenu.objects("options")[index]
+                ForEach(Array(submenu.objects("options").enumerated()), id: \.offset) { _, option in
                     let value = option.text(model.historyArchived ? "id" : "value")
                     let field = model.historyPanel
                     overflowRow(title: option.text("label"), selected: option.flag("selected"), id: menuPrefix + "-" + field + "-" + value) {

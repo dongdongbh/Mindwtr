@@ -441,8 +441,7 @@ struct InboxScreen: View {
 
     private var areaOptions: some View {
         VStack(spacing: 10) {
-            ForEach(model.area.objects("options").indices, id: \.self) { index in
-                let option = model.area.objects("options")[index]
+            ForEach(Array(model.area.objects("options").enumerated()), id: \.offset) { _, option in
                 let included = option.text("state") == "included"
                 let excluded = option.text("state") == "excluded"
                 let tone = excluded ? palette.danger : included ? palette.tint : palette.text
@@ -2470,8 +2469,7 @@ struct TaskCard: View {
                                 statusMenu = $0; model.navigationReplayLocalCover(navigationReplayCoverID, presented: $0)
                             }), titleVisibility: .visible) {
             if let onStatusChange {
-                ForEach(statusOptions.objects("options").indices, id: \.self) { index in
-                    let option = statusOptions.objects("options")[index]
+                ForEach(Array(statusOptions.objects("options").enumerated()), id: \.offset) { _, option in
                     Button((option.flag("selected") ? "✓ " : "") + option.text("label")) {
                         onStatusChange(statusRow, option.text("status"))
                     }
@@ -2480,8 +2478,7 @@ struct TaskCard: View {
                         .accessibilityIdentifier("done-status-" + option.text("status"))
                 }
             } else {
-                ForEach(statusOptions.objects("options").indices, id: \.self) { index in
-                    let option = statusOptions.objects("options")[index]
+                ForEach(Array(statusOptions.objects("options").enumerated()), id: \.offset) { _, option in
                     Button((option.flag("selected") ? "✓ " : "") + option.text("label")) {
                         selectDefaultStatus(option)
                     }
@@ -3390,8 +3387,7 @@ private struct InboxBulkRemoveTagDialog: View {
     private var options: some View {
         VStack(alignment: .leading, spacing: 12) {
             AppChipFlow {
-                ForEach(model.inboxBulkRemoveItems.indices, id: \.self) { index in
-                    let item = model.inboxBulkRemoveItems[index]
+                ForEach(Array(model.inboxBulkRemoveItems.enumerated()), id: \.offset) { index, item in
                     let picked = model.inboxBulkRemovePicked(item.text("value"))
                     Button { model.toggleInboxBulkRemove(item.text("value")) } label: {
                         Text(item.text("label")).rnFont(14).multilineTextAlignment(.leading).fixedSize(horizontal: false, vertical: true)
@@ -3565,8 +3561,7 @@ private struct InboxBulkOrganizeDialog: View {
         VStack(alignment: .leading, spacing: 14) {
             Text(view.text("statusLabel")).rnFont(14, .semibold)
             AppChipFlow {
-                ForEach(view.objects("statuses").indices, id: \.self) { index in
-                    let item = view.objects("statuses")[index]
+                ForEach(Array(view.objects("statuses").enumerated()), id: \.offset) { _, item in
                     Button { model.editInboxBulkOrganize(item.object("edit")) } label: {
                         Text(item.text("label")).rnFont(14).padding(.horizontal, 12).padding(.vertical, 10)
                             .frame(minHeight: 44).foregroundStyle(item.flag("selected") ? palette.onTint : palette.text)
@@ -3582,8 +3577,8 @@ private struct InboxBulkOrganizeDialog: View {
             if view["waitingFor"] is CoreObject {
                 input("delegateWho", part: view.object("waitingFor"))
             }
-            ForEach(view.objects("dates").indices, id: \.self) { index in
-                AnyView(date(view.objects("dates")[index]))
+            ForEach(Array(view.objects("dates").enumerated()), id: \.offset) { _, dateField in
+                AnyView(date(dateField))
             }
             input("contexts", part: view.object("contexts"))
             input("tags", part: view.object("tags"))
@@ -3738,8 +3733,7 @@ private struct TaskChecklistMoveDialog: View {
                         .accessibilityIdentifier("checklist-move-search").disabled(frozen)
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 4) {
-                            ForEach(model.taskChecklistMoveItems.indices, id: \.self) { index in
-                                let target = model.taskChecklistMoveItems[index]
+                            ForEach(Array(model.taskChecklistMoveItems.enumerated()), id: \.offset) { _, target in
                                 Button {
                                     guard !frozen, model.taskChecklistMovePickerCurrent else { return }
                                     searchFocused = false

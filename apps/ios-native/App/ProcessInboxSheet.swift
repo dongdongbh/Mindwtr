@@ -147,8 +147,7 @@ struct ProcessInboxSheet: View {
                 .accessibilityIdentifier("process-inbox-title")
             if !capture.objects("similarTasks").isEmpty {
                 Text(capture.text("similarTasksLabel")).rnFont(12, .semibold).foregroundStyle(palette.secondary)
-                ForEach(capture.objects("similarTasks").indices, id: \.self) { index in
-                    let task = capture.objects("similarTasks")[index]
+                ForEach(Array(capture.objects("similarTasks").enumerated()), id: \.offset) { index, task in
                     VStack(alignment: .leading, spacing: 2) {
                         Text(task.text("title")).rnFont(13)
                         Text(task.text("meta")).rnFont(11).foregroundStyle(palette.secondary)
