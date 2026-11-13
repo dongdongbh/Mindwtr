@@ -4657,9 +4657,10 @@ final class CoreHostTests: XCTestCase {
         XCTAssertTrue(primary.allSatisfy { ($0["label"] as? String)?.isEmpty == false && ($0["icon"] as? String)?.isEmpty == false })
         let searches = try XCTUnwrap(more["savedSearches"] as? [String: Any])
         XCTAssertEqual(searches["total"] as? Int, 0)
-        for name in ["moveDialog", "contextsAction", "", "__proto__"] {
+        for name in ["taskShare", "contextsAction", "", "__proto__"] {
             await expectFailure("Unsupported native menu") { _ = try await core.call("menuRead", argumentsJSON: json([name, "{}"])) }
         }
+        await expectFailure("INVALID_INPUT") { _ = try await core.call("menuRead", argumentsJSON: json(["moveDialog", "{}"])) }
         await expectFailure("Unsupported native Projects tag filter") {
             _ = try await core.call("menuRead", argumentsJSON: json(["projects", "{}"]))
         }
