@@ -3586,7 +3586,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     var focusControlsEnabled: Bool { focusControls(shown: false) }
     var focusControlsShown: Bool { focusControls(shown: true) }
     private func focusControls(shown: Bool) -> Bool {
-        ready && (shown || selectedSurface == .focus) && !focus.isEmpty && !operationBusy(shown: shown) && !retryNeeded && !taskPresented && !areaPickerPresented && !focusOrderPresented && !focusSavedFilterPresented
+        ready && (shown || selectedSurface == .focus) && !focus.isEmpty && !operationBusy(shown: shown) && !retryNeeded && (shown || (!taskPresented && !areaPickerPresented)) && !focusOrderPresented && !focusSavedFilterPresented
     }
     var focusSavedFilterPresented: Bool { !focusSavedFilterOperation.isEmpty }
     var focusSavedFilterCanConfirm: Bool {
@@ -3602,7 +3602,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     var reviewActionsShown: Bool { reviewActions(shown: true) }
     private func reviewActions(shown: Bool) -> Bool {
         ready && (shown || selectedSurface == .review) && (shown ? reviewCurrentShown : reviewCurrent) && !operationBusy(shown: shown) && !retryNeeded
-            && !taskPresented && !areaPickerPresented && !reviewPickerPresented && !mindSweepPresented
+            && (shown || (!taskPresented && !areaPickerPresented)) && !reviewPickerPresented && !mindSweepPresented
             && !processInboxPresented && reviewProjectCompletionOptions.isEmpty && projectLifecycleRequest == nil && reviewProjectTaskOwner == nil
     }
     var reviewRows: [CoreObject] {
@@ -18327,7 +18327,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
             && UIApplication.shared.applicationState == .active
             && (surface != .project || !projectDetail.flag("readOnly"))
             && (surface == .reference ? referenceActionsEnabled : taskCardSurfaceActions(shown: shown, surface: surface))
-            && notificationResponseContextIsClean(allowingReviewGuide: true, allowingProjectNotes: surface == .project)
+            && (shown || notificationResponseContextIsClean(allowingReviewGuide: true, allowingProjectNotes: surface == .project))
     }
     func taskRowSwipeRowEligible(_ row: CoreObject, surface: Surface? = nil) -> Bool {
         !row.flag("readOnly") && !row.text("id").isEmpty && !row.text("taskRevision").isEmpty && taskRowSwipeRowListed(row, surface: surface)
@@ -19917,8 +19917,8 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     }
 
     func taskFocusInputEnabled(_ row: CoreObject, checkingCurrentRow: Bool = false, shown: Bool = false, surface: Surface? = nil) -> Bool {
-        guard ready, !operationBusy(shown: shown), !retryNeeded, taskFocusRequest == nil, !taskPresented,
-              !capturePresented, !areaPickerPresented, !morePresented, !projectRenameEditing,
+        guard ready, !operationBusy(shown: shown), !retryNeeded, taskFocusRequest == nil, shown || (!taskPresented && !capturePresented && !areaPickerPresented && !morePresented),
+              !projectRenameEditing,
               !row.flag("readOnly"), row.object("meta").flag("canFocus") else { return false }
         let rows: [CoreObject]
         switch surface ?? selectedSurface {
@@ -28547,7 +28547,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     var inboxActionsShown: Bool { inboxActions(shown: true) }
     private func inboxActions(shown: Bool) -> Bool {
         ready && (shown || selectedSurface == .inbox) && (shown ? inboxCurrentShown : inboxCurrent) && !operationBusy(shown: shown) && !retryNeeded && !appLock.concealed
-            && !taskPresented && !capturePresented && !areaPickerPresented && !morePresented
+            && (shown || (!taskPresented && !capturePresented && !areaPickerPresented && !morePresented))
             && !inboxGroupPresented && !inboxSortPresented && !inboxFiltersPresented && !inboxFilterWorkPending
             && !inboxBulkCompositionBlocked && !projectBulkCompositionBlocked
     }
