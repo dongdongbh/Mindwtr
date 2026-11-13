@@ -7175,6 +7175,14 @@ final class CoreHostTests: XCTestCase {
         return try object(raw)["someday"] as? String
     }
 
+    func testSyncBadgeReadPassesTheNativeMenuReadGate() async throws {
+        let core = host()
+        _ = try await core.start()
+        let badge = try object(await core.call("menuRead", argumentsJSON: json(["syncBadge", "{}"])))
+        XCTAssertEqual(badge["state"] as? String, "hidden")
+        await core.close()
+    }
+
     func testMarkdownEditorReadsPassTheNativeMenuReadGate() async throws {
         let core = host()
         _ = try await core.start()
