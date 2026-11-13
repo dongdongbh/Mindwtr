@@ -694,9 +694,11 @@ private struct InboxSurface: View {
                             .frame(minHeight: 44).modifier(ModelDisabled { model.busyShown || model.retryNeeded || model.menuPanelPresented })
                             .accessibilityIdentifier("inbox-group-retry")
                     }
-                    ForEach(inboxRows, id: \.id) { entry in
+                    let rows = inboxRows
+                    let pagingRows = Set(rows.suffix(5).map(\.id))
+                    ForEach(rows, id: \.id) { entry in
                         InboxListRow(model: model, item: entry.item, palette: palette).equatable()
-                            .modifier(InboxAutomaticPage(model: model, identity: entry.id))
+                            .modifier(InboxAutomaticPage(model: model, identity: entry.id, pages: pagingRows.contains(entry.id)))
                     }
                     if model.items.count < model.inbox.number("total") {
                         Button { Task { await model.loadMore() } } label: {
@@ -1675,8 +1677,9 @@ private struct FocusTaskRow: View, Equatable {
 private struct InboxAutomaticPage: ViewModifier {
     let model: CoreModel
     let identity: [String]
+    let pages: Bool
     func body(content: Content) -> some View {
-        content.onAppear { Task { await model.loadMore(automaticRow: identity) } }
+        content.onAppear { if pages { Task { await model.loadMore(automaticRow: identity) } } }
     }
 }
 
@@ -2052,7 +2055,7 @@ private struct TaskRowSwipeTray: ViewModifier {
             }
             .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
             .background(GeometryReader { geometry in
-                Color.clear.onAppear { width = geometry.size.width }
+                Color.clear.onAppear { if width != geometry.size.width { width = geometry.size.width } }
                     .onChange(of: geometry.size.width) { width = $0; close() }
             })
             .modifier(TaskRowSwipeDrag(active: !left.isEmpty || !right.isEmpty, began: dragBegan, changed: dragChanged, ended: dragEnded))
@@ -2067,7 +2070,11 @@ private struct TaskRowSwipeTray: ViewModifier {
             .onChange(of: closeGeneration) { _ in close() }
             .onChange(of: active) { if !$0 { close() } }
             .onChange(of: scenePhase) { if $0 != .active { close() } }
-            .onDisappear { offset = 0; dragAxis = 0; openingOffset = 0 }
+            .onDisappear {
+                if offset != 0 { offset = 0 }
+                if dragAxis != 0 { dragAxis = 0 }
+                if openingOffset != 0 { openingOffset = 0 }
+            }
         }
     }
     private func button(_ action: CoreObject, native: Bool) -> some View {
