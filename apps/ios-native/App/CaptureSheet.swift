@@ -165,8 +165,9 @@ struct CaptureSheet: View {
             if !model.capture.objects("preview").isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 6) {
-                        ForEach(model.capture.objects("preview").indices, id: \.self) { index in
-                            let entry = model.capture.objects("preview")[index]
+                        let preview = model.capture.objects("preview")
+                        ForEach(preview.indices, id: \.self) { index in
+                            let entry = preview[index]
                             Text((entry.text("label").isEmpty ? "" : entry.text("label") + ": ") + entry.text("value"))
                                 .rnFont(12, .medium).foregroundStyle(entry.text("tone") == "warning" ? palette.warning : palette.secondary)
                                 .padding(.horizontal, 8).padding(.vertical, 5)
@@ -303,8 +304,9 @@ struct CaptureSheet: View {
                         .fixedSize(horizontal: false, vertical: true)
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 8) {
-                            ForEach(model.captureCopilotView.objects("chips").indices, id: \.self) { index in
-                                let chip = model.captureCopilotView.objects("chips")[index]
+                            let chips = model.captureCopilotView.objects("chips")
+                            ForEach(chips.indices, id: \.self) { index in
+                                let chip = chips[index]
                                 Button { Task { await model.applyCaptureCopilot(chip.object("edit")) } } label: {
                                     Text(chip.text("label")).rnFont(12, .semibold)
                                         .padding(.horizontal, 12).frame(minHeight: 44)
@@ -430,8 +432,9 @@ struct CaptureSheet: View {
     }
 
     @ViewBuilder private var dateChips: some View {
-        ForEach(model.capture.object("due").objects("quickDates").indices, id: \.self) { index in
-            let date = model.capture.object("due").objects("quickDates")[index]
+        let quickDates = model.capture.object("due").objects("quickDates")
+        ForEach(quickDates.indices, id: \.self) { index in
+            let date = quickDates[index]
             Button { Task { await model.editCapture(date.object("edit")) } } label: {
                 Text(date.text("label")).rnFont(12, .semibold)
                     .foregroundStyle(date.flag("selected") ? palette.tint : palette.secondary)
@@ -489,8 +492,9 @@ private struct ContextPicker: View {
             if !picker.objects("selected").isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
-                        ForEach(picker.objects("selected").indices, id: \.self) { index in
-                            let item = picker.objects("selected")[index]
+                        let selected = picker.objects("selected")
+                        ForEach(selected.indices, id: \.self) { index in
+                            let item = selected[index]
                             Button { Task { await model.editCapture(item.object("edit")) } } label: {
                                 Text(item.text("label")).rnFont(12, .semibold)
                                     .padding(.horizontal, 10).padding(.vertical, 6)
@@ -516,8 +520,9 @@ private struct ContextPicker: View {
                     }
                     .buttonStyle(.plain).modifier(ModelDisabled { !model.contextPickerReady })
                     .accessibilityIdentifier("capture-context-clear")
-                    ForEach(picker.objects("items").indices, id: \.self) { index in
-                        let item = picker.objects("items")[index]
+                    let items = picker.objects("items")
+                    ForEach(items.indices, id: \.self) { index in
+                        let item = items[index]
                         Button {
                             Task { await model.editCapture(item.object("edit"), clearContextQuery: true) }
                         } label: {
