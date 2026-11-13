@@ -883,6 +883,23 @@ final class NativeNotificationDelegate: NSObject, UIApplicationDelegate, UNUserN
         return true
     }
 
+    func application(_ application: UIApplication,
+                     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+        guard let selection = try? NativeAppLaunch.selection.get() else { return true }
+        switch selection {
+        case .production, .standard: application.registerForRemoteNotifications()
+        case .isolated, .rehearsal: break
+        }
+        return true
+    }
+
+    func application(_ application: UIApplication, didReceiveRemoteNotification userInfo: [AnyHashable: Any],
+                     fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void) {
+        let handled = NativeCloudKitPushInbox.isZoneChange(userInfo)
+        if handled { Task { @MainActor in NativeAppModel.shared.receiveCloudKitPush() } }
+        completionHandler(handled ? .newData : .noData)
+    }
+
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
                                 withCompletionHandler completionHandler: @escaping () -> Void) {
         let namespace: String

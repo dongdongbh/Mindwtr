@@ -64,6 +64,8 @@ final class NativeCloudKitBridge: @unchecked Sendable {
             result = try Self.encode(await transport.accountStatus())
         case .ensureZone:
             try await transport.ensureZone(); result = "null"
+        case .ensureSubscription:
+            try await transport.ensureSubscription(); result = "null"
         case .fetchAllRecords(let type):
             result = try await transport.fetchAllRecords(recordType: type.rawValue)
         case .saveRecords(let type, let records):

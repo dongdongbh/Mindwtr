@@ -675,6 +675,37 @@ describe('event-owned iOS stored/resume pacing', () => {
         expect(fixture.schedules).toEqual([]);
     });
 
+    it('runs a CloudKit push sync at once like RN\'s cloudkit trigger, and skips it for any other provider', async () => {
+        resetForTests();
+        let now = 100_000;
+        spyOn(Date, 'now').mockImplementation(() => now);
+        iosFiles();
+        const calls: string[] = [];
+        const port = {
+            isAvailable: () => true,
+            getAccountStatus: async () => 'available' as const,
+            ensureReady: async () => { calls.push('ensureReady'); },
+            read: async () => { calls.push('read'); return null; },
+            write: async () => { calls.push('write'); },
+            assets: { saveAttachmentAsset: async () => {}, fetchAttachmentAsset: async () => { throw new Error('no asset'); },
+                deleteAttachmentAssets: async () => {}, isAttachmentNotFoundError: () => false },
+        };
+        const fixture = host({ [SYNC_BACKEND_KEY]: 'cloudkit' }, false, async () => data(), async () => false);
+        const sync = createNativeSync({ ...fixture.bindings, cloudKit: port });
+        expect(await sync.performStoredAutomaticSync('startup')).toEqual({ success: true, skipped: false });
+        now += 1_000;
+        expect(await sync.performStoredAutomaticSync('resume')).toEqual({ success: true, skipped: true });
+        calls.length = 0;
+        expect(await sync.performStoredAutomaticSync('push')).toEqual({ success: true, skipped: false });
+        expect(calls).toContain('read');
+        expect(sync.state().cycles).toBe(2);
+
+        resetForTests(); serve();
+        const webdav = configured();
+        expect(await webdav.sync.performStoredAutomaticSync('push')).toEqual({ success: true, skipped: true });
+        expect(webdav.sync.state().cycles).toBe(0);
+    });
+
     it('reports an unsynced local edit and syncs it when the app leaves like RN', async () => {
         resetForTests(); serve();
         let now = 100_000;

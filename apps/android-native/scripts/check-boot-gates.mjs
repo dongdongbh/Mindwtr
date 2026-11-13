@@ -6394,7 +6394,7 @@ export function createNativeSync() {
             assert.equal((await foregroundCommand(name, value)).value.ok, true);
             assert.deepEqual(JSON.parse(JSON.stringify(foreground.foregroundInputs.at(-1))), [name, value]);
         }
-        for (const [name, reason] of [['syncStored', 'startup'], ['syncResume', 'resume'], ['syncChange', 'change']]) {
+        for (const [name, reason] of [['syncStored', 'startup'], ['syncResume', 'resume'], ['syncChange', 'change'], ['syncPush', 'push']]) {
             assert.deepEqual((await foregroundCommand(name, {})).value.value, { success: true, skipped: false });
             assert.deepEqual(JSON.parse(JSON.stringify(foreground.foregroundInputs.at(-1))), ['stored', reason]);
         }
@@ -6404,7 +6404,7 @@ export function createNativeSync() {
     assert(!(foreground.logText ?? '').includes('synthetic398'), 'Owned command marker contains no endpoint or token');
     for (const [name, value] of [['selectSyncBackend', { requestId: request.requestId, option: 'selfhosted' }],
         ...['saveSyncBackend', 'syncNow', 'testSyncConnection'].map(name => [name, { ...request, selfHosted: selfHostedFields }]),
-        ['syncStored', {}], ['syncResume', {}], ['syncChange', {}]]) {
+        ['syncStored', {}], ['syncResume', {}], ['syncChange', {}], ['syncPush', {}]]) {
         foreground.incompleteTransition = true;
         const prior = foreground.foregroundInputs.length;
         const priorDownloads = foreground.attachmentInputs.length;

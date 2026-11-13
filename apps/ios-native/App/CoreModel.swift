@@ -2449,6 +2449,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     @ObservationIgnored private var syncChangeTicket = 0
     @ObservationIgnored private var syncChangeWake: Task<Void, Never>?
     @ObservationIgnored private var syncChangeTask: Task<Void, Never>?
+    @ObservationIgnored private var cloudKitPushInbox = NativeCloudKitPushInbox()
     private static let syncChangeDeferralMs = 5_000
     private var foregroundSyncSceneActive = false
     private var foregroundSyncBackgroundObserved = false
@@ -9474,6 +9475,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
 
     func externalContextBecameClean() {
         watchCommandsChanged()
+        admitCloudKitPushSync()
         observeChangeSync()
         if productionWidgetFamilyEligible {
             requestSearchLifecycle(token: completedStartupToken, active: searchSceneActive, force: true)
@@ -11354,30 +11356,62 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
             do { try await Task.sleep(nanoseconds: UInt64(delayMs) * 1_000_000) } catch { return }
             guard let self, self.host === currentHost, self.syncChangeTicket == ticket else { return }
             self.syncChangeWake = nil
+            self.admitCloudKitPushSync()
             self.admitChangeSync(currentHost)
         }
     }
 
+    private var automaticSyncGate: NativeAutomaticSyncGate {
+        NativeAutomaticSyncGate(
+            foreground: foregroundSyncSceneActive && UIApplication.shared.applicationState == .active,
+            locked: appLock.concealed || appLockActive || appLockRecoveryPending,
+            busy: busy || reminderCaptureHandoverOwner != nil,
+            contextClean: notificationResponseContextClean && surfaceRefreshAllowed,
+            syncRunning: syncChangeTask != nil || foregroundSyncIntent != nil || foregroundSyncOwner != nil || foregroundSyncTask != nil,
+            ready: ready && !retryNeeded && !settingsSyncRestartRequired && completedStartupToken != nil)
+    }
+
+    func receiveCloudKitPush() {
+        cloudKitPushInbox.note()
+        guard let currentHost = host else { return }
+        Task {
+            _ = try? await currentHost.call("logLine", argumentsJSON: self.json([
+                "Native iOS CloudKit change notification received",
+                #"{"releaseCheck":"v1.3.9/ios-cloudkit-push","operation":"push","outcome":"received"}"#,
+            ]))
+        }
+        admitCloudKitPushSync()
+    }
+
+    private func admitCloudKitPushSync() {
+        guard cloudKitPushInbox.pending, let currentHost = syncTriggerHost else { return }
+        guard cloudKitPushInbox.take(automaticSyncGate) else { return }
+        startAutomaticSync("syncPush", host: currentHost)
+    }
+
     private func admitChangeSync(_ currentHost: CoreHost) {
-        guard syncChangeTask == nil, foregroundSyncIntent == nil, foregroundSyncOwner == nil, foregroundSyncTask == nil,
-              foregroundSyncSceneActive, UIApplication.shared.applicationState == .active,
-              !appLock.concealed, !appLockActive, syncTriggerHost === currentHost, ready, !busy, !retryNeeded,
-              !settingsSyncRestartRequired, !appLockRecoveryPending, reminderCaptureHandoverOwner == nil,
-              notificationResponseContextClean, surfaceRefreshAllowed, let token = completedStartupToken else { return }
+        guard automaticSyncGate.open, syncTriggerHost === currentHost else { return }
+        startAutomaticSync("syncChange", host: currentHost)
+    }
+
+    private func startAutomaticSync(_ command: String, host currentHost: CoreHost) {
+        guard let token = completedStartupToken else { return }
         syncChangeTask = Task { [weak self] in
             guard let self else { return }
             var synced = false, deferred = false
             do {
-                let result: CoreObject = try self.decode(try await currentHost.foregroundSync(command: "syncChange", requestJSON: "{}"))
+                let result: CoreObject = try self.decode(try await currentHost.foregroundSync(command: command, requestJSON: "{}"))
                 try self.validateForegroundSyncReply(result)
                 synced = result.flag("ok") && result.object("value").flag("success") && !result.object("value").flag("skipped")
             } catch is CoreHostRejection {
                 deferred = true
             } catch is CancellationError {
-                await self.logSyncCancelledCleanly("syncChange")
+                if command == "syncPush" { self.cloudKitPushInbox.note() }
+                await self.logSyncCancelledCleanly(command)
             } catch {
                 self.requireSettingsSyncRestart(currentHost)
             }
+            if deferred && command == "syncPush" { self.cloudKitPushInbox.note() }
             self.finishChangeSync(currentHost, token: token, synced: synced, deferred: deferred)
         }
     }
@@ -11394,7 +11428,10 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         if deferred, foregroundSyncSceneActive {
             syncChangeTicket &+= 1
             armChangeSync(after: Self.syncChangeDeferralMs, host: owner, ticket: syncChangeTicket)
-        } else { observeChangeSync() }
+        } else {
+            admitCloudKitPushSync()
+            observeChangeSync()
+        }
     }
 
     private func observeSyncBadge() {
@@ -48459,6 +48496,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
             gmailCapture.admit()
             admitBackgroundSync()
             observeLeaveSync()
+            admitCloudKitPushSync()
             observeChangeSync()
             observeSyncBadge()
             #if DEBUG && targetEnvironment(simulator)

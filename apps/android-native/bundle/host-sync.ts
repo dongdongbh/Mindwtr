@@ -714,9 +714,9 @@ export const createNativeSync = (bindings: NativeSyncBindings, fileEncryptionSta
         const answer = await performSync(undefined, { manual: true });
         return { success: answer.success === true, skipped: Boolean(answer.skipped) };
     };
-    const performStoredAutomaticSync = async (reason: 'startup' | 'resume' | 'leave' | 'change') => {
+    const performStoredAutomaticSync = async (reason: 'startup' | 'resume' | 'leave' | 'change' | 'push') => {
         if (fatalCleanupError) throw fatalCleanupError;
-        if (platform !== 'ios' || !['startup', 'resume', 'leave', 'change'].includes(reason)) {
+        if (platform !== 'ios' || !['startup', 'resume', 'leave', 'change', 'push'].includes(reason)) {
             throw new Error('Stored automatic sync is unavailable on this host');
         }
         if (iosAutomaticFrame) throw new Error('An automatic foreground sync is already in progress');
@@ -733,7 +733,9 @@ export const createNativeSync = (bindings: NativeSyncBindings, fileEncryptionSta
             const controller = automaticController();
             if (reason === 'resume' && Date.now() - controller.getLastAutoSyncAt()
                 <= getMobileAutoSyncCadence(backend).foregroundMinIntervalMs) return { success: true, skipped: true };
+            if (reason === 'push' && backend !== 'cloudkit') return { success: true, skipped: true };
             if (reason === 'change') await controller.requestAutoSync(undefined, 'data-change');
+            else if (reason === 'push') await controller.requestAutoSync(0, 'cloudkit');
             else await controller.requestAutoSync(0, reason === 'leave' ? 'app-state-background' : reason);
             if (fatalCleanupError) throw fatalCleanupError;
             if (reason === 'change' && !frame.result && hasPendingLocalChange()) {

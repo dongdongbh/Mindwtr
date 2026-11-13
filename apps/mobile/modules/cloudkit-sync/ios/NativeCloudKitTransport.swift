@@ -74,6 +74,7 @@ final class NativeCloudKitQueryCollector: @unchecked Sendable {
 
 public actor NativeCloudKitTransport {
     public static let maximumJSONBytes = 16 * 1_024 * 1_024
+    public static let zoneSubscriptionID = "MindwtrZoneSubscription"
     public static let maximumRecords = 100_000
     private let manager: CloudKitSyncManager
 
@@ -98,6 +99,10 @@ public actor NativeCloudKitTransport {
         }
     }
     public func ensureZone() async throws { try await run { try await self.manager.ensureZone() } }
+    public func ensureSubscription() async throws { try await run { try await self.manager.ensureSubscription() } }
+    public static func isZoneChangeNotification(_ userInfo: [AnyHashable: Any]) -> Bool {
+        CKNotification(fromRemoteNotificationDictionary: userInfo)?.subscriptionID == zoneSubscriptionID
+    }
 
     public func fetchAllRecords(recordType: String) async throws -> String {
         try Self.validateRecordType(recordType)

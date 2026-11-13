@@ -10,7 +10,8 @@ final class NativeCloudKitRequestTests: XCTestCase {
 
     func testAllRecordsOperationsAndAttachmentDeletionUseExactProtocol() throws {
         guard case .accountStatus = try parse(["op": "accountStatus"]),
-              case .ensureZone = try parse(["op": "ensureZone"]) else { return XCTFail("Wrong nullary request") }
+              case .ensureZone = try parse(["op": "ensureZone"]),
+              case .ensureSubscription = try parse(["op": "ensureSubscription"]) else { return XCTFail("Wrong nullary request") }
         let types: [NativeCloudKitRequest.RecordType] = [.task, .project, .section, .area, .person, .settings]
         for type in types {
             guard case .fetchAllRecords(let fetched) = try parse(["op": "fetchAllRecords", "recordType": type.rawValue]) else {
@@ -35,7 +36,7 @@ final class NativeCloudKitRequestTests: XCTestCase {
 
     func testClosedFieldsUnknownTypesAndMalformedNestedJSONRefuse() throws {
         let valid: [[String: Any]] = [
-            ["op": "accountStatus"], ["op": "ensureZone"],
+            ["op": "accountStatus"], ["op": "ensureZone"], ["op": "ensureSubscription"],
             ["op": "fetchAllRecords", "recordType": "MindwtrTask"],
             ["op": "saveRecords", "recordType": "MindwtrTask", "recordsJSON": "[]"],
             ["op": "deleteRecords", "recordType": "MindwtrTask", "recordIDs": ["one"]],
