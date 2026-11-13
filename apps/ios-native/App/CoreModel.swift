@@ -38308,7 +38308,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         searchLoading = false
         searchNeedsRead = false
         searchError = nil
-        await refresh()
+        await refresh(keepsPreferences: true)
     }
 
     func setSearchQuery(_ text: String) {
