@@ -963,6 +963,7 @@ assert.match(model, /fun refreshFocus\(\) \{\s+if \(focus == null && busy\) retu
 
 
 assert.match(model, /fun refreshProjects\(\) \{\s+if \(busy\) return menu\.whenIdle\(::refreshProjects\)\s+val at = depth\(\)\s+background\(/);
+assert.match(menuModel, /internal fun readMore\(\): Unit = whenIdle \{\s+val deep = more\?\.deep\.orEmpty\(\)\s+shell\.background\(listOf\(Part\.More\)/, 'a quick access pick reads the More view once the write is idle');
 assert.match(model, /private fun refreshAll\(synced: Boolean = false\) \{\s+val at = depth\(\)\s+if \(synced\) \{\s+background\(Part\.entries, \{ runtime -> applySyncedChoices\(runtime, prefs\); read\(runtime, at\) \}, apply = ::showLists\)/);
 
 assert.match(model, /AfterCommandReads\.Read\.AllLists -> background\(Part\.entries, \{ runtime -> read\(runtime, at\) \}, done, ::showLists\)/);

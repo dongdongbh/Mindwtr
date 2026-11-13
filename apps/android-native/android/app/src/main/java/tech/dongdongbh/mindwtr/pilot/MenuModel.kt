@@ -672,7 +672,7 @@ class MenuModel(internal val shell: InboxViewModel, private val saved: SavedStat
         if (dialog?.optString("kind") == "move" && moveChoices == null) readMoveChoices()
     }
 
-    internal fun readMore() {
+    internal fun readMore(): Unit = whenIdle {
         val deep = more?.deep.orEmpty()
         shell.background(listOf(Part.More), { runtime -> read(runtime, "more", JSONObject(), 0, deep) }) { next, mine ->
             if (shell.fresh(mine, Part.More)) keepMore(next)
