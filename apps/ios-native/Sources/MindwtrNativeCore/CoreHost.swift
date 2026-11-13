@@ -27917,8 +27917,9 @@ private final class Engine: @unchecked Sendable {
         if method == "projectCalendarReferenceOptions" {
             guard let encoded = args.first as? String, encoded.utf8.count <= 2_000_000,
                   let input = try NativeJSON.jsonObject(with: Data(encoded.utf8)) as? [String: Any],
-                  Set(input.keys) == Set(["projectId"]).union(input["query"] == nil ? [] : ["query"]),
+                  Set(input.keys) == Set(["projectId"]).union(input["query"] == nil ? [] : ["query"]).union(input["summary"] == nil ? [] : ["summary"]),
                   input["query"] == nil || (input["query"] as? String).map({ $0.utf16.count <= 1000 }) == true,
+                  input["summary"] == nil || (Self.isBoolean(input["summary"]) && input["summary"] as? Bool == true),
                   let projectID = input["projectId"] as? String, !projectID.isEmpty, projectID.utf16.count <= 500 else {
                 throw HostFailure("INVALID_INPUT: Project calendar reference options need a bounded Project ID")
             }

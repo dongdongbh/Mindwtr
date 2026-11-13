@@ -21377,6 +21377,29 @@ final class CoreHostTests: XCTestCase {
         }
     }
 
+    func testProjectCalendarReferenceSummaryReadsTheStoredLinkWithoutCandidatesAndRefusesAFalseSummary() async throws {
+        try await seedProjectRenameRows()
+        let reference: [String: Any] = ["sourceId": "feed", "uid": "event", "sourceName": "Calendar", "title": "Meeting",
+            "start": "2036-11-01", "end": "2036-11-02", "allDay": true, "recurrenceId": "DATE:2036-11-01"]
+        let edit = try SQLiteBridge(url: database)
+        _ = try edit.execute("UPDATE projects SET calendarReference=? WHERE id='focus-target'", parametersJSON: json([json(reference)]))
+        edit.close()
+        let core = host()
+        _ = try await core.start()
+        let summary = try object(await core.call("projectCalendarReferenceOptions",
+            argumentsJSON: json([json(["projectId": "focus-target", "summary": true])])))
+        XCTAssertEqual((summary["current"] as? [String: Any])?["title"] as? String, "Meeting")
+        XCTAssertEqual(summary["status"] as? String, "unavailable")
+        XCTAssertEqual(summary["available"] as? Bool, false)
+        XCTAssertEqual((summary["candidates"] as? [Any])?.count, 0)
+        XCTAssertFalse((summary["currentDateLabel"] as? String ?? "").isEmpty)
+        await expectFailure("INVALID_INPUT") {
+            _ = try await core.call("projectCalendarReferenceOptions",
+                argumentsJSON: json([json(["projectId": "focus-target", "summary": false])]))
+        }
+        await core.close()
+    }
+
     func testProjectCalendarReferenceClearRollbackRetryAndColdReceiptPreserveOtherRows() async throws {
         try await seedProjectRenameRows()
         let reference: [String: Any] = ["sourceId": "feed", "uid": "event", "sourceName": "Calendar", "title": "Meeting",

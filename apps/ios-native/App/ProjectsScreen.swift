@@ -1521,12 +1521,6 @@ struct ProjectDetailScreen: View {
                 .presentationDetents([.medium, .large])
                 .interactiveDismissDisabled(!model.projectBulkComposerCloseEnabled)
         }
-        .sheet(isPresented: Binding(get: { model.projectCalendarReferencePresented },
-                                    set: { model.projectCalendarReferencePresented = $0 })) {
-            ProjectCalendarReferencePicker(model: model, palette: palette)
-                .presentationDetents([.large])
-                .interactiveDismissDisabled(model.busy || model.projectCalendarReferencePending || model.retryNeeded)
-        }
         .sheet(isPresented: Binding(get: { model.projectAreaPresented },
                                     set: { if !$0 && !model.appLock.concealed { model.closeProjectArea() } })) {
             ProjectAreaSelectionSheet(model: model, palette: palette)
@@ -1916,6 +1910,7 @@ struct ProjectDetailScreen: View {
                 .accessibilityIdentifier("project-details-toggle")
             }
             if detailsExpanded {
+                ProjectCalendarReferenceCard(model: model, palette: palette)
                 VStack(alignment: .leading, spacing: 16) {
                     ProjectStatusMetadata(model: model, palette: palette, metadata: metadata) {
                         resignProjectNotesInput()
@@ -1976,7 +1971,6 @@ struct ProjectDetailScreen: View {
                 ProjectDatesMetadata(model: model, palette: palette, metadata: metadata) {
                     resignProjectNotesInput()
                 }
-                ProjectCalendarReferenceCard(model: model, palette: palette)
             }
         }
         .padding(12).frame(maxWidth: .infinity, alignment: .leading)
@@ -3026,97 +3020,148 @@ private struct ProjectSectionsMetadata: View {
 
 
 private struct ProjectCalendarReferenceCard: View {
-    let model: CoreModel
-    let palette: AppPalette
-    var body: some View {
-        let options = model.projectCalendarReferenceOptions
-        let reference = options.object("current")
-        VStack(alignment: .leading, spacing: 8) {
-            Text(model.label("projects.calendarTitle")).rnFont(14, .semibold).foregroundStyle(palette.text)
-            if !reference.isEmpty {
-                Text(model.label(options.text("status") == "scheduled" ? "projects.calendarScheduled"
-                    : options.text("status") == "elapsed" ? "projects.calendarElapsed" : "projects.calendarUnavailable"))
-                    .rnFont(13, .semibold).foregroundStyle(palette.secondary)
-                Text(reference.text("title")).rnFont(14).foregroundStyle(palette.text)
-                Text(reference.text("sourceName") + " · " + options.text("currentDateLabel"))
-                    .rnFont(13).foregroundStyle(palette.secondary)
-            }
-            Text(model.label("projects.calendarHelp")).rnFont(12).foregroundStyle(palette.secondary)
-            if !model.projectDetail.flag("readOnly") {
-                Button(model.label(reference.isEmpty ? "projects.calendarLink" : "projects.calendarReplace")) {
-                    Task { await model.openProjectCalendarReference() }
-                }
-                .rnFont(14, .semibold).frame(minHeight: 44)
-                .disabled(model.busy || model.retryNeeded || model.projectCalendarReferencePending || !model.projectActionsEnabled)
-                .accessibilityIdentifier("project-calendar-link")
-                if !reference.isEmpty {
-                    Button(model.label("projects.calendarUnlink")) { Task { await model.changeProjectCalendarReference(nil) } }
-                        .rnFont(14).frame(minHeight: 44).disabled(!model.projectCalendarReferenceCanEdit)
-                        .accessibilityIdentifier("project-calendar-unlink")
-                }
-            }
-            if let message = model.projectCalendarReferenceError {
-                Text(message).rnFont(13).foregroundStyle(palette.danger).textSelection(.enabled)
-                Button(model.label("common.retry")) {
-                    Task { if model.projectCalendarReferencePending { await model.retry() } else { await model.readProjectCalendarReference() } }
-                }
-                .frame(minHeight: 44).disabled(model.busy)
-            }
-        }
-        .padding(12).frame(maxWidth: .infinity, alignment: .leading)
-        .background(palette.filter, in: RoundedRectangle(cornerRadius: 8))
-        .accessibilityIdentifier("project-calendar-reference")
-    }
-}
-
-private struct ProjectCalendarReferencePicker: View {
     @Bindable var model: CoreModel
     let palette: AppPalette
     var body: some View {
         let options = model.projectCalendarReferenceOptions
-        let candidates = options.objects("candidates")
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text(model.label("projects.calendarWindow")).rnFont(20, .bold).foregroundStyle(palette.text)
-                Spacer()
-                Button(model.label("common.close")) { model.projectCalendarReferencePresented = false }
-                    .frame(minHeight: 44).disabled(model.busy || model.retryNeeded || model.projectCalendarReferencePending)
+        let reference = options.object("current")
+        let disabled = model.projectDetail.flag("readOnly") || !model.projectActionsEnabled
+            || model.busy || model.retryNeeded || model.projectCalendarReferencePending
+        VStack(alignment: .leading, spacing: 8) {
+            if !reference.isEmpty {
+                HStack(spacing: 8) {
+                    Image(systemName: "calendar").font(.system(size: 18)).foregroundStyle(palette.secondary).accessibilityHidden(true)
+                    Text(model.label("projects.calendarTitle")).rnFont(14, .semibold).foregroundStyle(palette.text)
+                        .accessibilityAddTraits(.isHeader)
+                }
+                Text(model.label("projects.calendarScheduled")).rnFont(12).foregroundStyle(palette.secondary)
+                Text(reference.text("title")).rnFont(14).foregroundStyle(palette.text)
+                    .accessibilityIdentifier("project-calendar-title")
+                Text(options.text("currentDateLabel") + " · " + reference.text("sourceName")).rnFont(12).foregroundStyle(palette.secondary)
+                    .accessibilityIdentifier("project-calendar-date")
+                if let status = statusKey(options) {
+                    Text(model.label(status)).rnFont(12).foregroundStyle(palette.secondary)
+                        .accessibilityIdentifier("project-calendar-status")
+                }
             }
-            TextField(model.label("common.search"), text: $model.projectCalendarReferenceQuery)
-                .textFieldStyle(.roundedBorder).disabled(model.busy || model.retryNeeded || model.projectCalendarReferencePending)
-                .accessibilityIdentifier("project-calendar-search")
-                .onChange(of: model.projectCalendarReferenceQuery) { query in Task { await model.searchProjectCalendarReference(query) } }
-            if options.number("total") > candidates.count {
-                Text("\(candidates.count) / \(options.number("total"))").rnFont(12).foregroundStyle(palette.secondary)
+            outlined(model.label(reference.isEmpty ? "projects.calendarLink" : "projects.calendarReplace"), color: palette.tint,
+                     disabled: disabled, id: "project-calendar-link") {
+                Task { await model.openProjectCalendarReference() }
             }
-            if !options.flag("available") {
-                Text(model.label("projects.calendarLoadFailed")).foregroundStyle(palette.secondary)
-            } else if candidates.isEmpty {
-                Text(model.label("projects.calendarEmpty")).foregroundStyle(palette.secondary)
+            .accessibilityValue(model.label(model.projectCalendarReferencePresented ? "markdown.collapse" : "markdown.expand"))
+            if !reference.isEmpty {
+                outlined(model.label("projects.calendarUnlink"), color: palette.tint,
+                         disabled: disabled || !model.projectCalendarReferenceCanEdit, id: "project-calendar-unlink") {
+                    Task { await model.changeProjectCalendarReference(nil) }
+                }
             }
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 8) {
-                    ForEach(Array(candidates.enumerated()), id: \.offset) { index, reference in
-                        Button { Task { await model.changeProjectCalendarReference(reference) } } label: {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(reference.text("title")).rnFont(15, .semibold).foregroundStyle(palette.text)
-                                Text(reference.text("sourceName") + " · " + ((options["candidateDateLabels"] as? [String])?[index] ?? ""))
-                                    .rnFont(13).foregroundStyle(palette.secondary)
-                            }
-                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain).disabled(!model.projectCalendarReferenceCanEdit)
-                        .accessibilityIdentifier("project-calendar-event-\(index)")
+            if model.projectCalendarReferencePresented { picker(options) }
+            if let message = model.projectCalendarReferenceError {
+                Text(message).rnFont(12).foregroundStyle(palette.secondary).textSelection(.enabled)
+                outlined(model.label("common.retry"), color: palette.tint, disabled: model.busy, id: "project-calendar-load-retry") {
+                    Task { await model.readProjectCalendarReference() }
+                }
+            }
+            if model.projectCalendarReferenceSaveFailed {
+                Text(model.label("projects.calendarSaveFailed")).rnFont(14).foregroundStyle(palette.danger)
+                    .accessibilityAddTraits(.isStaticText).accessibilityIdentifier("project-calendar-save-failed")
+                if model.projectCalendarReferencePending {
+                    outlined(model.label("common.retry"), color: palette.tint, disabled: model.busy, id: "project-calendar-retry") {
+                        Task { await model.retry() }
                     }
                 }
             }
-            if let message = model.projectCalendarReferenceError {
-                Text(message).foregroundStyle(palette.danger)
-                Button(model.label("common.retry")) { Task { if model.projectCalendarReferencePending { await model.retry() } else { await model.readProjectCalendarReference() } } }
-                    .frame(minHeight: 44).disabled(model.busy)
+        }
+        .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+        .background(palette.card, in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(palette.border, lineWidth: 1))
+        .padding(.vertical, 8)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("project-calendar-reference")
+    }
+
+    private func statusKey(_ options: CoreObject) -> String? {
+        switch options.text("status") {
+        case "elapsed": return model.projectCalendarReferenceLoaded ? "projects.calendarElapsed" : nil
+        case "unavailable":
+            return model.projectCalendarReferenceLoaded && !model.projectCalendarReferenceLoading
+                ? "projects.calendarUnavailable" : "projects.calendarLastKnown"
+        default: return nil
+        }
+    }
+
+    private func outlined(_ title: String, color: Color, disabled: Bool, id: String,
+                          action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title).rnFont(14).foregroundStyle(color)
+                .frame(maxWidth: .infinity, minHeight: 24, alignment: .leading).padding(10)
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(palette.border, lineWidth: 1))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain).frame(minHeight: 44).disabled(disabled).opacity(disabled ? 0.5 : 1)
+        .accessibilityIdentifier(id)
+    }
+
+    @ViewBuilder
+    private func picker(_ options: CoreObject) -> some View {
+        let candidates = options.objects("candidates")
+        let labels = options["candidateDateLabels"] as? [String] ?? []
+        let query = model.projectCalendarReferenceQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        let disabled = !model.projectCalendarReferenceCanEdit
+        VStack(alignment: .leading, spacing: 8) {
+            Text(model.label("projects.calendarHelp")).rnFont(12).foregroundStyle(palette.secondary)
+            Text(model.label("projects.calendarWindow")).rnFont(12).foregroundStyle(palette.text)
+            TextField(model.label("common.search"), text: $model.projectCalendarReferenceQuery)
+                .rnFont(14).foregroundStyle(palette.text).padding(.horizontal, 10).frame(minHeight: 44)
+                .background(palette.input, in: RoundedRectangle(cornerRadius: 8))
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(palette.border, lineWidth: 1))
+                .accessibilityLabel(model.label("common.search"))
+                .accessibilityIdentifier("project-calendar-search")
+                .onChange(of: model.projectCalendarReferenceQuery) { value in
+                    Task { await model.searchProjectCalendarReference(value) }
+                }
+            if options.number("total") > candidates.count {
+                Text(model.label("projects.calendarLimit")).rnFont(12).foregroundStyle(palette.secondary)
+            }
+            if model.projectCalendarReferenceLoading || !model.projectCalendarReferenceLoaded {
+                if model.projectCalendarReferenceError == nil {
+                    Text(model.label("common.loading")).rnFont(14).foregroundStyle(palette.secondary)
+                        .accessibilityIdentifier("project-calendar-picker-status")
+                } else {
+                    Text(model.label("projects.calendarLoadFailed")).rnFont(14).foregroundStyle(palette.secondary)
+                        .accessibilityIdentifier("project-calendar-picker-status")
+                }
+            } else if !options.flag("available") {
+                Text(model.label("projects.calendarLoadFailed")).rnFont(14).foregroundStyle(palette.secondary)
+                    .accessibilityIdentifier("project-calendar-picker-status")
+            } else if candidates.isEmpty {
+                Text(model.label(query.isEmpty ? "projects.calendarEmpty" : "common.noMatches")).rnFont(14).foregroundStyle(palette.secondary)
+                    .accessibilityIdentifier("project-calendar-picker-status")
+            }
+            if !candidates.isEmpty {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(Array(candidates.enumerated()), id: \.offset) { index, reference in
+                            Button { Task { await model.changeProjectCalendarReference(reference) } } label: {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(reference.text("title")).rnFont(14).foregroundStyle(palette.text)
+                                    Text((index < labels.count ? labels[index] : "") + " · " + reference.text("sourceName"))
+                                        .rnFont(12).foregroundStyle(palette.secondary)
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 12).contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain).disabled(disabled).opacity(disabled ? 0.5 : 1)
+                            .accessibilityIdentifier("project-calendar-event-\(index)")
+                        }
+                    }
+                }
+                .frame(maxHeight: 260)
+            }
+            outlined(model.label("common.cancel"), color: palette.text, disabled: model.projectCalendarReferencePending,
+                     id: "project-calendar-cancel") {
+                model.closeProjectCalendarReferencePicker()
             }
         }
-        .padding(16).background(palette.card)
     }
 }
 

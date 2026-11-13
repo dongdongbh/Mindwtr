@@ -1089,6 +1089,9 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     var projectCalendarReferencePresented = false
     var projectCalendarReferenceQuery = ""
     private(set) var projectCalendarReferenceError: String?
+    private(set) var projectCalendarReferenceSaveFailed = false
+    private(set) var projectCalendarReferenceLoading = false
+    private(set) var projectCalendarReferenceLoaded = false
     private var projectCalendarReferenceRequest: String?
     private(set) var projectDateField: String?
     private(set) var projectDatePicker: CoreObject = [:]
@@ -22171,19 +22174,41 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     }
 
     func readProjectCalendarReference() async {
+        guard await loadProjectCalendarReference(summary: true) else { return }
+        if projectCalendarReferenceOptions["current"] is CoreObject || projectCalendarReferencePresented {
+            await loadProjectCalendarReference(summary: false)
+        }
+    }
+
+    @discardableResult
+    private func loadProjectCalendarReference(summary: Bool) async -> Bool {
         let id = projectHeader.text("id")
         guard ready, selectedSurface == .project, projectCurrent, !id.isEmpty, !busy,
-              !retryNeeded, !projectCalendarReferencePending else { return }
+              !retryNeeded, !projectCalendarReferencePending else { return false }
         busy = true
-        defer { finishOperation() }
+        if !summary { projectCalendarReferenceLoading = true }
+        defer { projectCalendarReferenceLoading = false; finishOperation() }
         do {
-            let options = try await query("projectCalendarReferenceOptions", [try json(["projectId": id])])
+            var input: CoreObject = ["projectId": id]
+            if summary { input["summary"] = true }
+            let options = try await query("projectCalendarReferenceOptions", [try json(input)])
             guard selectedSurface == .project, projectCurrent, projectHeader.text("id") == id,
                   options.object("project").text("id") == id,
                   options.text("revision") == projectDetail.text("mutationRevision") else { throw CocoaError(.coderReadCorrupt) }
             projectCalendarReferenceOptions = options
+            projectCalendarReferenceLoaded = !summary
             projectCalendarReferenceError = nil
-        } catch { projectCalendarReferenceError = error.localizedDescription }
+            return true
+        } catch {
+            projectCalendarReferenceError = error.localizedDescription
+            return false
+        }
+    }
+
+    func closeProjectCalendarReferencePicker() {
+        guard !projectCalendarReferencePending else { return }
+        projectCalendarReferencePresented = false
+        projectCalendarReferenceQuery = ""
     }
 
     func searchProjectCalendarReference(_ query: String) async {
@@ -22202,10 +22227,13 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     func openProjectCalendarReference() async {
         guard projectActionsEnabled, !busy, !retryNeeded, !projectDetail.flag("readOnly"),
               !projectCalendarReferencePending else { return }
+        if projectCalendarReferencePresented { closeProjectCalendarReferencePicker(); return }
         let id = projectHeader.text("id")
         guard await flushProjectNotesEdit(), projectHeader.text("id") == id else { return }
-        await readProjectCalendarReference()
-        if projectCalendarReferenceCanEdit { projectCalendarReferenceQuery = ""; projectCalendarReferencePresented = true }
+        projectCalendarReferenceQuery = ""
+        projectCalendarReferenceSaveFailed = false
+        projectCalendarReferencePresented = true
+        await loadProjectCalendarReference(summary: false)
     }
 
     func changeProjectCalendarReference(_ value: CoreObject?) async {
@@ -22218,6 +22246,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         }
         guard await flushProjectNotesEdit(), projectHeader.text("id") == id, projectCalendarReferenceCanEdit else { return }
         busy = true
+        projectCalendarReferenceSaveFailed = false
         defer { finishOperation() }
         do {
             var expected = options.object("project")
@@ -22227,11 +22256,11 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
             let result = try await query("projectCalendarReferenceWrite", [projectCalendarReferenceRequest!])
             try acknowledgeProjectCalendarReference(result)
             try await readSelectedSurface()
-            projectCalendarReferenceOptions = [:]
+            projectCalendarReferenceOptions = [:]; projectCalendarReferenceLoaded = false
         } catch {
             if isDefiniteRejection(error) { projectCalendarReferenceRequest = nil; retryNeeded = false }
             else { retryNeeded = projectCalendarReferencePending }
-            projectCalendarReferenceError = error.localizedDescription
+            projectCalendarReferenceSaveFailed = true
             self.error = retryNeeded ? error.localizedDescription : nil
         }
     }
@@ -22246,7 +22275,9 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         }
         projectCalendarReferenceRequest = nil
         projectCalendarReferencePresented = false
+        projectCalendarReferenceQuery = ""
         projectCalendarReferenceError = nil
+        projectCalendarReferenceSaveFailed = false
         retryNeeded = false
         error = nil
     }
@@ -36461,6 +36492,8 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         projectCalendarReferenceOptions = [:]
         projectCalendarReferencePresented = false
         projectCalendarReferenceError = nil
+        projectCalendarReferenceSaveFailed = false
+        projectCalendarReferenceLoaded = false
         projectCalendarReferenceRequest = nil
         projectDateExpectedID = nil
         projectDateExpectedField = nil
@@ -45592,7 +45625,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
                 else { result = try await query("projectCalendarReferenceRetryOutcome", [request]) }
                 try acknowledgeProjectCalendarReference(result)
                 try await readSelectedSurface()
-                projectCalendarReferenceOptions = [:]
+                projectCalendarReferenceOptions = [:]; projectCalendarReferenceLoaded = false
                 return
             }
             if let request = projectDateRequest {
