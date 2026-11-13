@@ -344,7 +344,7 @@ import { createArchivedTasksRestoreMethods } from './native-host-contract-archiv
 import { createProjectTasksDeleteMethods } from './native-host-contract-project-bulk-delete';
 import { createTaskChecklistMoveMethods } from './native-host-contract-task-checklist-move';
 import { createArchivedTasksDeleteMethods } from './native-host-contract-archive-bulk-delete';
-import { createProjectCalendarReferenceMethods } from './native-host-contract-project-calendar-reference';
+import { createProjectCalendarReferenceMethods, projectCalendarReferenceDateLabel } from './native-host-contract-project-calendar-reference';
 import { createProjectDateMethods } from './native-host-contract-project-date';
 import { createProjectEditMethods } from './native-host-contract-project-edit';
 import { createProjectAreaMethods } from './native-host-contract-project-area';
@@ -2078,7 +2078,7 @@ export function createNativeHostContract(options: {
         ...createTaskChecklistMoveMethods({ readiness, save, t: () => translate }),
         ...createProjectTasksDeleteMethods({ readiness, save, t: () => translate }),
         ...createProjectCalendarReferenceMethods({ readiness, save, revision: projectMutationRevision,
-            formatDate: (reference) => createDateFormatter(dateFormatting())(reference.start, reference.allDay ? 'P' : 'Pp', reference.start),
+            formatDate: (reference) => projectCalendarReferenceDateLabel(reference, createDateFormatter(dateFormatting())),
             load: (input) => calendarSettingsMethods.loadExternalCalendarFeed(input) }),
         ...createProjectDateMethods({ readiness, save,
             revision: projectMutationRevision }),

@@ -2569,7 +2569,7 @@ assert.deepEqual([.../val ATTACHMENT_COMMANDS = setOf\(([^)]*)\)/.exec(coreHost)
 
 
         assert.equal((details.match(/replies\.ticket\(/g) ?? []).length, 10, 'every Details read takes a ticket');
-        assert.equal((details.match(/replies\.current\(ticket\)/g) ?? []).length, 10, 'every Details reply checks its ticket');
+        assert.equal((details.match(/replies\.current\(ticket\)/g) ?? []).length, 12, 'every Details reply checks its ticket; the calendar feed read checks it again before it clears its loading state and before its one rerun');
         assert.match(details, /shell\.fresh\(mine, InboxViewModel\.Part\.ProjectDetails\)/);
         assert.match(details, /fun closeOverlays\(\) \{\s*replies\.close\(\)/);
     }

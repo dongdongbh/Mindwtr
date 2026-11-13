@@ -156,9 +156,13 @@ class ProjectDetailsModel(private val shell: InboxViewModel) : FilterSheetHost {
     var tagDraft by mutableStateOf("")
 
     var datePicker by mutableStateOf<Pair<String, JSONObject>?>(null); private set
+    var calendarStored by mutableStateOf<JSONObject?>(null); private set
     var calendarOptions by mutableStateOf<JSONObject?>(null); private set
+    var calendarLoading by mutableStateOf(false); private set
+    var calendarSaveFailed by mutableStateOf(false); private set
     var calendarPicker by mutableStateOf(false); private set
     var calendarQuery by mutableStateOf(""); private set
+    private var calendarLoadedFor: String? = null
 
     var sections by mutableStateOf<JSONObject?>(null); private set
     var sectionDraft by mutableStateOf<SectionDraft?>(null)
@@ -376,7 +380,8 @@ class ProjectDetailsModel(private val shell: InboxViewModel) : FilterSheetHost {
         projectId = id
         open = false; statusMenu = false; raw = null; notesExpanded = false; notesPreview = false; notesFullscreen = false
         notesDraft = null; notesView = null; areaPicker = null; tagPicker = null; tagDraft = ""; datePicker = null
-        calendarOptions = null; calendarPicker = false
+        calendarStored = null; calendarOptions = null; calendarLoading = false; calendarSaveFailed = false
+        calendarPicker = false; calendarQuery = ""; calendarLoadedFor = null
         sections = null; sectionDraft = null; sectionDelete = null; help = null; actionsOpen = false; actionConfirm = null
         convertRow = null; convert = null; convertConfirm = false
         viewOptionsOpen = false; sortOpen = false; sort = null
@@ -441,45 +446,79 @@ class ProjectDetailsModel(private val shell: InboxViewModel) : FilterSheetHost {
     fun readCalendarReference() {
         val id = projectId ?: return
         val ticket = replies.ticket("calendarReference")
-        shell.background(emptyList(), { it.menuRead("projectCalendarReferenceOptions", input(id).toString()) }) { reply, mine ->
-            if (replies.current(ticket) && projectId == id && shell.fresh(mine, InboxViewModel.Part.ProjectDetails)) calendarOptions = reply
+        shell.background(emptyList(), { it.menuRead("projectCalendarReferenceOptions", input(id).put("summary", true).toString()) }) { reply, _ ->
+            if (!replies.current(ticket) || projectId != id) return@background
+            calendarStored = reply
+            val stored = storedCalendarReference(reply)
+            if (stored != null && stored != calendarLoadedFor) loadCalendarFeed(null)
         }
     }
 
-    fun openCalendarReference() = choices("projectCalendarReferenceOptions", JSONObject()) {
-        calendarOptions = it
+    private fun loadCalendarFeed(query: String?, retried: Boolean = false) {
+        val id = projectId ?: return
+        calendarLoadedFor = storedCalendarReference(calendarStored)
+        if (query == null) calendarLoading = true
+        var applied = false
+        var failure: String? = null
+        val ticket = replies.ticket("calendarFeed")
+        val request = input(id).apply { if (query != null) put("query", query) }.toString()
+        shell.background(emptyList(), { runtime -> runCatching { runtime.menuRead("projectCalendarReferenceOptions", request) } }, always = {
+            if (replies.current(ticket)) {
+                calendarLoading = false
+                if (!applied) calendarLoadedFor = null
+                if (rerunsCalendarFeed(failure, query, retried)) shell.menu.whenIdle {
+                    if (replies.current(ticket) && projectId == id) loadCalendarFeed(null, retried = true)
+                }
+            }
+        }) { result, _ ->
+            result.onFailure { Log.w(CoreHost.TAG, "Project calendar read failed ${failureForLog(it)}"); failure = it.message }
+            val reply = result.getOrNull() ?: return@background
+            if (!replies.current(ticket) || projectId != id || (query != null && calendarQuery != query)) return@background
+            calendarOptions = reply
+            applied = true
+        }
+    }
+
+    fun openCalendarReference() {
+        calendarSaveFailed = false
         calendarQuery = ""
-        calendarPicker = true
+        calendarPicker = !calendarPicker
+        if (calendarPicker) loadCalendarFeed(null)
     }
     fun searchCalendarReference(query: String) {
         calendarQuery = query.take(1000)
-        val id = projectId ?: return
-        val submitted = calendarQuery
-        val ticket = replies.ticket("calendarReferenceSearch")
-        shell.background(emptyList(), { it.menuRead("projectCalendarReferenceOptions", input(id).put("query", submitted).toString()) }) { reply, mine ->
-            if (replies.current(ticket) && projectId == id && calendarPicker && calendarQuery == submitted
-                && shell.fresh(mine, InboxViewModel.Part.ProjectDetails)) calendarOptions = reply
-        }
+        loadCalendarFeed(calendarQuery)
     }
 
     fun closeCalendarReference() { calendarPicker = false }
     fun setCalendarReference(value: JSONObject?) {
-        val options = calendarOptions ?: return
+        val options = (if (value == null) calendarStored else calendarOptions) ?: return
         val id = projectId ?: return
         if (!idle || options.getJSONObject("project").getString("id") != id || !options.getBoolean("canEdit")) return
         val expected = JSONObject(options.getJSONObject("project").toString()).apply { remove("id") }
         val requestId = UUID.randomUUID().toString()
         val request = JSONObject().put("requestId", requestId).put("projectId", id).put("value", value ?: JSONObject.NULL)
             .put("expected", expected).put("pickerId", options.getString("pickerId"))
-        calendarPicker = false
+        val failed = { calendarSaveFailed = true; readCalendarReference() }
+        calendarSaveFailed = false
         shell.perform { runtime ->
-            val preparation = runtime.prepareProjectCalendarReference(request.toString())
+            val preparation = try { runtime.prepareProjectCalendarReference(request.toString()) } catch (failure: Exception) {
+                shell.ui(failed)
+                if (failure.message.orEmpty().startsWith("SAVE_FAILED")) throw failure
+                Log.w(CoreHost.TAG, "Project calendar reference prepare refused ${failureForLog(failure)}")
+                return@perform
+            }
             shell.ui {
-                if (preparation.getString("kind") == "prepared") {
-                    answers[requestId] = { calendarOptions = null; readCalendarReference() }
-                    writes.add(FailedAction("projectCalendarReferenceCommit", requestId, preparation.getString("envelope")))
-                    pump()
-                } else readCalendarReference()
+                when (preparation.getString("kind")) {
+                    "prepared" -> {
+                        answers[requestId] = { calendarPicker = false; readCalendarReference() }
+                        refusals[requestId] = { failed() }
+                        writes.add(FailedAction("projectCalendarReferenceCommit", requestId, preparation.getString("envelope")))
+                        pump()
+                    }
+                    "noop" -> { calendarPicker = false; readCalendarReference() }
+                    else -> failed()
+                }
             }
         }
     }
@@ -897,6 +936,7 @@ fun LazyListScope.projectDetailsItems(model: InboxViewModel, projectId: String, 
     detail.gettingStarted?.let { actions -> item(key = "getting-started") { GettingStartedActions(model, actions) } }
     item(key = "details") { DetailsToggle(model, detail, metadata) }
     if (!model.projectDetails.open) return
+    item(key = "details-calendar-reference") { ProjectCalendarReference(model, projectId, detail.readOnly) }
     item(key = "details-status") { DetailsStatus(model, detail, metadata) }
     if (metadata.menuText("sequentialScopeLabel") != null) item(key = "details-scope") { DetailsScope(model, detail, metadata) }
     item(key = "details-sections") { DetailsSections(model, detail, metadata) }
@@ -904,7 +944,6 @@ fun LazyListScope.projectDetailsItems(model: InboxViewModel, projectId: String, 
     item(key = "details-notes") { ProjectNotes(model, projectId, detail.readOnly) }
     item(key = "details-attachments") { ProjectAttachments(model, projectId) }
     item(key = "details-dates") { DetailsDates(model, detail, metadata) }
-    item(key = "details-calendar-reference") { ProjectCalendarReference(model, projectId, detail.readOnly) }
 }
 
 
@@ -1060,28 +1099,81 @@ private fun DetailsDates(model: InboxViewModel, detail: ProjectDetail, metadata:
 @Composable
 private fun ProjectCalendarReference(model: InboxViewModel, projectId: String, archived: Boolean) = with(model.projectDetails) {
     val c = LocalTheme.current.colors
-    LaunchedEffect(projectId, model.project?.revision) { readCalendarReference() }
-    DetailsBlock(vertical = 8, tag = "project-calendar-reference") {
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(t("projects.calendarTitle"), style = rnText(14, 600), color = c.text)
-            val options = calendarOptions
-            val reference = options?.optJSONObject("current")
-            if (reference != null) {
-                Text(t(when (options.optString("status")) {
-                    "scheduled" -> "projects.calendarScheduled"
-                    "elapsed" -> "projects.calendarElapsed"
-                    else -> "projects.calendarUnavailable"
-                }), style = rnText(13, 600), color = c.secondaryText)
-                Text(reference.getString("title"), style = rnText(14, 500), color = c.text)
-                Text("${reference.getString("sourceName")} · ${options.getString("currentDateLabel")}", style = rnText(13, 400), color = c.secondaryText)
+    LaunchedEffect(projectId, model.project?.revision, model.busy) { if (!model.busy) readCalendarReference() }
+    val ours = { options: JSONObject? -> options?.takeIf { it.getJSONObject("project").getString("id") == projectId } }
+    val stored = ours(calendarStored)
+    val reference = stored?.optJSONObject("current")
+    val loaded = ours(calendarOptions)
+    val refreshed = loaded?.takeIf { reference != null && storedCalendarReference(it) == storedCalendarReference(stored) }
+    val enabled = idle && !archived
+    val shape = RoundedCornerShape(10.dp)
+    Column(Modifier.padding(vertical = 8.dp).fillMaxWidth().clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape)
+        .testTag("project-calendar-reference").padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (stored != null && reference != null) {
+            val shown = refreshed ?: stored
+            val details = shown.getJSONObject("current")
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Icon(Ionicons.CalendarOutline, null, tint = c.icon, modifier = Modifier.size(18.dp))
+                Text(t("projects.calendarTitle"), style = rnText(14, 600), color = c.text, modifier = Modifier.semantics { heading() })
             }
-            Text(t("projects.calendarHelp"), style = rnText(12, 400), color = c.secondaryText)
-            if (!archived) {
-                SmallButton(t(if (reference == null) "projects.calendarLink" else "projects.calendarReplace"), idle, "project-calendar-link") { openCalendarReference() }
-                if (reference != null) SmallButton(t("projects.calendarUnlink"), idle, "project-calendar-unlink") { setCalendarReference(null) }
+            Text(t("projects.calendarScheduled"), style = rnText(12, 400), color = c.secondaryText)
+            Text(details.getString("title"), style = rnText(14, 400), color = c.text, modifier = Modifier.testTag("project-calendar-title"))
+            Text("${shown.getString("currentDateLabel")} · ${reference.getString("sourceName")}", style = rnText(12, 400), color = c.secondaryText,
+                modifier = Modifier.testTag("project-calendar-date"))
+            when (refreshed?.getString("status")) {
+                null -> "projects.calendarLastKnown"
+                "elapsed" -> "projects.calendarElapsed"
+                "unavailable" -> "projects.calendarUnavailable"
+                else -> null
+            }?.let { Text(t(it), style = rnText(12, 400), color = c.secondaryText, modifier = Modifier.testTag("project-calendar-status")) }
+        }
+        CalendarButton(t(if (reference == null) "projects.calendarLink" else "projects.calendarReplace"), enabled, c.tint, "project-calendar-link") { openCalendarReference() }
+        if (reference != null) CalendarButton(t("projects.calendarUnlink"), enabled, c.tint, "project-calendar-unlink") { setCalendarReference(null) }
+        if (calendarPicker) CalendarPicker(model, loaded, enabled)
+        if (calendarSaveFailed) Text(t("projects.calendarSaveFailed"), style = rnText(14, 400), color = c.danger,
+            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Assertive }.testTag("project-calendar-save-failed"))
+    }
+}
+
+@Composable
+private fun CalendarPicker(model: InboxViewModel, options: JSONObject?, enabled: Boolean) = with(model.projectDetails) {
+    val c = LocalTheme.current.colors
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(t("projects.calendarHelp"), style = rnText(12, 400), color = c.secondaryText)
+        Text(t("projects.calendarWindow"), style = rnText(12, 400), color = c.text)
+        BasicTextField(calendarQuery, ::searchCalendarReference, singleLine = true,
+            textStyle = rnText(14, 400).copy(color = c.text), cursorBrush = SolidColor(c.tint),
+            modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp).clip(RoundedCornerShape(8.dp))
+                .background(c.inputBg).rnBorder(1.dp, c.border, RoundedCornerShape(8.dp)).padding(horizontal = 10.dp, vertical = 12.dp)
+                .semantics { contentDescription = t("common.search") }.testTag("project-calendar-search"),
+            decorationBox = { field -> Box { if (calendarQuery.isEmpty()) Text(t("common.search"), style = rnText(14, 400), color = c.secondaryText); field() } })
+        val candidates = if (calendarLoading) emptyList() else options?.menuObjects("candidates").orEmpty()
+        if (options != null && !calendarLoading && options.optInt("total") > candidates.size)
+            Text(t("projects.calendarLimit"), style = rnText(12, 400), color = c.secondaryText)
+        when {
+            calendarLoading -> t("common.loading")
+            options == null || !options.getBoolean("available") -> t("projects.calendarLoadFailed")
+            candidates.isEmpty() -> t(if (calendarQuery.isNotBlank()) "common.noMatches" else "projects.calendarEmpty")
+            else -> null
+        }?.let { Text(it, style = rnText(14, 400), color = c.secondaryText, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }.testTag("project-calendar-picker-status")) }
+        if (candidates.isNotEmpty()) Column(Modifier.heightIn(max = 260.dp).verticalScroll(rememberScrollState())) {
+            val labels = options!!.getJSONArray("candidateDateLabels")
+            for ((index, reference) in candidates.withIndex()) Column(Modifier.fillMaxWidth().fade(if (enabled) 1f else 0.5f)
+                .clickable(enabled = enabled, role = Role.Button) { setCalendarReference(reference) }
+                .testTag("project-calendar-event-$index").padding(vertical = 12.dp)) {
+                Text(reference.getString("title"), style = rnText(14, 400), color = c.text)
+                Text("${labels.getString(index)} · ${reference.getString("sourceName")}", style = rnText(12, 400), color = c.secondaryText)
             }
         }
+        CalendarButton(t("common.cancel"), !model.busy, c.text, "project-calendar-cancel") { closeCalendarReference() }
     }
+}
+
+@Composable
+private fun CalendarButton(label: String, enabled: Boolean, color: Color, tag: String, onClick: () -> Unit) {
+    val shape = RoundedCornerShape(8.dp)
+    Text(label, style = rnText(14, 400), color = color, modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp).fade(if (enabled) 1f else 0.5f).clip(shape)
+        .rnBorder(1.dp, LocalTheme.current.colors.border, shape).clickable(enabled = enabled, role = Role.Button, onClick = onClick).testTag(tag).padding(10.dp))
 }
 
 @Composable
@@ -1300,29 +1392,7 @@ fun ProjectDetailsDialogs(model: InboxViewModel) = with(model.projectDetails) {
             }
         }
     }
-    if (calendarPicker) calendarOptions?.let { options ->
-        BackHandler { closeCalendarReference() }
-        AlertDialog(onDismissRequest = { closeCalendarReference() },
-            title = { Text(t("projects.calendarWindow")) },
-            text = {
-                Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    BasicTextField(calendarQuery, ::searchCalendarReference, singleLine = true,
-                        textStyle = rnText(14, 400).copy(color = c.text), cursorBrush = SolidColor(c.tint),
-                        modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp).clip(RoundedCornerShape(8.dp))
-                            .background(c.inputBg).rnBorder(1.dp, c.border, RoundedCornerShape(8.dp)).padding(12.dp)
-                            .semantics { contentDescription = t("common.search") }.testTag("project-calendar-search"),
-                        decorationBox = { field -> Box { if (calendarQuery.isEmpty()) Text(t("common.search"), style = rnText(14, 400), color = c.secondaryText); field() } })
-                    val candidates = options.menuObjects("candidates")
-                    if (options.optInt("total") > candidates.size) Text("${candidates.size} / ${options.optInt("total")}")
-                    if (!options.getBoolean("available")) Text(t("projects.calendarLoadFailed"))
-                    else if (candidates.isEmpty()) Text(t("projects.calendarEmpty"))
-                    for ((index, reference) in candidates.withIndex()) TextButton(onClick = { setCalendarReference(reference) }, enabled = idle) {
-                        Text("${reference.getString("title")}\n${reference.getString("sourceName")} · ${options.getJSONArray("candidateDateLabels").getString(index)}")
-                    }
-                }
-            },
-            confirmButton = { TextButton(onClick = { closeCalendarReference() }) { Text(t("common.close")) } })
-    }
+    if (calendarPicker) BackHandler { closeCalendarReference() }
     datePicker?.let { (field, options) ->
         val picker = options.getJSONObject("picker")
         DayPickerDialog(picker.getString("date"), ::closeDate) { day -> setDate(field, day, if (field == "reviewAt") picker.getString("instant") else null) }
@@ -1891,6 +1961,14 @@ internal fun editsOnLeave(title: String?, storedTitle: String?, notes: String?, 
     titleToStore(title, storedTitle)?.let { add("projectRename" to it) }
     if (notes != null && storedNotes != null && notes != storedNotes) add("projectNotes" to notes)
 }
+
+
+internal fun rerunsCalendarFeed(failure: String?, query: String?, retried: Boolean): Boolean =
+    query == null && !retried && failure?.startsWith("STALE_REVISION") == true
+
+
+internal fun storedCalendarReference(options: JSONObject?): String? =
+    options?.optJSONObject("project")?.optJSONObject("calendarReference")?.toString()
 
 
 internal class ReplyGuard {

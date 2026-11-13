@@ -268,7 +268,7 @@ export type NativeCalendarCommandResult = {
 };
 
 
-export const NATIVE_CALENDAR_FEED_SLOTS = ['calendar', 'weeklyReview', 'dailyReview'] as const;
+export const NATIVE_CALENDAR_FEED_SLOTS = ['calendar', 'weeklyReview', 'dailyReview', 'projectCalendar'] as const;
 export type NativeCalendarFeedSlot = typeof NATIVE_CALENDAR_FEED_SLOTS[number];
 
 type Session = {

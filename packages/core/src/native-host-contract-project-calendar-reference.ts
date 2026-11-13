@@ -1,4 +1,4 @@
-import { safeParseDate } from './date';
+import { safeParseDate, type DateFormatter } from './date';
 import type { NativeHostResult } from './native-host-contract';
 import type { NativeCalendarFeed } from './native-host-contract-calendar';
 import { taskEditValuesEqual as same } from './json-value-equality';
@@ -23,6 +23,14 @@ export type NativePreparedProjectCalendarReference = PreparedProjectCalendarRefe
 export type NativeProjectCalendarReferencePreparation = { kind: 'blocked'; result: { blocked: '' } }
     | { kind: 'noop'; result: NativeProjectCalendarReferenceResult }
     | { kind: 'prepared'; prepared: NativePreparedProjectCalendarReference };
+
+export function projectCalendarReferenceDateLabel(reference: ProjectCalendarReference, format: DateFormatter): string {
+    const pattern = reference.allDay ? 'PP' : 'PPp', start = format(reference.start, pattern, reference.start), last = safeParseDate(reference.end);
+    if (!last) return start;
+    if (reference.allDay) last.setDate(last.getDate() - 1);
+    const end = format(last, pattern);
+    return !end || end === start ? start : `${start} – ${end}`;
+}
 
 const UUID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
 const token = (project: Project): NativeProjectCalendarReferenceToken => ({ title: project.title, status: project.status,
@@ -72,7 +80,7 @@ const readPrepared = (value: unknown): NativePreparedProjectCalendarReference | 
 export function createProjectCalendarReferenceMethods(deps: {
     readiness: () => NativeHostResult<null>; save: () => Promise<NativeHostResult<null>>; revision: () => string;
     formatDate: (reference: ProjectCalendarReference) => string;
-    load: (input: { slot: 'calendar'; start: string; end: string }) => Promise<NativeHostResult<NativeCalendarFeed>>;
+    load: (input: { slot: 'projectCalendar'; start: string; end: string }) => Promise<NativeHostResult<NativeCalendarFeed>>;
 }) {
     type Picker = { id: string; projectId: string; adapter: ReturnType<typeof getStorageAdapter>; subscriptions: string;
         expected: NativeProjectCalendarReferenceToken; candidates: ProjectCalendarReference[]; at: number;
@@ -92,30 +100,35 @@ export function createProjectCalendarReferenceMethods(deps: {
         return isNativeJsonWithinBytes(value) ? { ok: true as const, value } : fail('INVALID_INPUT', 'Calendar picker exceeds the bounded response');
     };
     return {
-        async getProjectCalendarReferenceOptions(input: { projectId: string; query?: string }) {
+        async getProjectCalendarReferenceOptions(input: { projectId: string; query?: string; summary?: true }) {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
             if (!input || typeof input.projectId !== 'string' || !input.projectId || input.projectId.length > 500
-                || (input.query !== undefined && (typeof input.query !== 'string' || input.query.length > 1000)))
+                || (input.query !== undefined && (typeof input.query !== 'string' || input.query.length > 1000))
+                || (input.summary !== undefined && input.summary !== true))
                 return fail('INVALID_INPUT', 'A bounded Project ID is required');
             const state = useTaskStore.getState(), project = state._projectsById.get(input.projectId);
             if (!project || project.deletedAt || project.purgedAt) return fail('STALE_REVISION', 'Project is unavailable');
             const adapter = getStorageAdapter(), source = subscriptions(), expected = token(project), now = new Date();
+            if (input.summary) return response({ id: generateUUID(), projectId: project.id, adapter, subscriptions: source, expected,
+                candidates: [], at: Date.now(), status: 'unavailable', current: project.calendarReference ?? null, available: false }, '');
             if (input.query !== undefined && picker && picker.projectId === project.id && picker.adapter === adapter
                 && picker.subscriptions === source && same(picker.expected, expected) && Date.now() - picker.at <= 300_000)
                 return response(picker, input.query);
-            const feed = await deps.load({ slot: 'calendar', start: now.toISOString(), end: new Date(now.getTime() + 90 * 86_400_000).toISOString() });
+            const feed = await deps.load({ slot: 'projectCalendar', start: now.toISOString(), end: new Date(now.getTime() + 90 * 86_400_000).toISOString() });
             const available = feed.ok && feed.value.status === 'ready' && feed.value.warning === undefined;
             const candidates = feed.ok && feed.value.status === 'ready' && feed.value.warning === undefined
                 ? getProjectCalendarReferenceCandidates(feed.value.events, state.settings.externalCalendars ?? [], now) : [];
             let status: 'scheduled' | 'elapsed' | 'unavailable' = 'unavailable';
             let current = project.calendarReference ?? null;
+            let superseded = !feed.ok && feed.error.code === 'STALE_REVISION';
             if (current) {
                 let linked = feed;
                 const starts = safeParseDate(current.start)?.getTime() ?? NaN, ends = safeParseDate(current.end)?.getTime() ?? NaN;
                 if (starts < now.getTime() || ends > now.getTime() + 90 * 86_400_000) {
-                    linked = await deps.load({ slot: 'calendar', start: new Date(starts - 86_400_000).toISOString(),
+                    linked = await deps.load({ slot: 'projectCalendar', start: new Date(starts - 86_400_000).toISOString(),
                         end: new Date(Math.max(starts + 86_400_000, ends + 86_400_000)).toISOString() });
+                    superseded ||= !linked.ok && linked.error.code === 'STALE_REVISION';
                 }
                 const resolved = resolveProjectCalendarReference(current, linked.ok && linked.value.status === 'ready' && linked.value.warning === undefined ? linked.value.events : [],
                     linked.ok && linked.value.status === 'ready' && linked.value.warning === undefined, now);
@@ -125,9 +138,10 @@ export function createProjectCalendarReferenceMethods(deps: {
             const fresh = useTaskStore.getState()._projectsById.get(input.projectId);
             if (getStorageAdapter() !== adapter || subscriptions() !== source || !fresh || !sameProjectSqliteRow(project, fresh))
                 return fail('STALE_REVISION', 'Project or calendars changed while loading');
-            picker = { id: generateUUID(), projectId: project.id, adapter, subscriptions: source, expected, candidates,
+            const loaded: Picker = { id: generateUUID(), projectId: project.id, adapter, subscriptions: source, expected, candidates,
                 at: Date.now(), status, current, available };
-            return response(picker, input.query ?? '');
+            if (!superseded) picker = loaded;
+            return response(loaded, input.query ?? '');
         },
         probeProjectCalendarReferenceOutcome(input: NativeProjectCalendarReferenceRequest): NativeHostResult<NativeProjectCalendarReferenceResult> {
             const ready = deps.readiness();

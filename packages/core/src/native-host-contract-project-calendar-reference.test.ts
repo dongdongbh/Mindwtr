@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { createProjectCalendarReferenceMethods, type NativeProjectCalendarReferenceRequest } from './native-host-contract-project-calendar-reference';
+import { createProjectCalendarReferenceMethods, projectCalendarReferenceDateLabel, type NativeProjectCalendarReferenceRequest } from './native-host-contract-project-calendar-reference';
+import { createDateFormatter } from './date';
 import { flushPendingSave, resetForTests, setStorageAdapter, useTaskStore } from './store';
 import type { NativeCalendarFeed } from './native-host-contract-calendar';
+import type { NativeHostResult } from './native-host-contract';
 import type { AppData, Project } from './types';
 import type { ExternalCalendarEvent } from './ics';
 
@@ -19,13 +21,14 @@ async function open(change: Partial<Project> = {}, events = [event()]) {
         settings: { deviceId: 'calendar-device', externalCalendars: calendars } };
     let rejected = false;
     let feed: NativeCalendarFeed = { status: 'ready', calendars, events };
+    const loads: string[] = [];
     const adapter = { getData: async () => data, saveData: async (value: AppData) => {
         if (rejected) throw new Error('disk unavailable'); data = structuredClone(value);
     } };
     setStorageAdapter(adapter);
     await useTaskStore.getState().fetchData({ throwOnError: true });
     const methods = createProjectCalendarReferenceMethods({ readiness: () => ({ ok: true, value: null }), revision: () => 'revision', formatDate: (reference) => `label:${reference.start}`,
-        load: async () => ({ ok: true, value: feed }), save: async () => {
+        load: async (input) => { loads.push(input.slot); return { ok: true, value: feed }; }, save: async () => {
             try { await flushPendingSave(); return { ok: true as const, value: null }; }
             catch { return { ok: false as const, error: { code: 'SAVE_FAILED' as const, message: 'disk unavailable' } }; }
         } });
@@ -40,7 +43,7 @@ async function open(change: Partial<Project> = {}, events = [event()]) {
             value: clear ? null : value.candidates[0], expected };
     };
     return { methods, options, request, data: () => data, adapter, reject: (value: boolean) => { rejected = value; },
-        feed: (value: NativeCalendarFeed) => { feed = value; } };
+        feed: (value: NativeCalendarFeed) => { feed = value; }, loads };
 }
 
 afterEach(async () => { await flushPendingSave(); resetForTests(); });
@@ -128,5 +131,56 @@ describe('native Project calendar reference command', () => {
         const current = await fixture.options();
         const { id: _id, ...expected } = current.project;
         expect(fixture.methods.prepareProjectCalendarReference({ ...request, expected })).toMatchObject({ ok: true, value: { kind: 'blocked' } });
+    });
+
+    it('answers a summary read from the stored link without downloading feeds', async () => {
+        const fixture = await open();
+        const unlinked = await fixture.methods.getProjectCalendarReferenceOptions({ projectId: 'target', summary: true });
+        expect(unlinked).toMatchObject({ ok: true, value: { current: null, currentDateLabel: null, candidates: [], available: false, status: 'unavailable' } });
+        expect(fixture.loads).toEqual([]);
+        const stored = (await fixture.options()).candidates[0];
+        expect(fixture.loads).toEqual(['projectCalendar']);
+        await useTaskStore.getState().updateProject('target', { calendarReference: stored });
+        fixture.loads.length = 0;
+        const linked = await fixture.methods.getProjectCalendarReferenceOptions({ projectId: 'target', summary: true });
+        expect(linked).toMatchObject({ ok: true, value: { current: stored, currentDateLabel: `label:${stored.start}`, status: 'unavailable' } });
+        expect(fixture.loads).toEqual([]);
+        expect(await fixture.methods.getProjectCalendarReferenceOptions({ projectId: 'target', summary: false as never }))
+            .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+    });
+
+    it('labels a timed and an all-day event with its start and end like the mobile app', () => {
+        const format = createDateFormatter({ language: 'en', dateFormat: 'mdy', systemLocale: 'en-US' });
+        const base = { sourceId: 'feed', uid: 'uid', sourceName: 'Calendar', title: 'Meeting' };
+        expect(projectCalendarReferenceDateLabel({ ...base, start: '2026-11-12', end: '2026-11-13', allDay: true }, format)).toBe('Nov 12, 2026');
+        expect(projectCalendarReferenceDateLabel({ ...base, start: '2026-11-12', end: '2026-11-15', allDay: true }, format)).toBe('Nov 12, 2026 – Nov 14, 2026');
+        const start = new Date(2026, 10, 12, 9, 0).toISOString(), end = new Date(2026, 10, 12, 10, 30).toISOString();
+        expect(projectCalendarReferenceDateLabel({ ...base, start, end, allDay: false }, format)).toBe('Nov 12, 2026, 9:00 AM – Nov 12, 2026, 10:30 AM');
+    });
+
+    it('never caches a picker load that a newer load superseded, so a search still downloads', async () => {
+        const fixture = await open();
+        const pending: Array<(value: NativeHostResult<NativeCalendarFeed>) => void> = [];
+        const methods = createProjectCalendarReferenceMethods({ readiness: () => ({ ok: true, value: null }), revision: () => 'revision',
+            formatDate: (reference) => reference.start, save: async () => ({ ok: true, value: null }),
+            load: () => new Promise((resolve) => {
+                for (const older of pending.splice(0)) older({ ok: false, error: { code: 'STALE_REVISION', message: 'A newer load for this screen replaced it' } });
+                pending.push(resolve);
+            }) });
+        const opened = methods.getProjectCalendarReferenceOptions({ projectId: 'target' });
+        await Promise.resolve();
+        const typed = methods.getProjectCalendarReferenceOptions({ projectId: 'target', query: 'Meeting' });
+        const superseded = await opened;
+        expect(superseded).toMatchObject({ ok: true, value: { available: false, total: 0 } });
+        if (!superseded.ok) throw new Error('superseded read failed');
+        expect(Object.keys(superseded.value).sort()).toEqual(['available', 'canEdit', 'candidateDateLabels', 'candidates', 'current',
+            'currentDateLabel', 'pickerId', 'project', 'query', 'revision', 'status', 'total']);
+        const again = methods.getProjectCalendarReferenceOptions({ projectId: 'target', query: 'Meeting 0' });
+        await Promise.resolve();
+        expect(pending).toHaveLength(1);
+        pending[0]({ ok: true, value: { status: 'ready', calendars, events: [event()] } });
+        expect(await again).toMatchObject({ ok: true, value: { available: true, total: 1 } });
+        expect(await typed).toMatchObject({ ok: true, value: { available: false } });
+        expect(fixture.loads).toEqual([]);
     });
 });
