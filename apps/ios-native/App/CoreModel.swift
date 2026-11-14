@@ -39823,9 +39823,12 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         taskRecoveryGateVisible = true
     }
 
+    var taskRecoveryRestoreAdmitted: Bool {
+        ready && !appLock.concealed && !busy && host != nil && (taskRecoverySnapshot != nil || taskRecoveryCorrupt)
+    }
+
     func restoreTaskRecovery() async {
-        guard ready, !appLock.concealed, !busy, let host,
-              taskRecoverySnapshot != nil || taskRecoveryCorrupt else { return }
+        guard taskRecoveryRestoreAdmitted, let host else { return }
         guard !taskRecoveryCorrupt, var snapshot = taskRecoverySnapshot else {
             taskRecoveryConflict = "The saved task draft is unreadable."
             return
