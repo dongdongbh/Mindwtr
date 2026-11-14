@@ -112,6 +112,31 @@ Play permits **one open-testing track**. If it already serves RN beta users, ann
 
 Use external TestFlight testers and a dedicated group/public link; community testers need no App Store Connect administrative access. Check existing automatic build assignment and public links so the normal RN beta audience is not unexpectedly moved. [Apple external testing](https://developer.apple.com/help/app-store-connect/test-a-beta-version/invite-external-testers/).
 
+### Android: RN stable and native RC run side by side (maintainer decision, 2026-11-14)
+
+Native Android first ships as release candidates, starting with `1.4.0-rc.1`. Until native Android becomes stable, two release lines run in parallel:
+
+- **Stable releases stay on React Native.** The stable release workflow keeps building `apps/mobile` for Play production, the GitHub APK, IzzyOnDroid and F-Droid.
+- **Release candidates are native only.** The RC workflow builds `apps/android-native`:
+  - the Play AAB for the internal and open-testing (beta) tracks;
+  - the GitHub prerelease APK;
+  - the GitHub prerelease `-foss.apk`.
+  There is no React Native RC.
+- **RCs do not go to IzzyOnDroid or F-Droid.** Those channels get native Android only with the first native stable release.
+- **RC users stay on native.** A user can move from RN stable to the native RC by joining the beta. A native RC user never moves back to RN. A bug found in an RC is fixed in native and shipped as a new native RC, not by an RN release.
+- **When native is stable,** the stable workflow switches to native, and the RN Android release line ends.
+
+**Version codes keep RC users on native.** Play gives each tester the highest version code among the production and beta releases they can see. So every native RC must have a higher code than every RN stable release:
+
+- A native RC's code is the higher of the newest RN code plus 15, and the highest code on any Play track plus 1. So `rc.1` starts 15 codes above RN, and every later RC goes up by at least 1.
+- An RN stable release takes the newest RN code plus 1. It must stay below the current native RC code. If it would reach that code, the stable workflow stops: cut a new native RC first.
+- The 15-code lead leaves room for RN stable releases between two RCs. The same codes apply to the GitHub APKs, so a native RC APK cannot be replaced by a lower-coded RN stable APK either.
+- A tester who leaves the beta stays on their native RC until native stable ships.
+- **An RN stable release goes to Play production only.** It no longer also replaces the beta and internal tracks, because that would remove the native RC from Play. Testers still get production whenever its code is higher, but the code rule above keeps the RC higher.
+- **Each native RC release on Play is named `<version> native testing`.** The version-code check counts a release as native only when it is on a testing track and carries that name. So older RN releases on the beta track never count as native.
+
+**Before `1.4.0-rc.1` goes to the open-testing track,** announce the change to the existing RN beta users (see "Play permits one open-testing track" above). The announcement includes backup instructions and the list of capabilities native does not have yet.
+
 Proposed observation policy: two weekly-review cycles in opt-in beta, then at least seven days on an RC with no unresolved release blocker. These intervals do not replace coverage. Material fixes repeat affected checks and the affected RC observation period; sparse observations remain explicitly uncertain.
 
 ## 5. Upgrade compatibility and recovery
