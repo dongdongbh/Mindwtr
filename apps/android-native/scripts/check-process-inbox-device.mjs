@@ -148,10 +148,12 @@ try {
     sh('settings put system accelerometer_rotation 0');
     sh('settings put system user_rotation 0');
     let nodes = await waitFor('the Inbox', onInbox, 60_000);
-    const total = inboxCount(nodes);
-    await type(title);
-    await tapExpecting(button(await screen(), 'Save'), (current) => draftText(current) === '' || button(current, 'Save')?.enabled === 'false', 'the capture to start');
-    nodes = await waitFor('the capture', (current) => inboxCount(current) === total + 1 && draftText(current) === '');
+    for (const capture of [`${title}1`, `${title}2`, title]) {
+        const total = inboxCount(nodes);
+        await type(capture);
+        await tapExpecting(button(await screen(), 'Save'), (current) => draftText(current) === '' || button(current, 'Save')?.enabled === 'false', 'the capture to start');
+        nodes = await waitFor(`the capture of ${capture}`, (current) => inboxCount(current) === total + 1 && draftText(current) === '');
+    }
 
 
     let guided = core('guided');

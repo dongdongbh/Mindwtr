@@ -6,7 +6,7 @@ import { createHash, randomInt, randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { check, connect, evidenced, fail, inboxCount, inEditor, inList, logStamp, linesAfter, Stopped, switchOn, tab, tabSelected, tagged, withDescription } from './device.mjs';
+import { check, connect, evidenced, fail, inboxCount, inEditor, logStamp, linesAfter, Stopped, switchOn, tab, tabSelected, tagged, withDescription } from './device.mjs';
 import { cleanupOnExit } from './check-net-device.mjs';
 import { projectFiles, removeNowhereFiles } from './nowhere-files.mjs';
 import { hostDevice, serveWebdav } from './sync-harness.mjs';
@@ -141,7 +141,7 @@ const runCommand = async (tag, operation, description, timeoutMs = 240_000) => {
     await tapTag(tag, () => commands(operation, since) > 0, description, timeoutMs);
 };
 
-const { projectList, removeProjectFile } = projectFiles({ device, en, toTabs, hideKeyboard });
+const { projectList, openProjectDetails, removeProjectFile } = projectFiles({ device, en, toTabs, hideKeyboard });
 const until = async (description, holds, timeoutMs = 120_000, everyMs = 2_000) => {
     const deadline = Date.now() + timeoutMs;
     for (;;) {
@@ -242,9 +242,7 @@ try {
     check(Boolean(after) && !after.deletedAt && Boolean(after.cloudKey), '(4) the attachment is still live and keyed after Continue');
     check(/Sync activation continued without attachment files/.test(logs()), '(4) the app log has the activation-continue-without-files line');
     await projectList();
-    nodes = await device.reveal(names.project);
-    nodes = await tapExpecting(inList(nodes, names.project) ?? fail('no project row'), (current) => Boolean(tagged(current, 'project-details-toggle')), 'the project');
-    nodes = await tapExpecting(tagged(nodes, 'project-details-toggle'), (current) => Boolean(tagged(current, 'project-attachment-add-link')), 'the project Details');
+    await openProjectDetails(names.project);
     const fileRow = (current) => current.find((node) => (node.text ?? '') === names.file || (node['content-desc'] ?? '').includes(names.file));
     await reveal(fileRow, names.file, false);
     nodes = await waitFor(`"${en['attachments.missing']}" beside the file`, (current) => current.some((node) => node.text === en['attachments.missing'])

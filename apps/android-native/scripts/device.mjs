@@ -504,6 +504,15 @@ export function connect({ serial, pkg, uiFile, adb = process.env.ADB ?? DEFAULT_
         }
         return nodes;
     };
+    const capture = async (text) => {
+        const nodes = await openCapture();
+        await focusAtEnd(tagged(nodes, 'capture-title') ?? fail('no capture field'));
+        requireAppFront();
+        sh(`input text '${text.replaceAll(' ', '%s')}'`);
+        await waitFor(`"${text}" in the capture field`, (current) => tagged(current, 'capture-title')?.text === text, 15_000);
+        const ready = await waitFor('the capture Save button', (current) => Boolean(button(current, en['common.save'])), 10_000);
+        await tapExpecting(button(ready, en['common.save']), (current) => !tagged(current, 'quick-capture'), `the capture of "${text}" to close`);
+    };
     const type = async (title) => {
         const nodes = await openCapture();
         await tap(field(nodes) ?? fail('no text field on screen'));
@@ -605,5 +614,5 @@ export function connect({ serial, pkg, uiFile, adb = process.env.ADB ?? DEFAULT_
         return execFileSync('magick', [file, '-format', points.map(([x, y]) => `%[hex:p{${x},${y}}]`).join(' '), 'info:'], { encoding: 'utf8' })
             .trim().split(' ').map((hex) => hex.slice(0, 6).toUpperCase());
     };
-    return { adbRaw, sh, home, front, requireAppFront, launch, pid, stopApp, tapExpecting, focusAtEnd, logs, screen, waitFor, tap, openCapture, type, swipe, signature, toTop, settle, reveal, revealNode, projectsTab, pull, colors, revealAction, swipeDone, completeUntil };
+    return { adbRaw, sh, home, front, requireAppFront, launch, pid, stopApp, tapExpecting, focusAtEnd, logs, screen, waitFor, tap, openCapture, capture, type, swipe, signature, toTop, settle, reveal, revealNode, projectsTab, pull, colors, revealAction, swipeDone, completeUntil };
 }

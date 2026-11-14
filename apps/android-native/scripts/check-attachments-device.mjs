@@ -180,7 +180,7 @@ const capture = async (text) => {
     await tapExpecting(button(await screen(), en['common.save']) ?? fail('no Save'), onInbox, 'the capture to close the popup');
 };
 
-const { removeProjectFile } = projectFiles({ device, en, toTabs, hideKeyboard });
+const { openProjectDetails, removeProjectFile } = projectFiles({ device, en, toTabs, hideKeyboard });
 const until = async (description, holds, timeoutMs = 120_000, everyMs = 2_000) => {
     const deadline = Date.now() + timeoutMs;
     for (;;) {
@@ -423,11 +423,7 @@ try {
 
     nodes = await device.projectsTab(toTabs);
     nodes = await tapExpecting(tab(nodes, en['nav.projects']), (current) => tabSelected(current, en['nav.projects']), 'Projects');
-    nodes = await device.reveal(names.project);
-
-    nodes = await tapExpecting(inList(nodes, names.project) ?? fail('no project row'), (current) => Boolean(tagged(current, 'project-details-toggle')), 'the project and its Details');
-    await tapExpecting(tagged(nodes, 'project-details-toggle'), (current) => Boolean(tagged(current, 'project-attachment-add-link')), 'the project Details and its Attachments');
-    await tapExpecting(tagged(await screen(), 'project-attachment-add-link'), (current) => Boolean(tagged(current, 'attachment-link-sheet')), 'the project link sheet');
+    await tapExpecting(await openProjectDetails(names.project), (current) => Boolean(tagged(current, 'attachment-link-sheet')), 'the project link sheet');
     const projectLink = `${names.link}/project`;
     await typeInto(tagged(await screen(), 'attachment-link-input'), projectLink);
     await hideKeyboard();

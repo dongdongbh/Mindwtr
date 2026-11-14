@@ -37,19 +37,23 @@ export const projectFiles = ({ device, en, toTabs, hideKeyboard }) => {
         }
         return inProject(nodes) ? fail('the project list did not come back') : nodes;
     };
+    const openProjectDetails = async (project) => {
+        let nodes = await device.reveal(project);
+        nodes = await device.tapExpecting(inList(nodes, project) ?? fail(`no project row ${project}`), (current) => Boolean(tagged(current, 'project-details-toggle')), `the project ${project}`);
+        if (!tagged(nodes, 'project-details-status')) {
+            await device.tapExpecting(tagged(nodes, 'project-details-toggle'), (current) => Boolean(tagged(current, 'project-details-status')), 'the project Details');
+        }
+        return device.revealNode((current) => tagged(current, 'project-attachment-add-link'), 'the project Attachments', false);
+    };
     const removeProjectFile = async (project, file) => {
         await projectList();
-        let nodes = await device.reveal(project);
-        nodes = await device.tapExpecting(inList(nodes, project) ?? fail(`no project row ${project}`), (current) => Boolean(tagged(current, 'project-details-toggle')), 'the project');
-        if (!tagged(nodes, 'project-attachment-add-link')) {
-            nodes = await device.tapExpecting(tagged(nodes, 'project-details-toggle'), (current) => Boolean(tagged(current, 'project-attachment-add-link')), 'the project Details');
-        }
+        await openProjectDetails(project);
         const row = await device.revealNode((current) => current.find((node) => node.text === file), file, false);
-        nodes = await device.screen();
+        const nodes = await device.screen();
         const [, top, , bottom] = box(row);
         const remove = nodes.find((node) => node.text === en['attachments.remove'] && box(node)[1] <= (top + bottom) / 2 && box(node)[3] >= (top + bottom) / 2);
         await device.tapExpecting(remove ?? fail(`no Remove beside ${file}`), (current) => !current.some((node) => node.text === file), `${file} removed`);
         await projectList();
     };
-    return { projectList, removeProjectFile };
+    return { projectList, openProjectDetails, removeProjectFile };
 };

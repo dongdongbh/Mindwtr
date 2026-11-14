@@ -193,6 +193,11 @@ try {
     await waitFor('the Inbox', onInbox, 60_000);
     const gone = `filter:gone-${run}`;
     let seen = core(['next', gone]);
+    if (seen.views.next.total === 0) {
+        console.log('note - core\'s Next Actions list is empty; capturing a Next action for it');
+        await device.capture(`Wlc Next ${run} /next`);
+        seen = core(['next', gone]);
+    }
 
     if (seen.filters.length > 0) seen = core(['next', gone, ...seen.filters.map((id) => `filter:${id}`)]);
     const filterId = seen.filters.map((id) => `filter:${id}`).find((id) => seen.views[id]?.found && !seen.views[id].contextsFilterId) ?? null;
@@ -295,9 +300,12 @@ try {
     await sleep(800);
     shot('contexts-filter');
     const shownSort = savedView.sort.find((option) => option.selected) ?? fail('core marks no Contexts sort');
-    const pick = savedView.sort.find((option) => option.value === (shownSort.value === 'created' ? 'title' : 'created')) ?? fail('core offers no created sort');
-    seen = core([], [{ savedFilterId: contextsId, sortOverride: pick.value }]);
-    const overridden = seen.contexts[0];
+    const others = savedView.sort.filter((option) => option.value !== shownSort.value);
+    seen = core([], others.map((option) => ({ savedFilterId: contextsId, sortOverride: option.value })));
+    const reorders = others.findIndex((option, index) => JSON.stringify(seen.contexts[index].rows) !== JSON.stringify(savedView.rows));
+    if (reorders < 0) fail(`no sort other than "${shownSort.label}" changes core's order ${JSON.stringify(savedView.rows)}`);
+    const pick = others[reorders];
+    const overridden = seen.contexts[reorders];
     nodes = await tapExpecting(withDescription(await screen(), savedView.sortLabel) ?? fail(`no sort control "${savedView.sortLabel}"`), (current) => hasText(current, pick.label), 'the sort modal');
     await tapExpecting(nodes.find((node) => node.text === pick.label), (current) => !hasText(current, pick.label) && onContexts(current)
         && JSON.stringify(rowTitles(current).filter((title) => Object.values(titles).includes(title))) === JSON.stringify(overridden.rows), 'the overridden order');

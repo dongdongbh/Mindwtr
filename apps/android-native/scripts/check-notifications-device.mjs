@@ -388,6 +388,8 @@ try {
     stayOn = /^\d+$/.test(sh('settings get global stay_on_while_plugged_in')) ? sh('settings get global stay_on_while_plugged_in') : '0';
     sh('settings put global stay_on_while_plugged_in 7');
     await launch();
+    await device.capture(`Ntf focus ${String(Date.now()).slice(-8)} /next`);
+    check(true, '(0) a Next action is captured for the Pomodoro task picker');
 
     let nodes = await openNotifications();
     const shown = async (label) => switchOn(await reveal((current) => visible(withDescription(current, label))), label);

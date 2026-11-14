@@ -134,8 +134,9 @@ const coreDetails = (keys, nowMs) => {
 };
 
 
+class AppStarted extends Error {}
 const editDb = (recurringId, reminders, repeatId) => {
-    if (pid()) fail(`the app must be stopped to edit its database, but process ${pid()} is alive, started for ${startReason(pid())}`);
+    if (pid()) throw new AppStarted(`the app must be stopped to edit its database, but process ${pid()} is alive, started for ${startReason(pid())}`);
     const db = pullDb();
     const before = execFileSync('bun', ['-e', `
         import { Database } from 'bun:sqlite';
@@ -155,12 +156,23 @@ const editDb = (recurringId, reminders, repeatId) => {
     try {
         runAs(`cp ${STAGED} ${next}`);
         if (Number(runAs(`stat -c %s ${next}`)) !== statSync(db).size) fail('the staged database has the wrong size');
-        if (pid()) fail(`the app started while its database was being replaced: process ${pid()}, started for ${startReason(pid())}`);
+        if (pid()) throw new AppStarted(`the app started while its database was being replaced: process ${pid()}, started for ${startReason(pid())}`);
         runAs(`rm -f files/${DB}-wal files/${DB}-shm && mv -f ${next} files/${DB}`);
     } finally {
         sh(`rm -f ${STAGED}`);
     }
     return JSON.parse(before);
+};
+const editStoppedDb = async (...edit) => {
+    for (let attempt = 1; ; attempt += 1) {
+        await killApp();
+        try { return editDb(...edit); } catch (error) {
+            if (!(error instanceof AppStarted)) throw error;
+            if (attempt === 5) fail(error.message);
+            console.log(`note - ${error.message}; stopping it and replacing the database again (attempt ${attempt + 1} of 5)`);
+            await sleep(3000);
+        }
+    }
 };
 
 let reminderSetting;
@@ -302,8 +314,7 @@ const restore = async () => {
     } catch (error) { console.error(`RESTORE: this run's tasks were not checked off (${error.message}); they may still post a reminder`); }
     try {
         if (reminderSetting !== undefined && reminderSetting !== true) {
-            await killApp();
-            editDb(null, reminderSetting);
+            await editStoppedDb(null, reminderSetting);
             await launchAndPlan();
             reminderSetting = undefined;
         }
@@ -427,8 +438,7 @@ try {
 
 
     {
-        await killApp();
-        reminderSetting = editDb(ids.C, true);
+        reminderSetting = await editStoppedDb(ids.C, true);
         await launchAndPlan();
         check(JSON.parse(stored(names.C)[0].recurrence ?? 'null')?.rule === 'daily', `(1) ${names.C} repeats daily; task reminders are on (they were ${reminderSetting ?? 'unset'})`);
     }

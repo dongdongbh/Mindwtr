@@ -46,6 +46,7 @@ const webdavFields = { url: `http://127.0.0.1:${WEBDAV_PORT}${FOLDER}`, username
 const cloudFields = { url: `http://127.0.0.1:${CLOUD_PORT}`, token: TOKEN, allowInsecureHttp: true };
 const titles = {
     host: `Sync ✓ Grüße 😀 ${run}`,
+    seed: `93${run}0`,
     phone: `93${run}1`,
     down: `93${run}2`,
     failed: `93${run}3`,
@@ -266,6 +267,10 @@ try {
     await waitFor('the Inbox', onInbox, 60_000);
     await until('the app to start sync', () => logs().includes('Native Android sync started'), 30_000, 1_000);
     check(true, '(0) the app booted and started sync after its journal replay');
+    if (Object.keys(phoneTasks()).length === 0) {
+        console.log(`note - the library is empty; capturing ${titles.seed} so the phone has a task to upload`);
+        await capture(titles.seed);
+    }
     second = await hostDevice({ bundle, name: 'second', log: (line) => { if (/error|fail/i.test(line)) console.log(`note - ${line.slice(0, 240)}`); } });
     await second.boot();
 
