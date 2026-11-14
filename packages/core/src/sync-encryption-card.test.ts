@@ -3,6 +3,7 @@ import { createSyncEncryptionCard, getSyncEncryptionCardMessages, isSyncEncrypti
 import { SyncEncryptionBackendIncompatibleError, SyncEncryptionRemoteConflictError, SyncEncryptionRemoteVersionUnavailableError, SyncEncryptionTerminalError, type SyncEncryptionTransitionKind } from './sync-encryption';
 import { SyncCryptoAuthError, SyncCryptoUnsupportedError } from './sync-crypto';
 import { SyncEncryptionCleanupDeferredError, isSyncEncryptionCleanupDeferredError } from './sync-encryption-service';
+import { SyncRemoteMutationFenceUnavailableError } from './sync-remote-fence';
 
 function setup(overrides: Partial<SyncEncryptionCardHost> = {}) {
     const calls: unknown[][] = [];
@@ -254,7 +255,7 @@ describe('sync encryption card', () => {
         interrupted.card.setField('next', 'phrase');
         interrupted.card.setField('confirm', 'phrase');
         await interrupted.card.submitEnable();
-        expect(interrupted.card.getState()).toMatchObject({ state: 'off', incompleteTransition: true, incompleteTransitionKind: 'enable' });
+        expect(interrupted.card.getState()).toMatchObject({ state: 'off', incompleteTransition: true, incompleteTransitionKind: 'enable', error: 'transition-incomplete' });
 
         const completed = setup({ enable: async () => {
             completed.setIncomplete(undefined);
@@ -267,6 +268,58 @@ describe('sync encryption card', () => {
         completed.card.setField('confirm', 'phrase');
         await completed.card.submitEnable();
         expect(completed.card.getState()).toMatchObject({ state: 'enabled', incompleteTransition: false, incompleteTransitionKind: null });
+    });
+
+    it('names an enable cut off by a lost remote fence as unfinished, as the card reads it after a refresh', async () => {
+        const cut = setup({ enable: async () => {
+            cut.setIncomplete('enable');
+            throw new SyncRemoteMutationFenceUnavailableError('Remote sync mutation fence validation failed: WebDAV File GET failed (503)');
+        } });
+        await cut.card.refresh().done;
+        cut.card.openFlow('enable');
+        cut.card.setField('next', 'p');
+        cut.card.setField('confirm', 'p');
+        await cut.card.submitEnable();
+        expect(cut.card.getState()).toMatchObject({ incompleteTransition: true, error: 'transition-incomplete', busy: false });
+        expect(getSyncEncryptionCardMessages(cut.card.getState(), (key) => key).errorMessage).toBe('settings.syncEncryptionErrorTransitionIncomplete');
+        await cut.card.refresh().done;
+        expect(cut.card.getState().error).toBe('transition-incomplete');
+
+        const refused = setup({ enable: async () => { throw new SyncRemoteMutationFenceUnavailableError('Remote sync mutation fencing requires a valid provider Date response header'); } });
+        await refused.card.refresh().done;
+        refused.card.openFlow('enable');
+        refused.card.setField('next', 'p');
+        refused.card.setField('confirm', 'p');
+        await refused.card.submitEnable();
+        expect(refused.card.getState()).toMatchObject({ incompleteTransition: false, error: 'generic' });
+    });
+
+    it('keeps a specific error when the failed change is left unfinished, after the failure and after a refresh', async () => {
+        const refused = setup({ enable: async () => {
+            refused.setIncomplete('enable');
+            throw new SyncEncryptionBackendIncompatibleError(new SyncEncryptionRemoteVersionUnavailableError('WebDAV data.json'));
+        } });
+        await refused.card.refresh().done;
+        refused.card.openFlow('enable');
+        refused.card.setField('next', 'p');
+        refused.card.setField('confirm', 'p');
+        await refused.card.submitEnable();
+        expect(refused.card.getState()).toMatchObject({ incompleteTransition: true, error: 'backend-incompatible' });
+        await refused.card.refresh().done;
+        expect(refused.card.getState()).toMatchObject({ incompleteTransition: true, error: 'backend-incompatible' });
+
+        const wrong = setup({ upgrade: async () => {
+            wrong.setIncomplete('upgrade');
+            throw new SyncCryptoAuthError();
+        } });
+        wrong.setState('enabled');
+        await wrong.card.refresh().done;
+        wrong.card.openFlow('upgrade');
+        wrong.card.setField('current', 'synthetic phrase');
+        await wrong.card.submitUpgrade();
+        expect(wrong.card.getState()).toMatchObject({ incompleteTransition: true, error: 'wrong-passphrase' });
+        await wrong.card.refresh().done;
+        expect(wrong.card.getState()).toMatchObject({ incompleteTransition: true, error: 'wrong-passphrase' });
     });
 
     it('holds a partly encrypted location until "Check this location again" finds it whole', async () => {

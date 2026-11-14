@@ -123,6 +123,10 @@ export const classifySyncEncryptionCardFailure = (error: unknown, terminal: Sync
     return 'generic';
 };
 
+export const syncEncryptionErrorAfterStatus = <E extends string>(error: E | null, unfinished: boolean): E | 'transition-incomplete' | null => (
+    unfinished && (error === null || error === 'generic') ? 'transition-incomplete' : error
+);
+
 const SYNC_ENCRYPTION_CARD_ERROR_KEYS: Record<SyncEncryptionCardError, string> = {
     mismatch: 'settings.syncEncryptionErrorMismatch',
     'wrong-passphrase': 'settings.syncEncryptionErrorWrongPassphrase',
@@ -200,7 +204,7 @@ export function createSyncEncryptionCard(host: SyncEncryptionCardHost) {
         const read = readState().then((next) => {
             if (!cancelled) {
                 set({ state: next.state, stateUnavailable: next.unavailable, incompleteTransition: next.incomplete, incompleteTransitionKind: next.incompleteKind, partlyEncrypted: next.partly });
-                if (next.incomplete) set({ error: 'transition-incomplete' });
+                set({ error: syncEncryptionErrorAfterStatus(card.error, next.incomplete) });
             }
         });
         const pending = host.isBackendPending()
@@ -285,7 +289,7 @@ export function createSyncEncryptionCard(host: SyncEncryptionCardHost) {
 
         const nextState = await readState();
         set({ state: nextState.state, stateUnavailable: nextState.unavailable, incompleteTransition: nextState.incomplete, incompleteTransitionKind: nextState.incompleteKind, partlyEncrypted: nextState.partly });
-        if (nextState.incomplete && !card.error) set({ error: 'transition-incomplete' });
+        set({ error: syncEncryptionErrorAfterStatus(card.error, nextState.incomplete) });
         set({ pendingFirstSync: await host.isBackendPending().catch(() => false) });
         set({ progress: null, busy: false });
         if (succeeded) {
