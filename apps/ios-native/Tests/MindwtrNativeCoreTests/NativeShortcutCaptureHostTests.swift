@@ -51,7 +51,8 @@ final class NativeShortcutCaptureHostTests: XCTestCase {
         XCTAssertEqual(try rows("SELECT status FROM tasks WHERE title='Shortcut capture 2'").first?["status"] as? String, "inbox")
         XCTAssertEqual(try rows("SELECT count(*) AS n FROM native_request_receipts").first?["n"] as? Int, 2)
         let cold = host(); _ = try await cold.start()
-        XCTAssertEqual(try await cold.ingestShortcutCaptures(selected), completed)
+        let replayed = try await cold.ingestShortcutCaptures(selected)
+        XCTAssertEqual(replayed, completed)
         await cold.close()
         XCTAssertEqual(try rows("SELECT count(*) AS n FROM tasks").first?["n"] as? Int, 2)
     }
@@ -75,7 +76,8 @@ final class NativeShortcutCaptureHostTests: XCTestCase {
         let core = host(); _ = try await core.start()
         _ = try await core.ingestShortcutCaptures(try XCTUnwrap(NativeShortcutCaptureBatch.next([source(1)])))
         let receipts = try rows("SELECT count(*) AS n FROM native_request_receipts").first?["n"] as? Int
-        let snapshot = try XCTUnwrap(NativeShortcutsSnapshot(json: try await core.shortcutsSnapshot()))
+        let raw = try await core.shortcutsSnapshot()
+        let snapshot = try XCTUnwrap(NativeShortcutsSnapshot(json: raw))
         XCTAssertEqual(snapshot.items(forList: "inbox").map(\.title), ["Shortcut capture 1"])
         XCTAssertEqual(snapshot.freshness(now: Date()), .current)
         XCTAssertEqual(try rows("SELECT count(*) AS n FROM native_request_receipts").first?["n"] as? Int, receipts)
