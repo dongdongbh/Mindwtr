@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
-import type { Project } from '@mindwtr/core';
+import { useTaskStore, type Project } from '@mindwtr/core';
 
 import { LanguageProvider } from '../../../contexts/language-context';
 import { ProjectDetailsFields } from './ProjectDetailsFields';
@@ -111,6 +111,23 @@ describe('ProjectDetailsFields', () => {
         fireEvent.click(screen.getByRole('button', { name: 'Use Area color' }));
         await waitFor(() => expect(onColorChange).toHaveBeenCalledWith(null));
     });
+    it('edits the review date in the app date field, empty when unset and in the chosen date format (#1556)', async () => {
+        useTaskStore.setState({ settings: { ...useTaskStore.getState().settings, dateFormat: 'dmy' } });
+        const onReviewAtChange = vi.fn();
+        const { rerender } = render(<LanguageProvider><ProjectDetailsFields {...defaultProps} onReviewAtChange={onReviewAtChange} /></LanguageProvider>);
+        const review = screen.getByLabelText('Review Date') as HTMLInputElement;
+        expect(review.type).toBe('text');
+        expect(review.value).toBe('');
+        expect(document.querySelector('input[type="datetime-local"]')).toBeNull();
+
+        fireEvent.change(review, { target: { value: '20/04/2027' } });
+        fireEvent.blur(review);
+        await waitFor(() => expect(onReviewAtChange).toHaveBeenLastCalledWith('2027-04-20'));
+
+        rerender(<LanguageProvider><ProjectDetailsFields {...defaultProps} reviewAtValue="2027-04-20T09:30" onReviewAtChange={onReviewAtChange} /></LanguageProvider>);
+        expect((screen.getByLabelText('Review Date') as HTMLInputElement).value).toBe('20/04/2027');
+    });
+
     it('uses a compact responsive settings grid', () => {
         const { container } = render(
             <LanguageProvider>

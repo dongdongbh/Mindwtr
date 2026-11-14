@@ -7,6 +7,7 @@ Changes collected since the latest stable release.
 - Self-hosted sync: update the Mindwtr server along with the apps. Until the server is updated, each change costs one extra sync cycle. (feedback d4644bd4)
 - Mobile voice capture: on-device Whisper now detects the spoken language when Settings › AI is set to Auto, and uses the language you picked otherwise. Before, it always transcribed as English. English-only (`.en`) models always use English.
 - Mobile task Preview: Mark Done saves the current draft and completes the task directly, retaining Retry if saving fails. (#1514)
+- Desktop: a project's Review date uses the same date field as Start and Due. It is empty until you set it, follows your date format, and closes when you click elsewhere. (#1556)
 - Desktop: project task titles use the shared task-row typography. The Area selector summarizes the active scope and provides a direct reset to all areas. (#1532, #1525)
 - Quick add: on a library with no projects, a `+name` made of letters a-f and digits, such as `+cafe1234`, now creates a project with that name. Before, the task got a project link that pointed nowhere. A `!name` or `/area:name` that matches no area now stays in the task title instead of linking to a missing area.
 

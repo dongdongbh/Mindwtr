@@ -1,8 +1,11 @@
-import { safeParseDate, type Project, type ProjectFlowMode } from '@mindwtr/core';
+import { safeFormatDate, safeParseDate, type Project, type ProjectFlowMode } from '@mindwtr/core';
+import { joinDateTime, splitDateTime } from '@mindwtr/core/date-draft';
 import { Calendar, CalendarClock, CalendarRange, FolderOpenDot, ListOrdered, Plus, Settings2, Signal, Tags } from 'lucide-react';
 import { useNativeDateInputLocale } from '../../../hooks/use-native-date-input-locale';
 import { TokenAutocompleteInput } from '../../Task/TokenAutocompleteInput';
 import { DateField } from '../../ui/DateField';
+import { TimeInput } from '../../ui/TimeInput';
+import { normalizeDateInputValue } from '../../Task/task-item-helpers';
 import { useEffect, useRef, useState } from 'react';
 import { AreaColorPicker } from './AreaColorPicker';
 import { ProjectCalendarReference } from './ProjectCalendarReference';
@@ -81,6 +84,7 @@ export function ProjectDetailsFields({
     const resolvedSequenceModeLabel = resolveText('projects.sequenceMode', 'Flow Mode');
     const resolvedSequentialScope = sequentialScope === 'section' ? 'section' : 'project';
     const { nativeDateInputLocale, dateFormatSetting } = useNativeDateInputLocale();
+    const { date: reviewDate, time: reviewTime } = splitDateTime(reviewAtValue);
     const saveColor = async (value: string | null) => {
         const generation = colorGeneration.current;
         setColorIntent(value);
@@ -294,13 +298,30 @@ export function ProjectDetailsFields({
                         <CalendarClock className="h-3.5 w-3.5" />
                         {t('projects.reviewAt')}
                     </label>
-                    <input
+                    <DateField
                         key={`${project.id}-review`}
-                        type="datetime-local"
-                        defaultValue={reviewAtValue}
-                        onBlur={(e) => onReviewAtChange(e.target.value)}
-                        aria-describedby="project-review-date-hint"
-                        className="h-8 w-full rounded-md border border-border bg-background px-2 text-sm text-foreground"
+                        t={t}
+                        dateAriaLabel={t('projects.reviewAt')}
+                        dateValue={reviewDate}
+                        selectedDate={safeParseDate(reviewAtValue)}
+                        dateFormatSetting={dateFormatSetting}
+                        nativeDateInputLocale={nativeDateInputLocale}
+                        dateInputClassName="h-8 rounded-md border border-border bg-background px-2 text-sm text-foreground"
+                        className="max-w-none"
+                        timeInput={(
+                            <TimeInput
+                                lang={nativeDateInputLocale}
+                                aria-label={t('task.aria.reviewTime')}
+                                aria-describedby="project-review-date-hint"
+                                value={reviewTime}
+                                onChange={(value) => onReviewAtChange(joinDateTime(reviewDate || (value ? safeFormatDate(new Date(), 'yyyy-MM-dd') : ''), value))}
+                                className="h-8 w-24 shrink-0 rounded-md border border-border bg-background px-2 text-sm text-foreground"
+                            />
+                        )}
+                        hasValue={Boolean(reviewAtValue)}
+                        onDateChange={(value) => onReviewAtChange(joinDateTime(normalizeDateInputValue(value), reviewTime))}
+                        onClear={() => onReviewAtChange('')}
+                        onDateOnly={reviewTime ? () => onReviewAtChange(reviewDate) : undefined}
                     />
                 </div>
             </div>
