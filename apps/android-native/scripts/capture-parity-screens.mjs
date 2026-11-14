@@ -178,7 +178,7 @@ const buildFixture = () => execFileSync('bun', ['-e', `
 
 
 const device = connect({ serial, pkg: PKG, uiFile: '/data/local/tmp/mindwtr-parity-ui.xml' });
-const { adbRaw, sh, home, front, requireAppFront, pid, screen, waitFor, tap } = device;
+const { adbRaw, sh, home, front, requireAppFront, pid, screen, waitFor, tap, tapExpecting } = device;
 const runAs = (command) => sh(`run-as ${PKG} ${command}`);
 const installed = () => sh(`pm list packages ${PKG}`).split('\n').some((line) => line.trim() === `package:${PKG}`);
 const originalNight = /Night mode: (\w+)/.exec(sh('cmd uimode night'))?.[1] ?? 'auto';
@@ -594,16 +594,18 @@ const shootWhisper = async (prefix, rn) => {
     await tap(rn ? menu.find((node) => node['content-desc'] === 'Menu') : tab(menu, 'Menu'));
     await tap(withDescription(await waitFor('the Settings tile', (current) => Boolean(withDescription(current, en['nav.settings'])), 15_000), en['nav.settings']));
     const advanced = `${en['settings.advanced']}. ${en['settings.menuDesc.advanced']}`;
-    await tap(await device.revealNode((current) => withDescription(current, advanced), 'the Advanced row'));
+    await tap(withDescription(await waitFor('the Advanced row', (current) => Boolean(withDescription(current, advanced)), 30_000), advanced));
     const ai = `${en['settings.ai']}. ${en['settings.menuDesc.ai']}`;
-    await tap(await device.revealNode((current) => withDescription(current, ai), 'the AI row'));
+    await tap(withDescription(await waitFor('the AI row', (current) => Boolean(withDescription(current, ai)), 30_000), ai));
     const heading = (current) => (rn ? current.find((node) => node.text === en['settings.speechDesc']) : withDescription(current, `${en['settings.speechTitle']}, ${en['settings.speechDesc']}`));
-    await tap(await device.revealNode(heading, 'the Speech card'));
-    await waitFor('the Speech card open', (current) => hasText(current, en['settings.speechEnable']), 15_000);
-    const chip = (current) => (rn ? current.find((node) => node.text === en['settings.speechProviderOffline']) : tagged(current, 'ai-speech-provider-whisper'));
-    await tap(await device.revealNode(chip, 'the Whisper chip'));
+    const open = (current) => hasText(current, en['settings.speechEnable']);
     await sleep(1500);
+    await tapExpecting(heading(await waitFor('the Speech card', (current) => Boolean(heading(current)), 30_000)), open, 'the Speech card open');
+    const chip = (current) => (rn ? current.find((node) => node.text === en['settings.speechProviderOffline']) : tagged(current, 'ai-speech-provider-whisper'));
     const row = (current) => (rn ? current.find((node) => node.text === en['settings.speechOfflineDownload']) : tagged(current, 'ai-whisper-action'));
+    await tapExpecting(chip(await waitFor('the Whisper chip', (current) => Boolean(chip(current)), 15_000)), (current) => Boolean(row(current))
+        || hasText(current, en['settings.speechOfflineModel']), 'the Whisper model row');
+    await sleep(1500);
     await device.revealNode(row, 'the offline model row', false);
     await shoot(`${prefix}-settings-ai-whisper-light`, (current) => Boolean(row(current)) && hasText(current, en['settings.speechOfflineNotDownloaded']));
 };

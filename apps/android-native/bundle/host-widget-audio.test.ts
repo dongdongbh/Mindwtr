@@ -92,6 +92,11 @@ describe('the widget audio port', () => {
         });
         expect(await port.transcribe!(path, settings({ enabled: true, provider: 'whisper', model: 'whisper-base.en', language: 'en' }))).toBe('Call the bank');
         expect([heard, requests.length, waiting]).toEqual([[`${path} en`], 0, []]);
+        for (const marker of ['[BLANK_AUDIO]', ' [BLANK_AUDIO] ', '[Music] [silence]']) {
+            const silent = harness({ whisper: { ready: async () => true, transcribe: async () => marker } });
+            expect(await silent.port.transcribe!(path, settings({ enabled: true, provider: 'whisper' }))).toBeNull();
+            expect(silent.waiting).toEqual(['empty']);
+        }
         const foss = harness({ isFossBuild: true, whisper: { ready: async () => true, transcribe: async () => '' } });
         expect(await foss.port.transcribe!(path, settings({ enabled: true, provider: 'gemini' }))).toBeNull();
         expect([foss.requests.length, foss.waiting]).toEqual([0, ['empty']]);

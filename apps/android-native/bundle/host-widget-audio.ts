@@ -32,6 +32,7 @@ export type WidgetAudioBindings = {
 };
 
 const AUDIO_DIRECTORY = 'quick-capture-audio';
+const WHISPER_MARKERS_ONLY = /^(?:\[\s*[^\]]+?\s*\]\s*)+$/;
 const UUID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
 
 export function createWidgetAudioPort(bindings: WidgetAudioBindings): PendingCaptureAudioPort {
@@ -70,7 +71,7 @@ export function createWidgetAudioPort(bindings: WidgetAudioBindings): PendingCap
                 bindings.logWaiting('failed');
                 throw error;
             }
-            if (!transcript) { bindings.logWaiting('empty'); return null; }
+            if (!transcript || (whisper && WHISPER_MARKERS_ONLY.test(transcript))) { bindings.logWaiting('empty'); return null; }
             return transcript;
         },
     };

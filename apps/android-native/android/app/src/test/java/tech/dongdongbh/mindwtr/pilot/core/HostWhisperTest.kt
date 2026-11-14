@@ -75,6 +75,20 @@ class HostWhisperTest {
         assertEquals(elsewhere.canonicalPath, heard.single().first.canonicalPath)
     }
 
+    @Test fun aFreshModelOfTheExactSizeWinsOverAStalePartialFileAtTheStoredPath() {
+        val stale = File(cache, WhisperModelStore.DIRECTORY).apply { mkdirs() }.let { File(it, model.first) }.apply { writeBytes(model.second.copyOf(100)) }
+        val leftover = File(cache, "whisper-downloads/ggml-base.bin.part").apply { parentFile!!.mkdirs(); writeBytes(ByteArray(10)) }
+        answer(spec()).getOrThrow()
+        assertFalse(leftover.exists())
+
+        val located = answer(JSONObject().put("op", "whisperLocate").put("fileName", model.first).put("sizeBytes", model.second.size.toLong())
+            .put("storedPath", HostVoice.uriOf(stale))).getOrThrow() as JSONObject
+        assertEquals(HostVoice.uriOf(canonical()), located.getString("uri"))
+        assertEquals(model.second.size.toLong(), located.getLong("size"))
+        assertEquals("Buy milk", transcribe(speech(), storedPath = HostVoice.uriOf(stale)).getOrThrow())
+        assertEquals(canonical().canonicalPath, heard.single().first.canonicalPath)
+    }
+
     @Test fun aDownloadNeverOverwritesAGoodModelAndLeavesNoSidecarFile() {
         canonical().apply { parentFile!!.mkdirs(); writeBytes(model.second); setLastModified(1_000_000L) }
         served = { throw IOException("no network in this test") }

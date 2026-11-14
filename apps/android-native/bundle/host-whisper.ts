@@ -25,13 +25,15 @@ const reasonOf = (error: unknown) => {
     return /^E_[A-Z0-9_]+$/.test(message) ? message : 'E_WHISPER_FAILED';
 };
 
-export function createNativeWhisper(bindings: { call: WhisperCall; documentDirectory: string; log: (line: WhisperLine) => void; now?: () => number }) {
+export function createNativeWhisper(bindings: { call: WhisperCall; documentDirectory: string; log: (line: WhisperLine) => void;
+    rememberPath: (modelId: string, uri: string | undefined) => Promise<void>; now?: () => number }) {
     const now = bindings.now ?? Date.now;
     const documents = bindings.documentDirectory.endsWith('/') ? bindings.documentDirectory : `${bindings.documentDirectory}/`;
     const modelOf = (modelId: string | undefined) => getSelectedMobileWhisperModel(modelId ?? '')!;
 
     const locate = async (modelId: string, storedPath: string | undefined): Promise<WhisperLocation> => (
-        await bindings.call({ op: 'whisperLocate', fileName: modelOf(modelId).fileName, ...(storedPath ? { storedPath } : {}) }) as WhisperLocation
+        await bindings.call({ op: 'whisperLocate', fileName: modelOf(modelId).fileName, sizeBytes: modelOf(modelId).sizeBytes,
+            ...(storedPath ? { storedPath } : {}) }) as WhisperLocation
     );
 
     return {
@@ -67,6 +69,7 @@ export function createNativeWhisper(bindings: { call: WhisperCall; documentDirec
                 const found = await bindings.call({ op: 'whisperDownload', fileName: model.fileName, sizeBytes: model.sizeBytes, sha256: model.sha256,
                     urls: WHISPER_MODEL_BASE_URLS.map((root) => `${root}/${model.fileName}`) }) as WhisperLocation & { repaired: boolean };
                 bindings.log({ stage: 'download', outcome: 'model-ready', ...(found.repaired ? { repaired: true } : {}) });
+                await bindings.rememberPath(model.id, found.uri);
                 return { exists: found.exists, uri: found.uri, size: found.size };
             } catch (error) {
                 bindings.log({ stage: 'download', outcome: 'failed', reason: reasonOf(error) });
@@ -78,6 +81,7 @@ export function createNativeWhisper(bindings: { call: WhisperCall; documentDirec
             try {
                 await bindings.call({ op: 'whisperDelete', fileName: modelOf(modelId).fileName });
                 bindings.log({ stage: 'delete', outcome: 'deleted' });
+                await bindings.rememberPath(modelOf(modelId).id, undefined);
             } catch (error) {
                 bindings.log({ stage: 'delete', outcome: 'failed', reason: reasonOf(error) });
                 throw error;

@@ -754,6 +754,18 @@ describe('native host contract: AI commands replayed after a restart', () => {
         expect(useTaskStore.getState().settings.ai).toMatchObject({ thinkingBudget: 4096, speechToText: { provider: 'openai', model: 'whisper-1' } });
     });
 
+    it('offers no Whisper Download or Delete on a host without a Whisper model store', async () => {
+        const dev = createDevice({});
+        delete dev.host.whisper;
+        const env = await openSqliteHost({ settings: { ai: { speechToText: { provider: 'whisper', model: 'whisper-tiny' } } } }, undefined, { ai: dev.host });
+        try {
+            const opened = value(await env.host.openAISettings({ requestId: generateUUID() }));
+            expect(opened.speech.whisper?.action).toMatchObject({ kind: 'download', enabled: false });
+        } finally {
+            await env.close();
+        }
+    });
+
     it('openAISettings answered from its receipt still reads the Whisper model file', async () => {
         const dev = createDevice({});
         dev.host.whisper = {

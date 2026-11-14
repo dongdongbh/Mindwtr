@@ -72,9 +72,10 @@ class WhisperModelStore(private val files: File, private val cache: File, privat
         return file?.takeIf { it.name == fileName && inside(it) }
     }
 
-    fun locate(fileName: String, storedPath: String?): Located {
-        val candidates = listOfNotNull(stored(storedPath, fileName)) + roots.flatMap { listOf(File(File(it, DIRECTORY), fileName), File(it, fileName)) }
-        val found = candidates.firstOrNull { it.isFile }
+    fun locate(fileName: String, storedPath: String?, sizeBytes: Long?): Located {
+        val candidates = (listOfNotNull(stored(storedPath, fileName)) + roots.flatMap { listOf(File(File(it, DIRECTORY), fileName), File(it, fileName)) })
+            .filter { it.isFile }
+        val found = candidates.firstOrNull { it.length() == sizeBytes } ?: candidates.firstOrNull()
             ?: return Located(null, HostVoice.uriOf(File(File(files, DIRECTORY), fileName)), 0)
         return Located(found, HostVoice.uriOf(found), found.length())
     }
@@ -95,7 +96,8 @@ class WhisperModelStore(private val files: File, private val cache: File, privat
             return Downloaded(Located(target, HostVoice.uriOf(target), target.length()), repaired)
         }
         if (directory.usableSpace < spec.sizeBytes) throw IOException("E_WHISPER_SPACE")
-        val part = File(File(cache, "whisper-downloads").apply { mkdirs() }, "${spec.fileName}.part")
+        val parts = File(cache, "whisper-downloads").apply { listFiles()?.forEach { it.delete() }; mkdirs() }
+        val part = File(parts, "${spec.fileName}.part")
         var failure: IOException? = null
         for (url in spec.urls) {
             try {
@@ -152,7 +154,9 @@ class HostWhisper(
     fun call(request: JSONObject, reply: (Result<Any?>) -> Unit) {
         val answer = { work: () -> Any? -> reply(runCatching(work).recoverCatching { throw IOException(code(it)) }) }
         when (request.optString("op")) {
-            "whisperLocate" -> answer { located(store.locate(WhisperModelStore.fileName(request.getString("fileName")), storedPath(request))) }
+            "whisperLocate" -> answer {
+                located(store.locate(WhisperModelStore.fileName(request.getString("fileName")), storedPath(request), request.optLong("sizeBytes").takeIf { it > 0 }))
+            }
             "whisperDownload" -> models.execute {
                 answer { store.download(WhisperModelStore.spec(request)).let { located(it.located).put("repaired", it.repaired) } }
             }
@@ -164,8 +168,9 @@ class HostWhisper(
 
     private fun transcribe(request: JSONObject): String {
         val audio = store.owned(request.getString("uri"))?.takeIf(QuickCaptureWave::isValid) ?: throw IOException("E_WHISPER_AUDIO_UNSUPPORTED")
-        val model = store.locate(WhisperModelStore.fileName(request.getString("fileName")), storedPath(request))
-        if (model.file == null || model.size != request.getLong("sizeBytes")) throw IOException("E_WHISPER_MODEL_MISSING")
+        val size = request.getLong("sizeBytes")
+        val model = store.locate(WhisperModelStore.fileName(request.getString("fileName")), storedPath(request), size)
+        if (model.file == null || model.size != size) throw IOException("E_WHISPER_MODEL_MISSING")
         return engine(model.file, samples(audio), language(request.optString("language"))).trim()
     }
 
@@ -180,8 +185,8 @@ class HostWhisper(
         fun threads(cores: Int): Int = if (cores == 4) 2 else cores.coerceIn(1, 4)
 
         fun samples(wave: File): FloatArray {
-            val data = ByteBuffer.wrap(wave.readBytes(), QuickCaptureWave.HEADER_SIZE, wave.length().toInt() - QuickCaptureWave.HEADER_SIZE)
-                .order(ByteOrder.LITTLE_ENDIAN).asShortBuffer()
+            val bytes = wave.readBytes()
+            val data = ByteBuffer.wrap(bytes, QuickCaptureWave.HEADER_SIZE, bytes.size - QuickCaptureWave.HEADER_SIZE).order(ByteOrder.LITTLE_ENDIAN).asShortBuffer()
             return FloatArray(data.remaining()) { data.get(it) / 32768f }
         }
 

@@ -713,8 +713,12 @@ const whisperLine = (line: WhisperLine) => {
 };
 const nativeWhisper = (() => {
     const call = (globalThis as { __mindwtrVoiceCall?: (request: Record<string, unknown>) => Promise<unknown> }).__mindwtrVoiceCall;
+    const rememberPath = async (model: string, offlineModelPath: string | undefined) => {
+        const { settings, updateSettings } = useTaskStore.getState();
+        await updateSettings({ ai: { ...(settings.ai ?? {}), speechToText: { ...(settings.ai?.speechToText ?? {}), model, offlineModelPath } } });
+    };
     const channels = nativeSync && call ? nativeFileChannels() : null;
-    return channels && call ? createNativeWhisper({ call, documentDirectory: channels.directories.document, log: whisperLine }) : null;
+    return channels && call ? createNativeWhisper({ call, documentDirectory: channels.directories.document, log: whisperLine, rememberPath }) : null;
 })();
 const nativeAI = nativeSync ? createNativeAI(keyValue, () => globalThis.__mindwtrSecrets as HostSecrets, isFossBuild, nativeWhisper ?? undefined) : null;
 let iosCaptureAIHost: NativeAIHost | null = null;

@@ -10,14 +10,16 @@ const baseEn = WHISPER_MODELS.find((model) => model.id === 'whisper-base.en')!;
 const harness = (answer: (request: Record<string, unknown>) => unknown) => {
     const requests: Array<Record<string, unknown>> = [];
     const lines: WhisperLine[] = [];
+    const remembered: Array<[string, string | undefined]> = [];
     let clock = 1_000;
     const whisper = createNativeWhisper({
         call: async (request) => { requests.push(request); return answer(request); },
         documentDirectory: DOCS,
         log: (line) => { lines.push(line); },
+        rememberPath: async (modelId, uri) => { remembered.push([modelId, uri]); },
         now: () => (clock += 250),
     });
-    return { whisper, requests, lines };
+    return { whisper, requests, lines, remembered };
 };
 
 describe('native local Whisper', () => {
@@ -31,7 +33,7 @@ describe('native local Whisper', () => {
         for (const [size, ready] of [[tiny.sizeBytes, true], [tiny.sizeBytes - 1, false], [tiny.sizeBytes + 1, false]] as const) {
             const { whisper, requests } = harness(() => ({ exists: true, uri: `${DOCS}whisper-models/ggml-tiny.bin`, size }));
             expect(await whisper.ready({ model: 'whisper-tiny', modelPath: `${DOCS}whisper-models/ggml-tiny.bin`, language: 'auto' })).toBe(ready);
-            expect(requests).toEqual([{ op: 'whisperLocate', fileName: 'ggml-tiny.bin', storedPath: `${DOCS}whisper-models/ggml-tiny.bin` }]);
+            expect(requests).toEqual([{ op: 'whisperLocate', fileName: 'ggml-tiny.bin', sizeBytes: tiny.sizeBytes, storedPath: `${DOCS}whisper-models/ggml-tiny.bin` }]);
         }
         const missing = harness(() => { throw new Error('E_WHISPER_IO'); });
         expect(await missing.whisper.ready({ model: 'whisper-tiny', language: 'auto' })).toBe(false);
@@ -64,8 +66,8 @@ describe('native local Whisper', () => {
         ]);
     });
 
-    it('downloads from RN\'s two hosts with the pinned size and SHA-256, and deletes by file name', async () => {
-        const { whisper, requests, lines } = harness((request) => (request.op === 'whisperDownload'
+    it('downloads from RN\'s two hosts with the pinned size and SHA-256, deletes by file name, and stores the model path as RN does', async () => {
+        const { whisper, requests, lines, remembered } = harness((request) => (request.op === 'whisperDownload'
             ? { exists: true, uri: `${DOCS}whisper-models/ggml-base.en.bin`, size: baseEn.sizeBytes, repaired: true } : null));
         expect(await whisper.download('whisper-base.en')).toEqual({ exists: true, uri: `${DOCS}whisper-models/ggml-base.en.bin`, size: baseEn.sizeBytes });
         await whisper.remove('whisper-base.en');
@@ -77,8 +79,10 @@ describe('native local Whisper', () => {
             { op: 'whisperDelete', fileName: 'ggml-base.en.bin' },
         ]);
         expect(lines).toEqual([{ stage: 'download', outcome: 'model-ready', repaired: true }, { stage: 'delete', outcome: 'deleted' }]);
+        expect(remembered).toEqual([['whisper-base.en', `${DOCS}whisper-models/ggml-base.en.bin`], ['whisper-base.en', undefined]]);
         const failed = harness(() => { throw new Error('E_WHISPER_HASH'); });
         await expect(failed.whisper.download('whisper-tiny')).rejects.toThrow('E_WHISPER_HASH');
         expect(failed.lines).toEqual([{ stage: 'download', outcome: 'failed', reason: 'E_WHISPER_HASH' }]);
+        expect(failed.remembered).toEqual([]);
     });
 });

@@ -1562,7 +1562,7 @@ assert.equal(coreHost.match(/debugFault\("language"\)/g).length, 2);
     }
 
     assert.match(hostEntry, /const nativeAI = nativeSync \? createNativeAI\(keyValue, \(\) => globalThis\.__mindwtrSecrets as HostSecrets, isFossBuild, nativeWhisper \?\? undefined\) : null;/);
-    assert.match(hostEntry, /const channels = nativeSync && call \? nativeFileChannels\(\) : null;\s*return channels && call \? createNativeWhisper\(\{ call, documentDirectory: channels\.directories\.document, log: whisperLine \}\) : null;/);
+    assert.match(hostEntry, /const channels = nativeSync && call \? nativeFileChannels\(\) : null;\s*return channels && call \? createNativeWhisper\(\{ call, documentDirectory: channels\.directories\.document, log: whisperLine, rememberPath \}\) : null;/);
     assert.match(hostEntry, /const localAttachments = nativeSync \? null : createNativeLocalAttachmentsForHost\(\);/);
     assert.match(hostEntry, /const attachmentsHost = nativeSync\?\.attachmentsHost \?\? localAttachments\?\.contractHost;/);
     assert.match(hostEntry, /createNativeHostContract\(\{\s*\.\.\.\(globalThis\.__mindwtrHostPlatform === 'ios' \? \{\s*registerSyncSettingsRetirementStatus: \(read: \(\) => \{ pending: boolean; uncertain: boolean \}\) => \{ readSyncSettingsRetirementStatus = read; \},\s*\} : \{\}\), reminderPlatform: globalThis\.__mindwtrHostPlatform === 'ios' \? 'ios' : 'android', get syncSettings\(\) \{ return nativeSync\?\.settingsHost \?\? iosManualSync\?\.settingsHost; \}, get ai\(\) \{ return nativeAI \?\? iosTaskAI\?\.host \?\? iosInboxAI\?\.host \?\? iosReviewAI\?\.host \?\? iosCaptureAIHost \?\? iosConfigurationAIHost \?\? undefined; \},\s*calendar: iosCalendar \?\? nativeCalendar \?\? undefined,\s*get attachments\(\) \{\s*const selected = iosProjectAttachmentDownload \? iosSelfHostedProjectAttachments\?\.contractHost \?\? iosManualSync\?\.attachmentsHost : attachmentsHost;\s*if \(!iosRelocatedProjectAvailability \|\| !selected\) return selected \?\? undefined;/);
@@ -10600,7 +10600,7 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     assert.doesNotMatch(source('core/HostWhisper.kt'), /Log\.\w\(/, 'the Whisper host logs nothing itself; the bundle writes the fixed-field line');
     const whisperLineBlock = hostEntrySource.slice(hostEntrySource.indexOf('const whisperLine = '), hostEntrySource.indexOf('const nativeWhisper = '));
     assert.deepEqual([...new Set([...whisperLineBlock.matchAll(/\b(\w+): line\.\w+/g)].map((m) => m[1]))].sort(), ['ms', 'outcome', 'reason', 'stage'], 'a Whisper line holds fixed fields only');
-    assert.match(whisperLineBlock, /releaseCheck: 'v1\.3\.9\/native-whisper-local'/);
+    assert(whisperLineBlock.includes("releaseCheck: 'v1.3.9/native-whisper-local'"), 'the Whisper line carries its release check');
     assert.match(hostEntrySource, /submit: \(input\) => contract\.submitQuickCaptureAudio\(input\),/);
 
 
