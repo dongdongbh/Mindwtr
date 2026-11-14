@@ -25,9 +25,14 @@ env:
   IMAGE_NAME: dongdongbh/mindwtr-mcp
 
 jobs:
-  publish:
+  prepare:
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.identity.outputs.version }}
+      revision: ${{ steps.identity.outputs.revision }}
+      image: ${{ steps.identity.outputs.image }}
+      exists: ${{ steps.existing.outputs.exists }}
     defaults:
       run:
         shell: bash
@@ -82,64 +87,75 @@ jobs:
               ;;
           esac
 
+  smoke:
+    needs: prepare
+    if: needs.prepare.outputs.exists == 'false'
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - name: Checkout resolved source
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
+        with:
+          ref: ${{ needs.prepare.outputs.revision }}
+
       - name: Set up Bun
-        if: steps.existing.outputs.exists != 'true'
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
         with:
           bun-version-file: .bun-version
 
       - name: Install smoke test dependencies
-        if: steps.existing.outputs.exists != 'true'
         run: bun install --frozen-lockfile
 
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
+
+      - name: Build native smoke image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
+        with:
+          context: .
+          file: docker/mcp/Dockerfile
+          platforms: linux/${{ matrix.arch }}
+          load: true
+          tags: mindwtr-mcp:smoke-${{ matrix.arch }}
+          build-args: |
+            MCP_VERSION=${{ needs.prepare.outputs.version }}
+            SOURCE_REVISION=${{ needs.prepare.outputs.revision }}
+          cache-from: type=gha,scope=mcp-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=mcp-${{ matrix.arch }}
+
+      - name: Smoke test native image
+        env:
+          SMOKE_IMAGE: mindwtr-mcp:smoke-${{ matrix.arch }}
+        run: node scripts/ci/smoke-mcp-container.mjs "$SMOKE_IMAGE"
+
+  publish:
+    needs: [prepare, smoke]
+    if: needs.prepare.outputs.exists == 'false'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout resolved source
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
+        with:
+          ref: ${{ needs.prepare.outputs.revision }}
+
       - name: Set up QEMU
-        if: steps.existing.outputs.exists != 'true'
         uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130
 
       - name: Set up Docker Buildx
-        if: steps.existing.outputs.exists != 'true'
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
 
-      - name: Build amd64 smoke image
-        if: steps.existing.outputs.exists != 'true'
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
-        with:
-          context: .
-          file: docker/mcp/Dockerfile
-          platforms: linux/amd64
-          load: true
-          tags: mindwtr-mcp:smoke-amd64
-          build-args: |
-            MCP_VERSION=${{ steps.identity.outputs.version }}
-            SOURCE_REVISION=${{ steps.identity.outputs.revision }}
-          cache-from: type=gha,scope=mcp-amd64
-          cache-to: type=gha,mode=min,scope=mcp-amd64
-
-      - name: Smoke test amd64 image
-        if: steps.existing.outputs.exists != 'true'
-        run: node scripts/ci/smoke-mcp-container.mjs mindwtr-mcp:smoke-amd64
-
-      - name: Build arm64 smoke image
-        if: steps.existing.outputs.exists != 'true'
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
-        with:
-          context: .
-          file: docker/mcp/Dockerfile
-          platforms: linux/arm64
-          load: true
-          tags: mindwtr-mcp:smoke-arm64
-          build-args: |
-            MCP_VERSION=${{ steps.identity.outputs.version }}
-            SOURCE_REVISION=${{ steps.identity.outputs.revision }}
-          cache-from: type=gha,scope=mcp-arm64
-          cache-to: type=gha,mode=min,scope=mcp-arm64
-
-      - name: Smoke test arm64 image
-        if: steps.existing.outputs.exists != 'true'
-        run: node scripts/ci/smoke-mcp-container.mjs mindwtr-mcp:smoke-arm64
-
       - name: Log in to GHCR
-        if: steps.existing.outputs.exists != 'true'
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9
         with:
           registry: ghcr.io
@@ -147,17 +163,16 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Publish tested multi-platform image
-        if: steps.existing.outputs.exists != 'true'
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
         with:
           context: .
           file: docker/mcp/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: ${{ steps.identity.outputs.image }}
+          tags: ${{ needs.prepare.outputs.image }}
           build-args: |
-            MCP_VERSION=${{ steps.identity.outputs.version }}
-            SOURCE_REVISION=${{ steps.identity.outputs.revision }}
+            MCP_VERSION=${{ needs.prepare.outputs.version }}
+            SOURCE_REVISION=${{ needs.prepare.outputs.revision }}
           cache-from: |
             type=gha,scope=mcp-amd64
             type=gha,scope=mcp-arm64
