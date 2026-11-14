@@ -2566,6 +2566,8 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     @ObservationIgnored private weak var widgetNextPublishedHost: CoreHost?
     private var widgetFamilySystemColorScheme: NativeWidgetFamilySnapshot.SystemColorScheme?
     private var widgetFamilyLastObservation: NativeSearchObservation?
+    private var shortcutsSnapshotLastObservation: NativeSearchObservation?
+    private var shortcutCaptureLease: NativeTaskAIEditorLease?
     private var widgetFamilyForceSnapshot = true
     @ObservationIgnored private weak var widgetFamilyPublishedHost: CoreHost?
     private var widgetFamilyPublisher: NativeWidgetFamilyPublisher?
@@ -10835,6 +10837,8 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     func searchPolicyChanged(suspendNavigation: Bool = true) {
         watchLifecycleLease?.invalidate()
         widgetCompletionLease?.invalidate()
+        shortcutCaptureLease?.invalidate()
+        if appLock.enabled != false { withdrawShortcutsSnapshot() }
         guard workspaceAdmissionsOpen else { return }
         searchPublicationGeneration &+= 1
         searchDeadlineTask?.cancel(); searchDeadlineTask = nil
@@ -10859,6 +10863,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
             try? publisher.invalidate { WidgetCenter.shared.reloadTimelines(ofKind: $0) }
         }
         widgetFamilyLastObservation = nil; widgetFamilyPublishedHost = nil; widgetFamilyPublisher = nil
+        withdrawShortcutsSnapshot()
         productionWidgetActionDeadline = nil
         cancelSearchLifecycle()
         withdrawSearchIndex()
@@ -11271,6 +11276,8 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
                 await self.publishNextWidgetIfCurrent(owner)
                 await self.publishProductionWidgetFamiliesIfCurrent(owner)
                 await self.publishAppIconBadgeIfCurrent(owner)
+                await self.drainShortcutCapturesIfCurrent(owner)
+                await self.publishShortcutsSnapshotIfCurrent(owner)
                 guard self.searchOwnerCurrent(owner), !self.searchConsentBusy, self.searchConsentPending == nil else { return }
                 if !self.searchConsentKnown {
                     let enabled = try await observed.readSearchConsent()
@@ -48919,5 +48926,75 @@ extension CoreModel {
         guard ["markdownToolbarActions", "markdownToolbarApply", "markdownTextChange"].contains(name),
               let encoded = try? json(input) else { return nil }
         return await refusalLogged("menuRead:" + name, { try await query("menuRead", [name, encoded]) })
+    }
+}
+
+extension CoreModel {
+    private var shortcutIntakeSelection: NativeLaunchSelection? {
+        guard let selection = trustedSearchSelection else { return nil }
+        switch selection {
+        case .production, .standard: return selection
+        case .isolated, .rehearsal: return nil
+        }
+    }
+
+    private func shortcutIntakeCurrent(_ owner: SearchLifecycleOwner) -> Bool {
+        shortcutIntakeSelection != nil && workspaceAdmissionsOpen && host?.workspaceMode == .personal
+            && !appLock.concealed && !appLockActive && !appLockRecoveryPending
+            && searchOwnerCurrent(owner) && operationContextIsClean() && shareCaptureOwner == nil && !reviewFinishPending
+    }
+
+    private func drainShortcutCapturesIfCurrent(_ owner: SearchLifecycleOwner) async {
+        guard shortcutIntakeCurrent(owner), !busy, let queue = NativeShortcutCaptureQueue.live() else { return }
+        let lease = NativeTaskAIEditorLease(); shortcutCaptureLease = lease
+        busy = true
+        defer {
+            lease.invalidate()
+            if shortcutCaptureLease === lease { shortcutCaptureLease = nil }
+            if host === owner.host { finishOperation(wakeWidget: false) }
+        }
+        var dispatched = false
+        do {
+            guard let batch = try NativeShortcutCaptureBatch.next(try queue.pending()),
+                  shortcutIntakeCurrent(owner), lease.isCurrent else { return }
+            dispatched = true
+            let completed = try await owner.host.ingestShortcutCaptures(batch, lease: lease, readmit: { [weak self] in
+                guard let self else { return false }
+                return await self.shortcutIntakeCurrent(owner)
+            })
+            dispatched = false
+            for entry in batch.entries where completed.contains(entry.name) { try queue.retire(name: entry.name, body: entry.body) }
+            searchWakeTicket &+= 1; widgetNextForceSnapshot = true; widgetFamilyForceSnapshot = true
+            guard shortcutIntakeCurrent(owner), lease.isCurrent else { return }
+            try await readSelectedSurface()
+        } catch {
+            if dispatched, host === owner.host, !isDefiniteRejection(error) {
+                retryNeeded = true; self.error = error.localizedDescription
+            }
+        }
+    }
+
+    private func publishShortcutsSnapshotIfCurrent(_ owner: SearchLifecycleOwner) async {
+        guard let selection = shortcutIntakeSelection, let file = NativeShortcutsSnapshotFile.live(selection: selection) else { return }
+        guard appLock.enabled == false, !appLockActive, !appLockRecoveryPending else { withdrawShortcutsSnapshot(); return }
+        guard workspaceAdmissionsOpen, host?.workspaceMode == .personal, searchOwnerCurrent(owner), !busy else { return }
+        do {
+            let observation = try await owner.host.searchObservation()
+            guard searchOwnerCurrent(owner), observation.ready, appLock.enabled == false else { return }
+            installSearchDeadline(observation.nextAt, owner: owner)
+            guard !sameSearchObservation(shortcutsSnapshotLastObservation, observation) else { return }
+            let json = try await owner.host.shortcutsSnapshot()
+            let after = try await owner.host.searchObservation()
+            guard searchOwnerCurrent(owner), after.ready, sameSearchObservation(observation, after),
+                  appLock.enabled == false, !appLockActive else { return }
+            try file.publish(json)
+            shortcutsSnapshotLastObservation = observation
+        } catch {}
+    }
+
+    private func withdrawShortcutsSnapshot() {
+        shortcutsSnapshotLastObservation = nil
+        guard let selection = shortcutIntakeSelection, let file = NativeShortcutsSnapshotFile.live(selection: selection) else { return }
+        try? file.withdraw()
     }
 }

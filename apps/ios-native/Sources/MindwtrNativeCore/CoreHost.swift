@@ -1811,6 +1811,22 @@ public final class CoreHost: @unchecked Sendable {
         return try batch.result(await perform { try $0.ingestWatchBatch(batch, lease: lease) })
     }
 
+    public func ingestShortcutCaptures(_ batch: NativeShortcutCaptureBatch, lease: NativeTaskAIEditorLease = NativeTaskAIEditorLease(),
+                                       readmit: @escaping @Sendable () async -> Bool = { true }) async throws -> [String] {
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        guard await readmit(), lease.isCurrent, !Task.isCancelled else {
+            throw CoreHostRejection(message: "NOT_READY: Shortcuts capture owner changed")
+        }
+        return try batch.result(await perform { try $0.ingestShortcutCaptureBatch(batch, lease: lease) })
+    }
+
+    public func shortcutsSnapshot() async throws -> String {
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        return try await perform { try $0.call("iosShortcutsSnapshot", argumentsJSON: "[]") }
+    }
+
     #if os(iOS)
     public func ingestWatchAudio(_ command: MindwtrWatchPendingCommand, receiver: MindwtrWatchConnectivityReceiver,
                                  lease: NativeTaskAIEditorLease = NativeTaskAIEditorLease(),
@@ -9676,6 +9692,20 @@ private final class Engine: @unchecked Sendable {
         guard try editorDrafts.read() == nil else { throw HostFailure("NOT_READY: Watch intake waits for the task editor") }
         return try call("iosWatchIngest", argumentsJSON: Self.ownedJSON([batch.json]), editorAttempt: nil, watchOwned: true)
     }
+    func ingestShortcutCaptureBatch(_ batch: NativeShortcutCaptureBatch, lease: NativeTaskAIEditorLease) throws -> String {
+        guard lease.isCurrent else { throw CoreHostRejection(message: "NOT_READY: Shortcuts capture owner changed") }
+        try requirePersonalWorkspace()
+        if let command = pending {
+            guard command.method == "iosShortcutCaptureIngest", let prior = try journalArguments(command).first as? String,
+                  Self.equalJSON(try NativeJSON.jsonObject(with: Data(prior.utf8)),
+                                 try NativeJSON.jsonObject(with: Data(batch.json.utf8))),
+                  let value = try retryPending() else { throw NativeShortcutCaptureBatch.invalid }
+            return value
+        }
+        _ = try requireDeviceStorageAdmission()
+        guard try editorDrafts.read() == nil else { throw HostFailure("NOT_READY: Shortcuts capture waits for the task editor") }
+        return try call("iosShortcutCaptureIngest", argumentsJSON: Self.ownedJSON([batch.json]), editorAttempt: nil, watchOwned: true)
+    }
 
     func beginWatchAudio(_ source: NativeWatchAudio, lease: NativeTaskAIEditorLease) throws -> WatchAudio? {
         try requirePersonalWorkspace()
@@ -9898,7 +9928,7 @@ private final class Engine: @unchecked Sendable {
         try requireEncryptionUnlockTurn()
         try denyCleanupOwner()
         try requireNoAttachmentDraft()
-        guard !closed, context != nil, lockFD >= 0, ["iosWatchIngest", "iosWatchAudioIngest"].contains(pending?.method ?? ""),
+        guard !closed, context != nil, lockFD >= 0, ["iosWatchIngest", "iosWatchAudioIngest", "iosShortcutCaptureIngest"].contains(pending?.method ?? ""),
               retainedOrdinaryTurn == nil, taskDownloadTurn == nil, projectAvailabilityTurn == nil,
               projectFileAddTurn == nil, projectDownloadTurn == nil, let deviceStorage else { throw Self.deviceStorageUnavailable }
         return deviceStorage
@@ -14461,7 +14491,7 @@ private final class Engine: @unchecked Sendable {
         dispatchPrecondition(condition: .onQueue(queue))
         let registered = HostMethod.registry[method]
         guard method != "gettingStartedOutcome" else { throw CoreHostRejection(message: "INVALID_INPUT: Getting Started outcome requires its journal") }
-        guard !["iosWatchIngestOutcome", "iosWatchPomodoroPrepare", "iosWatchAudioOutcome", "iosWatchAudioNeedsTranscript", "iosWatchOpenAIRuntime"].contains(method), !["iosWatchIngest", "iosWatchAudioIngest", "watchPomodoroSubmit"].contains(method) || watchOwned else { throw NativeWatchBatch.invalid }
+        guard !["iosWatchIngestOutcome", "iosWatchPomodoroPrepare", "iosWatchAudioOutcome", "iosWatchAudioNeedsTranscript", "iosWatchOpenAIRuntime", "iosShortcutCaptureOutcome"].contains(method), !["iosWatchIngest", "iosWatchAudioIngest", "watchPomodoroSubmit", "iosShortcutCaptureIngest"].contains(method) || watchOwned else { throw NativeWatchBatch.invalid }
         guard method != "iosAISummaryCheckpointSettled" else { throw CoreHostRejection(message: "INVALID_INPUT: AI summary checkpoint requires fixture authority") }
         guard method != "iosAISettingsProjection" else {
             throw CoreHostRejection(message: "INVALID_INPUT: AI projection requires its private read facade")
@@ -18025,6 +18055,15 @@ private final class Engine: @unchecked Sendable {
             guard proof != "null", Self.equalJSON(try NativeJSON.jsonObject(with: Data(raw.utf8)),
                                                   try NativeJSON.jsonObject(with: Data(proof.utf8))) else {
                 throw HostFailure("SAVE_FAILED: Watch audio receipt is not proven")
+            }
+        }
+        if command.method == "iosShortcutCaptureIngest", case .success(let raw) = terminal {
+            let args = try journalArguments(command), batch = try NativeShortcutCaptureBatch(json: args[0] as! String)
+            _ = try batch.result(raw)
+            let proof = try invoke("iosShortcutCaptureOutcome", arguments: args)
+            guard proof != "null", Self.equalJSON(try NativeJSON.jsonObject(with: Data(raw.utf8)),
+                                                  try NativeJSON.jsonObject(with: Data(proof.utf8))) else {
+                throw HostFailure("SAVE_FAILED: Shortcuts capture receipts are not proven")
             }
         }
         if command.method == "iosWatchIngest", case .success(let raw) = terminal {
@@ -25056,6 +25095,10 @@ private final class Engine: @unchecked Sendable {
             guard command.version == 2, command.editorDraft == nil, !retainedOrdinary else { throw NativeWatchBatch.invalid }
             return try arguments(command.method, command.argumentsJSON)
         }
+        if command.method == "iosShortcutCaptureIngest" {
+            guard command.version == 2, command.editorDraft == nil, !retainedOrdinary else { throw NativeShortcutCaptureBatch.invalid }
+            return try arguments(command.method, command.argumentsJSON)
+        }
         if command.method == "iosWidgetCompletionCommit" {
             guard command.version == 2, command.editorDraft == nil, command.argumentsJSON.utf8.count <= 12_610_000,
                   try NativeJSON.hasUniqueObjectKeys(command.argumentsJSON),
@@ -26591,6 +26634,11 @@ private final class Engine: @unchecked Sendable {
             guard json.utf8.count <= 8 * 1024 * 1024 + 16, try NativeJSON.hasUniqueObjectKeys(json),
                   let args = try NativeJSON.jsonObject(with: Data(json.utf8)) as? [String], args.count == 1 else { throw NativeWatchBatch.invalid }
             _ = try NativeWatchBatch(json: args[0]); return args
+        }
+        if method == "iosShortcutCaptureIngest" {
+            guard json.utf8.count <= 2 * 1024 * 1024 + 16, try NativeJSON.hasUniqueObjectKeys(json),
+                  let args = try NativeJSON.jsonObject(with: Data(json.utf8)) as? [String], args.count == 1 else { throw NativeShortcutCaptureBatch.invalid }
+            _ = try NativeShortcutCaptureBatch(json: args[0]); return args
         }
         if method == "shareCaptureSubmit" {
             guard let args = try NativeJSON.jsonObject(with: Data(json.utf8)) as? [String], args.count == 1 else { throw NativeShareError.invalidInput }

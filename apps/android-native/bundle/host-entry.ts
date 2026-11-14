@@ -4,7 +4,8 @@ import { createNativeGmail } from './host-gmail';
 import { discoverNativeAITextModels, discoverNativeVoiceModels } from '../../../packages/core/src/native-ai-model-discovery';
 import { readNativeAIExtraBodyInput } from '../../../packages/core/src/native-host-contract-ai';
 import { readWatchOpenAIRuntime, buildWatchOpenAITranscription, decodeWatchOpenAITranscription, buildWatchOpenAIParse, decodeWatchOpenAIParse } from './ios-watch-openai';
-import { ingestIOSWatchBatch, readIOSWatchBatchOutcome, ingestIOSWatchAudio, readIOSWatchAudioOutcome, readIOSWatchAudioNeedsTranscript } from './ios-watch-ingest';
+import { ingestIOSWatchBatch, readIOSWatchBatchOutcome, ingestIOSWatchAudio, readIOSWatchAudioOutcome, readIOSWatchAudioNeedsTranscript,
+    ingestIOSShortcutCaptureBatch, readIOSShortcutCaptureOutcome } from './ios-watch-ingest';
 import { createNativeShareCaptureMethods } from '../../../packages/core/src/native-share-capture';
 import { readIOSShareCaptureDraft } from './ios-share-capture';
 import { resolveNativeRouteDestination, resolveNativeShortcutCaptureDraft } from '../../../packages/core/src/native-route-destination';
@@ -1776,7 +1777,7 @@ const boot = (legacyState: string, legacyBackup: string, recoveryLoad = false, j
 
     traceStep('js:receipts');
     if (journaled) await adapter.withConnection(() => loadNativeRequestReceipts(sqlite), { write: true });
-    else await adapter.withConnection(() => loadNativeRequestReceipts(sqlite, { durableCommands: [...(globalThis.__mindwtrHostPlatform === 'ios' ? ['rowTaskFocus', 'rowTaskDates', 'rowTaskDestination', 'taskChecklistMove', 'taskChecklistMoveUndo', 'rowTaskBackdate', 'projectTasksDelete', 'projectTasksDeleteUndo', 'projectOrganizeDestinationCreate', 'projectTasksOrganize', 'projectTasksRemoveTag', 'projectTasksAddTag', 'projectTasksMove', 'rowTaskCompletion', 'rowTaskCompletionUndo', 'iosRowQuickStatus', 'iosInlineChecklist', 'gettingStarted', 'voiceSettings', 'voiceCapture', 'voiceResult', 'review', 'weeklyReviewProjectTask', 'iosShareCapture', 'iosWidgetCompletion', 'iosWatchIngestItem', 'somedaySectionBulkMove', 'somedaySectionBulkMoveUndo', 'aiTextConfiguration', 'aiTextConfigurationV2', 'waitingTasksDelete', 'waitingTasksDeleteUndo', 'somedayTasksDelete', 'somedayTasksDeleteUndo', 'reviewTasksDelete', 'reviewTasksDeleteUndo', 'contextsTasksDelete', 'contextsTasksDeleteUndo'] : []), 'appLock', 'notificationSetting', 'aiRequestTimeout', 'aiReasoningEffort', 'aiGeminiThinkingBudget', 'deviceCalendarSetting', 'calendarSubscriptionSetting', 'calendarSubscriptionAdd', 'reminderComplete', 'reminderSnooze', 'taskCompletion', 'taskCompletionUndo', 'boardTaskCompletion', 'boardTaskCompletionUndo', 'boardTaskReactivate', 'boardTaskOrder', 'archivedTaskRestore', 'archivedTasksRestore', 'trashItemsRestore', 'trashItemsPurge', 'doneTasksMove', 'doneTasksAddTag', 'doneTasksRemoveTag', 'archivedTasksDelete', 'archivedTasksDeleteUndo', 'doneTasksDelete', 'doneTasksDeleteUndo', 'referenceTasksDelete', 'referenceTasksDeleteUndo', 'inboxTasksDelete', 'inboxTasksDeleteUndo', 'referenceTasksMove', 'inboxTasksMove', 'inboxTasksAddTag', 'inboxTasksRemoveTag', 'inboxTasksOrganize', 'inboxOrganizeDestinationCreate', 'inboxPreparedCommit', 'inboxUndo', 'referenceTasksAddTag', 'referenceTasksRemoveTag', 'preparedProjectLifecycle', 'preparedTaskDelete', 'preparedProjectDelete', 'preparedTaskDeleteUndo', 'doneTaskStatus', 'referenceTaskNext', 'referenceTaskStatus', 'referenceTaskCompletion', 'referenceTaskCompletionUndo', 'referenceTaskBackdate', 'referenceTaskDestination', 'referenceProjectNextAction', 'doneTaskCompletedAt', 'archiveTaskCompletedAt', 'data', 'backupDocument', 'pomodoroTransition', 'appleReminderImportItem'] }), { write: true });
+    else await adapter.withConnection(() => loadNativeRequestReceipts(sqlite, { durableCommands: [...(globalThis.__mindwtrHostPlatform === 'ios' ? ['rowTaskFocus', 'rowTaskDates', 'rowTaskDestination', 'taskChecklistMove', 'taskChecklistMoveUndo', 'rowTaskBackdate', 'projectTasksDelete', 'projectTasksDeleteUndo', 'projectOrganizeDestinationCreate', 'projectTasksOrganize', 'projectTasksRemoveTag', 'projectTasksAddTag', 'projectTasksMove', 'rowTaskCompletion', 'rowTaskCompletionUndo', 'iosRowQuickStatus', 'iosInlineChecklist', 'gettingStarted', 'voiceSettings', 'voiceCapture', 'voiceResult', 'review', 'weeklyReviewProjectTask', 'iosShareCapture', 'iosWidgetCompletion', 'iosWatchIngestItem', 'iosShortcutCaptureItem', 'somedaySectionBulkMove', 'somedaySectionBulkMoveUndo', 'aiTextConfiguration', 'aiTextConfigurationV2', 'waitingTasksDelete', 'waitingTasksDeleteUndo', 'somedayTasksDelete', 'somedayTasksDeleteUndo', 'reviewTasksDelete', 'reviewTasksDeleteUndo', 'contextsTasksDelete', 'contextsTasksDeleteUndo'] : []), 'appLock', 'notificationSetting', 'aiRequestTimeout', 'aiReasoningEffort', 'aiGeminiThinkingBudget', 'deviceCalendarSetting', 'calendarSubscriptionSetting', 'calendarSubscriptionAdd', 'reminderComplete', 'reminderSnooze', 'taskCompletion', 'taskCompletionUndo', 'boardTaskCompletion', 'boardTaskCompletionUndo', 'boardTaskReactivate', 'boardTaskOrder', 'archivedTaskRestore', 'archivedTasksRestore', 'trashItemsRestore', 'trashItemsPurge', 'doneTasksMove', 'doneTasksAddTag', 'doneTasksRemoveTag', 'archivedTasksDelete', 'archivedTasksDeleteUndo', 'doneTasksDelete', 'doneTasksDeleteUndo', 'referenceTasksDelete', 'referenceTasksDeleteUndo', 'inboxTasksDelete', 'inboxTasksDeleteUndo', 'referenceTasksMove', 'inboxTasksMove', 'inboxTasksAddTag', 'inboxTasksRemoveTag', 'inboxTasksOrganize', 'inboxOrganizeDestinationCreate', 'inboxPreparedCommit', 'inboxUndo', 'referenceTasksAddTag', 'referenceTasksRemoveTag', 'preparedProjectLifecycle', 'preparedTaskDelete', 'preparedProjectDelete', 'preparedTaskDeleteUndo', 'doneTaskStatus', 'referenceTaskNext', 'referenceTaskStatus', 'referenceTaskCompletion', 'referenceTaskCompletionUndo', 'referenceTaskBackdate', 'referenceTaskDestination', 'referenceProjectNextAction', 'doneTaskCompletedAt', 'archiveTaskCompletedAt', 'data', 'backupDocument', 'pomodoroTransition', 'appleReminderImportItem'] }), { write: true });
     traceStep('js:schema');
 
     let loaded: LoadedData | null = legacyState ? await adapter.getData() : null;
@@ -7181,6 +7182,48 @@ globalThis.MindwtrHost = {
             return result;
         });
     },
+    iosShortcutCaptureOutcome(json: string): string {
+        return submit(async () => readIOSShortcutCaptureOutcome(json, iosWatchReadiness));
+    },
+    iosShortcutCaptureIngest(json: string): string {
+        const arity = arguments.length;
+        return submit(async () => {
+            if (arity !== 1) throw new Error('INVALID_INPUT: Native Shortcuts capture batch requires one argument');
+            requireSaved();
+            const result = await ingestIOSShortcutCaptureBatch(json, { contract, current: iosWatchReadiness, lastApplied: lastAppliedRecord });
+            try {
+                logInfo('Native iOS Shortcuts captures saved', { scope: 'native-ios', force: true,
+                    context: { releaseCheck: 'v1.3.9/ios-shortcut-capture-ingest', operation: 'ingest', outcome: 'saved', count: String(result.ingested) } });
+            } catch {}
+            return result;
+        });
+    },
+    iosShortcutsSnapshot(): string {
+        const argumentCount = arguments.length;
+        return submit(async () => {
+            if (argumentCount !== 0) throw new Error('INVALID_INPUT: Shortcuts snapshot takes no arguments');
+            const unavailable = () => new Error('NOT_READY: Native iOS Shortcuts snapshot is unavailable');
+            const adapter = bootAdapter;
+            const assertReady = () => {
+                if (globalThis.__mindwtrHostPlatform !== 'ios' || !adapter || bootAdapter !== adapter
+                    || getStorageAdapter() !== adapter || isSandboxMode() || isWorkspaceTransitionActive()) throw unavailable();
+                requireSaved();
+                const status = getPersistenceStatus();
+                if (status.failed || status.queued || status.inFlight || status.immediate || status.retrying
+                    || !contract.getDataSettings().ok) throw unavailable();
+                return status;
+            };
+            const before = assertReady(), state = useTaskStore.getState();
+            const data = { tasks: state._allTasks, projects: state._allProjects, sections: state._allSections,
+                areas: state._allAreas, settings: state.settings };
+            const snapshot = buildShortcutsSnapshot(data);
+            if (new TextEncoder().encode(JSON.stringify(snapshot)).byteLength > 4 * 1024 * 1024) throw new Error('INVALID_INPUT: Native iOS Shortcuts snapshot is too large');
+            const after = assertReady(), current = useTaskStore.getState();
+            if (before.generation !== after.generation || current._allTasks !== data.tasks || current._allProjects !== data.projects
+                || current._allSections !== data.sections || current._allAreas !== data.areas || current.settings !== data.settings) throw unavailable();
+            return snapshot;
+        });
+    },
     ingest(requestId: string): string {
         return submit(async () => taskResult('ingest', await contract.ingestPendingCaptures({ requestId, queue: pendingCaptureQueue, lastApplied: lastAppliedRecord })));
     },
@@ -7288,8 +7331,8 @@ globalThis.MindwtrHost = {
                 || retained.some((id) => typeof id !== 'string' || !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(id))
                 || new Set(retained).size !== retained.length)) throw invalid();
             const pruned = await withHostConnection(() => pruneNativeRequestReceipts(sqlite, new Date(), retained === null
-                ? { retainedCommands: ['reminderComplete', 'reminderSnooze', 'iosShareCapture', 'iosWidgetCompletion', 'iosWatchIngestItem'], retainedRequestIds: [...new Set([...(owedRequestId ? [owedRequestId] : []), ...owedInboxRequestIds])] }
-                : { retainedCommands: ['iosShareCapture', 'iosWidgetCompletion', 'iosWatchIngestItem'], retainedRequestIds: [...new Set([...(retained as string[]), ...(owedRequestId ? [owedRequestId] : []), ...owedInboxRequestIds])] }));
+                ? { retainedCommands: ['reminderComplete', 'reminderSnooze', 'iosShareCapture', 'iosWidgetCompletion', 'iosWatchIngestItem', 'iosShortcutCaptureItem'], retainedRequestIds: [...new Set([...(owedRequestId ? [owedRequestId] : []), ...owedInboxRequestIds])] }
+                : { retainedCommands: ['iosShareCapture', 'iosWidgetCompletion', 'iosWatchIngestItem', 'iosShortcutCaptureItem'], retainedRequestIds: [...new Set([...(retained as string[]), ...(owedRequestId ? [owedRequestId] : []), ...owedInboxRequestIds])] }));
             try { await diagnosticsLog.append({ ts: new Date().toISOString(), level: 'info', scope: 'native-ios',
                 message: 'Native iOS reminder receipt retention applied',
                 context: { releaseCheck: 'v1.3.5/ios-reminder-receipt-retention', outcome: retained === null ? 'conservative' : 'snapshot' },

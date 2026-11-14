@@ -33,13 +33,13 @@ beforeAll(async () => {
         import './host-entry';
         import { useTaskStore, getStorageAdapter, setStorageAdapter, getPersistenceStatus, flushPendingSave, resetForTests } from '../../../packages/core/src/store';
         import { acquireWorkspaceTransitionLock, initializeSandboxRuntime } from '../../../packages/core/src/sandbox';
-        import { createWidgetPayloadProjection } from '../../../packages/core/src/widget-payload';
+        import { buildShortcutsSnapshot, createWidgetPayloadProjection } from '../../../packages/core/src/widget-payload';
         import { getFocusWidgetFilter, setFocusWidgetFilter } from '../../../packages/core/src/focus-widget-filter';
         const canonical = () => { const s = useTaskStore.getState(); return {
             tasks: s._allTasks, projects: s._allProjects, sections: s._allSections, areas: s._allAreas, settings: s.settings }; };
         globalThis.fixture = { state: useTaskStore.getState, set: useTaskStore.setState,
             focusFilter: setFocusWidgetFilter, currentFocusFilter: getFocusWidgetFilter,
-            canonical, shared: () => createWidgetPayloadProjection(canonical(), 'en', { focusFilter: getFocusWidgetFilter() }).build(20),
+            canonical, shortcuts: () => buildShortcutsSnapshot(canonical()), shared: () => createWidgetPayloadProjection(canonical(), 'en', { focusFilter: getFocusWidgetFilter() }).build(20),
             adapter: getStorageAdapter, replaceAdapter: setStorageAdapter, persistence: getPersistenceStatus,
             flush: flushPendingSave, reset: resetForTests,
             sandbox: () => initializeSandboxRuntime(true), transition: acquireWorkspaceTransitionLock,
@@ -316,6 +316,70 @@ describe('actual iOS immutable Watch intake batch', () => {
     });
 });
 
+
+const shortcutId = (n: number) => `ABCDEF00-0000-4000-8000-${String(n).padStart(12, '0')}`;
+const shortcutEntry = (n: number, fields: Record<string, unknown> = {}) => ({ name: `${shortcutId(n)}.json`,
+    body: JSON.stringify({ id: shortcutId(n), title: `PRIVATE shortcut ${n}`, createdAt: at, ...fields }) });
+const shortcutBatch = (entries: { name: string; body: string }[]) => JSON.stringify({ version: 1, requestId: captureId(998), entries });
+
+describe('actual iOS Shortcuts Add to Mindwtr intake', () => {
+    it('saves RN queue items with note, tags, project and dates once, proves the receipt and logs no task text', async () => {
+        const f = fixture(); await f.boot(data([], {}, [project('garden', { title: 'Garden' })]));
+        const entries = [shortcutEntry(1, { note: 'PRIVATE note', tags: 'home,errands', project: 'Garden', dueDate: '2026-11-05', startDate: '2026-11-03' }),
+            shortcutEntry(2)];
+        const answer = await f.poll(f.state.MindwtrHost.iosShortcutCaptureIngest(shortcutBatch(entries)));
+        expect(answer).toEqual({ ok: true, value: { version: 1, ingested: 2, completed: entries.map(({ name }) => ({ name })) } });
+        expect(await f.poll(f.state.MindwtrHost.iosShortcutCaptureOutcome(shortcutBatch(entries)))).toEqual({ ok: true, value: answer.value });
+        const tasks: Task[] = f.state.fixture.state()._allTasks;
+        const saved = tasks.find(t => t.title === 'PRIVATE shortcut 1');
+        expect(saved).toMatchObject({ status: 'next', description: 'PRIVATE note', projectId: 'garden', dueDate: '2026-11-05', startTime: '2026-11-03' });
+        expect(saved?.tags).toEqual(expect.arrayContaining(['#home', '#errands']));
+        expect(tasks.filter(t => t.title.startsWith('PRIVATE shortcut'))).toHaveLength(2);
+        expect(tasks.find(t => t.title === 'PRIVATE shortcut 2')?.status).toBe('inbox');
+        expect(f.writes).not.toContain('fileDelete');
+        expect(f.database.query('SELECT count(*) AS count FROM native_request_receipts').get()).toMatchObject({ count: 2 });
+        expect(await f.poll(f.state.MindwtrHost.iosShortcutCaptureIngest(shortcutBatch(entries)))).toMatchObject({ ok: true, value: { ingested: 2 } });
+        expect(f.state.fixture.state()._allTasks.filter((t: Task) => t.title.startsWith('PRIVATE shortcut'))).toHaveLength(2);
+        const lines = f.logText().trim().split('\n').map((line) => JSON.parse(line));
+        expect(lines.some((line) => line.message === 'Native iOS Shortcuts captures saved'
+            && line.context?.releaseCheck === 'v1.3.9/ios-shortcut-capture-ingest')).toBe(true);
+        expect(f.logText()).not.toContain('PRIVATE');
+    });
+
+    it('refuses watch, typed, extended, misdated, renamed, blank or duplicate items before any write', async () => {
+        const f = fixture(); await f.boot();
+        const valid = shortcutEntry(1);
+        for (const entries of [[shortcutEntry(2, { source: 'apple-watch' })], [shortcutEntry(2, { kind: 'text' })],
+            [shortcutEntry(2, { status: 'next' })], [shortcutEntry(2, { dueDate: '2026-11-05T09:00:00Z' })],
+            [{ ...valid, name: '../escape.json' }], [shortcutEntry(2, { title: '  ' })], [valid, valid],
+            [shortcutEntry(2, { tags: ['home'] })]]) {
+            expect(await f.poll(f.state.MindwtrHost.iosShortcutCaptureIngest(shortcutBatch(entries))))
+                .toMatchObject({ ok: false, error: expect.stringContaining('INVALID_INPUT:') });
+        }
+        expect(f.state.fixture.state()._allTasks).toEqual([]); expect(f.writes).toEqual([]);
+    });
+});
+
+describe('actual iOS Shortcuts Get Mindwtr Tasks snapshot', () => {
+    it('returns core\'s RN snapshot without writing', async () => {
+        const f = fixture();
+        await f.boot(data([task('a', { status: 'inbox' }), task('b', { projectId: 'garden' }), task('c', { status: 'waiting' })], {}, [project('garden')]));
+        const saved = f.durable(), before = f.state.fixture.canonical();
+        const answer = await f.poll(f.state.MindwtrHost.iosShortcutsSnapshot());
+        expect(answer).toEqual({ ok: true, value: JSON.parse(JSON.stringify(f.state.fixture.shortcuts())) });
+        expect(answer.value.lists.inbox.map((item: { id: string }) => item.id)).toEqual(['a']);
+        expect(answer.value.projects.map((group: { id: string }) => group.id)).toEqual(['garden']);
+        await readonly(f, saved, before);
+    });
+
+    it.each(['platform', 'sandbox', 'arguments'])('refuses %s', async (guard) => {
+        const f = fixture(); await f.boot();
+        if (guard === 'platform') f.state.__mindwtrHostPlatform = 'android';
+        if (guard === 'sandbox') f.state.fixture.sandbox();
+        const answer = await f.poll(guard === 'arguments' ? f.state.MindwtrHost.iosShortcutsSnapshot('x') : f.state.MindwtrHost.iosShortcutsSnapshot());
+        expect(answer.ok).toBe(false); expect(f.writes).toEqual([]);
+    });
+});
 
 describe('actual iOS Watch Pomodoro preparation', () => {
     it('initializes from saved settings, links actionable tasks and proves cold source replay without undoing later state', async () => {

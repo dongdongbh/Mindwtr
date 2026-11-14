@@ -218,6 +218,244 @@ struct MindwtrOpenSavedListIntent: AppIntent {
     }
 }
 
+enum MindwtrBackgroundCaptureError: Error, CustomLocalizedStringResourceConvertible {
+    case emptyTask
+    case writeFailed
+
+    var localizedStringResource: LocalizedStringResource {
+        switch self {
+        case .emptyTask: return "Tell Mindwtr what to add."
+        case .writeFailed: return "Mindwtr could not save the task. Open the app and try again."
+        }
+    }
+}
+
+struct MindwtrBackgroundCaptureIntent: AppIntent {
+    static var title: LocalizedStringResource = "Add to Mindwtr"
+    static var description = IntentDescription("Silently adds a task to Mindwtr without opening the app. It can file into a project. The item appears the next time Mindwtr opens.")
+
+    #if compiler(>=6.0)
+    @available(iOS 26.0, *)
+    static var supportedModes: IntentModes { .background }
+    #endif
+
+    @available(*, deprecated, message: "Use supportedModes with newer App Intents SDKs.")
+    static var openAppWhenRun: Bool { false }
+
+    @Parameter(title: "Task")
+    var task: String
+
+    @Parameter(title: "Note")
+    var note: String?
+
+    @Parameter(title: "Tags")
+    var tags: String?
+
+    @Parameter(title: "Project")
+    var project: String?
+
+    @Parameter(title: "Due date")
+    var dueDate: Date?
+
+    @Parameter(title: "Start date")
+    var startDate: Date?
+
+    static var parameterSummary: some ParameterSummary {
+        Summary("Add \(\.$task) to Mindwtr") {
+            \.$note
+            \.$tags
+            \.$project
+            \.$dueDate
+            \.$startDate
+        }
+    }
+
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        let trimmedTask = task.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedTask.isEmpty else { throw MindwtrBackgroundCaptureError.emptyTask }
+        guard let queue = NativeShortcutCaptureQueue.live(),
+              queue.enqueue(task: trimmedTask, note: note, tags: tags, project: project, dueDate: dueDate, startDate: startDate) else {
+            throw MindwtrBackgroundCaptureError.writeFailed
+        }
+        return .result(dialog: "Added to Mindwtr.")
+    }
+}
+
+enum MindwtrGetTasksList: String, AppEnum {
+    case inbox
+    case focus
+    case next
+    case waiting
+    case someday
+
+    static var typeDisplayRepresentation = TypeDisplayRepresentation(name: "Mindwtr Task List")
+    static var caseDisplayRepresentations: [MindwtrGetTasksList: DisplayRepresentation] = [
+        .inbox: "Inbox",
+        .focus: "Focus",
+        .next: "Next",
+        .waiting: "Waiting",
+        .someday: "Someday"
+    ]
+
+    var dialogTitle: String {
+        switch self {
+        case .inbox: return "Inbox"
+        case .focus: return "Focus"
+        case .next: return "Next"
+        case .waiting: return "Waiting"
+        case .someday: return "Someday"
+        }
+    }
+}
+
+private enum MindwtrTaskDueDateDisplay {
+    private static let mediumDateOnly: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .none
+        return formatter
+    }()
+
+    private static let shortDateTime: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .short
+        formatter.timeStyle = .short
+        return formatter
+    }()
+
+    static func format(_ raw: String) -> String {
+        if let dateOnly = NativeShortcutCaptureQueue.dateOnly.date(from: raw) { return mediumDateOnly.string(from: dateOnly) }
+        let fractional = ISO8601DateFormatter(); fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let dateTime = ISO8601DateFormatter().date(from: raw) ?? fractional.date(from: raw) { return shortDateTime.string(from: dateTime) }
+        return raw
+    }
+}
+
+private enum NativeShortcutsSnapshotLoader {
+    static func load() -> NativeShortcutsSnapshot? {
+        guard let selection = try? NativeAppLaunch.selection.get(),
+              let file = NativeShortcutsSnapshotFile.live(selection: selection) else { return nil }
+        return file.read()
+    }
+}
+
+struct MindwtrTaskEntity: AppEntity {
+    let id: String
+    let title: String
+    let listLabel: String
+    let dueDate: String?
+
+    static var typeDisplayRepresentation = TypeDisplayRepresentation(
+        name: "Mindwtr Task",
+        numericFormat: "\(placeholder: .int) tasks"
+    )
+
+    var displayRepresentation: DisplayRepresentation {
+        if let dueDate, !dueDate.isEmpty {
+            return DisplayRepresentation(title: "\(title)", subtitle: "\(listLabel) · Due \(MindwtrTaskDueDateDisplay.format(dueDate))")
+        }
+        return DisplayRepresentation(title: "\(title)", subtitle: "\(listLabel)")
+    }
+
+    static var defaultQuery = MindwtrTaskEntityQuery()
+
+    init(item: NativeShortcutsSnapshotItem) {
+        id = item.id
+        title = item.title
+        dueDate = item.dueDate
+        if let projectName = item.projectName, !projectName.isEmpty {
+            listLabel = projectName
+        } else {
+            listLabel = MindwtrGetTasksList(rawValue: item.list)?.dialogTitle ?? item.list.capitalized
+        }
+    }
+}
+
+struct MindwtrTaskEntityQuery: EntityStringQuery {
+    func entities(for identifiers: [String]) async throws -> [MindwtrTaskEntity] {
+        let items = NativeShortcutsSnapshotLoader.load()?.allItems() ?? []
+        let byId = Dictionary(items.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        return identifiers.compactMap { byId[$0] }.map(MindwtrTaskEntity.init(item:))
+    }
+
+    func entities(matching string: String) async throws -> [MindwtrTaskEntity] {
+        let needle = string.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !needle.isEmpty else { return [] }
+        return (NativeShortcutsSnapshotLoader.load()?.allItems() ?? [])
+            .filter { $0.title.lowercased().contains(needle) }
+            .prefix(25)
+            .map(MindwtrTaskEntity.init(item:))
+    }
+}
+
+struct MindwtrGetTasksIntent: AppIntent {
+    static var title: LocalizedStringResource = "Get Mindwtr Tasks"
+    static var description = IntentDescription("Reads up to 50 tasks from a Mindwtr list, as of the last time Mindwtr was open. When Project is set, it is read instead of the list. Never opens the app.")
+
+    #if compiler(>=6.0)
+    @available(iOS 26.0, *)
+    static var supportedModes: IntentModes { .background }
+    #endif
+
+    @available(*, deprecated, message: "Use supportedModes with newer App Intents SDKs.")
+    static var openAppWhenRun: Bool { false }
+
+    @Parameter(title: "List", default: MindwtrGetTasksList.next)
+    var list: MindwtrGetTasksList
+
+    @Parameter(title: "Project")
+    var project: String?
+
+    static var parameterSummary: some ParameterSummary {
+        Summary("Get tasks from \(\.$list), overridden by \(\.$project) if set")
+    }
+
+    func perform() async throws -> some IntentResult & ReturnsValue<[MindwtrTaskEntity]> & ProvidesDialog {
+        let snapshot = NativeShortcutsSnapshotLoader.load()
+        let items: [NativeShortcutsSnapshotItem]
+        let omittedCount: Int?
+        let sourceLabel: String
+        if let trimmedProject = NativeShortcutIntentLinks.trimmed(project) {
+            switch snapshot?.items(forProjectNamed: trimmedProject) ?? .missing {
+            case .matched(let matchedItems, let matchedOmittedCount):
+                items = matchedItems
+                omittedCount = matchedOmittedCount
+                sourceLabel = "project"
+            case .missing:
+                return .result(value: [], dialog: "That project is not in the current Mindwtr snapshot. Open Mindwtr to refresh it.")
+            case .ambiguous:
+                return .result(value: [], dialog: "More than one project has that name. Open Mindwtr and choose the project there.")
+            }
+        } else {
+            items = snapshot?.items(forList: list.rawValue) ?? []
+            omittedCount = snapshot?.knownOmittedTaskCount(forList: list.rawValue)
+            sourceLabel = "list"
+        }
+
+        let entities = items.map(MindwtrTaskEntity.init(item:))
+        guard !entities.isEmpty, let snapshot else {
+            return .result(value: [], dialog: "No tasks found. Open Mindwtr to refresh this list.")
+        }
+        let current = snapshot.freshness() == .current
+        if let omittedCount, omittedCount > 0 {
+            if current {
+                return .result(value: entities, dialog: "Found \(entities.count) task(s); \(omittedCount) eligible task(s) from this \(sourceLabel) were omitted by the snapshot limit.")
+            }
+            return .result(value: entities, dialog: "Found \(entities.count) task(s) in a stale snapshot; \(omittedCount) eligible task(s) from this \(sourceLabel) were omitted. Open Mindwtr to refresh it.")
+        }
+        if omittedCount == nil && entities.count >= 50 {
+            if current {
+                return .result(value: entities, dialog: "Found \(entities.count) task(s) at the snapshot limit. This \(sourceLabel) may contain more tasks.")
+            }
+            return .result(value: entities, dialog: "Found \(entities.count) task(s) at the limit in a stale snapshot. This \(sourceLabel) may contain more tasks. Open Mindwtr to refresh it.")
+        }
+        if current {
+            return .result(value: entities, dialog: "Found \(entities.count) task(s).")
+        }
+        return .result(value: entities, dialog: "Found \(entities.count) task(s) in a stale snapshot. Open Mindwtr to refresh it.")
+    }
+}
+
 struct MindwtrNativeCaptureShortcuts: AppShortcutsProvider {
     static var shortcutTileColor: ShortcutTileColor { .blue }
 

@@ -6,6 +6,7 @@ import { parsePendingCapture, type PendingCaptureAudioPort, type PendingCaptureR
 type Contract = Pick<ReturnType<typeof createNativeHostContract>, 'ingestPendingCaptures'>;
 const uuid = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/;
 const invalid = () => new Error('INVALID_INPUT: Native Watch batch is invalid');
+const WATCH_COMMAND = 'iosWatchIngestItem';
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
 const exact = (value: Record<string, unknown>, keys: string[]) => Object.keys(value).length === keys.length && keys.every(k => Object.hasOwn(value, k));
 
@@ -80,9 +81,41 @@ const readBatch = (raw: string) => {
         bodies.set(entry.name, entry.body);
         if (capture.kind === 'checklist') checklistNames.set(capture.id, entry.name);
     }
-    return { requestId: frame.requestId, bodies, checklistNames };
+    return { requestId: frame.requestId, bodies, checklistNames, command: WATCH_COMMAND };
 };
-const receiptPayload = (body: string) => JSON.stringify(['iosWatchIngestItem', body]);
+
+const SHORTCUT_COMMAND = 'iosShortcutCaptureItem';
+const SHORTCUT_KEYS = ['id', 'title', 'createdAt', 'note', 'tags', 'project', 'dueDate', 'startDate'];
+const anyCaseUUID = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/iu;
+const dateOnly = /^\d{4}-\d{2}-\d{2}$/u;
+const shortcutInvalid = () => new Error('INVALID_INPUT: Native Shortcuts capture batch is invalid');
+
+const readShortcutBatch = (raw: string) => {
+    if (typeof raw !== 'string' || new TextEncoder().encode(raw).byteLength > 1024 * 1024) throw shortcutInvalid();
+    let frame: unknown;
+    try { frame = JSON.parse(raw); } catch { throw shortcutInvalid(); }
+    if (!object(frame) || !exact(frame, ['version', 'requestId', 'entries']) || frame.version !== 1
+        || typeof frame.requestId !== 'string' || !uuid.test(frame.requestId)
+        || !Array.isArray(frame.entries) || !frame.entries.length || frame.entries.length > 16) throw shortcutInvalid();
+    const bodies = new Map<string, string>();
+    for (const entry of frame.entries) {
+        if (!object(entry) || !exact(entry, ['name', 'body']) || typeof entry.name !== 'string' || typeof entry.body !== 'string')
+            throw shortcutInvalid();
+        let value: Record<string, unknown>;
+        try { value = flatJSON(entry.body, 32 * 1024) as Record<string, unknown>; } catch { throw shortcutInvalid(); }
+        const capture = parsePendingCapture(entry.body);
+        if (Object.keys(value).some(name => !SHORTCUT_KEYS.includes(name))
+            || Object.values(value).some(field => typeof field !== 'string')
+            || typeof value.id !== 'string' || !anyCaseUUID.test(value.id) || typeof value.title !== 'string' || !value.title.trim()
+            || ['dueDate', 'startDate'].some(name => Object.hasOwn(value, name) && !dateOnly.test(value[name] as string))
+            || !capture || capture.kind !== undefined || capture.source !== undefined || capture.id !== value.id
+            || entry.name !== `${capture.id}.json` || bodies.has(entry.name)) throw shortcutInvalid();
+        bodies.set(entry.name, entry.body);
+    }
+    return { requestId: frame.requestId, bodies, checklistNames: new Map<string, string>(), command: SHORTCUT_COMMAND };
+};
+
+const receiptPayload = (body: string, command = WATCH_COMMAND) => JSON.stringify([command, body]);
 const receiptReply = (value: unknown, name: string, checklist: boolean) => {
     if (!object(value) || !exact(value, checklist ? ['name', 'checklistOutcome'] : ['name']) || value.name !== name
         || (checklist && !['applied', 'stale', 'missing', 'terminal', 'changed'].includes(value.checklistOutcome as string)))
@@ -92,11 +125,20 @@ const receiptReply = (value: unknown, name: string, checklist: boolean) => {
 
 export async function readIOSWatchBatchOutcome(raw: string, current: () => void) {
     current();
-    const { bodies, checklistNames } = readBatch(raw), adapter = getStorageAdapter();
+    return readBatchOutcome(readBatch(raw), current);
+}
+
+export async function readIOSShortcutCaptureOutcome(raw: string, current: () => void) {
+    current();
+    return readBatchOutcome(readShortcutBatch(raw), current);
+}
+
+async function readBatchOutcome({ bodies, checklistNames, command }: ReturnType<typeof readBatch>, current: () => void) {
+    const adapter = getStorageAdapter();
     if (!(adapter instanceof NativeReceiptSqliteAdapter)) throw new Error('NOT_READY: Watch intake requires durable receipts');
     const completed = [];
     for (const [name, body] of bodies) {
-        const saved = await adapter.readDurableReceipt(name.slice(0, -5), receiptPayload(body), { committedOnly: true });
+        const saved = await adapter.readDurableReceipt(name.slice(0, -5), receiptPayload(body, command), { committedOnly: true });
         current();
         if (getStorageAdapter() !== adapter || !saved.ok) throw new Error('SAVE_FAILED: Watch receipt cannot be proven');
         if (saved.value === null) return null;
@@ -114,7 +156,16 @@ export async function ingestIOSWatchBatch(raw: string, deps: {
     return ingestWatchBatch(readBatch(raw), deps);
 }
 
-async function ingestWatchBatch({ requestId, bodies, checklistNames }: ReturnType<typeof readBatch>, deps: {
+export async function ingestIOSShortcutCaptureBatch(raw: string, deps: {
+    contract: Contract;
+    current: () => void;
+    lastApplied: PendingCaptureRecordPort;
+}) {
+    deps.current();
+    return ingestWatchBatch(readShortcutBatch(raw), deps);
+}
+
+async function ingestWatchBatch({ requestId, bodies, checklistNames, command }: ReturnType<typeof readBatch>, deps: {
     contract: Contract; current: () => void; lastApplied: PendingCaptureRecordPort;
 }, audio?: PendingCaptureAudioPort) {
     const completed = new Set<string>(), outcomes = new Map<string, string>();
@@ -137,7 +188,7 @@ async function ingestWatchBatch({ requestId, bodies, checklistNames }: ReturnTyp
             return adapter.commitReceiptOnly(id, payload);
         },
     });
-    const payload = (name: string) => receiptPayload(bodies.get(name)!);
+    const payload = (name: string) => receiptPayload(bodies.get(name)!, command);
     for (const name of bodies.keys()) {
         const saved = receipts.saved<unknown>(name.slice(0, -5), payload(name));
         if (!saved) continue;
@@ -221,7 +272,7 @@ export async function ingestIOSWatchAudio(raw: string, deps: {
     };
     current();
     const path = `watch-audio/${source.capture.id}.wav`;
-    return ingestWatchBatch({ requestId: source.capture.id, bodies: new Map([[source.name, source.body]]), checklistNames: new Map() },
+    return ingestWatchBatch({ requestId: source.capture.id, bodies: new Map([[source.name, source.body]]), checklistNames: new Map(), command: WATCH_COMMAND },
         { ...deps, current }, {
             resolvePath: capture => {
                 current();

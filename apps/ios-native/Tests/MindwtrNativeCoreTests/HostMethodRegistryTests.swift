@@ -13,7 +13,7 @@ final class HostMethodRegistryTests: XCTestCase {
             "focusSavedFilterWrite", "generalPreference", "gettingStarted", "gtdWorkflow", "inboxCommit", "inboxOrganizeDestinationCreateWrite",
             "inboxSkip", "inboxTasksAddTagWrite", "inboxTasksMoveWrite", "inboxTasksOrganizeWrite", "inboxTasksRemoveTagWrite", "inboxUndo",
             "inlineChecklistWrite", "iosAIGeminiThinkingBudget", "iosAIReasoningEffort", "iosAIRequestTimeout", "iosAITextConfiguration",
-            "iosAITextConfigurationV2", "iosWatchAudioIngest", "iosWatchIngest", "manageAreaCreate", "manageAreaDelete", "manageAreaEdit",
+            "iosAITextConfigurationV2", "iosShortcutCaptureIngest", "iosWatchAudioIngest", "iosWatchIngest", "manageAreaCreate", "manageAreaDelete", "manageAreaEdit",
             "managePersonCreate", "managePersonDelete", "managePersonEdit", "manageTaxonomy", "mindSweepAdd", "notificationSetting",
             "pomodoroTransitionWrite", "projectAreaWrite", "projectAttachmentWrite", "projectCreate", "projectDateWrite", "projectDeleteUndo",
             "projectDeleteWrite", "projectDuplicateWrite", "projectFileRemoveWrite", "projectFlowWrite", "projectFocusWrite", "projectLifecycleWrite",
