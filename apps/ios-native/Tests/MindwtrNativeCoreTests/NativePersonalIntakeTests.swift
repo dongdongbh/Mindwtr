@@ -690,7 +690,8 @@ final class NativePersonalIntakeTests: XCTestCase {
             XCTAssertEqual(marker.releaseCheck, "v1.3.9/ios-navigation-finish-settlement")
             XCTAssertEqual(marker.operation, "finish-settlement"); XCTAssertEqual(marker.outcome, outcome.rawValue)
             let fields = Mirror(reflecting: marker).children.compactMap { $0.label }
-            XCTAssertEqual(Set(fields), ["message", "releaseCheck", "operation", "outcome"])
+            XCTAssertEqual(Set(fields), ["message", "releaseCheck", "operation", "outcome", "check", "unfinished"])
+            XCTAssertEqual(marker.check, ""); XCTAssertEqual(marker.unfinished, 0)
             await context.store.close()
         }
     }
