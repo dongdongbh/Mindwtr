@@ -30291,7 +30291,10 @@ private final class Engine: @unchecked Sendable {
 
     func foregroundSync(command: String, requestJSON: String, cancellation: NativeAttachmentCancellation) throws -> String {
         dispatchPrecondition(condition: .onQueue(queue))
-        if ["syncChange", "syncPush", "syncStored", "syncResume"].contains(command), (try? changeSyncEngineIdle()) != true { throw Self.changeSyncDeferred }
+        if ["syncChange", "syncPush", "syncStored", "syncResume"].contains(command) {
+            try denyCleanupOwner()
+            if (try? changeSyncEngineIdle()) != true { throw Self.changeSyncDeferred }
+        }
         var cancelSettled = false
         do {
             try denyCleanupOwner()
