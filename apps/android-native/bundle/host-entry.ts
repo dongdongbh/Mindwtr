@@ -15,6 +15,7 @@ import {
     formatOpenAIExtraBodyParams,
     getSelectedMobileWhisperModel,
     normalizeSpeechLanguage,
+    resolveSpeechToTextRuntimeSettings,
     WHISPER_MODEL_BASE_URLS,
     buildNativePomodoroPanel,
     buildWatchApplicationContext,
@@ -189,6 +190,7 @@ import type { NativeCalendarPushLifecycle } from '../../../packages/core/src/nat
 import { createCalendarFeeds, createNativeCalendar } from './host-calendar';
 import { createNativeVoice, managedAttachmentsDirectory, persistIntoManagedStorage, type VoiceCaptureLine } from './host-voice';
 import { createWidgetAudioPort } from './host-widget-audio';
+import { createNativeWhisper, type WhisperLine } from './host-whisper';
 import { createAIKeyStore } from '../../../packages/core/src/ai-config';
 import { createSyncSecretVault } from '../../../packages/core/src/sync-secret-storage';
 import { createNativeLocalAttachmentsForHost, nativeFileChannels, prepareNativeTaskAttachmentAvailabilityPreflight,
@@ -702,7 +704,19 @@ const cacheIOSFocusWidgetFilter = (focus: NativeFocusView): void => {
     if (filter) setFocusWidgetFilter({ criteria: filter.criteria, sortBy: filter.sortBy, sortOrder: filter.sortOrder ?? undefined });
 };
 
-const nativeAI = nativeSync ? createNativeAI(keyValue, () => globalThis.__mindwtrSecrets as HostSecrets, isFossBuild) : null;
+const whisperLine = (line: WhisperLine) => {
+    try {
+        (line.outcome === 'failed' ? logWarn : logInfo)('Native Android local Whisper', { scope: 'capture', force: true,
+            context: { releaseCheck: 'v1.3.9/native-whisper-local', stage: line.stage, outcome: line.outcome, ...(line.reason ? { reason: line.reason } : {}),
+                ...(line.repaired ? { repaired: true } : {}), ...(line.ms !== undefined ? { ms: line.ms } : {}) } });
+    } catch {                                                 }
+};
+const nativeWhisper = (() => {
+    const call = (globalThis as { __mindwtrVoiceCall?: (request: Record<string, unknown>) => Promise<unknown> }).__mindwtrVoiceCall;
+    const channels = nativeSync && call ? nativeFileChannels() : null;
+    return channels && call ? createNativeWhisper({ call, documentDirectory: channels.directories.document, log: whisperLine }) : null;
+})();
+const nativeAI = nativeSync ? createNativeAI(keyValue, () => globalThis.__mindwtrSecrets as HostSecrets, isFossBuild, nativeWhisper ?? undefined) : null;
 let iosCaptureAIHost: NativeAIHost | null = null;
 let iosTaskAI: ReturnType<typeof createIOSTaskAI> | null = null;
 let iosInboxAI: ReturnType<typeof createIOSInboxAI> | null = null;
@@ -844,6 +858,7 @@ const widgetAudioPort = (() => {
         deleteFile: (path) => { checked(native().fileDelete(path)); },
         loadKey: (provider) => keys.load(provider),
         isFossBuild,
+        ...(nativeWhisper ? { whisper: nativeWhisper } : {}),
         logWaiting: (outcome) => {
             try {
                 logInfo('Native Android widget recording waits for transcription', { scope: 'capture',
@@ -853,6 +868,28 @@ const widgetAudioPort = (() => {
     });
 })();
 
+
+const manageWhisperModel = async (action: 'download' | 'delete') => {
+    const whisper = nativeWhisper;
+    if (!whisper) throw new Error('Local Whisper is not available on this host');
+    const t = (key: string) => unwrap(contract.getStrings({ keys: [key] })).strings[key] ?? key;
+    const model = resolveSpeechToTextRuntimeSettings(useTaskStore.getState().settings.ai?.speechToText, { isFossBuild }).model;
+    if (action === 'delete') {
+        try {
+            await whisper.remove(model);
+            return { status: 'deleted' };
+        } catch {
+            return { status: 'failed', toast: { title: t('settings.speechOfflineDeleteError'), message: t('settings.speechOfflineDeleteErrorBody') } };
+        }
+    }
+    try {
+        await whisper.download(model);
+        return { status: 'ready', note: t('settings.speechOfflineDownloadSuccess') };
+    } catch (error) {
+        const message = `${t('settings.aiMobile.downloadFailedPleaseRetryOnWiFiLargeModelsCannot')}\n${error instanceof Error ? error.message : 'E_WHISPER_FAILED'}`;
+        return { status: 'failed', error: message, toast: { title: t('settings.speechOfflineDownloadError'), message } };
+    }
+};
 
 const nativeVoice = (() => {
     const call = (globalThis as { __mindwtrVoiceCall?: (request: Record<string, unknown>) => Promise<unknown> }).__mindwtrVoiceCall;
@@ -893,7 +930,9 @@ const nativeVoice = (() => {
         isFossBuild,
         loadKey: (provider) => keys.load(provider),
 
-        whisperModelReady: () => false,
+        whisperModelReady: (runtime) => (nativeWhisper ? nativeWhisper.ready(runtime) : Promise.resolve(false)),
+        transcribeLocal: (uri, runtime) => (nativeWhisper ? nativeWhisper.transcribe(uri, runtime) : Promise.reject(new Error('E_WHISPER_UNAVAILABLE'))),
+        manageWhisperModel,
         persistAttachment: (attachment) => persistIntoManagedStorage(attachment, {
             persist: (entry) => host.persistAttachmentLocally(entry),
             getInfo: async (uri) => await channels.files({ op: 'getInfo', uri }) as { exists?: boolean; isDirectory?: boolean } | null,

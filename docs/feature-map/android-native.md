@@ -106,6 +106,14 @@ The native client is a Kotlin and Jetpack Compose app in `apps/android-native`. 
 - Checks: `apps/android-native/scripts/check-voice-device.mjs`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/CaptureVoiceTest.kt`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/core/VoiceRecorderTest.kt`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/core/HostVoiceTest.kt`
 - Notes: Closing the popup while recording saves nothing and leaves no file. A refused microphone permission shows an alert and records nothing.
 
+## Local Whisper
+
+- Reach: Settings › Advanced › AI assistant › Speech to text › Offline (Whisper) › Offline model › Download or Delete. A ready model transcribes the capture popup's recordings and the widget's voice captures on the device.
+- Selectors: `ai-speech-provider-whisper`, `ai-whisper-status`, `ai-whisper-action`, `ai-whisper-busy`
+- Code: `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/core/HostWhisper.kt`, `apps/android-native/android/whisper` (JNI and CMake), `apps/android-native/android/third_party/whisper.rn` (vendored whisper.cpp), `apps/android-native/bundle/host-whisper.ts`, `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/AISettings.kt`
+- Checks: `apps/android-native/scripts/check-whisper-device.mjs`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/core/HostWhisperTest.kt`, `apps/android-native/bundle/host-whisper.test.ts`, `apps/android-native/bundle/host-voice.test.ts`, `apps/android-native/bundle/host-widget-audio.test.ts`
+- Notes: The model file is RN's: `files/whisper-models/ggml-<model>.bin`, with RN's size and SHA-256. A download goes to the cache folder first and moves into place only when its size and hash match. Only a 16 kHz mono WAV reaches the engine; an m4a fallback recording keeps its attachment and is not transcribed.
+
 ## Focus
 
 - Reach: Tab bar › Focus. A cold start opens Focus, as RN does.

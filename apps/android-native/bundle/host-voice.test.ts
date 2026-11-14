@@ -60,7 +60,9 @@ const harness = (overrides: Partial<NativeVoiceBindings> = {}, setup: {
         admit: (_text, options) => options,
         isFossBuild: false,
         loadKey: async () => setup.key ?? 'secret-key',
-        whisperModelReady: () => false,
+        whisperModelReady: async () => false,
+        transcribeLocal: async () => { throw new Error('E_WHISPER_UNAVAILABLE'); },
+        manageWhisperModel: async () => ({}),
         persistAttachment: async (attachment) => {
             persisted.push(attachment.uri);
             return { ...attachment, uri: `${DOCS}attachments/${attachment.id}.m4a` };
@@ -269,7 +271,7 @@ describe('native voice capture', () => {
     it('a WAV start that cannot open the microphone records m4a instead, as RN falls back from Whisper', async () => {
         const starts: string[] = [];
         const h = harness({
-            whisperModelReady: () => true,
+            whisperModelReady: async () => true,
             recorder: {
                 permission: async () => 'granted',
                 start: async (format) => {
@@ -286,10 +288,67 @@ describe('native voice capture', () => {
         expect(starts).toEqual(['wav', 'm4a']);
     });
 
+    it('local Whisper runs once on the finished WAV after the recording stops, never while it records (RN 7125633d8, #424)', async () => {
+        const heard: string[] = [];
+        const h = harness({
+            whisperModelReady: async (runtime) => runtime.provider === 'whisper',
+            transcribeLocal: async (uri, runtime) => { heard.push(`${uri} ${runtime.model}`); return 'Buy milk'; },
+            recorder: {
+                permission: async () => 'granted',
+                start: async (format) => ({ id: `rec-${format}` }),
+                stop: async (id) => ({ uri: `${DOCS}voice-captures/${id}.wav`, size: 64_044 }),
+                cancel: async () => undefined,
+            },
+            persistAttachment: async (attachment) => ({ ...attachment, uri: `${DOCS}attachments/${attachment.id}.wav` }),
+        }, { settings: { ...gemini({ provider: 'whisper', model: 'whisper-base' }), gtd: { saveAudioAttachments: false } } as never });
+        const { session } = await h.voice.open();
+        expect(await h.voice.start(session)).toEqual({ status: 'recording', format: 'wav' });
+        await new Promise((done) => setTimeout(done, 10));
+        expect(heard).toEqual([]);
+        const saved = await h.voice.stop({ session, save: true, text: '', options: OPTIONS }) as { status: string; taskId: string };
+        await h.voice.settled();
+        expect(heard).toEqual([`${DOCS}voice-captures/rec-wav.wav whisper-base`]);
+        expect(h.submitted[0]?.attachments).toEqual([]);
+        expect(h.state.tasks.find((task) => task.id === saved.taskId)?.title).toBe('Buy milk');
+        expect(h.lines).toContainEqual({ kind: 'transcribe', outcome: 'applied', provider: 'whisper' });
+        expect(h.deleted).toEqual([`${DOCS}voice-captures/rec-wav.wav`]);
+    });
+
+    it('an m4a fallback recording never reaches local Whisper, so the audio note keeps its recording (RN 5cf267ddf, #424)', async () => {
+        let asked = 0;
+        const h = harness({
+            whisperModelReady: async () => true,
+            transcribeLocal: async () => { asked += 1; return 'Buy milk'; },
+            recorder: {
+                permission: async () => 'granted',
+                start: async (format) => { if (format === 'wav') throw new Error('E_VOICE_START_FAILED'); return { id: 'rec-m4a' }; },
+                stop: async () => ({ uri: `${DOCS}voice-captures/rec-m4a.m4a`, size: 2048 }),
+                cancel: async () => undefined,
+            },
+        }, { settings: { ...gemini({ provider: 'whisper' }), gtd: { saveAudioAttachments: false } } as never });
+        const { session } = await h.voice.open();
+        expect(await h.voice.start(session)).toEqual({ status: 'recording', format: 'm4a' });
+        const saved = await h.voice.stop({ session, save: true, text: '', options: OPTIONS }) as { status: string; taskId: string };
+        await h.voice.settled();
+        expect(saved.status).toBe('saved');
+        expect(asked).toBe(0);
+        expect(h.submitted[0]?.attachments).toHaveLength(1);
+        expect(h.state.tasks.find((task) => task.id === saved.taskId)?.title).toBe('Audio note 06/29/2026, 9:00 AM');
+    });
+
+    it('the Settings › AI model action goes to the host, which answers the screen', async () => {
+        const asked: string[] = [];
+        const h = harness({ manageWhisperModel: async (action) => { asked.push(action); return { status: 'ready' }; } });
+        expect(await h.voice.request('whisperModel', { action: 'download' })).toEqual({ status: 'ready' });
+        expect(await h.voice.request('whisperModel', { action: 'delete' })).toEqual({ status: 'ready' });
+        expect(await h.voice.request('whisperModel', { action: 'anything' })).toEqual({ status: 'ready' });
+        expect(asked).toEqual(['download', 'delete', 'download']);
+    });
+
     it('a start the app left before the microphone opened does nothing: no m4a retry, no error', async () => {
         const starts: string[] = [];
         const h = harness({
-            whisperModelReady: () => true,
+            whisperModelReady: async () => true,
             recorder: {
                 permission: async () => 'granted',
                 start: async (format) => { starts.push(format); throw new Error('E_VOICE_CANCELLED'); },

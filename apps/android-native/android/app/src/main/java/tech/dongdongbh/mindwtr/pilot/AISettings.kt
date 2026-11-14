@@ -25,6 +25,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -104,6 +105,10 @@ class AISettingsModel(private val menu: MenuModel) {
 
     var consent by mutableStateOf<Pair<JSONObject, JSONObject>?>(null); private set
 
+    var whisperBusy by mutableStateOf(false); private set
+    var whisperNote by mutableStateOf<String?>(null); private set
+    var whisperError by mutableStateOf<String?>(null); private set
+
     private val asked = HashMap<String, String>()
 
     private val pending = LinkedHashMap<String, Runnable>()
@@ -176,6 +181,25 @@ class AISettingsModel(private val menu: MenuModel) {
         }, "mindwtr-ai-models").start()
     }
 
+    fun whisperModel(action: String) {
+        val runtime = shell.coreHost() ?: return
+        if (whisperBusy) return
+        whisperBusy = true; whisperNote = null; whisperError = null
+        Thread({
+            val reply = runCatching { runtime.voiceRequest("whisperModel", JSONObject().put("action", action).toString()) }
+            shell.ui {
+                whisperBusy = false
+                reply.onSuccess { answer ->
+                    whisperNote = answer.menuText("note")?.also { note -> main.postDelayed({ if (whisperNote == note) whisperNote = null }, 2000) }
+                    whisperError = answer.menuText("error")
+                    answer.optJSONObject("toast")?.let { shell.showToast(it.getString("title"), it.getString("message"), "warning") }
+                }.onFailure { Log.w(CoreHost.TAG, "Whisper model action failed action=$action ${failureForLog(it)}") }
+                opened = false
+                menu.whenIdle { settings.refresh() }
+            }
+        }, "mindwtr-whisper-model").start()
+    }
+
     fun toggleAssistant() { assistantOpen = !assistantOpen }
     fun toggleSpeech() { speechOpen = !speechOpen }
     fun toggleAdvanced() { advancedOpen = !advancedOpen }
@@ -190,6 +214,7 @@ class AISettingsModel(private val menu: MenuModel) {
         opened = false
         assistantOpen = false; speechOpen = false; advancedOpen = false; extraOpen = false
         picker = null; typed = emptyMap(); keyTexts.clear(); keys = emptyMap(); extraDraft = null; extraFollowed = null; consent = null
+        whisperNote = null; whisperError = null
         asked.clear(); unsaved.clear()
         val runtime = shell.coreHost() ?: return
         ordered.execute { runCatching { runtime.menuRead("aiSettingsClose", "{}") }.onFailure { Log.w(CoreHost.TAG, "AI screen close failed ${failureForLog(it)}") } }
@@ -531,14 +556,25 @@ private fun SpeechCard(model: InboxViewModel, card: JSONObject) {
             AIRow(whisper.getString("label"), whisper.getString("description"))
             Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 12.dp), verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(whisper.getString("status"), style = rnText(12, 400), color = c.secondaryText, modifier = Modifier.weight(1f))
+                Column(Modifier.weight(1f)) {
+                    Text(whisper.getString("status"), style = rnText(12, 400), color = c.secondaryText, modifier = Modifier.testTag("ai-whisper-status"))
+                    ai.whisperNote?.let { Text(it, style = rnText(12, 400), color = c.tint, modifier = Modifier.padding(top = 6.dp)) }
+                    ai.whisperError?.let { Text(it, style = rnText(12, 400), color = c.danger, modifier = Modifier.padding(top = 6.dp)) }
+                }
 
                 val action = whisper.getJSONObject("action")
+                val label = action.getString("label")
+                val enabled = action.getBoolean("enabled") && model.menu.idle
                 val shape = RoundedCornerShape(16.dp)
-                Box(Modifier.fade(if (action.getBoolean("enabled")) 1f else 0.5f).clip(shape).rnBorder(1.dp, c.border, shape)
-                    .clearAndSetSemantics { contentDescription = action.getString("label"); role = Role.Button; disabled() }
+                if (ai.whisperBusy) CircularProgressIndicator(Modifier.size(20.dp).testTag("ai-whisper-busy"), color = c.tint, strokeWidth = 2.dp)
+                else Box(Modifier.fade(if (action.getBoolean("enabled")) 1f else 0.5f).clip(shape).rnBorder(1.dp, c.border, shape)
+                    .clearAndSetSemantics {
+                        contentDescription = label; role = Role.Button; testTag = "ai-whisper-action"
+                        if (enabled) onClick { ai.whisperModel(action.getString("kind")); true } else disabled()
+                    }
+                    .clickable(enabled = enabled) { ai.whisperModel(action.getString("kind")) }
                     .padding(horizontal = 10.dp, vertical = 6.dp)) {
-                    Text(action.getString("label"), style = rnText(13, 700, 17), color = c.text, maxLines = 2, textAlign = TextAlign.Center)
+                    Text(label, style = rnText(13, 700, 17), color = c.text, maxLines = 2, textAlign = TextAlign.Center)
                 }
             }
         }

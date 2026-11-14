@@ -763,7 +763,9 @@ describe('native host contract: AI commands replayed after a restart', () => {
         const env = await openSqliteHost({ settings: { ai: { speechToText: { provider: 'whisper', model: 'whisper-tiny' } } } }, undefined, { ai: dev.host });
         try {
             const input = { requestId: generateUUID() };
-            expect(value(await env.host.openAISettings(input)).speech.whisper?.status).toBe('Model downloaded - 74.1 MB');
+            const opened = value(await env.host.openAISettings(input));
+            expect(opened.speech.whisper?.status).toBe('Model downloaded - 74.1 MB');
+            expect(opened.speech.whisper?.action).toMatchObject({ kind: 'delete', enabled: true });
             const { result } = await env.replay((restarted) => restarted.openAISettings(input));
             expect(value(result).speech.whisper?.status).toBe('Model downloaded - 74.1 MB');
         } finally {

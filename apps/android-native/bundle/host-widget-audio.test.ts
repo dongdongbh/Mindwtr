@@ -67,6 +67,7 @@ describe('the widget audio port', () => {
 
             [{}, { enabled: true, provider: 'openai' }, 'not-configured'],
             [{}, { enabled: true, provider: 'whisper' }, 'provider-unsupported'],
+            [{ whisper: { ready: async () => false, transcribe: async () => 'never' } }, { enabled: true, provider: 'whisper' }, 'not-configured'],
 
             [{ isFossBuild: true }, { enabled: true, provider: 'gemini' }, 'provider-unsupported'],
             [{}, { enabled: true, provider: 'parakeet' }, 'not-configured'],
@@ -81,6 +82,20 @@ describe('the widget audio port', () => {
         expect(empty.waiting).toEqual(['empty']);
     });
 
+
+    it('transcribes on the device with local Whisper once its model is ready, and never asks for a key or the network', async () => {
+        const path = `${DOCS}quick-capture-audio/${ID}.wav`;
+        const heard: string[] = [];
+        const { port, requests, waiting } = harness({
+            loadKey: async () => { throw new Error('no key for local Whisper'); },
+            whisper: { ready: async (runtime) => runtime.model === 'whisper-base.en', transcribe: async (uri, runtime) => { heard.push(`${uri} ${runtime.language}`); return ' Call the bank '; } },
+        });
+        expect(await port.transcribe!(path, settings({ enabled: true, provider: 'whisper', model: 'whisper-base.en', language: 'en' }))).toBe('Call the bank');
+        expect([heard, requests.length, waiting]).toEqual([[`${path} en`], 0, []]);
+        const foss = harness({ isFossBuild: true, whisper: { ready: async () => true, transcribe: async () => '' } });
+        expect(await foss.port.transcribe!(path, settings({ enabled: true, provider: 'gemini' }))).toBeNull();
+        expect([foss.requests.length, foss.waiting]).toEqual([0, ['empty']]);
+    });
 
     it('reads the provider through core\'s resolver: Parakeet off, OpenAI with a key transcribed', async () => {
         const path = `${DOCS}quick-capture-audio/${ID}.wav`;

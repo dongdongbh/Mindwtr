@@ -50,7 +50,11 @@ export type NativeVoiceBindings = {
 
     loadKey: (provider: AIProviderId) => Promise<string>;
 
-    whisperModelReady: () => boolean;
+    whisperModelReady: (runtime: ResolvedSpeechToTextRuntimeSettings) => Promise<boolean>;
+
+    transcribeLocal: (uri: string, runtime: ResolvedSpeechToTextRuntimeSettings) => Promise<string>;
+
+    manageWhisperModel: (action: 'download' | 'delete') => Promise<unknown>;
 
     persistAttachment: (attachment: Attachment) => Promise<Attachment>;
     admit: (text: string, options: QuickCaptureOptions) => QuickCaptureOptions;
@@ -182,8 +186,8 @@ export function createNativeVoice(bindings: NativeVoiceBindings) {
         ? Promise.resolve('') : bindings.loadKey(runtime.provider).catch(() => ''));
 
 
-    const readiness = (runtime: ResolvedSpeechToTextRuntimeSettings, apiKey: string) => {
-        const whisperModelReady = runtime.provider === 'whisper' && bindings.whisperModelReady();
+    const readiness = async (runtime: ResolvedSpeechToTextRuntimeSettings, apiKey: string) => {
+        const whisperModelReady = runtime.provider === 'whisper' && runtime.enabled && await bindings.whisperModelReady(runtime);
         return {
             whisperModelReady,
             ready: isQuickCaptureSpeechReady({
@@ -204,7 +208,7 @@ export function createNativeVoice(bindings: NativeVoiceBindings) {
             const runtime = runtimeOf(bindings.settings());
             const apiKey = await keyFor(runtime);
             if (!current()) return { status: 'stale' };
-            const { ready, whisperModelReady } = readiness(runtime, apiKey);
+            const { ready, whisperModelReady } = await readiness(runtime, apiKey);
 
             if (!ready) {
                 bindings.log({ kind: 'capture', outcome: 'not-configured', provider: runtime.provider });
@@ -247,6 +251,7 @@ export function createNativeVoice(bindings: NativeVoiceBindings) {
             const transcriptionUri = attachment?.uri ?? recording;
             try {
                 const ports = { ...createNativeSpeechPorts(bindings, transcriptionUri, mimeType, () => undefined),
+                    transcribeLocal: () => bindings.transcribeLocal(transcriptionUri, runtime),
                     ...(bindings.fetcher ? { fetcher: bindings.fetcher } : {}) };
                 const result = await dispatchSpeechCapture(speechConfigFor(runtime, apiKey, settings, now()), runtime.isFossBuild, ports);
                 const applied = await applySpeechResult(taskId, result, bindings.store, { titleAtSave, preserveDestination });
@@ -301,9 +306,9 @@ export function createNativeVoice(bindings: NativeVoiceBindings) {
             const settings = bindings.settings();
             const runtime = runtimeOf(settings);
             const apiKey = await keyFor(runtime);
-            const { ready } = readiness(runtime, apiKey);
+            const { ready } = await readiness(runtime, apiKey);
 
-            const canTranscribe = runtime.provider === 'whisper' ? false : ready;
+            const canTranscribe = ready && (runtime.provider !== 'whisper' || current.format === 'wav');
             const mimeType = getAudioMimeType(`.${current.format}`);
             const recovery = buildQuickCaptureAudioAttachment({ title, uri: stopped.uri, mimeType, size: stopped.size || undefined, now: at, newId: bindings.newId });
 
@@ -467,6 +472,7 @@ export function createNativeVoice(bindings: NativeVoiceBindings) {
                 case 'state': return this.state();
 
                 case 'defaults': return { defaultAudio: defaultAudio() };
+                case 'whisperModel': return bindings.manageWhisperModel(input.action === 'delete' ? 'delete' : 'download');
                 default: throw new Error(`Unknown voice request ${name}`);
             }
         },
