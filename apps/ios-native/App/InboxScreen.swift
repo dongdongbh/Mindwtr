@@ -186,9 +186,21 @@ struct InboxScreen: View {
         })
     }
 
+    private func recordBottomSafeInset(_ inset: CGFloat) {
+        let pull = min(12, max(0, inset))
+        if pull != bottomSafeInset { bottomSafeInset = pull }
+    }
+
     var body: some View {
         ZStack(alignment: .bottom) {
             palette.bg.ignoresSafeArea()
+            GeometryReader { proxy in
+                Color.clear
+                    .onAppear { recordBottomSafeInset(proxy.safeAreaInsets.bottom) }
+                    .onChange(of: proxy.safeAreaInsets.bottom) { recordBottomSafeInset($0) }
+            }
+            .ignoresSafeArea(.keyboard)
+            .accessibilityHidden(true)
             VStack(spacing: 0) {
                 ZStack(alignment: .bottom) {
                     VStack(spacing: 0) {
@@ -215,11 +227,6 @@ struct InboxScreen: View {
                         .accessibilityHidden(model.inboxSortPresented || model.contextsSortPresented || model.inboxGroupPresented || model.inboxFiltersPresented)
                 }
             }
-            .background(GeometryReader { proxy in
-                Color.clear.onAppear { bottomSafeInset = proxy.safeAreaInsets.bottom }
-                    .onChange(of: proxy.safeAreaInsets.bottom) { bottomSafeInset = $0 }
-            })
-
             .accessibilityElement(children: .contain)
             .accessibilityAddTraits(model.morePresented || model.inboxSortPresented || model.contextsSortPresented || model.inboxGroupPresented ? .isModal : [])
             .disabled(model.rowTaskDatesPresented || model.rowTaskDestinationPresented || model.taskChecklistMovePresented || model.rowTaskBackdatePresented || (model.inboxBulkTagPresented || model.inboxBulkRemovePresented || model.inboxBulkOrganizePresented) || model.referenceProjectNextActionPresented || model.savedSearchWritePresented || model.focusSavedFilterPresented || model.boardFiltersPresented || model.calendarItemPresented || model.calendarComposerPresented || model.mindSweepPresented || model.processInboxPresented || !model.focusPanel.isEmpty || (model.selectedSurface == .review
