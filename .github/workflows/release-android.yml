@@ -674,9 +674,9 @@ jobs:
             echo "### Google Play publication"
             echo
             if [ "$ROLLOUT_MODE" = "staged" ]; then
-              echo "Started production versionCode \`$VERSION_CODE\` at \`${ROLLOUT_PERCENTAGE}%\`; beta and internal completed in the same Play edit."
+              echo "Started production versionCode \`$VERSION_CODE\` at \`${ROLLOUT_PERCENTAGE}%\`."
             else
-              echo "Completed production, beta, and internal for versionCode \`$VERSION_CODE\` in one Play edit."
+              echo "Completed production for versionCode \`$VERSION_CODE\` in one Play edit."
             fi
             echo
             echo "Use \`.github/workflows/rollout.yml\` to inspect, increase, halt, resume, or finalize the production rollout."

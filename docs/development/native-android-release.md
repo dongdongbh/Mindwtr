@@ -58,6 +58,8 @@ The policy reads the Play track releases from `google-play-edit.py max-version-c
 
 An RC dispatch with `run_play_testing` off cannot read the codes from Play. It fails unless you give `android_version_code`.
 
+**Stable releases publish to Play production only.** Before, a stable release also replaced the beta and internal releases. That would remove the native RC from every track, and the policy could no longer see its code.
+
 `scripts/bump-version.sh` with `ANDROID_REMOTE_MAX_VERSION_CODE` treats that number as an RN code. Pass the highest production code, not a native RC code.
 
 ## Secrets

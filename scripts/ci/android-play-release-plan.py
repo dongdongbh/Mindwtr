@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 TRACK_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$")
-STABLE_TRACKS = ("production", "beta", "internal")
+STABLE_TRACKS = ("production",)
 ROLLOUT_MODES = {"staged", "immediate"}
 
 
@@ -68,7 +68,7 @@ def resolve_tracks(
     if "production" in tracks and tracks != ["production"]:
         raise ValueError(
             "Google Play production cannot be combined with testing tracks; "
-            "stable tag publication expands production automatically"
+            "stable tag publication targets production only, so beta and internal keep the native release candidate"
         )
     if stable_production_tag and tracks == ["production"]:
         return list(STABLE_TRACKS)
@@ -138,7 +138,7 @@ def build_plan(
     if stable_production:
         if unique_tracks != list(STABLE_TRACKS):
             raise ValueError(
-                "Stable production publication must target production,beta,internal"
+                "Stable production publication must target production only"
             )
     elif "production" in unique_tracks:
         raise ValueError("Production requires a stable tagged publication")
