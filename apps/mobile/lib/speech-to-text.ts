@@ -233,10 +233,7 @@ const getWhisperRealtimeModule = () => {
 };
 
 const buildWhisperTranscribeOptions = (language: string): Record<string, unknown> => {
-  const options: Record<string, unknown> = {};
-  if (language !== 'auto') {
-    options.language = language;
-  }
+  const options: Record<string, unknown> = { language };
   if (Platform.OS === 'android') {
     options.maxThreads = WHISPER_ANDROID_MAX_THREADS;
     options.nProcessors = WHISPER_ANDROID_N_PROCESSORS;
@@ -722,8 +719,7 @@ export const startWhisperRealtimeCapture = async (
   }
   const context = await getWhisperContext(resolved.path, config.model);
   const language = normalizeSpeechLanguage(config.language);
-  const effectiveLanguage = config.model?.endsWith('.en') && language === 'auto' ? 'en' : language;
-  const transcribeOptions = buildWhisperTranscribeOptions(effectiveLanguage);
+  const effectiveLanguage = config.model?.endsWith('.en') ? 'en' : language;
   const options: Record<string, unknown> = {
     audioOutputPath,
     audioSliceSec: WHISPER_REALTIME_SLICE_SEC,
@@ -734,7 +730,7 @@ export const startWhisperRealtimeCapture = async (
       bufferSize: WHISPER_REALTIME_BUFFER_SIZE,
       audioSource: 6,
     },
-    transcribeOptions: Object.keys(transcribeOptions).length ? transcribeOptions : undefined,
+    transcribeOptions: buildWhisperTranscribeOptions(effectiveLanguage),
     promptPreviousSlices: false,
   };
 
@@ -874,7 +870,7 @@ export const transcribeLocalWhisper = async (input: LocalWhisperAudio, config: S
   }
   const context = await getWhisperContext(resolved.path, config.model);
   const language = normalizeSpeechLanguage(config.language);
-  const effectiveLanguage = config.model?.endsWith('.en') && language === 'auto' ? 'en' : language;
+  const effectiveLanguage = config.model?.endsWith('.en') ? 'en' : language;
   const options = buildWhisperTranscribeOptions(effectiveLanguage);
   const audioUri = input.uri;
   const normalizedUri = audioUri.startsWith('file://')
