@@ -1,6 +1,6 @@
 import { createDropboxTokenStore, isDropboxUnauthorizedError, testDropboxAccess,
     type DropboxAuthTokens, type DropboxTokenStoreDeps, type SyncSettingsDropboxPort, type MobileSyncDropboxAuthPort } from '@mindwtr/core';
-export type NativeIosDropboxConfiguration = { version: 1; clientId: string; redirectUri: 'mindwtr-native-dev://redirect' };
+export type NativeIosDropboxConfiguration = { version: 1; clientId: string; redirectUri: string };
 export type NativeIosDropboxGrant = NativeIosDropboxConfiguration & { requestId: string; code: string; codeVerifier: string };
 export type NativeIosDropboxCapability = {
     configuration(): NativeIosDropboxConfiguration | null;
@@ -14,13 +14,23 @@ const bytes = (v: unknown, maximum: number) => { try { return new TextEncoder().
 export const readNativeIosDropboxConfiguration = (v: unknown): NativeIosDropboxConfiguration | null => record(v)
     && exact(v, ['version', 'clientId', 'redirectUri']) && v.version === 1 && typeof v.clientId === 'string' && /^[A-Za-z0-9]{1,512}$/.test(v.clientId)
     && v.redirectUri === 'mindwtr-native-dev://redirect' ? v as NativeIosDropboxConfiguration : null;
+const ANDROID_DROPBOX_REDIRECTS = ['mindwtr://redirect', 'mindwtr-native-dev://redirect', 'mindwtr-upgradetest://redirect'];
+export const readNativeAndroidDropboxConfiguration = (v: unknown): NativeIosDropboxConfiguration | null => record(v)
+    && exact(v, ['version', 'clientId', 'redirectUri']) && v.version === 1 && typeof v.clientId === 'string' && /^[A-Za-z0-9]{1,512}$/.test(v.clientId)
+    && typeof v.redirectUri === 'string' && ANDROID_DROPBOX_REDIRECTS.includes(v.redirectUri) ? v as NativeIosDropboxConfiguration : null;
+export type NativeDropboxOptions = {
+    read?: (v: unknown) => NativeIosDropboxConfiguration | null;
+    observe?: (url: string, body: string, response: Response) => void | Promise<void>;
+};
 const unavailable = () => new Error('Dropbox authorization is unavailable for this foreground owner');
-export const createNativeIosDropbox = (capability: NativeIosDropboxCapability, deps: DropboxTokenStoreDeps) => {
-    const configuration = readNativeIosDropboxConfiguration(capability.configuration());
+export const createNativeIosDropbox = (capability: NativeIosDropboxCapability, deps: DropboxTokenStoreDeps,
+    { read = readNativeIosDropboxConfiguration, observe }: NativeDropboxOptions = {}) => {
+    const configuration = read(capability.configuration());
     if (!configuration) return null;
-    const current = () => { capability.assertCurrent(); const actual = readNativeIosDropboxConfiguration(capability.configuration());
+    const current = () => { capability.assertCurrent(); const actual = read(capability.configuration());
         if (!actual || actual.clientId !== configuration.clientId || actual.redirectUri !== configuration.redirectUri) throw unavailable(); };
-    const ownedFetch = (send: typeof fetch): typeof fetch => (async (input, init) => { current(); const response = await send(input, { ...init, redirect: 'error' }); current(); return response; }) as typeof fetch;
+    const ownedFetch = (send: typeof fetch): typeof fetch => (async (input, init) => { current(); const response = await send(input, { ...init, redirect: 'error' }); current();
+        await observe?.(String(input), typeof init?.body === 'string' ? init.body : '', response); return response; }) as typeof fetch;
     const store = createDropboxTokenStore({ ...deps, fetch: ownedFetch(deps.fetch) });
     const owned = async <T>(operation: () => Promise<T>): Promise<T> => { current(); const result = await operation(); current(); return result; };
     const client = (id: string) => { current(); if (id !== configuration.clientId) throw unavailable(); };

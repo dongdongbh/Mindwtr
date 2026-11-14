@@ -31,6 +31,7 @@ val rnHeartbeatUrl = if (System.getenv("ANALYTICS_HEARTBEAT_DISABLED") in setOf(
 val rnHeartbeatChannel = System.getenv("ANALYTICS_HEARTBEAT_CHANNEL")
 
 val rnDonationPrompt = System.getenv("DONATION_PROMPT_ENABLED") in setOf("1", "true")
+val dropboxAppKey = (System.getenv("DROPBOX_APP_KEY") ?: "").trim()
 val quickjsVersion = rootProject.projectDir.resolve("third_party/quickjs-wrapper/quickjs/VERSION").readText().trim()
 fun quoted(value: String) = "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
 
@@ -144,11 +145,13 @@ android {
         create("play") {
             dimension = "channel"
             buildConfigField("boolean", "FOSS", "false")
+            buildConfigField("String", "DROPBOX_APP_KEY", quoted(dropboxAppKey))
             buildConfigField("String", "ANALYTICS_HEARTBEAT_CHANNEL", quoted(rnHeartbeatChannel ?: ""))
         }
         create("foss") {
             dimension = "channel"
             buildConfigField("boolean", "FOSS", "true")
+            buildConfigField("String", "DROPBOX_APP_KEY", "\"\"")
 
             buildConfigField("String", "ANALYTICS_HEARTBEAT_CHANNEL", quoted(rnHeartbeatChannel ?: if (rnHeartbeatUrl.isNotEmpty()) "fdroid" else ""))
         }
@@ -267,6 +270,8 @@ dependencies {
 
     "playImplementation"("com.google.android.gms:play-services-auth:22.0.0")
     implementation("androidx.activity:activity-compose:1.10.1")
+
+    implementation("androidx.browser:browser:1.6.0")
 
     implementation("androidx.core:core-splashscreen:1.2.0-alpha02")
     implementation(platform("androidx.compose:compose-bom:2025.08.01"))

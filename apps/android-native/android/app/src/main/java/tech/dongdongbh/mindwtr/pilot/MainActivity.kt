@@ -122,6 +122,7 @@ import tech.dongdongbh.mindwtr.pilot.core.CalendarPermissionPrompt
 import tech.dongdongbh.mindwtr.pilot.core.MicrophonePermissionPrompt
 import tech.dongdongbh.mindwtr.pilot.core.VoiceCapture
 import tech.dongdongbh.mindwtr.pilot.core.GmailConsentPrompt
+import tech.dongdongbh.mindwtr.pilot.core.DropboxAuthorization
 
 
 class MainActivity : FragmentActivity() {
@@ -186,7 +187,7 @@ class MainActivity : FragmentActivity() {
 
         fullyDrawnReporter.addOnReportDrawnListener(model::contentShown)
 
-        if (savedInstanceState == null) model.entries.receive(intent)
+        if (savedInstanceState == null && !dropboxRedirect(intent)) model.entries.receive(intent)
         setContent {
 
             val banners = remember { FailureBannerSlot<FailureBannerContent>() }
@@ -312,20 +313,25 @@ class MainActivity : FragmentActivity() {
     override fun onResume() {
         super.onResume()
         model.appState("active")
+        DropboxAuthorization.current?.resumed()
     }
 
 
     override fun onPause() {
         super.onPause()
         if (!isChangingConfigurations) model.appState("background")
+        DropboxAuthorization.current?.left()
     }
 
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        model.entries.receive(intent)
+        if (!dropboxRedirect(intent)) model.entries.receive(intent)
     }
+
+
+    private fun dropboxRedirect(intent: Intent) = intent.action == Intent.ACTION_VIEW && DropboxAuthorization.current?.redirected(intent.dataString) == true
 }
 
 

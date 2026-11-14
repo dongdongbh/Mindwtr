@@ -68,6 +68,8 @@ class CoreHost(
     private val gmailReceipts: HostGmailReceipts? = null,
 
     private val voice: ((String, (Result<Any?>) -> Unit) -> Unit)? = null,
+
+    private val dropbox: DropboxAuthorization? = null,
 ) {
 
 
@@ -508,7 +510,9 @@ class CoreHost(
         }
 
         voice?.let { call -> bridge.setProperty("voiceCall", guarded { args -> io.voice(args[0] as String, call) }) }
+        dropbox?.let { auth -> bridge.setProperty("dropboxCall", guarded { args -> io.dropbox(args[0] as String, auth::call) }) }
         engine.globalObject.setProperty("__mindwtrNative", bridge)
+        dropbox?.let { engine.globalObject.setProperty("__mindwtrDropboxConfig", it.configuration()) }
 
         engine.globalObject.setProperty("__mindwtrFossBuild", BuildConfig.FOSS)
 

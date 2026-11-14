@@ -564,7 +564,19 @@ const submit = (work: (signal: AbortSignal) => Promise<unknown>): string => {
 
 
 const isFossBuild = globalThis.__mindwtrFossBuild === true;
+const androidDropboxCall = globalThis.__mindwtrHostPlatform !== 'ios'
+    ? (globalThis as { __mindwtrDropboxCall?: (input: unknown) => Promise<unknown> }).__mindwtrDropboxCall : undefined;
+const androidDropboxConfiguration: unknown = (() => {
+    try { return JSON.parse(String((globalThis as { __mindwtrDropboxConfig?: unknown }).__mindwtrDropboxConfig)) as unknown; } catch { return null; }
+})();
+const androidDropbox: NativeIosDropboxCapability | undefined = androidDropboxCall ? {
+    configuration: () => androidDropboxConfiguration as ReturnType<NativeIosDropboxCapability['configuration']>,
+    assertCurrent: () => {},
+    authorizationRequestId: generateUUID,
+    authorize: (request) => androidDropboxCall({ op: 'authorize', ...request }),
+} : undefined;
 const nativeSyncBindings: NativeSyncBindings = {
+    ...(androidDropbox ? { dropbox: androidDropbox } : {}),
     keyValue,
     secrets: {
         getSecret: (key) => (globalThis.__mindwtrSyncSecrets as HostSecrets).getSecret(key),

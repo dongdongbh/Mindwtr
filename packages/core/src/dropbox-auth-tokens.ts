@@ -244,13 +244,18 @@ export const createDropboxTokenStore = ({
     ): Promise<void> => {
         requireDropboxClientId(clientId);
         const resolvedTokens = requireDropboxTokens(tokens);
+        const revokeWith = (accessToken: string) => fetcher('https://api.dropboxapi.com/2/auth/token/revoke', {
+            method: 'POST',
+            headers: {
+                Authorization: `Bearer ${accessToken}`,
+            },
+        });
         try {
-            await fetcher('https://api.dropboxapi.com/2/auth/token/revoke', {
-                method: 'POST',
-                headers: {
-                    Authorization: `Bearer ${resolvedTokens.accessToken}`,
-                },
-            });
+            const response = await revokeWith(resolvedTokens.accessToken);
+            if (response?.status === 401) {
+                const refreshed = await requestDropboxAccessToken(clientId, resolvedTokens.refreshToken, fetcher);
+                await revokeWith(refreshed.accessToken);
+            }
         } catch {
 
         }

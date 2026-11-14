@@ -1057,6 +1057,16 @@
         var dropboxChannel = fileChannel('dropboxCall', 'dropboxCancel');
         global.__mindwtrDropboxCall = function (request, signal) { return dropboxChannel(request, undefined, signal); };
     }
+    else if (global.__mindwtrNative && typeof global.__mindwtrNative.dropboxCall === 'function') {
+        global.__mindwtrDropboxCall = function (request) {
+            return new Promise(function (resolve, reject) {
+                startIo(hostCall(native().dropboxCall(JSON.stringify(request))), function (answer) {
+                    if (answer.error !== undefined) reject(new Error(answer.error));
+                    else resolve(answer.value);
+                });
+            });
+        };
+    }
 
     if (global.__mindwtrNative && typeof global.__mindwtrNative.cryptoCall === 'function') {
         global.__mindwtrCryptoCall = function (request) {

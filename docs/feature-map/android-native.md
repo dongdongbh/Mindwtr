@@ -410,6 +410,14 @@ The native client is a Kotlin and Jetpack Compose app in `apps/android-native`. 
 - Checks: `apps/android-native/scripts/check-sync-device.mjs`, `apps/android-native/scripts/check-bgsync-device.mjs`, `apps/android-native/scripts/check-file-sync-device.mjs`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/PullSyncFailureTest.kt`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/core/HostSyncLockTest.kt`
 - Notes: The password is sealed in secure storage and never logged. Background sync runs every 15 minutes and skips during a failure cooldown.
 
+## Dropbox sync
+
+- Reach: Settings › Sync › Dropbox › Connect Dropbox. Dropbox sign-in opens in a Custom Tab (the plain browser when no Custom Tabs browser is installed); the redirect `mindwtr://redirect` (`mindwtr-native-dev://redirect` in the dev build) returns to the app, which saves the tokens and syncs at once. The panel also has Test connection, Sync now and Disconnect Dropbox. Play builds only, and only when the build has a `DROPBOX_APP_KEY`; the FOSS build hides Dropbox, as RN's does.
+- Selectors: `sync-dropbox-connect`, `sync-test`, `sync-now`, `sync-status`
+- Code: `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/core/DropboxAuthorization.kt`, `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/SyncSettings.kt`, `apps/android-native/bundle/host-ios-dropbox.ts`, `apps/android-native/bundle/host-sync.ts`
+- Checks: `apps/android-native/bundle/host-android-dropbox.test.ts`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/core/DropboxAuthorizationTest.kt`, `apps/android-native/scripts/check-dropbox-device.mjs`, `apps/android-native/scripts/capture-dropbox-parity.mjs` (RN vs native panel pair)
+- Notes: Tokens live in the same secure store RN used (`mindwtr_dropbox_tokens`), so an RN user keeps the sign-in after the upgrade. Closing the browser without signing in cancels the connect. A debug build reads `debug.mindwtr.native.dropbox_origin` to send every Dropbox request to a local fake; release builds ignore it.
+
 ## Sync encryption
 
 - Reach: Settings › Sync › Encryption › Enable encryption. It also has Disable, Show passphrase, and the locked state that asks for the passphrase.

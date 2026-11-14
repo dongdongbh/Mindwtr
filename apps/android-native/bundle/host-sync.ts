@@ -1,10 +1,11 @@
-import { createNativeIosDropbox, type NativeIosDropboxCapability } from './host-ios-dropbox';
+import { createNativeIosDropbox, readNativeAndroidDropboxConfiguration, type NativeIosDropboxCapability } from './host-ios-dropbox';
 import { createNativeFileSync, prepareNativeFileSync, type NativeFileSyncCall, type NativeFileSyncSelection, type NativeFileSyncLease, type NativeFileSyncPort } from './host-file-sync';
 import { DOMParser } from '@xmldom/xmldom';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex } from '@noble/hashes/utils.js';
 import { createNativeAttachments, nativeFileChannels, type NativeAttachmentBindings } from './host-attachments';
 import {
+    DROPBOX_SECURESTORE_TOKENS_KEY,
     MOBILE_BACKGROUND_SYNC_DEADLINE_MS,
     NativeAttachmentCleanupUnconfirmedError,
     SETTINGS_SYNC_BADGE_COLORS,
@@ -117,6 +118,7 @@ export type NativeSyncBindings = {
 };
 
 const IOS_SERVER_ANSWER_WINDOW_MS = 20_000;
+const NATIVE_DROPBOX_SEEN_KEY = 'mindwtr-native-dropbox-seen';
 
 
 type HostCryptoCall = (request: Record<string, unknown>) => Promise<Uint8Array>;
@@ -237,8 +239,45 @@ export const createNativeSync = (bindings: NativeSyncBindings, fileEncryptionSta
     };
     const vault = createSyncSecretVault(secretStorage);
     const secureConfig = createSecureSyncConfigStore({ storage, secrets: secretStorage, vault });
-    const dropbox = platform === 'ios' && !bindings.isFossBuild && bindings.dropbox
-        ? createNativeIosDropbox(bindings.dropbox, { storage, secrets: secretStorage, vault, fetch: (input, init) => fetch(input, init) }) : null;
+    const logDropbox = (outcome: string, warn = false) => void logLine(warn ? 'warn' : 'info', 'Native Android Dropbox',
+        { scope: 'sync', force: true, extra: { releaseCheck: 'v1.3.9/native-dropbox', outcome } });
+    const noteRnDropboxTokens = async () => {
+        try {
+            if (await keyValue.get(NATIVE_DROPBOX_SEEN_KEY)) return;
+            await keyValue.set(NATIVE_DROPBOX_SEEN_KEY, '1');
+        } catch { return; }
+        logDropbox('migrated-from-rn');
+    };
+    const androidDropboxSecrets: SyncSecretStoragePort = {
+        ...secretStorage,
+        getItem: async (key) => {
+            const value = await secretStorage.getItem(key);
+            if (key === DROPBOX_SECURESTORE_TOKENS_KEY && value) await noteRnDropboxTokens();
+            return value;
+        },
+        setItem: async (key, value, accessibility) => {
+            await secretStorage.setItem(key, value, accessibility);
+            if (key === DROPBOX_SECURESTORE_TOKENS_KEY) await noteRnDropboxTokens();
+        },
+    };
+    const observeAndroidDropbox = async (url: string, body: string, response: Response) => {
+        if (url === 'https://api.dropboxapi.com/2/auth/token/revoke') {
+            if (response.ok) logDropbox('revoked');
+            else if (response.status !== 401) logDropbox('revoke-failed', true);
+            return;
+        }
+        if (url !== 'https://api.dropboxapi.com/oauth2/token') return;
+        const grant = new URLSearchParams(body).get('grant_type');
+        if (grant === 'refresh_token') logDropbox(response.ok ? 'refreshed' : 'refresh-failed', !response.ok);
+        else if (grant === 'authorization_code') {
+            if (response.ok) await keyValue.set(NATIVE_DROPBOX_SEEN_KEY, '1').catch(() => undefined);
+            logDropbox(response.ok ? 'connected' : 'connect-failed', !response.ok);
+        }
+    };
+    const dropbox = bindings.isFossBuild || !bindings.dropbox ? null : platform === 'ios'
+        ? createNativeIosDropbox(bindings.dropbox, { storage, secrets: secretStorage, vault, fetch: (input, init) => fetch(input, init) })
+        : createNativeIosDropbox(bindings.dropbox, { storage, secrets: androidDropboxSecrets, vault, fetch: (input, init) => fetch(input, init) },
+            { read: readNativeAndroidDropboxConfiguration, observe: observeAndroidDropbox });
     const encryptionState = fileEncryptionState ?? createSyncEncryptionStateStore({
         storage,
         secureConfig,
@@ -365,7 +404,8 @@ export const createNativeSync = (bindings: NativeSyncBindings, fileEncryptionSta
     const attachments = channels ? createNativeAttachments({
         ...(cloudKitBinding ? { cloudKit: cloudKitBinding.assets } : {}),
         storage,
-        ...(dropbox ? { dropboxAuth: dropbox.auth, getDropboxClientId: async () => { dropbox.assertCurrent(); return dropbox.configuration.clientId; }, maxDropboxBufferedUploadBytes: 8 * 1024 * 1024 } : {}),
+        ...(dropbox ? { dropboxAuth: dropbox.auth, getDropboxClientId: async () => { dropbox.assertCurrent(); return dropbox.configuration.clientId; },
+            maxDropboxBufferedUploadBytes: platform === 'ios' ? 8 * 1024 * 1024 : undefined } : {}),
         getSecureConfigValue: (key) => secureConfig.getSecureConfigValue(key),
         log: {
             info: (message, context) => logLine('info', message, context),
@@ -670,6 +710,7 @@ export const createNativeSync = (bindings: NativeSyncBindings, fileEncryptionSta
             if (error instanceof NativeAttachmentCleanupUnconfirmedError) fatalCleanupError = error;
             throw error;
         } finally {
+            if (platform === 'android' && dropbox && options.configOverride?.dropbox && !succeeded) logDropbox('first-sync-failed', true);
             const ended = !requeued && fileCycle !== earlier ? takeFileCycle() : null;
             if (ended) {
                 const encrypted = (await encryptionState.getSyncEncryptionStatus().catch(() => null))?.state === 'enabled';

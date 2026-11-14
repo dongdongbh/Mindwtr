@@ -1079,7 +1079,7 @@ assert.equal(kotlinFiles.join('\n').match(/(?<!class )CoreHost\(/g).length, 1);
 
 
 assert.match(owner, /val legacy = if \(BuildConfig\.RN_STORAGE && !sandbox\) \{\s*LegacyRnStoreGuard\.requireClear\(app\.dataDir, File\(app\.cacheDir, "legacy-rn-guard"\)\)\s*\} else \{\s*null\s*\}\s*val installer = if \(sandbox\) HostInstaller\(File\(scratch, "files"\), File\(scratch, "cache"\)\) else HostInstaller\(app\.filesDir, app\.cacheDir\)\s*val files = Workspace\.files\(legacy\?\.database \?: File\(app\.filesDir, "mindwtr-native-dev\.db"\), File\(app\.filesDir, "journal"\),\s*app\.getDatabasePath\("RKStorage"\), scratch, sandbox = sandbox\)\s*val runtime = host\(app, files, legacy, installer, sandbox\)\s*try \{\s*if \(sandboxRequest != null\) \{[\s\S]*?sandboxHost = runtime\s*return runtime\s*\}\s*runtime\.start\([^\n]*, legacy\?\.bootState \?: "", legacy\?\.backup \?: "", legacy\?\.preflight == true\)/);
-assert.match(owner, /val keyValue = RnKeyValue\(files\.keyValue\)\s*return CoreHost\(files\.database, legacy\?\.let \{ app\.dataDir \}, HostIo\(app\),\s*files\.journal, deviceStore\(app, keyValue, sandbox\), File\(app\.filesDir, DiagnosticsLogFile\.RELATIVE_PATH\),\s*keyValue, HostFiles\(app\.filesDir, app\.cacheDir, content = AndroidContentSource\(app\)\), installer,\s*if \(sandbox\) SandboxReminders else ReminderAlarms\(app, keyValue, checkpointRnState = \{ if \(legacy != null\) LegacyRnStoreGuard\.checkpointRnState\(app\.dataDir\) \}\),\s*if \(sandbox\) null else HostWidgets\(app\) \{ appState \},\s*scheduleBackgroundSync = if \(sandbox\) null else \{ on -> CoreWork\.scheduleSyncStored\(app, on\) \}, appInfo = aboutAppInfo\(\),[\s\S]{0,400}?calendars = HostCalendars\(app\), documents = HostDocuments\(app\), syncLock = HostSyncLock\(app\),\s*appSearch = HostAppSearch\(app, app\.getString\(R\.string\.mindwtr_link_scheme\)\),\s*gmail = \(gmail \?: GmailAuthorization\(app\)\.also \{ gmail = it \}\)::call, gmailReceipts = HostGmailReceipts\([^\n]*\),\s*voice = HostVoice\.forApp\(app\)::call\)/);
+assert.match(owner, /val keyValue = RnKeyValue\(files\.keyValue\)\s*return CoreHost\(files\.database, legacy\?\.let \{ app\.dataDir \}, HostIo\(app\),\s*files\.journal, deviceStore\(app, keyValue, sandbox\), File\(app\.filesDir, DiagnosticsLogFile\.RELATIVE_PATH\),\s*keyValue, HostFiles\(app\.filesDir, app\.cacheDir, content = AndroidContentSource\(app\)\), installer,\s*if \(sandbox\) SandboxReminders else ReminderAlarms\(app, keyValue, checkpointRnState = \{ if \(legacy != null\) LegacyRnStoreGuard\.checkpointRnState\(app\.dataDir\) \}\),\s*if \(sandbox\) null else HostWidgets\(app\) \{ appState \},\s*scheduleBackgroundSync = if \(sandbox\) null else \{ on -> CoreWork\.scheduleSyncStored\(app, on\) \}, appInfo = aboutAppInfo\(\),[\s\S]{0,400}?calendars = HostCalendars\(app\), documents = HostDocuments\(app\), syncLock = HostSyncLock\(app\),\s*appSearch = HostAppSearch\(app, app\.getString\(R\.string\.mindwtr_link_scheme\)\),\s*gmail = \(gmail \?: GmailAuthorization\(app\)\.also \{ gmail = it \}\)::call, gmailReceipts = HostGmailReceipts\([^\n]*\),\s*voice = HostVoice\.forApp\(app\)::call, dropbox = dropbox\(app\)\)/);
 
 
 assert.match(guard, /check\(blocked == null\)[^\n]*\n(?:(?!return Opened\()[\s\S])*?\n\s*checkpointRnState\(dataDir\)\n(?:(?!fun )[\s\S])*?return Opened\(/);
@@ -1227,10 +1227,11 @@ assert.match(model, /ProcessCoreHost\.get\(/);
 
 assert.equal(coreHost.match(/JSCallFunction \{/g).length, 1, 'the only JS callback constructor is guarded');
 const bridgeCallbacks = coreHost.match(/bridge\.setProperty\([^\n]*/g);
-assert.equal(bridgeCallbacks.length, 55, 'the SQL calls, trace, nowMs, randomBytes, rnStateCommit, collationKey, dateTimeFormat, log, the fetch, secret and sync crypto calls, logFile, the key-value calls, hostEvent, the queue\'s file calls, Settings › Data\'s three channel calls, its debug property and memory probe (D1c), the attachment file, delete, abort and installer calls and the reminder alarms\' calls: and the widgets\' three calls, the background sync\'s schedule, the device calendar call, system search\'s info and call (O2d), and File Sync\'s document and lock calls (S5), Gmail\'s authorization call, receipts file call and receipts SQL (G2), and voice capture\'s microphone call (V3): each guarded');
+assert.equal(bridgeCallbacks.length, 56, 'the SQL calls, trace, nowMs, randomBytes, rnStateCommit, collationKey, dateTimeFormat, log, the fetch, secret and sync crypto calls, logFile, the key-value calls, hostEvent, the queue\'s file calls, Settings › Data\'s three channel calls, its debug property and memory probe (D1c), the attachment file, delete, abort and installer calls and the reminder alarms\' calls: and the widgets\' three calls, the background sync\'s schedule, the device calendar call, system search\'s info and call (O2d), and File Sync\'s document and lock calls (S5), Gmail\'s authorization call, receipts file call and receipts SQL (G2), voice capture\'s microphone call (V3) and Dropbox\'s sign-in call: each guarded');
 
 
 assert(bridgeCallbacks.includes('bridge.setProperty("gmailCall", guarded { args -> io.gmail(args[0] as String, authorization) }) }'));
+assert(bridgeCallbacks.includes('bridge.setProperty("dropboxCall", guarded { args -> io.dropbox(args[0] as String, auth::call) }) }'));
 assert(bridgeCallbacks.includes('bridge.setProperty("gmailFile", guarded { args -> receipts.file(args[0] as String, args[1] as String, args[2] as String) })'));
 assert(bridgeCallbacks.includes('bridge.setProperty("gmailSql", guarded { args -> receipts.sql(args[0] as String, args[1] as String, args[2] as String) })'));
 
@@ -1291,7 +1292,7 @@ assert.match(coreHost, /private fun kvFault\(\) = check\(debugFault\("fail_kv_se
     assert.match(hostIo, /private val argon2DelayMs = debugProperty\("crypto_delay_ms"\)/);
 
 
-    assert.match(hostIo, /override fun onResponse\(call: Call, response: Response\) \{[^{}]*?try \{\s*answers\.add\(runCatching \{ response\.use \{ read\(id, it, redirect\) \} \}\.getOrElse \{ failure\(id, call, it\) \}\)\s*\} finally \{\s*calls\.remove\(id\)\s*\}/);
+    assert.match(hostIo, /override fun onResponse\(call: Call, response: Response\) \{[^{}]*?try \{\s*answers\.add\(runCatching \{ response\.use \{ read\(id, it, redirect, reported\) \} \}\.getOrElse \{ failure\(id, call, it\) \}\)\s*\} finally \{\s*calls\.remove\(id\)\s*\}/);
     assert.equal(hostIo.match(/calls\.remove\(id\)/g).length, 3);
     assert.match(hostIo, /fun close\(\) \{\s*calls\.values\.forEach \{ it\.cancel\(\) \}/);
     assert.match(hostIo, /secretThread\.execute \{\s*if \(op == "get" && answers\.closed\) return@execute\s*answers\.add\(runCatching \{/, 'a secret call runs on the secrets thread');
@@ -1366,7 +1367,9 @@ assert.match(coreHost, /private fun kvFault\(\) = check\(debugFault\("fail_kv_se
     assert.match(coreHost, /val answer = pumpUntil\(id, deadlineMs\) \?: run \{[^}]*?call\("cancel", id\)\s*if \(pumpUntil\(id, DRAIN_MS\) == null\) \{[^}]*?stopped = reason[^}]*?closeOnEngine\(\)\s*throw IllegalStateException\(reason\)\s*\}\s*checkNotNull\(context\)\.globalObject\.getJSFunction\("__resumeHostCalls"\)\.call\(\)\s*schedulePump\(\)\s*throw IllegalStateException\("Core \$method timed out"\)/);
     assert.equal(coreHost.match(/pumpUntil\(/g).length, 4, 'a call pumps itself only through pumpUntil: a nested one, and a drain');
     assert.match(coreHost, /callAsync\("netCheck", port, deadlineMs = NETWORK_DEADLINE_MS\)/);
-    assert.match(hostIo, /response\.use \{ read\(id, it, redirect\) \}/);
+    assert.match(hostIo, /response\.use \{ read\(id, it, redirect, reported\) \}/);
+    assert.match(hostIo, /val reported = requested\.takeIf \{ it != routed \}/);
+    assert.match(hostIo, /\.put\("url", reportedUrl\?\.takeIf \{ response\.priorResponse == null \} \?: response\.request\.url\.toString\(\)\)/);
 
     const rnClient = readFileSync(resolve(app, '../mobile/modules/sync-file-lock/android/src/main/java/tech/dongdongbh/mindwtr/syncfilelock/SyncHttpClientPackage.kt'), 'utf8');
     assert.equal(/CONNECT_TIMEOUT_MS = ([\d_]+L)/.exec(hostIo)[1], /CONNECT_TIMEOUT_MS = ([\d_]+L)/.exec(rnClient)[1]);
@@ -3846,8 +3849,9 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     assert.match(queueKt, /out\.fd\.sync\(\)\s+\}\s+check\(partial\.renameTo\(file\)\)/);
     assert.match(readFileSync(resolve(app, 'android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/EntryQueueTest.kt'), 'utf8'), /fun aSecondEntryNeverReplacesTheFirst\(\)/);
     assert.match(entryKt, /highlight\(id\); menu\.whenIdle \{ openEditor\(id, "view"\) \}/);
-    assert.match(activity, /if \(savedInstanceState == null\) model\.entries\.receive\(intent\)/);
-    assert.match(activity, /override fun onNewIntent\(intent: Intent\) \{\s+super\.onNewIntent\(intent\)\s+setIntent\(intent\)\s+model\.entries\.receive\(intent\)/);
+    assert.match(activity, /if \(savedInstanceState == null && !dropboxRedirect\(intent\)\) model\.entries\.receive\(intent\)/);
+    assert.match(activity, /override fun onNewIntent\(intent: Intent\) \{\s+super\.onNewIntent\(intent\)\s+setIntent\(intent\)\s+if \(!dropboxRedirect\(intent\)\) model\.entries\.receive\(intent\)/);
+    assert.match(activity, /private fun dropboxRedirect\(intent: Intent\) = intent\.action == Intent\.ACTION_VIEW && DropboxAuthorization\.current\?\.redirected\(intent\.dataString\) == true/);
     assert.match(activity, /LaunchedEffect\(entries\.head, entries\.blocked\) \{ entries\.pump\(\) \}/);
     assert.match(activity, /LaunchedEffect\(leaveApp\) \{ if \(leaveApp\) \{ leftApp\(\); moveTaskToBack\(true\) \} \}/);
     assert.match(hostEntry, /^\s+entryPoint: \(input\) => logEntryPoint\(input, isNotificationTap\(input\) \? notificationEntry\(input\) : contract\.resolveNativeEntryPoint\(input\)\),$/m);
@@ -10589,7 +10593,15 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     const voiceTs = readFileSync(resolve(app, 'bundle/host-voice.ts'), 'utf8');
     assert.match(coreHost, /voice\?\.let \{ call -> bridge\.setProperty\("voiceCall", guarded \{ args -> io\.voice\(args\[0\] as String, call\) \}\) \}/);
     assert.match(coreHost, /fun voiceRequest\(name: String, json: String\): JSONObject = callLong\("voiceRequest", name, json\)/);
-    assert.match(source('ProcessCoreHost.kt'), /voice = HostVoice\.forApp\(app\)::call\)/);
+    assert.match(source('ProcessCoreHost.kt'), /voice = HostVoice\.forApp\(app\)::call, dropbox = dropbox\(app\)\)/);
+    assert.match(source('ProcessCoreHost.kt'), /if \(BuildConfig\.FOSS \|\| BuildConfig\.DROPBOX_APP_KEY\.isEmpty\(\)\) return null/);
+    const dropboxAuthorization = readFileSync(resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/core/DropboxAuthorization.kt'), 'utf8');
+    assert.match(dropboxAuthorization, /pending\?\.takeIf \{ DropboxAuthorization\.answers\(url, redirectUri, it\.state\) \}/, 'only the pending sign-in\'s own redirect answers it');
+    assert.match(dropboxAuthorization, /private fun params\(url: String\): Map<String, String>\? = runCatching \{/, 'a malformed redirect is not answered instead of throwing on the main thread');
+    assert.match(activity, /override fun onResume\(\) \{\s+super\.onResume\(\)\s+model\.appState\("active"\)\s+DropboxAuthorization\.current\?\.resumed\(\)/, 'a return without a redirect cancels the waiting sign-in');
+    assert.match(activity, /override fun onPause\(\) \{\s+super\.onPause\(\)\s+if \(!isChangingConfigurations\) model\.appState\("background"\)\s+DropboxAuthorization\.current\?\.left\(\)/, 'leaving for the browser arms that cancel');
+    assert.match(dropboxAuthorization, /CustomTabsClient\.getPackageName\(context, null\)[\s\S]*?Intent\.ACTION_VIEW[\s\S]*?CustomTabsIntent\.Builder\(\)/, 'a Custom Tab when a provider exists, else the browser');
+    assert.match(coreHost, /dropbox\?\.let \{ auth -> bridge\.setProperty\("dropboxCall", guarded \{ args -> io\.dropbox\(args\[0\] as String, auth::call\) \}\) \}/);
     assert.match(hostEntrySource, /voiceRequest\(name: string, json: string\): string \{\s*return submit\(async \(\) => \{\s*if \(!nativeVoice\) throw new Error\('Voice capture is not available on this host'\);\s*return nativeVoice\.request\(name, JSON\.parse\(json\) as Record<string, unknown>\);/);
     assert.match(hostEntrySource, /whisperModelReady: \(runtime\) => \(nativeWhisper \? nativeWhisper\.ready\(runtime\) : Promise\.resolve\(false\)\),/);
     assert.match(hostEntrySource, /transcribeLocal: \(uri, runtime\) => \(nativeWhisper \? nativeWhisper\.transcribe\(uri, runtime\) : Promise\.reject\(new Error\('E_WHISPER_UNAVAILABLE'\)\)\),/);

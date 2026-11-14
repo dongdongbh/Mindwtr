@@ -168,6 +168,7 @@ try {
         recoverySource: RECOVERY_COMMIT,
         rn152: describe(rnApk(V132, 152), 152, true),
         native153: describe(nativeApk, 153, false),
+        nativeDropboxAppKey: (process.env.DROPBOX_APP_KEY ?? '').trim(),
         rn154: describe(rnApk(RECOVERY_COMMIT, 154), 154, true),
         rnFixSource: RN_FIX_COMMIT,
         rn155: describe(rnApk(RN_FIX_COMMIT, 155), 155, true),

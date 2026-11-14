@@ -154,6 +154,7 @@ test('an unset adb port defaults to 5038 in the child env and the detached unit;
 
     assert.deepEqual(setenvArgs({ PATH: '/bin', PARITY_ONLY: 'small2' }), ['--setenv=PATH=/bin', '--setenv=PARITY_ONLY=small2']);
     assert.deepEqual(setenvArgs({ MINDWTR_UPGRADE_ONLY: '12' }), ['--setenv=MINDWTR_UPGRADE_ONLY=12']);
+    assert.deepEqual(setenvArgs({ DROPBOX_APP_KEY: 'mindwtrcheck1' }), ['--setenv=DROPBOX_APP_KEY=mindwtrcheck1']);
     assert.equal(DEFAULT_ADB, '/opt/android-sdk/platform-tools/adb');
 });
 

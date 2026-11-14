@@ -56,6 +56,7 @@ class HostIo(context: Context) {
     private val ceiling = minOf(MAX_SYNC_DOCUMENT_BYTES, Runtime.getRuntime().maxMemory() / 5)
 
     private val argon2DelayMs = debugProperty("crypto_delay_ms").toLongOrNull()?.coerceIn(0, 30_000) ?: 0L
+    private val dropboxOrigin = debugProperty("dropbox_origin")
     private val maxResponseBytes = debugProperty("net_max_bytes").toLongOrNull()?.takeIf { it > 0 }?.let { minOf(it, ceiling) } ?: ceiling
     private val secrets = SecretStore(context.applicationContext)
     private val secretThread = Executors.newSingleThreadExecutor { task -> Thread(task, "mindwtr-secrets") }
@@ -97,8 +98,11 @@ class HostIo(context: Context) {
             else -> null
         }
         val redirect = request.optString("redirect", "follow")
+        val requested = request.getString("url")
+        val routed = DropboxAuthorization.route(requested, dropboxOrigin)
+        val reported = requested.takeIf { it != routed }
         val call = (if (redirect == "follow") client else noRedirects)
-            .newCall(Request.Builder().url(request.getString("url")).headers(headers).method(method, body).build())
+            .newCall(Request.Builder().url(routed).headers(headers).method(method, body).build())
         val id = (++nextId).toString()
         calls[id] = call
         call.enqueue(object : Callback {
@@ -112,7 +116,7 @@ class HostIo(context: Context) {
 
 
                 try {
-                    answers.add(runCatching { response.use { read(id, it, redirect) } }.getOrElse { failure(id, call, it) })
+                    answers.add(runCatching { response.use { read(id, it, redirect, reported) } }.getOrElse { failure(id, call, it) })
                 } finally {
                     calls.remove(id)
                 }
@@ -179,6 +183,10 @@ class HostIo(context: Context) {
 
 
     fun gmail(json: String, run: (String, (Result<Any?>) -> Unit) -> Unit): String =
+        replied { reply -> runCatching { run(json, reply) }.onFailure { reply(Result.failure(it)) } }
+
+
+    fun dropbox(json: String, run: (String, (Result<Any?>) -> Unit) -> Unit): String =
         replied { reply -> runCatching { run(json, reply) }.onFailure { reply(Result.failure(it)) } }
 
 
@@ -291,7 +299,7 @@ class HostIo(context: Context) {
     }
 
 
-    private fun read(id: String, response: Response, redirect: String): Answer {
+    private fun read(id: String, response: Response, redirect: String, reportedUrl: String? = null): Answer {
         if (redirect == "error" && response.isRedirect) throw Refused("fetch failed: unexpected redirect")
         val body = response.body!!
         val tooLarge = "Response exceeds the $maxResponseBytes byte download limit"
@@ -310,7 +318,7 @@ class HostIo(context: Context) {
         val raw = bytes.readByteArray()
         val text = StrictUtf8.bridgeTextOrNull(raw)
         val json = JSONObject().put("id", id).put("status", response.code).put("statusText", response.message)
-            .put("url", response.request.url.toString()).put("redirected", response.priorResponse != null)
+            .put("url", reportedUrl?.takeIf { response.priorResponse == null } ?: response.request.url.toString()).put("redirected", response.priorResponse != null)
             .put("headers", headers).put("body", true).put("bytes", raw.size).apply { if (text != null) put("utf8", true) }.toString()
 
         return Answer(json, if (text != null) "T$text" else Base64.encodeToString(raw, Base64.NO_WRAP))

@@ -170,4 +170,40 @@ describe('Dropbox access token refresh', () => {
         }));
         await expect(store.getStoredDropboxTokens()).resolves.toBeNull();
     });
+
+    it('disconnect with an expired access token refreshes once and revokes the grant, then clears the tokens', async () => {
+        const calls: Array<{ url: string; authorization?: string }> = [];
+        const { store } = createStore({
+            fetch: (async (url: string, init?: RequestInit) => {
+                const authorization = (init?.headers as Record<string, string> | undefined)?.Authorization;
+                calls.push({ url, authorization });
+                if (url.endsWith('/oauth2/token')) return jsonResponse({ access_token: 'fresh-access', expires_in: 14_400 });
+                return authorization === 'Bearer fresh-access' ? new Response('null') : jsonResponse({ error_summary: 'expired_access_token/' }, 401);
+            }) as unknown as typeof fetch,
+        });
+        await store.saveDropboxTokens(tokens);
+
+        await store.disconnectDropbox('app-key');
+
+        expect(calls).toEqual([
+            { url: 'https://api.dropboxapi.com/2/auth/token/revoke', authorization: 'Bearer dropbox-access' },
+            { url: 'https://api.dropboxapi.com/oauth2/token', authorization: undefined },
+            { url: 'https://api.dropboxapi.com/2/auth/token/revoke', authorization: 'Bearer fresh-access' },
+        ]);
+        await expect(store.getStoredDropboxTokens()).resolves.toBeNull();
+    });
+
+    it('disconnect still clears the tokens when the refresh token is already revoked', async () => {
+        const { store, fetcher } = createStore({
+            fetch: (async (url: string) => (url.endsWith('/oauth2/token')
+                ? jsonResponse({ error: 'invalid_grant', error_description: 'refresh token is invalid or revoked' }, 400)
+                : jsonResponse({ error_summary: 'expired_access_token/' }, 401))) as unknown as typeof fetch,
+        });
+        await store.saveDropboxTokens(tokens);
+
+        await store.disconnectDropbox('app-key');
+
+        expect(fetcher).toHaveBeenCalledTimes(2);
+        await expect(store.getStoredDropboxTokens()).resolves.toBeNull();
+    });
 });

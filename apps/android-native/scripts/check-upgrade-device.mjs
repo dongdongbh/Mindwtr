@@ -6,9 +6,10 @@ import { isDeepStrictEqual } from 'node:util';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { bootFailure, box, button, check, connect, draftText, evidenced, fail, field, hasText, Stopped, inboxCount, tab, tagged, withDescription } from './device.mjs';
 import { serveWebdav, webdavDocument } from './sync-harness.mjs';
+import { serveDropbox } from './dropbox-harness.mjs';
 import { PUBLISHED, REFRESHED, WIDGET_PREFS, WIDGET_LIST_PREFS, widgetSelections, corePublication, count, firstDifference, isRnPayloadPrefsWrite, publicationContext, widgetPrefs } from './widget-payload.mjs';
 
-const SCENARIOS = ['1', '4', '2', '4b', '2b', '3', '3b', '5', '5b', '6', '7', '8', '9', '9b', '9c', '10', '11', '12'];
+const SCENARIOS = ['1', '4', '2', '4b', '2b', '3', '3b', '5', '5b', '6', '6b', '7', '8', '9', '9b', '9c', '10', '11', '12'];
 const USAGE = `usage: node check-upgrade-device.mjs <adb-serial> [--only=${SCENARIOS.join(',')}] [--keep]`;
 const args = process.argv.slice(2);
 const serials = args.filter((arg) => !arg.startsWith('--'));
@@ -1089,6 +1090,90 @@ const scenarioSync = async () => {
 };
 
 
+const DROPBOX_PORT = Number(process.env.MINDWTR_DROPBOX_PORT ?? 18774);
+const scenarioDropbox = async () => {
+    console.log('\n# 6b RN Dropbox sign-in');
+    const key = built.nativeDropboxAppKey ?? '';
+    if (!key) {
+        const why = 'the harness native APK has no Dropbox app key; rebuild it with DROPBOX_APP_KEY=<fake key> node build-upgrade-harness.mjs';
+        if (only?.includes('6b')) fail(`(6b) ${why}`);
+        console.log(`NOT RUN (6b): ${why}`);
+        return;
+    }
+    fresh();
+    const dropbox = await serveDropbox({ port: DROPBOX_PORT, clientId: key });
+    adbRaw('reverse', `tcp:${DROPBOX_PORT}`, `tcp:${DROPBOX_PORT}`);
+    try {
+        device.launch(RN_ACTIVITY);
+        let first = [];
+        for (const deadline = Date.now() + 20_000; Date.now() < deadline && !first.some((node) => node.text === RN_SKIP_ONBOARDING); await sleep(1_000)) {
+            first = await screen();
+        }
+        const skip = first.find((node) => node.text === RN_SKIP_ONBOARDING);
+        if (skip) await tap(skip);
+        await sleep(2_000);
+        openLink('mindwtr-upgradetest://settings?settingsScreen=sync');
+        const chips = await waitFor('RN Settings > Sync', (current) => current.some((node) => node.text === 'Dropbox'), 60_000);
+        await tap(chips.find((node) => node.text === 'Dropbox'));
+        await sleep(2_000);
+        writeFileSync(resolve(work, '6b-rn-dropbox-panel.png'), adbRaw('exec-out', 'screencap', '-p'));
+        console.log(`info - RN Dropbox panel: ${resolve(work, '6b-rn-dropbox-panel.png')}`);
+        await until('RN to create its AsyncStorage', () => runAs('ls databases').split(/\s+/).includes('RKStorage'), 30_000);
+        await stopApp();
+        const refresh = `rnrefresh${run}`;
+        const access = `rnaccess${run}`;
+        const title = `6b from RN ${run}`;
+        dropbox.state.refresh.add(refresh);
+        dropbox.state.access.set(access, { refresh, expiresAt: Date.now() + 3_600_000 });
+        const at = new Date().toISOString();
+        dropbox.state.files.set('/data.json', { rev: '0rn6b0001', body: Buffer.from(JSON.stringify({ tasks: [{ id: `rn6b-${run}`, title, status: 'inbox',
+            contexts: [], tags: [], createdAt: at, updatedAt: at }], projects: [], sections: [], areas: [], settings: {} })) });
+        const tokens = JSON.stringify({ accessToken: access, refreshToken: refresh, expiresAt: Date.now() + 3_600_000 });
+        rewriteAsyncStorage('6b-rkstorage', `INSERT OR REPLACE INTO catalystLocalStorage (key, value) VALUES ('@mindwtr_sync_backend', 'cloud'), `
+            + `('@mindwtr_cloud_provider', 'dropbox'), ('@mindwtr_dropbox_tokens', '${tokens}'), ('@mindwtr_dropbox_last_rev', '0rn6b0001');`);
+        console.log('INJECTED (6b): RN\'s Dropbox backend, its legacy stored tokens and its cursor in RKStorage');
+
+        install(APKS.native153, true);
+        sh(`setprop debug.mindwtr.native.dropbox_origin 'http://127.0.0.1:${DROPBOX_PORT}'`);
+        device.launch(NATIVE_ACTIVITY);
+        await nativeScreen();
+        let nodes = await screen();
+        await tap(tab(nodes, en['tab.menu']) ?? fail('no Menu tab'));
+        nodes = await waitFor('the More sheet', (current) => Boolean(tagged(current, 'more-sheet')), 10_000);
+        await tap(withDescription(nodes, en['nav.settings']) ?? fail('no Settings tile'));
+        nodes = await waitFor('native Settings', (current) => Boolean(tagged(current, 'settings-main')), 20_000);
+        let row = nodes.find((node) => (node['content-desc'] ?? '').startsWith(`${en['settings.sync']}. `));
+        for (let step = 0; step < 6 && !row; step += 1) {
+            nodes = await device.swipe(nodes, 'down');
+            row = nodes.find((node) => (node['content-desc'] ?? '').startsWith(`${en['settings.sync']}. `));
+        }
+        await tap(row ?? fail('no Sync row in native Settings'));
+        nodes = await waitFor('the native Dropbox panel connected', (current) => current.some((node) => node.text === en['settings.syncMobile.statusConnected']), 30_000);
+        check(tagged(nodes, 'sync-dropbox-connect') !== undefined, '(6b) the native Sync screen shows RN\'s Dropbox backend, signed in');
+        writeFileSync(resolve(work, '6b-native-dropbox-panel.png'), adbRaw('exec-out', 'screencap', '-p'));
+        console.log(`info - native Dropbox panel: ${resolve(work, '6b-native-dropbox-panel.png')}`);
+        for (let step = 0; step < 6 && !tagged(nodes, 'sync-now'); step += 1) nodes = await device.swipe(nodes, 'down');
+        await tap(tagged(nodes, 'sync-now') ?? fail('no Sync now'));
+        await waitFor('the native Sync now to complete', (current) => current.some((node) => node.text === en['settings.syncCompleted']), 60_000);
+        check(dropbox.state.authorizes.length === 0 && !dropbox.state.tokens.includes('authorization_code'), '(6b) the native app synced with no new sign-in');
+        check(rows(pullDatabase('6b-db'), 'SELECT title FROM tasks').some((task) => task.title === title), '(6b) RN\'s Dropbox data reached the native library');
+        const keys = asyncStorage('6b-native-rkstorage');
+        check(!keys.has('@mindwtr_dropbox_tokens'), '(6b) the plain RN token copy is gone from RKStorage');
+        check(keys.get('@mindwtr_dropbox_last_rev') === dropbox.state.files.get('/data.json').rev, '(6b) the cursor follows the native sync under RN\'s key');
+        const prefs = runAs('cat shared_prefs/SecureStore.xml');
+        check(/name="key_v1-mindwtr_dropbox_tokens"/.test(prefs) && !prefs.includes(access), '(6b) the tokens moved into RN\'s secret store, sealed');
+        const lines = device.logs(pid(), TAG).replace(/\\/g, '');
+        check(/v1\.3\.9\/native-dropbox[^\n]*migrated-from-rn/.test(lines) && !lines.includes(access) && !lines.includes(refresh),
+            '(6b) the log shows native-dropbox migrated-from-rn and no token');
+        await stopApp();
+    } finally {
+        try { sh("setprop debug.mindwtr.native.dropbox_origin ''"); } catch { }
+        try { adbRaw('reverse', '--remove', `tcp:${DROPBOX_PORT}`); } catch { }
+        await dropbox.close();
+    }
+};
+
+
 const RN_FILE = 'File';
 const RN_SELECT_FOLDER = 'Select Folder';
 
@@ -1730,6 +1815,7 @@ try {
     if (want('5')) await scenarioMissing();
     if (want('5b')) await scenarioMissingWithBackup();
     if (want('6')) await scenarioSync();
+    if (want('6b')) await scenarioDropbox();
     if (want('7')) await scenarioAlarms();
     if (want('8')) await scenarioPendingCheckoff();
     if (want('9')) await scenarioPomodoro();

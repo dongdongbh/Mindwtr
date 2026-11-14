@@ -12,6 +12,7 @@ import tech.dongdongbh.mindwtr.pilot.core.BytecodeCache
 import tech.dongdongbh.mindwtr.pilot.core.CoreBundle
 import tech.dongdongbh.mindwtr.pilot.core.CoreHost
 import tech.dongdongbh.mindwtr.pilot.core.DiagnosticsLogFile
+import tech.dongdongbh.mindwtr.pilot.core.DropboxAuthorization
 import tech.dongdongbh.mindwtr.pilot.core.HostAppSearch
 import tech.dongdongbh.mindwtr.pilot.core.HostCalendars
 import tech.dongdongbh.mindwtr.pilot.core.HostGmailReceipts
@@ -183,7 +184,14 @@ internal object ProcessCoreHost {
             calendars = HostCalendars(app), documents = HostDocuments(app), syncLock = HostSyncLock(app),
             appSearch = HostAppSearch(app, app.getString(R.string.mindwtr_link_scheme)),
             gmail = (gmail ?: GmailAuthorization(app).also { gmail = it })::call, gmailReceipts = HostGmailReceipts(if (sandbox) Workspace.dir(app, "GmailCapture", true) else File(app.filesDir, "GmailCapture")),
-            voice = HostVoice.forApp(app)::call)
+            voice = HostVoice.forApp(app)::call, dropbox = dropbox(app))
+    }
+
+
+    private fun dropbox(app: Application): DropboxAuthorization? {
+        if (BuildConfig.FOSS || BuildConfig.DROPBOX_APP_KEY.isEmpty()) return null
+        return DropboxAuthorization.current ?: DropboxAuthorization(app, BuildConfig.DROPBOX_APP_KEY, "${BuildConfig.URL_SCHEME}://redirect")
+            .also { DropboxAuthorization.current = it }
     }
 
 
