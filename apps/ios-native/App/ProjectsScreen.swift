@@ -480,7 +480,9 @@ private struct AreaManagerSheet: View {
                             .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                     } else {
                         VStack(spacing: 0) {
-                            ForEach(Array(areas.enumerated()), id: \.offset) { index, area in
+                            let areaRows = areas
+                            ForEach(areaRows.indices, id: \.self) { index in
+                                let area = areaRows[index]
                                 let canDelete = area.flag("canDelete")
                                 let deleteDecisionAvailable = area["canDelete"] is Bool
                                 VStack(spacing: 0) {
@@ -1686,7 +1688,9 @@ struct ProjectDetailScreen: View {
                     if model.projectSectionRows.isEmpty {
                         Text(model.label("common.none")).rnFont(14).foregroundStyle(palette.secondary)
                     } else {
-                        ForEach(Array(model.projectSectionRows.enumerated()), id: \.offset) { _, row in
+                        let sectionRows = model.projectSectionRows
+                        ForEach(sectionRows.indices, id: \.self) { index in
+                            let row = sectionRows[index]
                             VStack(alignment: .leading, spacing: 0) {
                                 Text(row.text("title")).rnFont(15).foregroundStyle(palette.text)
                                     .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
@@ -1884,7 +1888,9 @@ struct ProjectDetailScreen: View {
                 ProgressView().frame(minHeight: 44)
             }
             if model.projectAttachmentsVisible {
-                ForEach(Array(model.projectAttachmentRows.enumerated()), id: \.offset) { _, entry in
+                let attachmentRows = model.projectAttachmentRows
+                ForEach(attachmentRows.indices, id: \.self) { index in
+                    let entry = attachmentRows[index]
                     VStack(alignment: .leading, spacing: 4) {
                         if ["link", "file"].contains(entry.text("kind")) {
                             Button {
@@ -4033,7 +4039,9 @@ private struct ProjectBulkTagSheet: View {
                 VStack(alignment: .leading, spacing: 12) {
                     if model.projectBulkComposerRemoving {
                         AppChipFlow {
-                            ForEach(Array(model.projectBulkRemoveItems.enumerated()), id: \.offset) { index, option in
+                            let removeItems = model.projectBulkRemoveItems
+                            ForEach(removeItems.indices, id: \.self) { index in
+                                let option = removeItems[index]
                                 let picked = model.projectBulkRemovePicked(option.text("value"))
                                 Button { model.toggleProjectBulkRemove(option.text("value")) } label: {
                                     Text(option.text("label")).rnFont(14).multilineTextAlignment(.leading)

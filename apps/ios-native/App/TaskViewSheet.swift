@@ -1576,7 +1576,9 @@ struct TaskViewSheet: View {
     private var attachmentEditor: some View {
         VStack(alignment: .leading, spacing: 10) {
             label(strings.text("attachments.title"))
-            ForEach(Array(model.taskAttachmentRows.enumerated()), id: \.offset) { _, entry in
+            let attachmentRows = model.taskAttachmentRows
+            ForEach(attachmentRows.indices, id: \.self) { index in
+                let entry = attachmentRows[index]
                 HStack(spacing: 8) {
                     Image(systemName: entry.text("kind") == "link" ? "link" : "paperclip")
                         .foregroundStyle(palette.secondary).accessibilityHidden(true)

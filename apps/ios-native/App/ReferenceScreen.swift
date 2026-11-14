@@ -241,7 +241,9 @@ private struct ReferenceBulkRemoveTagDialog: View {
     private var options: some View {
         VStack(alignment: .leading, spacing: 12) {
             AppChipFlow {
-                ForEach(Array(model.referenceBulkRemoveItems.enumerated()), id: \.offset) { index, item in
+                let removeItems = model.referenceBulkRemoveItems
+                ForEach(removeItems.indices, id: \.self) { index in
+                    let item = removeItems[index]
                     let picked = model.referenceBulkRemovePicked(item.text("value"))
                     Button { model.toggleReferenceBulkRemove(item.text("value")) } label: {
                         Text(item.text("label")).rnFont(14).multilineTextAlignment(.leading).fixedSize(horizontal: false, vertical: true)

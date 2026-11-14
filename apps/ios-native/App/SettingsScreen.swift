@@ -1834,7 +1834,9 @@ struct SettingsScreen: View {
                     Button(model.label("common.retry")) { Task { await model.retryGtdWorkflow() } }
                         .disabled(!model.gtdWorkflowEnabled).accessibilityIdentifier("gtd-taskEditorPreset-retry")
                 }
-                ForEach(Array(model.gtdTaskEditor.objects("groups").enumerated()), id: \.offset) { _, group in
+                let editorGroups = model.gtdTaskEditor.objects("groups")
+                ForEach(editorGroups.indices, id: \.self) { index in
+                    let group = editorGroups[index]
                     VStack(alignment: .leading, spacing: 12) {
                         let expanded = model.gtdTaskEditorExpanded[group.text("id")] ?? true
                         Button { model.toggleGtdTaskEditorGroup(group.text("id")) } label: {
@@ -3332,7 +3334,9 @@ struct SettingsScreen: View {
                             }
                         }
                     }
-                    ForEach(Array(model.manageSettings.objects("sections").enumerated()), id: \.offset) { index, section in
+                    let manageSections = model.manageSettings.objects("sections")
+                    ForEach(manageSections.indices, id: \.self) { index in
+                        let section = manageSections[index]
                         let someday = section.text("key") == "somedaySections"
                         let areas = section.text("key") == "areas"
                         let inventory = ["people", "contexts", "tags"].contains(section.text("key"))

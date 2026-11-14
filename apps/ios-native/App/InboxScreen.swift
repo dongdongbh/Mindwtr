@@ -444,39 +444,7 @@ struct InboxScreen: View {
     private var areaOptions: some View {
         VStack(spacing: 10) {
             ForEach(Array(model.area.objects("options").enumerated()), id: \.offset) { _, option in
-                let included = option.text("state") == "included"
-                let excluded = option.text("state") == "excluded"
-                let tone = excluded ? palette.danger : included ? palette.tint : palette.text
-                Button { Task { await model.selectArea(option.object("next")) } } label: {
-                    HStack(spacing: 12) {
-                        if !option.text("color").isEmpty {
-                            Circle().fill(palette.einkSafe(Color(hex: option.text("color")))).frame(width: 8, height: 8)
-                                .accessibilityHidden(true)
-                        }
-                        Text(option.text("label")).rnFont(15, .semibold).lineLimit(1).strikethrough(excluded)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        if excluded { AppIcon(name: "x", size: 16) }
-                        else if included {
-
-                            Path { path in
-                                path.move(to: CGPoint(x: 20, y: 6))
-                                path.addLine(to: CGPoint(x: 9, y: 17))
-                                path.addLine(to: CGPoint(x: 4, y: 12))
-                            }
-                            .stroke(style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
-                            .frame(width: 24, height: 24).scaleEffect(16.0 / 24).frame(width: 16, height: 16)
-                            .accessibilityHidden(true)
-                        }
-                    }
-                    .foregroundStyle(tone).padding(.horizontal, 14).frame(minHeight: 48)
-                    .background(included || excluded ? tone.opacity(0.094) : palette.card, in: RoundedRectangle(cornerRadius: 14))
-                    .overlay(RoundedRectangle(cornerRadius: 14).stroke(included || excluded ? tone : palette.border, lineWidth: 1))
-                }
-                .buttonStyle(.plain).modifier(ModelDisabled { model.busy || model.retryNeeded })
-                .accessibilityLabel(excluded ? option.text("label") + " (" + model.label("filters.excluded") + ")" : option.text("label"))
-                .accessibilityAddTraits(included ? .isSelected : [])
-                .accessibilityValue(excluded ? model.label("filters.excluded") : "")
-                .accessibilityIdentifier("area-option-" + option.text("id"))
+                AreaOptionRow(model: model, palette: palette, option: option)
             }
         }
         .padding(.bottom, 8)
@@ -1288,6 +1256,48 @@ private struct FocusSurface: View {
         .accessibilityIdentifier("focus-project-" + project.text("id"))
     }
 
+}
+
+private struct AreaOptionRow: View {
+    let model: CoreModel
+    let palette: AppPalette
+    let option: CoreObject
+
+    var body: some View {
+        let included = option.text("state") == "included"
+        let excluded = option.text("state") == "excluded"
+        let tone = excluded ? palette.danger : included ? palette.tint : palette.text
+        Button { Task { await model.selectArea(option.object("next")) } } label: {
+            HStack(spacing: 12) {
+                if !option.text("color").isEmpty {
+                    Circle().fill(palette.einkSafe(Color(hex: option.text("color")))).frame(width: 8, height: 8)
+                        .accessibilityHidden(true)
+                }
+                Text(option.text("label")).rnFont(15, .semibold).lineLimit(1).strikethrough(excluded)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                if excluded { AppIcon(name: "x", size: 16) }
+                else if included {
+
+                    Path { path in
+                        path.move(to: CGPoint(x: 20, y: 6))
+                        path.addLine(to: CGPoint(x: 9, y: 17))
+                        path.addLine(to: CGPoint(x: 4, y: 12))
+                    }
+                    .stroke(style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
+                    .frame(width: 24, height: 24).scaleEffect(16.0 / 24).frame(width: 16, height: 16)
+                    .accessibilityHidden(true)
+                }
+            }
+            .foregroundStyle(tone).padding(.horizontal, 14).frame(minHeight: 48)
+            .background(included || excluded ? tone.opacity(0.094) : palette.card, in: RoundedRectangle(cornerRadius: 14))
+            .overlay(RoundedRectangle(cornerRadius: 14).stroke(included || excluded ? tone : palette.border, lineWidth: 1))
+        }
+        .buttonStyle(.plain).modifier(ModelDisabled { model.busy || model.retryNeeded })
+        .accessibilityLabel(excluded ? option.text("label") + " (" + model.label("filters.excluded") + ")" : option.text("label"))
+        .accessibilityAddTraits(included ? .isSelected : [])
+        .accessibilityValue(excluded ? model.label("filters.excluded") : "")
+        .accessibilityIdentifier("area-option-" + option.text("id"))
+    }
 }
 
 private struct TaskRowMutationRetryBanners: View {
@@ -2473,7 +2483,9 @@ struct TaskCard: View {
                                 statusMenu = $0; model.navigationReplayLocalCover(navigationReplayCoverID, presented: $0)
                             }), titleVisibility: .visible) {
             if let onStatusChange {
-                ForEach(Array(statusOptions.objects("options").enumerated()), id: \.offset) { _, option in
+                let statusRows = statusOptions.objects("options")
+                ForEach(statusRows.indices, id: \.self) { index in
+                    let option = statusRows[index]
                     Button((option.flag("selected") ? "✓ " : "") + option.text("label")) {
                         onStatusChange(statusRow, option.text("status"))
                     }
@@ -2482,7 +2494,9 @@ struct TaskCard: View {
                         .accessibilityIdentifier("done-status-" + option.text("status"))
                 }
             } else {
-                ForEach(Array(statusOptions.objects("options").enumerated()), id: \.offset) { _, option in
+                let statusRows = statusOptions.objects("options")
+                ForEach(statusRows.indices, id: \.self) { index in
+                    let option = statusRows[index]
                     Button((option.flag("selected") ? "✓ " : "") + option.text("label")) {
                         selectDefaultStatus(option)
                     }
@@ -3391,7 +3405,9 @@ private struct InboxBulkRemoveTagDialog: View {
     private var options: some View {
         VStack(alignment: .leading, spacing: 12) {
             AppChipFlow {
-                ForEach(Array(model.inboxBulkRemoveItems.enumerated()), id: \.offset) { index, item in
+                let removeItems = model.inboxBulkRemoveItems
+                ForEach(removeItems.indices, id: \.self) { index in
+                    let item = removeItems[index]
                     let picked = model.inboxBulkRemovePicked(item.text("value"))
                     Button { model.toggleInboxBulkRemove(item.text("value")) } label: {
                         Text(item.text("label")).rnFont(14).multilineTextAlignment(.leading).fixedSize(horizontal: false, vertical: true)
@@ -3565,7 +3581,9 @@ private struct InboxBulkOrganizeDialog: View {
         VStack(alignment: .leading, spacing: 14) {
             Text(view.text("statusLabel")).rnFont(14, .semibold)
             AppChipFlow {
-                ForEach(Array(view.objects("statuses").enumerated()), id: \.offset) { _, item in
+                let statusRows = view.objects("statuses")
+                ForEach(statusRows.indices, id: \.self) { index in
+                    let item = statusRows[index]
                     Button { model.editInboxBulkOrganize(item.object("edit")) } label: {
                         Text(item.text("label")).rnFont(14).padding(.horizontal, 12).padding(.vertical, 10)
                             .frame(minHeight: 44).foregroundStyle(item.flag("selected") ? palette.onTint : palette.text)

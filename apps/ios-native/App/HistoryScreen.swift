@@ -25,7 +25,9 @@ struct HistoryScreen: View {
         ZStack {
             VStack(spacing: 0) {
                 HStack(spacing: 0) {
-                    ForEach(Array(model.historyTabs.objects("tabs").enumerated()), id: \.offset) { _, tab in
+                    let tabRows = model.historyTabs.objects("tabs")
+                    ForEach(tabRows.indices, id: \.self) { index in
+                        let tab = tabRows[index]
                         Button {
                             searchFocused = false
                             Task { await model.selectHistoryTab(tab.text("id")) }
@@ -179,7 +181,9 @@ struct HistoryScreen: View {
     private var archiveContent: some View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
-                ForEach(Array(model.history.objects("segments").enumerated()), id: \.offset) { _, segment in
+                let segmentRows = model.history.objects("segments")
+                ForEach(segmentRows.indices, id: \.self) { index in
+                    let segment = segmentRows[index]
                     Button {
                         searchFocused = false
                         Task { await model.setHistoryOption("segment", value: segment.text("id")) }
@@ -781,7 +785,9 @@ private struct HistoryDoneBulkRemoveTagDialog: View {
                                 .accessibilityLabel(model.doneBulkRemoveOptions.text("placeholder"))
                                 .accessibilityIdentifier("done-bulk-remove-tag-input")
                             AppChipFlow {
-                                ForEach(Array(model.doneBulkRemoveItems.enumerated()), id: \.offset) { index, item in
+                                let removeItems = model.doneBulkRemoveItems
+                                ForEach(removeItems.indices, id: \.self) { index in
+                                    let item = removeItems[index]
                                     let picked = model.doneBulkRemovePicked(item.text("value"))
                                     Button { model.toggleDoneBulkRemove(item.text("value")) } label: {
                                         Text(item.text("label")).rnFont(14).multilineTextAlignment(.leading).fixedSize(horizontal: false, vertical: true)
