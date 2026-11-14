@@ -26793,6 +26793,8 @@ private final class Engine: @unchecked Sendable {
         case "Native iOS startup prompts read":
             valid = Set(context.keys) == ["releaseCheck", "outcome"] && context["releaseCheck"] as? String == "v1.3.9/ios-startup-prompts"
                 && ["onboarding", "donation", "announcement", "none", "held", "failed"].contains(context["outcome"] as? String ?? "")
+        case "Native iOS legacy Shortcuts snapshot removed":
+            valid = Self.equalJSON(context, ["releaseCheck": "v1.3.9/ios-legacy-shortcuts-snapshot", "outcome": "removed"])
         case "Native iOS Contexts filter saved":
             valid = Self.equalJSON(context, ["releaseCheck": "v1.3.9/ios-context-filter-save", "outcome": "saved"])
         case "Native iOS Weekly Review project completion confirmed":

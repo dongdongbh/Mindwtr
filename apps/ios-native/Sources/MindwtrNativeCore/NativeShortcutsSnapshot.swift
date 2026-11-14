@@ -115,3 +115,19 @@ public struct NativeShortcutsSnapshotFile: Sendable {
         return NativeShortcutsSnapshot(json: String(decoding: data, as: UTF8.self))
     }
 }
+
+public enum NativeLegacyShortcutsSnapshot {
+    public static let key = "mindwtr-ios-shortcuts-snapshot"
+
+    public static func defaults(selection: NativeLaunchSelection, bundleIdentifier: String?) -> UserDefaults? {
+        guard bundleIdentifier == NativeLaunchSelection.productionNamespace, case .production = selection else { return nil }
+        return UserDefaults(suiteName: NativeSavedListCatalog.group)
+    }
+
+    public static func retire(from defaults: UserDefaults) -> Bool {
+        guard defaults.object(forKey: key) != nil else { return false }
+        defaults.removeObject(forKey: key)
+        return defaults.object(forKey: key) == nil
+    }
+}
+

@@ -101,4 +101,24 @@ final class NativeShortcutsSnapshotTests: XCTestCase {
         XCTAssertNil(NativeShortcutsSnapshotFile.live(selection: isolated))
         XCTAssertNil(NativeShortcutsSnapshotFile.live(selection: .rehearsal(containerURL: home, databaseURL: home, bundleIdentifier: "x")))
     }
+
+    func testLegacyRNSnapshotIsRetiredOnceAndOtherKeysStay() throws {
+        let domain = "mindwtr.legacy-shortcuts.fixture." + UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: domain))
+        addTeardownBlock { defaults.removePersistentDomain(forName: domain) }
+        defaults.setPersistentDomain([NativeLegacyShortcutsSnapshot.key: "PRIVATE RN titles", "mindwtr-ios-widget-payload": "kept"], forName: domain)
+        XCTAssertTrue(NativeLegacyShortcutsSnapshot.retire(from: defaults))
+        XCTAssertNil(defaults.object(forKey: NativeLegacyShortcutsSnapshot.key))
+        XCTAssertEqual(defaults.string(forKey: "mindwtr-ios-widget-payload"), "kept")
+        XCTAssertFalse(NativeLegacyShortcutsSnapshot.retire(from: defaults))
+    }
+
+    func testLegacyRNSnapshotIsOnlyReachedFromTheProductionApp() {
+        let home = URL(fileURLWithPath: "/synthetic-home", isDirectory: true)
+        let standard = NativeLaunchSelection.standard(databaseURL: home.appendingPathComponent("m.sqlite"), containerURL: home,
+                                                      namespace: "tech.dongdongbh.mindwtr")
+        XCTAssertNil(NativeLegacyShortcutsSnapshot.defaults(selection: standard, bundleIdentifier: "tech.dongdongbh.mindwtr"))
+        XCTAssertNil(NativeLegacyShortcutsSnapshot.defaults(selection: .production(containerURL: home),
+                                                            bundleIdentifier: "tech.dongdongbh.mindwtr.native.dev"))
+    }
 }

@@ -48975,6 +48975,14 @@ extension CoreModel {
     }
 
     private func publishShortcutsSnapshotIfCurrent(_ owner: SearchLifecycleOwner) async {
+        if let selection = shortcutIntakeSelection,
+           let legacy = NativeLegacyShortcutsSnapshot.defaults(selection: selection, bundleIdentifier: Bundle.main.bundleIdentifier),
+           NativeLegacyShortcutsSnapshot.retire(from: legacy) {
+            _ = try? await owner.host.call("logLine", argumentsJSON: json([
+                "Native iOS legacy Shortcuts snapshot removed",
+                #"{"releaseCheck":"v1.3.9/ios-legacy-shortcuts-snapshot","outcome":"removed"}"#,
+            ]))
+        }
         guard let selection = shortcutIntakeSelection, let file = NativeShortcutsSnapshotFile.live(selection: selection) else { return }
         guard appLock.enabled == false, !appLockActive, !appLockRecoveryPending else { withdrawShortcutsSnapshot(); return }
         guard workspaceAdmissionsOpen, host?.workspaceMode == .personal, searchOwnerCurrent(owner), !busy else { return }
