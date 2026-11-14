@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import Module from 'node:module';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { OPENAI_DEFAULT_MODEL } from '@mindwtr/core';
 
 const fileSystemMock = vi.hoisted(() => ({
@@ -36,6 +37,10 @@ const constantsMock = vi.hoisted(() => ({
       },
     },
   },
+}));
+
+const whisperContextMock = vi.hoisted(() => ({
+  transcribe: vi.fn(() => ({ promise: Promise.resolve({ result: 'hola' }) })),
 }));
 
 const whisperMock = vi.hoisted(() => ({
@@ -179,6 +184,7 @@ import {
   processAudioCapture,
   REMOTE_SPEECH_TO_TEXT_FOSS_ERROR,
   startWhisperRealtimeCapture,
+  transcribeLocalWhisper,
 } from './speech-to-text';
 
 const makePcmWav = ({
@@ -494,6 +500,53 @@ describe('speech-to-text', () => {
         }),
       })
     );
+  });
+
+  describe('local Whisper transcription', () => {
+    type ModuleLoad = (request: string, ...rest: unknown[]) => unknown;
+    const moduleLoader = Module as unknown as { _load: ModuleLoad };
+    const originalLoad = moduleLoader._load;
+
+    beforeAll(() => {
+      moduleLoader._load = function (this: unknown, request, ...rest) {
+        if (request === 'whisper.rn/src/index') return whisperMock;
+        return originalLoad.call(this, request, ...rest);
+      };
+    });
+
+    afterAll(() => {
+      moduleLoader._load = originalLoad;
+    });
+
+    it.each([
+      { model: 'whisper-base', file: 'ggml-base.bin', language: 'auto', expected: 'auto' },
+      { model: 'whisper-base', file: 'ggml-base.bin', language: 'de', expected: 'de' },
+      { model: 'whisper-tiny.en', file: 'ggml-tiny.en.bin', language: 'auto', expected: 'en' },
+      { model: 'whisper-tiny.en', file: 'ggml-tiny.en.bin', language: 'de', expected: 'en' },
+    ])('passes language $expected to local Whisper for $model set to $language', async ({ model, file, language, expected }) => {
+      const modelUri = `file:///document/whisper-models/${file}`;
+      fileSystemMock.existingUris = new Set([modelUri]);
+      fileSystemMock.fileSizes.set(modelUri, 77704715);
+      whisperMock.initWhisper.mockResolvedValue(whisperContextMock);
+
+      await expect(transcribeLocalWhisper(
+        {
+          uri: 'file:///tmp/audio.wav',
+          format: 'wav-pcm',
+          sampleRate: 16000,
+          channels: 1,
+          bitsPerSample: 16,
+          bytes: 6444,
+          durationMs: 200,
+        },
+        { provider: 'whisper', model, modelPath: modelUri, language }
+      )).resolves.toBe('hola');
+      expect(whisperContextMock.transcribe).toHaveBeenCalledWith('/tmp/audio.wav', {
+        language: expected,
+        maxThreads: 1,
+        nProcessors: 1,
+      });
+    });
   });
 
   it('does not initialize local Whisper for m4a input', async () => {
