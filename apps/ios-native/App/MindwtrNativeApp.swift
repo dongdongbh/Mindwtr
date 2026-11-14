@@ -1729,6 +1729,7 @@ private struct TaskRecoveryGate: View {
     let model: CoreModel
     let palette: AppPalette
     @State private var confirmingDiscard = false
+    @State private var automaticResumeTried = false
     private var retainedCleanup: Bool {
         model.taskAttachmentState == .savedCleanup
             || (model.taskAttachmentState == .discardedCleanup && !model.taskAttachmentHasIndependentDraft)
@@ -1813,8 +1814,10 @@ private struct TaskRecoveryGate: View {
         } message: {
             Text("This removes the unsaved task changes from this device.")
         }
-        .task {
-            if canResume && model.taskRecoveryConflict == nil { await model.restoreTaskRecovery() }
+        .task(id: model.busy) {
+            guard !automaticResumeTried, !model.busy, canResume, model.taskRecoveryConflict == nil else { return }
+            automaticResumeTried = true
+            await model.restoreTaskRecovery()
         }
     }
 }
