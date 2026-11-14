@@ -93,6 +93,34 @@ Or let an MCP client launch it through npx:
 
 The npm package is read-only by default. Add `--write` only when you explicitly want add/update/complete/delete tools enabled.
 
+### Container (Cloud/API only)
+
+Use `ghcr.io/dongdongbh/mindwtr-mcp:1.1.14`. Image tags follow the **MCP helper version**, not the desktop version. The image supports Linux amd64 and arm64, runs as a non-root user, and needs no writable volume. It omits the optional SQLite addon: direct database mode is unsupported. Connect to Cloud through its API; never mount the Cloud data directory into this container.
+
+Set `MINDWTR_MCP_CLOUD_URL` and `MINDWTR_MCP_CLOUD_TOKEN` in the launching environment, then let your MCP client run:
+
+```bash
+docker run --rm -i --read-only --cap-drop=ALL --security-opt=no-new-privileges \
+  -e MINDWTR_MCP_CLOUD_URL -e MINDWTR_MCP_CLOUD_TOKEN \
+  ghcr.io/dongdongbh/mindwtr-mcp:1.1.14
+```
+
+Podman accepts the same arguments. Keep stdin open with `-i`; do not allocate a TTY (`-t`). Stdio needs no published port. Add `--write` after the image name only to enable mutations. HTTPS is the default; trusted private HTTP Cloud deployments must explicitly add `--cloud-allow-insecure-http=true`. Backend errors never switch to a local database. Local API mode retains its loopback-only URL restriction, so a separate container network cannot reach a desktop API through an arbitrary service hostname.
+
+For ToolHive on Kubernetes, start with [`docker/mcp/toolhive.yaml`](../../docker/mcp/toolhive.yaml). Install the [ToolHive operator](https://docs.stacklok.com/toolhive/guides-k8s/quickstart), create a Kubernetes Secret named `mindwtr-cloud` with a `token` entry in the same namespace, and replace the example HTTPS Cloud URL before applying the manifest. ToolHive attaches to stdio; no MCP HTTP listener is needed. Use `spec.args: ["--write"]` only when writes are intended, and allow outbound access to the Cloud endpoint in your network policy. No shared task volume is required.
+
+For direct Streamable HTTP, use a separate randomly generated `MINDWTR_MCP_HTTP_TOKEN` of at least 16 characters:
+
+```bash
+docker run --rm --read-only --cap-drop=ALL --security-opt=no-new-privileges \
+  -p 127.0.0.1:8722:8722 \
+  -e MINDWTR_MCP_CLOUD_URL -e MINDWTR_MCP_CLOUD_TOKEN \
+  -e MINDWTR_MCP_HTTP_TOKEN \
+  ghcr.io/dongdongbh/mindwtr-mcp:1.1.14 --http --http-host 0.0.0.0
+```
+
+Clients connect to `/mcp` with the HTTP token. The Cloud token authenticates outgoing requests; the HTTP token authenticates incoming MCP clients. Keep them distinct. Use a TLS reverse proxy for remote access. The host port above is published only on loopback.
+
 ### Desktop Local API mode
 
 The updated Bun API helper also supplies task versions and protected writes. Keep version tokens with the server and workspace that issued them; they are not portable between implementations. Its create receipts are separate local records with the same seven-day retention and 10,000-live-receipt limit. Check the connected server’s health capabilities; the helper does not advertise desktop conditional task-list GET support.

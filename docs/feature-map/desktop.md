@@ -475,3 +475,10 @@ Source: `apps/desktop/src` (Tauri + React). Labels come from `packages/core/src/
 - Ownership: `packages/core/src/task-reminder-policy.ts`, `packages/core/src/schedule-utils.ts`, `packages/core/src/task-editor-schedule.ts`; each platform consumes the shared reminder model and plan.
 - Checks: `packages/core/src/selective-reminders.test.ts`; confirm old alarms are withdrawn after changing modes, completion, or permission revocation. Review reminders remain separate.
 - Compatibility: older clients skip these selective reminders and cannot edit or preserve the new policy reliably. Update every device before using the new modes.
+
+## Standalone MCP container
+
+- Reach: Run the standalone `ghcr.io/dongdongbh/mindwtr-mcp` image from an MCP client or ToolHive; configure a Cloud URL and token. This does not require the desktop app.
+- Code: `docker/mcp/Dockerfile`, `docker/mcp/toolhive.yaml`, `.github/workflows/docker-image-mcp.yml`, `apps/mcp-server/src/index.ts`
+- Checks: `scripts/ci/smoke-mcp-container.mjs`
+- Notes: Stdio and read-only operations are the defaults. The non-root image supports API backends, not direct SQLite; image versions follow the helper package.
