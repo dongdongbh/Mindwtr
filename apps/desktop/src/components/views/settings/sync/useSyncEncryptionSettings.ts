@@ -10,7 +10,7 @@ import {
 } from '@mindwtr/core';
 
 import { logError } from '../../../../lib/app-log';
-import { classifySyncEncryptionUpgradeFailure } from '@mindwtr/core/sync-encryption-card';
+import { classifySyncEncryptionUpgradeFailure, syncEncryptionErrorAfterStatus } from '@mindwtr/core/sync-encryption-card';
 import {
     isSyncEncryptionCleanupDeferredError,
     isSyncEncryptionFailure,
@@ -69,7 +69,7 @@ export function useSyncEncryptionSettings(
             const status = await SyncService.getSyncEncryptionStatus();
             setIncompleteTransitionKind(status.incompleteTransition ?? null);
             setPartlyEncrypted(Boolean(status.partlyEncrypted));
-            if (status.incompleteTransition) setError((current) => current ?? 'transition-incomplete');
+            if (status.incompleteTransition) setError((current) => syncEncryptionErrorAfterStatus(current, true));
             return status.state;
         } catch (failure) {
             void logError(failure, { scope: 'sync-encryption', step: 'status' });

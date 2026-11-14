@@ -29,6 +29,7 @@ val rnHeartbeatUrl = if (System.getenv("ANALYTICS_HEARTBEAT_DISABLED") in setOf(
 val rnHeartbeatChannel = System.getenv("ANALYTICS_HEARTBEAT_CHANNEL")
 
 val rnDonationPrompt = System.getenv("DONATION_PROMPT_ENABLED") in setOf("1", "true")
+val quickjsVersion = rootProject.projectDir.resolve("third_party/quickjs-wrapper/quickjs/VERSION").readText().trim()
 fun quoted(value: String) = "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
 
 
@@ -57,7 +58,7 @@ android {
 
         buildConfigField("boolean", "RN_STORAGE", "false")
 
-        buildConfigField("String", "QUICKJS_WRAPPER", "\"3.2.0\"")
+        buildConfigField("String", "QUICKJS_ENGINE", quoted("quickjs-$quickjsVersion"))
         buildConfigField("String", "RN_NAME", quoted(rnName))
         buildConfigField("String", "RN_PACKAGE", quoted(rnPackage))
         buildConfigField("String", "RN_VERSION", quoted(rnVersion))
@@ -235,7 +236,7 @@ val checkVariantIdentity by tasks.registering { dependsOn(checkFossDependencies)
 val sqliteVersion = "2.7.1"
 
 dependencies {
-    implementation("wang.harlon.quickjs:wrapper-android:3.2.0")
+    implementation(project(":quickjs-wrapper"))
 
 
     implementation("androidx.sqlite:sqlite-bundled:$sqliteVersion")

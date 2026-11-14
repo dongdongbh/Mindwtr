@@ -219,6 +219,8 @@ const RELEASE_CHECK_FIELD_NAMES = [
 
     'items', 'outcome',
 
+    'engine', 'cache',
+
     'mode',
 
     'direction',

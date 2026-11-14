@@ -16,3 +16,5 @@ rootProject.name = "mindwtr-android-native"
 include(":app")
 
 include(":widget")
+include(":quickjs-wrapper")
+project(":quickjs-wrapper").projectDir = file("third_party/quickjs-wrapper")

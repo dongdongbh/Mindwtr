@@ -337,6 +337,14 @@ class CoreHost(
     }
 
 
+    fun logEngine() {
+        val outcome = engineCacheOutcome(bundleOutcome)
+        Log.i(TAG, "Native Android QuickJS engine releaseCheck=v1.3.9/quickjs-engine engine=${BuildConfig.QUICKJS_ENGINE} outcome=$outcome cache=$bundleOutcome")
+        logLine("Native Android QuickJS engine releaseCheck=v1.3.9/quickjs-engine", JSONObject().put("releaseCheck", "v1.3.9/quickjs-engine")
+            .put("engine", BuildConfig.QUICKJS_ENGINE).put("outcome", outcome).put("cache", bundleOutcome))
+    }
+
+
     fun cacheBytecode() {
         val writer = synchronized(lifecycleLock) {
             if (bundleOutcome == "hit" || cacheWriter != null || shutdown != null) return
@@ -1377,6 +1385,15 @@ fun debugProperty(name: String): String {
 internal inline fun <T> traced(name: String, work: () -> T): T {
     Trace.beginSection(name)
     try { return work() } finally { Trace.endSection() }
+}
+
+
+fun engineCacheOutcome(load: String): String = when {
+    load == "hit" -> "hit"
+    load == "other-engine" -> "miss-version"
+    load == "absent" || load == "stale-bundle" -> "miss-new"
+    load.startsWith("failed:") -> "failed"
+    else -> "miss-$load"
 }
 
 

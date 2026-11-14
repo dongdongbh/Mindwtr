@@ -168,6 +168,16 @@ try {
     sh('settings put system accelerometer_rotation 0');
     sh('settings put system user_rotation 0');
     let nodes = await inbox();
+    if (!digitProject()) {
+        console.log('note - the library has no digits-only project; capturing a task into a new project 5600');
+        await device.capture(`56${run} +5600`);
+    }
+    if (!busyQuery()) {
+        const token = `sq${run.slice(-4)}`;
+        console.log(`note - no 6-character piece matches 2 projects and 15 tasks; capturing 15 tasks with "${token}" into 2 new projects`);
+        for (let index = 0; index < 15; index += 1) await device.capture(`${token} ${index} +Sx${token}${index % 2 ? 'b' : 'a'}`);
+    }
+    nodes = await inbox();
     const total = inboxCount(nodes);
     await type(title);
     await tapExpecting(button(await screen(), 'Save'), (current) => draftText(current) === '' || button(current, 'Save')?.enabled === 'false', 'the capture to start');
@@ -230,7 +240,7 @@ try {
     check(true, '(f) Back returns to the Inbox');
 
 
-    const projectTitle = digitProject() ?? fail('no live project with a digits-only title: run check-capture-device first (it creates 5600)');
+    const projectTitle = digitProject() ?? fail('no live project with a digits-only title');
     nodes = await tapExpecting(withDescription(await screen(), en['search.title']) ?? fail('no Search button in the header'), inSearch, 'the search screen');
     await typeQuery(projectTitle);
     const projectHit = (current) => current.find((node, index) => (node['resource-id'] ?? '').endsWith('search-result')
@@ -249,7 +259,7 @@ try {
     nodes = await waitFor('the search results again', (current) => inSearch(current) && field(current)?.text === projectTitle && Boolean(projectHit(current)), 15_000);
     check(!tagged(nodes, 'project-title-input'), `(h) Back from the project returns to the search with "${projectTitle}" and its results, as RN pops back to it`);
     writeFileSync(resolve(work, 'search-after-project-back.png'), execFileSync(adbBin, ['-s', serial, 'exec-out', 'screencap', '-p'], { maxBuffer: 64 << 20 }));
-    const [busyToken, projectCount] = busyQuery() ?? fail('no 6-character piece of a project title matches 2 projects and 15 tasks: run check-projects-device first');
+    const [busyToken, projectCount] = busyQuery() ?? fail('no 6-character piece of a project title matches 2 projects and 15 tasks');
     await tapExpecting(withDescription(nodes, en['common.clear']) ?? fail('no Clear in the search field'), (current) => field(current)?.text === '', 'the empty query');
     await typeQuery(busyToken);
     const projectHits = (current) => current.filter((node, index) => (node['resource-id'] ?? '').endsWith('search-result') && current[index + 1]?.text === en['search.resultProject']);

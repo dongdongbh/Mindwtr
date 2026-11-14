@@ -348,6 +348,27 @@ describe('useSyncEncryptionSettings cleanup outcome', () => {
     });
 });
 
+describe('useSyncEncryptionSettings unfinished change', () => {
+    it.each([
+        [new Error('Remote sync mutation fence validation failed: WebDAV File GET failed (503)'), 'enable', 'transition-incomplete'],
+        [new Error('Remote sync mutation fencing requires a valid provider Date response header'), undefined, 'generic'],
+        [new Error('SYNC_ENCRYPTION_BACKEND_INCOMPATIBLE: no strong ETag'), 'enable', 'backend-incompatible'],
+    ] as const)('names a generic failure that leaves the change unfinished as unfinished (%s)', async (failure, left, expected) => {
+        const status = vi.spyOn(SyncService, 'getSyncEncryptionStatus').mockResolvedValueOnce({ state: 'off' })
+            .mockResolvedValue({ state: 'off', ...(left ? { incompleteTransition: left } : {}) });
+        const enable = vi.spyOn(SyncService, 'enableSyncEncryption').mockRejectedValue(failure);
+        try {
+            const { result } = renderHook(() => useSyncEncryptionSettings('webdav', 'selfhosted', 'webdav', 'selfhosted'));
+            await waitFor(() => expect(result.current.state).toBe('off'));
+            await act(async () => { expect(await result.current.enable('synthetic phrase')).toBe(false); });
+            expect(result.current.error).toBe(expected);
+        } finally {
+            status.mockRestore();
+            enable.mockRestore();
+        }
+    });
+});
+
 describe('upgrade failure classification through the desktop service', () => {
     it.each([
         [new SyncCryptoAuthError(), 'wrong-passphrase'],

@@ -47,6 +47,16 @@ class BytecodeCacheTest {
         assertMiss("other-engine", cache(engine = "3.2.0").read(bundle))
     }
 
+    @Test fun anotherEngineVersionsCacheForAnotherBundleNamesTheEngine() {
+        cache(engine = "3.2.0").write(otherBundle, bytecode)
+        assertMiss("other-engine", cache(engine = "quickjs-2026-06-04").read(bundle))
+    }
+
+    @Test fun theEngineLineNamesWhyTheCacheMissed() {
+        assertEquals(listOf("hit", "miss-version", "miss-new", "miss-new", "failed", "miss-corrupt", "miss-off"),
+            listOf("hit", "other-engine", "absent", "stale-bundle", "failed:QuickJSException", "corrupt", "off").map(::engineCacheOutcome))
+    }
+
     @Test fun changedBytecodeFailsItsChecksum() {
         cache().write(bundle, bytecode)
         RandomAccessFile(file(), "rw").use { raw ->

@@ -121,6 +121,14 @@ try {
 
     const pulls = () => lines('Native Android pull to sync');
     let nodes = await device.toTop();
+    if (!mainList(nodes)) {
+        console.log('note - the Focus list is too short to scroll; capturing 10 Upcoming Next actions to fill it');
+        await tapExpecting(tab(nodes, en['tab.inbox']), onTab(en['tab.inbox']), 'the Inbox', 10_000);
+        for (let index = 0; index < 10; index += 1) await device.capture(`73${run}f${index} /next /start:tomorrow`);
+        await showFocus();
+        await openSections();
+        nodes = await device.toTop();
+    }
 
     const before = pulls().length;
     const list = mainList(nodes) ?? fail('no Focus list');

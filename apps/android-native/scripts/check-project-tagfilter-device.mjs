@@ -26,6 +26,8 @@ const STAGED = '/data/local/tmp/mindwtr-native-dev-project-tagfilter.db';
 const DB = 'mindwtr-native-dev.db';
 const NAMES = { work: 'PT32Work', home: 'PT32Home', bare: 'PT32Bare' };
 const TAGS = { work: '#pt32work', home: '#pt32home' };
+const FILLERS = Array.from({ length: 12 }, (_, index) => `PT32Fill${String(index + 1).padStart(2, '0')}`);
+const ENOUGH_TO_SCROLL = 12;
 const work = resolve(app, 'android/build/project-tagfilter-check');
 const shots = resolve(process.env.MINDWTR_HARNESS_DIR ?? work, 'project-tagfilter');
 const coreSrc = resolve(app, '../../packages/core/src');
@@ -68,6 +70,8 @@ const core = (mode, db = pullDatabase(mode)) => JSON.parse(execFileSync('bun', [
             if (!project(names[key])) await store().addProject(names[key], '#94a3b8');
             await store().updateProject(project(names[key]).id, { areaId: undefined, status: 'active', tagIds: tags });
         }
+        const live = () => store()._allProjects.filter((entry) => !entry.deletedAt && entry.status === 'active').length;
+        for (const title of names.fillers) if (live() < names.enough && !project(title)) await store().addProject(title, '#94a3b8');
         const filtered = await host.setAreaFilter({ included: [], excluded: [] });
         if (!filtered.ok) throw new Error(filtered.error.message);
         if (store().settings.appearance?.mobileQuickAccessView !== 'projects') await store().updateSettings({ appearance: { mobileQuickAccessView: 'projects' } });
@@ -75,7 +79,7 @@ const core = (mode, db = pullDatabase(mode)) => JSON.parse(execFileSync('bun', [
         if (store().persistenceFailure) throw new Error('save failed: ' + store().persistenceFailure.message);
     }
     if (process.env.CHECK_MODE === 'cleanup') {
-        for (const key of ['work', 'home', 'bare']) if (project(names[key])) await store().deleteProject(project(names[key]).id);
+        for (const title of [names.work, names.home, names.bare, ...names.fillers]) if (project(title)) await store().deleteProject(project(title).id);
         const kept = JSON.parse(process.env.CHECK_KEPT);
         if ((store().settings.appearance?.mobileQuickAccessView ?? null) !== kept.quickView)
             await store().updateSettings({ appearance: { ...store().settings.appearance, mobileQuickAccessView: kept.quickView ?? undefined } });
@@ -95,13 +99,13 @@ const core = (mode, db = pullDatabase(mode)) => JSON.parse(execFileSync('bun', [
     db.close();
     console.log(JSON.stringify(out));
     process.exit(0);
-`], { encoding: 'utf8', maxBuffer: 64 << 20, env: { ...process.env, CHECK_DB: db, CHECK_MODE: mode, CHECK_NAMES: JSON.stringify({ ...NAMES, tags: TAGS }), CHECK_KEPT: JSON.stringify(kept ?? { quickView: null, areaFilter: { included: [], excluded: [] } }) } })
+`], { encoding: 'utf8', maxBuffer: 64 << 20, env: { ...process.env, CHECK_DB: db, CHECK_MODE: mode, CHECK_NAMES: JSON.stringify({ ...NAMES, tags: TAGS, fillers: FILLERS, enough: ENOUGH_TO_SCROLL }), CHECK_KEPT: JSON.stringify(kept ?? { quickView: null, areaFilter: { included: [], excluded: [] } }) } })
     .trim().split('\n').pop());
 
 const ours = (seen) => Object.fromEntries(Object.entries(NAMES).map(([key, title]) => [key, seen.projects.find((entry) => entry.title === title)]));
 const canonical = (seen) => {
     const mine = ours(seen);
-    return Boolean(seen.quickView === 'projects' && mine.work?.tags.join() === TAGS.work && mine.home?.tags.join() === TAGS.home && mine.bare?.tags.length === 0
+    return Boolean(seen.quickView === 'projects' && seen.projects.filter((entry) => entry.status === 'active').length >= ENOUGH_TO_SCROLL && mine.work?.tags.join() === TAGS.work && mine.home?.tags.join() === TAGS.home && mine.bare?.tags.length === 0
         && Object.values(mine).every((entry) => entry?.status === 'active'));
 };
 
@@ -139,7 +143,7 @@ const restore = async () => {
         if (fixtureAdded) {
             await rewrite('cleanup');
             const left = core('view');
-            if (Object.values(ours(left)).some(Boolean) || left.quickView !== kept.quickView || JSON.stringify(left.areaFilter) !== JSON.stringify(kept.areaFilter))
+            if (Object.values(ours(left)).some(Boolean) || left.projects.some((entry) => FILLERS.includes(entry.title)) || left.quickView !== kept.quickView || JSON.stringify(left.areaFilter) !== JSON.stringify(kept.areaFilter))
                 console.error(`RESTORE: the fixture or the settings it changed are still stored: ${JSON.stringify({ quickView: left.quickView, areaFilter: left.areaFilter, ours: ours(left) })}`);
         }
     } catch (error) { console.error(`RESTORE FAILED: the fixture projects were not removed (${error.message})`); process.exitCode = 1; }

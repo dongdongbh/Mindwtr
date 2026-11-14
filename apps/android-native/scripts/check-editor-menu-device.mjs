@@ -122,7 +122,8 @@ const capture = async (title) => {
     nodes = await device.toTop();
     const total = inboxCount(nodes);
     await type(title);
-    await tapExpecting(button(await screen(), en['common.save']), (current) => draftText(current) === '' || button(current, en['common.save'])?.enabled === 'false', 'the capture to start');
+    const ready = await waitFor('the capture Save button', (current) => Boolean(button(current, en['common.save'])), 10_000);
+    await tapExpecting(button(ready, en['common.save']), (current) => draftText(current) === '' || button(current, en['common.save'])?.enabled === 'false', 'the capture to start');
     await waitFor(`the capture of ${title}`, (current) => inboxCount(current) === total + 1 && draftText(current) === '');
     const rows = live(title);
     check(rows.length === 1 && rows[0].status === 'inbox', `captured ${title} in the Inbox`);
