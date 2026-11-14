@@ -55,6 +55,11 @@ on:
         required: false
         default: 'external_testing'
         type: string
+      android_version_code:
+        description: 'Native Android versionCode. Required when run_play_testing is off, because the code cannot then be read from Google Play.'
+        required: false
+        default: ''
+        type: string
 
 concurrency:
   group: release-rc-${{ inputs.tag || github.ref_name }}
@@ -103,6 +108,29 @@ jobs:
           fi
           BASE_VERSION="${VERSION%%-*}"
           echo "base_version=$BASE_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Require Android signing secrets
+        env:
+          ANDROID_UPLOAD_KEYSTORE_BASE64: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_BASE64 }}
+          ANDROID_UPLOAD_KEY_ALIAS: ${{ secrets.ANDROID_UPLOAD_KEY_ALIAS }}
+          ANDROID_UPLOAD_STORE_PASSWORD: ${{ secrets.ANDROID_UPLOAD_STORE_PASSWORD }}
+          ANDROID_UPLOAD_KEY_PASSWORD: ${{ secrets.ANDROID_UPLOAD_KEY_PASSWORD }}
+          ANDROID_RELEASE_KEYSTORE_BASE64: ${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 }}
+          ANDROID_RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
+          ANDROID_RELEASE_STORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_STORE_PASSWORD }}
+          ANDROID_RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          missing=0
+          for required in \
+            ANDROID_UPLOAD_KEYSTORE_BASE64 ANDROID_UPLOAD_KEY_ALIAS ANDROID_UPLOAD_STORE_PASSWORD ANDROID_UPLOAD_KEY_PASSWORD \
+            ANDROID_RELEASE_KEYSTORE_BASE64 ANDROID_RELEASE_KEY_ALIAS ANDROID_RELEASE_STORE_PASSWORD ANDROID_RELEASE_KEY_PASSWORD; do
+            if [[ -z "${!required:-}" ]]; then
+              echo "::error::Missing required secret ${required}. See docs/development/native-android-release.md." >&2
+              missing=1
+            fi
+          done
+          exit "$missing"
 
       - name: Detect existing RC release
         id: existing_release
@@ -242,50 +270,28 @@ jobs:
       - name: Resolve Android versionCode
         id: version_code
         env:
-          ACCESS_TOKEN: ${{ steps.play_auth.outputs.access_token }}
+          GOOGLE_PLAY_ACCESS_TOKEN: ${{ steps.play_auth.outputs.access_token }}
           USE_PLAY_TRACKS: ${{ github.event_name != 'workflow_dispatch' || inputs.run_play_testing }}
+          ANDROID_CLIENT: native
+          REQUESTED_VERSION_CODE: ${{ github.event_name == 'workflow_dispatch' && inputs.android_version_code || '' }}
         run: |
           set -euo pipefail
-          PACKAGE="tech.dongdongbh.mindwtr"
-          MAX_CODE=0
+          if [ "$USE_PLAY_TRACKS" != "true" ] && [ -z "$REQUESTED_VERSION_CODE" ]; then
+            echo "::error::Without Google Play testing the native versionCode cannot be read from Play. Dispatch again with android_version_code set." >&2
+            exit 1
+          fi
           if [ "$USE_PLAY_TRACKS" = "true" ]; then
-            if [ -z "${ACCESS_TOKEN:-}" ]; then
+            if [ -z "${GOOGLE_PLAY_ACCESS_TOKEN:-}" ]; then
               echo "Missing Google Play access token for Android versionCode preflight" >&2
               exit 1
             fi
-            EDIT_ID=$(curl -sS -X POST \
-              -H "Authorization: Bearer $ACCESS_TOKEN" \
-              -H "Content-Type: application/json" \
-              "https://androidpublisher.googleapis.com/androidpublisher/v3/applications/$PACKAGE/edits" \
-              -d '{}' | jq -r '.id')
-            if [ -z "$EDIT_ID" ] || [ "$EDIT_ID" = "null" ]; then
-              echo "Failed to create Google Play edit" >&2
-              exit 1
-            fi
-            TRACKS_FILE=$(mktemp)
-            TRACKS_CODE=$(curl -sS -o "$TRACKS_FILE" -w "%{http_code}" \
-              -H "Authorization: Bearer $ACCESS_TOKEN" \
-              "https://androidpublisher.googleapis.com/androidpublisher/v3/applications/$PACKAGE/edits/$EDIT_ID/tracks")
-            TRACKS_JSON=$(cat "$TRACKS_FILE")
-            if [ "$TRACKS_CODE" != "200" ]; then
-              echo "Failed to fetch Google Play tracks (HTTP $TRACKS_CODE): $TRACKS_JSON" >&2
-              exit 1
-            fi
-            if echo "$TRACKS_JSON" | jq -e '.error' >/dev/null; then
-              echo "Failed to fetch Google Play tracks: $TRACKS_JSON" >&2
-              exit 1
-            fi
-            MAX_CODE=$(echo "$TRACKS_JSON" | jq -r '[(.tracks // [])[]? | (.releases // [])[]? | (.versionCodes // [])[]? | tonumber] | max // 0')
-            if [ -z "$MAX_CODE" ] || [ "$MAX_CODE" = "null" ]; then
-              MAX_CODE=0
-            fi
-            curl -sS -X DELETE \
-              -H "Authorization: Bearer $ACCESS_TOKEN" \
-              "https://androidpublisher.googleapis.com/androidpublisher/v3/applications/$PACKAGE/edits/$EDIT_ID" >/dev/null
+            PLAY_RELEASES_FILE="$(mktemp)"
+            python3 scripts/ci/google-play-edit.py max-version-code \
+              --package tech.dongdongbh.mindwtr \
+              --result "$PLAY_RELEASES_FILE"
+            export PLAY_RELEASES_FILE
           fi
-          REMOTE_MAX_VERSION_CODE="$MAX_CODE" \
-            ALLOW_UNTRACKED_VERSION_CODE=1 \
-            node scripts/ci/android-version-code-policy.js
+          node scripts/ci/android-version-code-policy.js
 
   android:
     if: ${{ needs.validate.outputs.existing_release != 'true' }}
@@ -298,6 +304,7 @@ jobs:
       tag: ${{ needs.validate.outputs.tag }}
       play_track: ${{ github.event_name != 'workflow_dispatch' && 'internal,beta' || (inputs.run_play_testing && (inputs.play_track != 'none' && format('internal,{0}', inputs.play_track) || 'internal') || 'none') }}
       version_code: ${{ needs['android-version-code'].outputs.version_code }}
+      android_client: native
       internal_test_release: false
       release_notes: 'Mindwtr release candidate. Please test launch, capture, task editing, task completion, sync settings, and upgrade from the previous stable release.'
       retention_days: '28'
@@ -310,6 +317,7 @@ jobs:
     with:
       tag: ${{ needs.validate.outputs.tag }}
       version_code: ${{ needs['android-version-code'].outputs.version_code }}
+      android_client: native
     secrets: inherit
 
   ios-appstore:

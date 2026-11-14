@@ -17,6 +17,11 @@ on:
         required: false
         default: ''
         type: string
+      android_client:
+        description: 'Android client to build: rn (React Native, EAS) or native (Kotlin, Gradle)'
+        required: false
+        default: 'rn'
+        type: string
       internal_test_release:
         description: 'Compatibility mode: publish the standard AAB only to the Google Play internal track'
         required: false
@@ -192,6 +197,7 @@ jobs:
         id: provided_version_code
         env:
           REQUESTED_VERSION_CODE: ${{ inputs.version_code }}
+          ANDROID_CLIENT: ${{ inputs.android_client == 'native' && 'native' || 'rn' }}
           ALLOW_UNTRACKED_VERSION_CODE: ${{ (contains(inputs.tag || github.event.inputs.tag || github.ref_name, '-') || inputs.internal_test_release || inputs.play_track != 'production') && 'true' || 'false' }}
         run: node scripts/ci/android-version-code-policy.js
 
@@ -200,6 +206,7 @@ jobs:
         id: version_code
         env:
           GOOGLE_PLAY_ACCESS_TOKEN: ${{ steps.play_auth.outputs.access_token }}
+          ANDROID_CLIENT: ${{ inputs.android_client == 'native' && 'native' || 'rn' }}
         run: |
           set -euo pipefail
           PACKAGE="tech.dongdongbh.mindwtr"
@@ -207,13 +214,7 @@ jobs:
           python3 scripts/ci/google-play-edit.py max-version-code \
             --package "$PACKAGE" \
             --result "$RESULT_FILE"
-          MAX_CODE=$(jq -er '.maxVersionCode | numbers' "$RESULT_FILE")
-          LOCAL_CODE=$(jq -r '.expo.android.versionCode' apps/mobile/app.json)
-          if [ -z "$LOCAL_CODE" ] || [ "$LOCAL_CODE" = "null" ]; then
-            echo "Missing expo.android.versionCode in apps/mobile/app.json" >&2
-            exit 1
-          fi
-          REMOTE_MAX_VERSION_CODE="$MAX_CODE" \
+          PLAY_RELEASES_FILE="$RESULT_FILE" \
             ALLOW_UNTRACKED_VERSION_CODE=${{ (contains(inputs.tag || github.event.inputs.tag || github.ref_name, '-') || inputs.internal_test_release || inputs.play_track != 'production') && 'true' || 'false' }} \
             node scripts/ci/android-version-code-policy.js
 
@@ -232,6 +233,7 @@ jobs:
           echo "Internal track shares standard versionCode: $RELEASE_VERSION_CODE"
 
   build-aab:
+    if: ${{ inputs.android_client != 'native' }}
     needs: preflight
 
 
@@ -322,7 +324,7 @@ jobs:
           retention-days: ${{ inputs.retention_days }}
 
   build-apk:
-    if: ${{ !inputs.internal_test_release }}
+    if: ${{ !inputs.internal_test_release && inputs.android_client != 'native' }}
     needs: preflight
 
 
@@ -420,9 +422,98 @@ jobs:
           if-no-files-found: error
           retention-days: 28
 
+  build-native:
+    if: ${{ inputs.android_client == 'native' }}
+    needs: preflight
+    runs-on: ubuntu-24.04
+    name: Android Native AAB and APK Build
+    timeout-minutes: 75
+    env:
+      RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
+      RELEASE_VERSION_CODE: ${{ needs.preflight.outputs.version_code }}
+      EXPECTED_SIGNER_SHA256: 09902a7f33aec074a1fa5642ef360f349dae6e8b67387d36b523f966a3220ef8
+      DONATION_PROMPT_ENABLED: "true"
+      ANALYTICS_HEARTBEAT_URL: ${{ secrets.ANALYTICS_HEARTBEAT_URL }}
+      ANALYTICS_RELEASE_VERSION: ${{ inputs.tag || github.event.inputs.tag || github.ref_name }}
+      FEEDBACK_ENDPOINT_URL: ${{ vars.FEEDBACK_ENDPOINT_URL || vars.VITE_FEEDBACK_ENDPOINT_URL || 'https://feedback.mindwtr.app' }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
+        with:
+          ref: ${{ inputs.tag || github.event.inputs.tag || github.ref }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
+        with:
+          node-version: 22
+
+      - name: Setup Java
+        uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Setup Android SDK
+        env:
+          ANDROID_SDK_PACKAGES: "platform-tools platforms;android-36 build-tools;36.0.0 ndk;27.1.12297006 cmake;3.22.1"
+        run: bash scripts/ci/setup-android-sdk.sh
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+        with:
+          bun-version-file: ".bun-version"
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build the native core bundle
+        run: node apps/android-native/scripts/build-bundle.mjs
+
+      - name: Android native boot gates
+        run: node apps/android-native/scripts/check-boot-gates.mjs
+
+      - name: Build native Play AAB
+        timeout-minutes: 45
+        env:
+          ANALYTICS_HEARTBEAT_CHANNEL: ${{ contains(inputs.tag || github.event.inputs.tag || github.ref_name, '-') && 'android-internal-test' || 'play-store' }}
+          SIGNING_KEYSTORE_BASE64: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_BASE64 }}
+          SIGNING_KEY_ALIAS: ${{ secrets.ANDROID_UPLOAD_KEY_ALIAS }}
+          SIGNING_STORE_PASSWORD: ${{ secrets.ANDROID_UPLOAD_STORE_PASSWORD }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.ANDROID_UPLOAD_KEY_PASSWORD }}
+        run: bash scripts/ci/build-android-native-release.sh aab native-release
+
+      - name: Build native direct-download APK
+        if: ${{ !inputs.internal_test_release }}
+        timeout-minutes: 30
+        env:
+          ANALYTICS_HEARTBEAT_CHANNEL: android-direct
+          SIGNING_KEYSTORE_BASE64: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_BASE64 }}
+          SIGNING_KEY_ALIAS: ${{ secrets.ANDROID_UPLOAD_KEY_ALIAS }}
+          SIGNING_STORE_PASSWORD: ${{ secrets.ANDROID_UPLOAD_STORE_PASSWORD }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.ANDROID_UPLOAD_KEY_PASSWORD }}
+        run: bash scripts/ci/build-android-native-release.sh apk native-release
+
+      - name: Upload Android AAB build artifact
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        with:
+          name: android-aab-build
+          path: native-release/*.aab
+          if-no-files-found: error
+          retention-days: ${{ inputs.retention_days }}
+
+      - name: Upload Android release artifacts
+        if: ${{ !inputs.internal_test_release }}
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        with:
+          name: release-android
+          path: native-release/*.apk
+          if-no-files-found: error
+          retention-days: 28
+
   publish:
-    if: ${{ always() && needs.preflight.result == 'success' && needs.build-aab.result == 'success' && needs.preflight.outputs.play_tracks != 'none' && ((inputs.internal_test_release && needs.build-apk.result == 'skipped') || (!inputs.internal_test_release && needs.build-apk.result == 'success')) && (needs.preflight.outputs.publishes_production != 'true' || needs.preflight.outputs.stable_production_tag == 'true') }}
-    needs: [preflight, build-aab, build-apk]
+    if: ${{ always() && needs.preflight.result == 'success' && needs.preflight.outputs.play_tracks != 'none' && ((inputs.android_client != 'native' && needs.build-aab.result == 'success' && ((inputs.internal_test_release && needs.build-apk.result == 'skipped') || (!inputs.internal_test_release && needs.build-apk.result == 'success'))) || (inputs.android_client == 'native' && needs.build-native.result == 'success')) && (needs.preflight.outputs.publishes_production != 'true' || needs.preflight.outputs.stable_production_tag == 'true') }}
+    needs: [preflight, build-aab, build-apk, build-native]
     runs-on: ubuntu-latest
     name: Android Publish
     timeout-minutes: 30
@@ -597,6 +688,7 @@ jobs:
           GOOGLE_PLAY_ACCESS_TOKEN: ${{ steps.play_auth.outputs.access_token }}
           PLAY_TRACKS: ${{ needs.preflight.outputs.play_tracks }}
           RELEASE_NOTES: ${{ inputs.release_notes }}
+          NATIVE_RELEASE_CANDIDATE: ${{ inputs.android_client == 'native' && 'true' || '' }}
         run: |
           set -euo pipefail
           PACKAGE="tech.dongdongbh.mindwtr"
@@ -613,7 +705,8 @@ jobs:
             --expected-version-code "$EXPECTED_VERSION_CODE" \
             --version "$VERSION" \
             --tracks "$PLAY_TRACKS" \
-            --testing-release-notes "$RELEASE_NOTES"
+            --testing-release-notes "$RELEASE_NOTES" \
+            ${NATIVE_RELEASE_CANDIDATE:+--native-release-candidate}
 
           python3 scripts/ci/google-play-edit.py publish \
             --plan "$PLAN_FILE" \

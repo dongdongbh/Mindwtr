@@ -120,6 +120,7 @@ def build_plan(
     stable_release_notes_directory: str | None = None,
     listing_assets_file: str | None = None,
     listings_file: str | None = None,
+    native_release_candidate: bool = False,
 ) -> dict[str, Any]:
 
     normalized_rollout_mode, rollout_fraction = resolve_rollout(
@@ -141,6 +142,8 @@ def build_plan(
             )
     elif "production" in unique_tracks:
         raise ValueError("Production requires a stable tagged publication")
+    if native_release_candidate and stable_production:
+        raise ValueError("Native release candidates never publish to production")
 
     releases: list[dict[str, object]] = []
     stable_notes = _read_release_notes(stable_release_notes_directory)
@@ -160,7 +163,7 @@ def build_plan(
         else:
             release = {
                 "track": track,
-                "name": f"{version} testing",
+                "name": f"{version} native testing" if native_release_candidate else f"{version} testing",
                 "status": "completed",
             }
             notes = testing_release_notes.strip()
@@ -229,6 +232,7 @@ def _plan_command(args: argparse.Namespace) -> int:
         stable_release_notes_directory=args.stable_release_notes_directory,
         listing_assets_file=args.listing_assets_file,
         listings_file=args.listings_file,
+        native_release_candidate=args.native_release_candidate,
     )
     Path(args.output).write_text(
         json.dumps(plan, ensure_ascii=False, indent=2) + "\n",
@@ -264,6 +268,7 @@ def _parser() -> argparse.ArgumentParser:
     plan.add_argument("--stable-release-notes-directory")
     plan.add_argument("--listing-assets-file")
     plan.add_argument("--listings-file")
+    plan.add_argument("--native-release-candidate", action="store_true")
     plan.set_defaults(handler=_plan_command)
     return parser
 

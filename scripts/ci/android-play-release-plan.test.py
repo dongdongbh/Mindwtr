@@ -198,6 +198,32 @@ class AndroidPlayReleasePlanTest(unittest.TestCase):
             self.assertNotIn("userFraction", release)
             self.assertEqual(release["releaseNotes"][0]["text"], "Test this release")
 
+    def test_native_release_candidate_names_mark_every_testing_release(self) -> None:
+        common = {
+            "package": "tech.dongdongbh.mindwtr",
+            "artifact_path": "mindwtr-1.4.0-rc.1.aab",
+            "expected_version_code": 175,
+            "version": "1.4.0-rc.1",
+            "tracks": ["internal", "beta"],
+            "stable_production": False,
+        }
+        native = MODULE.build_plan(**common, native_release_candidate=True)
+        react_native = MODULE.build_plan(**common)
+
+        self.assertEqual(
+            [release["name"] for release in native["tracks"]],
+            ["1.4.0-rc.1 native testing", "1.4.0-rc.1 native testing"],
+        )
+        self.assertEqual(
+            [release["name"] for release in react_native["tracks"]],
+            ["1.4.0-rc.1 testing", "1.4.0-rc.1 testing"],
+        )
+        with self.assertRaises(ValueError):
+            MODULE.build_plan(
+                **{**common, "tracks": ["production", "beta", "internal"], "stable_production": True},
+                native_release_candidate=True,
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

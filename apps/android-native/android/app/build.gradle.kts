@@ -15,7 +15,9 @@ val urlSchemes = mapOf("debug" to "mindwtr-native-dev", "upgradetest" to "mindwt
 val rnAppJson = groovy.json.JsonSlurper().parse(rootProject.projectDir.resolve("../../mobile/app.json")) as Map<*, *>
 val rnExpo = rnAppJson["expo"] as Map<*, *>
 val rnVersion = rnExpo["version"] as String
-val rnVersionCode = ((rnExpo["android"] as Map<*, *>)["versionCode"] as Number).toString()
+val rnVersionCode = providers.gradleProperty("mindwtr.versionCode").orNull ?: ((rnExpo["android"] as Map<*, *>)["versionCode"] as Number).toString()
+val releaseVersionName = providers.gradleProperty("mindwtr.versionName").orNull ?: rnVersion
+val releaseAbis = providers.gradleProperty("mindwtr.abis").orNull?.split(",")?.map(String::trim)?.filter(String::isNotEmpty)
 val rnName = rnExpo["name"] as String
 val rnPackage = (rnExpo["android"] as Map<*, *>)["package"] as String
 val rnReleaseVersion = (System.getenv("ANALYTICS_RELEASE_VERSION") ?: "").trim().ifEmpty {
@@ -69,6 +71,20 @@ android {
 
         externalNativeBuild { cmake { cppFlags += "-std=c++17 -Wall -Wextra -Werror" } }
         buildConfigField("boolean", "DONATION_PROMPT", "false")
+        releaseAbis?.let { ndk { abiFilters += it } }
+    }
+
+    dependenciesInfo { includeInApk = false }
+
+    signingConfigs {
+        System.getenv("MINDWTR_RELEASE_KEYSTORE")?.let { keystore ->
+            create("release") {
+                storeFile = file(keystore)
+                storePassword = System.getenv("MINDWTR_RELEASE_STORE_PASSWORD")
+                keyAlias = System.getenv("MINDWTR_RELEASE_KEY_ALIAS")
+                keyPassword = System.getenv("MINDWTR_RELEASE_KEY_PASSWORD")
+            }
+        }
     }
 
 
@@ -79,6 +95,7 @@ android {
         getByName("debug") { launcherIdentity() }
 
         getByName("release") {
+            signingConfig = signingConfigs.findByName("release")
             buildConfigField("boolean", "RN_STORAGE", "true")
             buildConfigField("String", "ANALYTICS_HEARTBEAT_URL", quoted(rnHeartbeatUrl))
             buildConfigField("boolean", "DONATION_PROMPT", rnDonationPrompt.toString())
@@ -196,7 +213,7 @@ androidComponents {
 
     onVariants(selector().withBuildType("release")) { variant ->
         variant.applicationId.set(rnPackage)
-        variant.outputs.forEach { it.versionCode.set(rnVersionCode.toInt()); it.versionName.set(rnVersion) }
+        variant.outputs.forEach { it.versionCode.set(rnVersionCode.toInt()); it.versionName.set(releaseVersionName) }
     }
 
 

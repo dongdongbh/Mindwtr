@@ -570,6 +570,109 @@ test("RC Android Play and FOSS builds share a parallel versionCode preflight", (
   );
 });
 
+test("RC Android is always native and stable Android is always React Native", () => {
+  const rc = parse(readFileSync(".github/workflows/release-rc.yml", "utf8"));
+  const stable = parse(readFileSync(".github/workflows/release.yml", "utf8"));
+  const resolve = (workflow) => workflow.jobs["android-version-code"].steps.find((step) => step.id === "version_code");
+
+  expect(rc.jobs.android.with.android_client).toBe("native");
+  expect(rc.jobs["android-foss"].with.android_client).toBe("native");
+  expect(rc.on.workflow_dispatch.inputs.android_client).toBeUndefined();
+  expect(resolve(rc).env.ANDROID_CLIENT).toBe("native");
+  expect(stable.jobs.android.with.android_client).toBeUndefined();
+  expect(stable.jobs["android-foss"].with.android_client).toBeUndefined();
+  expect(resolve(stable).env.ANDROID_CLIENT).toBe("rn");
+  for (const workflow of [rc, stable]) {
+    const run = resolve(workflow).run;
+    expect(run).toContain("scripts/ci/google-play-edit.py max-version-code");
+    expect(run).toContain("export PLAY_RELEASES_FILE");
+    expect(run).not.toContain("curl ");
+  }
+});
+
+test("RC validation stops every platform before publishing when an Android signing secret is missing", () => {
+  const rc = parse(readFileSync(".github/workflows/release-rc.yml", "utf8"));
+  const check = rc.jobs.validate.steps.find((step) => step.name === "Require Android signing secrets");
+  const secrets = ["UPLOAD_KEYSTORE_BASE64", "UPLOAD_KEY_ALIAS", "UPLOAD_STORE_PASSWORD", "UPLOAD_KEY_PASSWORD",
+    "RELEASE_KEYSTORE_BASE64", "RELEASE_KEY_ALIAS", "RELEASE_STORE_PASSWORD", "RELEASE_KEY_PASSWORD"].map((name) => `ANDROID_${name}`);
+  expect(Object.keys(check.env).sort()).toEqual([...secrets].sort());
+  for (const name of secrets) expect(check.env[name]).toBe(`\${{ secrets.${name} }}`);
+  for (const job of ["linux", "macos", "windows", "android-version-code", "ios-appstore", "macos-appstore"]) {
+    expect(asNeedsList(rc.jobs[job].needs)).toContain("validate");
+  }
+  const run = (env) => {
+    try {
+      execFileSync("bash", ["-c", check.run], { env: { PATH: process.env.PATH, ...env }, stdio: "pipe" });
+      return 0;
+    } catch (error) {
+      return error.status;
+    }
+  };
+  const all = Object.fromEntries(secrets.map((name) => [name, "set"]));
+  expect(run(all)).toBe(0);
+  for (const name of secrets) expect(run({ ...all, [name]: "" })).toBe(1);
+});
+
+test("an RC dispatch without Play testing needs an explicit Android versionCode", () => {
+  const rc = parse(readFileSync(".github/workflows/release-rc.yml", "utf8"));
+  const step = rc.jobs["android-version-code"].steps.find((entry) => entry.id === "version_code");
+  expect(rc.on.workflow_dispatch.inputs.android_version_code.default).toBe("");
+  expect(step.env.REQUESTED_VERSION_CODE).toBe("${{ github.event_name == 'workflow_dispatch' && inputs.android_version_code || '' }}");
+  const dir = mkdtempSync(join(tmpdir(), "rc-version-code-"));
+  try {
+    writeFileSync(join(dir, "app.json"), JSON.stringify({ expo: { android: { versionCode: 160 } } }));
+    const run = (env) => {
+      const output = join(dir, "output");
+      writeFileSync(output, "");
+      try {
+        execFileSync("bash", ["-c", step.run], {
+          cwd: process.cwd(),
+          env: { PATH: process.env.PATH, APP_JSON_PATH: join(dir, "app.json"), GITHUB_OUTPUT: output, ANDROID_CLIENT: "native", ...env },
+          stdio: "pipe",
+        });
+        return { status: 0, output: readFileSync(output, "utf8") };
+      } catch (error) {
+        return { status: error.status, output: readFileSync(output, "utf8") };
+      }
+    };
+    expect(run({ USE_PLAY_TRACKS: "false", REQUESTED_VERSION_CODE: "" }).status).toBe(1);
+    const explicit = run({ USE_PLAY_TRACKS: "false", REQUESTED_VERSION_CODE: "180" });
+    expect(explicit.status).toBe(0);
+    expect(explicit.output).toContain("resolved_code=180");
+    expect(run({ USE_PLAY_TRACKS: "false", REQUESTED_VERSION_CODE: "170" }).status).toBe(1);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the native Android client replaces the React Native build jobs only when selected", () => {
+  const android = parse(readFileSync(".github/workflows/release-android.yml", "utf8"));
+  const foss = parse(readFileSync(".github/workflows/release-android-foss.yml", "utf8"));
+
+  expect(android.on.workflow_call.inputs.android_client.default).toBe("rn");
+  expect(android.jobs["build-aab"].if).toContain("inputs.android_client != 'native'");
+  expect(android.jobs["build-apk"].if).toContain("inputs.android_client != 'native'");
+  expect(android.jobs["build-native"].if).toBe("${{ inputs.android_client == 'native' }}");
+  expect(android.jobs.publish.if).toContain("inputs.android_client == 'native' && needs.build-native.result == 'success'");
+  const nativeRuns = android.jobs["build-native"].steps.map((step) => step.run ?? "").join("\n");
+  expect(nativeRuns).toContain("scripts/ci/build-android-native-release.sh aab native-release");
+  expect(nativeRuns).toContain("scripts/ci/build-android-native-release.sh apk native-release");
+  expect(android.jobs["build-native"].env.EXPECTED_SIGNER_SHA256).toBe("09902a7f33aec074a1fa5642ef360f349dae6e8b67387d36b523f966a3220ef8");
+  const uploads = android.jobs["build-native"].steps.filter((step) => step.uses?.startsWith("actions/upload-artifact@"));
+  expect(uploads.map((step) => step.with.name)).toEqual(["android-aab-build", "release-android"]);
+  const testing = android.jobs.publish.steps.find((step) => step.name === "Publish to Google Play testing tracks");
+  expect(testing.env.NATIVE_RELEASE_CANDIDATE).toBe("${{ inputs.android_client == 'native' && 'true' || '' }}");
+  expect(testing.run).toContain("${NATIVE_RELEASE_CANDIDATE:+--native-release-candidate}");
+
+  expect(foss.on.workflow_call.inputs.android_client.default).toBe("rn");
+  expect(foss.jobs["android-foss"].if).toBe("${{ inputs.android_client != 'native' }}");
+  expect(foss.jobs["android-foss-native"].if).toBe("${{ inputs.android_client == 'native' }}");
+  expect(foss.jobs["android-foss-native"].env.EXPECTED_SIGNER_SHA256).toBe("1a3e0ab42178306c36534cee2ef3b888756c6e43f0d19de67f7b55246c473df5");
+  const fossNative = foss.jobs["android-foss-native"].steps;
+  expect(fossNative.find((step) => step.id === "version_code").env.ANDROID_CLIENT).toBe("native");
+  expect(fossNative.map((step) => step.run ?? "").join("\n")).toContain("scripts/ci/build-android-native-release.sh foss release-artifacts");
+});
+
 test("direct-download Android APK build gives R8 a release-sized heap", () => {
   const workflow = parse(
     readFileSync(".github/workflows/release-android.yml", "utf8"),
@@ -659,7 +762,7 @@ test("Android Play tracks share the standard AAB and versionCode", () => {
   expect(workflow.jobs["build-internal-test-aab"]).toBeUndefined();
   expect(text).not.toContain("ANDROID_PROFILEABLE");
   expect(text).not.toContain("profileable");
-  expect(publish.needs).toEqual(["preflight", "build-aab", "build-apk"]);
+  expect(publish.needs).toEqual(["preflight", "build-aab", "build-apk", "build-native"]);
   expect(preflight.outputs.internal_version_code).toBe(
     "${{ steps.internal_version_code.outputs.version_code }}",
   );

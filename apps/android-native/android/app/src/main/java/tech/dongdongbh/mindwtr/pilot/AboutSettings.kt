@@ -99,6 +99,7 @@ fun aboutAppInfo(): String {
         .put("feedbackEndpointUrl", aboutFeedbackEndpoint(BuildConfig.BUILD_TYPE, BuildConfig.FEEDBACK_ENDPOINT_URL, stub))
         .put("analyticsHeartbeatUrl", stub?.let { "$it/heartbeat" } ?: BuildConfig.ANALYTICS_HEARTBEAT_URL)
         .put("analyticsHeartbeatChannel", BuildConfig.ANALYTICS_HEARTBEAT_CHANNEL)
+        .put("releaseCandidateUpdates", BuildConfig.RN_RELEASE_VERSION.contains("-rc."))
         .apply { stub?.let { put("githubReleasesApi", "$it/github/releases/latest") } }
         .toString()
 }

@@ -129,13 +129,24 @@ export type AboutUpdateDevice = {
     now?: () => number;
 
     githubReleasesApi?: string;
+
+    releaseCandidate?: string;
 };
 
 type AndroidComparableVersionResult =
     | { source: 'play-store'; updateAvailable: boolean; availableVersionCode: number | null }
     | { source: 'github-release'; version: string };
 
-type GithubRelease = { tag_name?: string; html_url?: string; body?: string };
+type GithubRelease = { tag_name?: string; html_url?: string; body?: string; prerelease?: boolean; draft?: boolean };
+
+const RELEASE_CANDIDATE_TAG = /^v?(\d+\.\d+\.\d+)-rc\.(\d+)$/;
+
+export const compareReleaseCandidates = (a: string, b: string): number => {
+    const left = a.trim().match(RELEASE_CANDIDATE_TAG);
+    const right = b.trim().match(RELEASE_CANDIDATE_TAG);
+    if (!left || !right) return compareVersions(a, b);
+    return compareVersions(left[1], right[1]) || Math.sign(Number(left[2]) - Number(right[2]));
+};
 
 
 export function createAboutUpdateChecks(device: AboutUpdateDevice) {
@@ -144,6 +155,10 @@ export function createAboutUpdateChecks(device: AboutUpdateDevice) {
     const currentVersion = device.currentVersion;
     const displayVersion = device.displayVersion;
     const githubReleasesApi = device.githubReleasesApi ?? ABOUT_GITHUB_RELEASES_API;
+    const releaseCandidate = device.releaseCandidate?.match(RELEASE_CANDIDATE_TAG) ? device.releaseCandidate : null;
+    const isNewerRelease = (latest: string) => (releaseCandidate
+        ? RELEASE_CANDIDATE_TAG.test(latest) && compareReleaseCandidates(latest, releaseCandidate) > 0
+        : compareVersions(latest, currentVersion) > 0);
     const PLAY_STORE_URL = `https://play.google.com/store/apps/details?id=${device.androidPackageName}`;
     const PLAY_STORE_MARKET_URL = `market://details?id=${device.androidPackageName}`;
 
@@ -161,8 +176,8 @@ export function createAboutUpdateChecks(device: AboutUpdateDevice) {
         }
     };
 
-    const fetchLatestRelease = async (): Promise<GithubRelease> => {
-        const response = await device.fetcher(githubReleasesApi, {
+    const fetchGithub = async (url: string): Promise<unknown> => {
+        const response = await device.fetcher(url, {
             headers: {
                 Accept: 'application/vnd.github.v3+json',
                 'User-Agent': 'Mindwtr-App',
@@ -171,8 +186,22 @@ export function createAboutUpdateChecks(device: AboutUpdateDevice) {
         if (!response.ok) {
             throw new Error(`GitHub API error: ${response.status}`);
         }
-        return response.json() as Promise<GithubRelease>;
+        return response.json();
     };
+
+    const fetchNewestReleaseCandidate = async (): Promise<GithubRelease> => {
+        const releases = await fetchGithub(githubReleasesApi.replace(/\/latest$/, '?per_page=30'));
+        const candidates = (Array.isArray(releases) ? releases as GithubRelease[] : [])
+            .filter((release) => release.prerelease === true && release.draft !== true && RELEASE_CANDIDATE_TAG.test(release.tag_name ?? ''));
+        return candidates.reduce<GithubRelease>(
+            (newest, release) => (compareReleaseCandidates(release.tag_name!, newest.tag_name!) > 0 ? release : newest),
+            { tag_name: releaseCandidate! },
+        );
+    };
+
+    const fetchLatestRelease = async (): Promise<GithubRelease> => (releaseCandidate
+        ? fetchNewestReleaseCandidate()
+        : fetchGithub(githubReleasesApi) as Promise<GithubRelease>);
 
 
     const fetchLatestAppStoreInfo = () => fetchAppStoreInfo(device.iosBundleId, device.fetcher as unknown as typeof globalThis.fetch);
@@ -223,7 +252,7 @@ export function createAboutUpdateChecks(device: AboutUpdateDevice) {
                 if (cancelled()) return;
                 const hasUpdate = comparable.source === 'play-store'
                     ? comparable.updateAvailable
-                    : compareVersions(comparable.version, currentVersion) > 0;
+                    : isNewerRelease(comparable.version);
                 await storage.setItem(UPDATE_BADGE_LAST_CHECK_KEY, String(now()));
                 await persistUpdateBadge(
                     hasUpdate,
@@ -255,7 +284,7 @@ export function createAboutUpdateChecks(device: AboutUpdateDevice) {
                     const result = await fetchAndroidComparableVersion();
                     const hasUpdate = result.source === 'play-store'
                         ? result.updateAvailable
-                        : compareVersions(result.version, currentVersion) > 0;
+                        : isNewerRelease(result.version);
                     if (hasUpdate) {
                         const updateMessage = result.source === 'play-store'
                             ? tr('settings.aboutMobile.updateIsAvailableOnGooglePlayOpenAppListingNow')
@@ -310,7 +339,7 @@ export function createAboutUpdateChecks(device: AboutUpdateDevice) {
 
                 const release = await fetchLatestRelease();
                 const latestVersion = release.tag_name?.replace(/^v/, '') || '0.0.0';
-                const hasUpdate = compareVersions(latestVersion, currentVersion) > 0;
+                const hasUpdate = isNewerRelease(latestVersion);
 
                 if (hasUpdate) {
                     const downloadUrl = release.html_url || ABOUT_GITHUB_RELEASES_URL;
