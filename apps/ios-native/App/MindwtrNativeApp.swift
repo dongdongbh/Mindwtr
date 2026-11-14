@@ -1817,7 +1817,7 @@ private struct TaskRecoveryGate: View {
         .task(id: model.busy) {
             guard !automaticResumeTried, !model.busy, canResume, model.taskRecoveryConflict == nil else { return }
             automaticResumeTried = true
-            await model.restoreTaskRecovery()
+            Task { await model.restoreTaskRecovery() }
         }
     }
 }
