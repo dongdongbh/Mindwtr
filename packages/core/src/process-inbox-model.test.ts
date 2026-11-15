@@ -16,6 +16,7 @@ import {
     applyProcessInboxDraftEdit,
     createProcessInboxDraft,
     getProcessInboxNotePreview,
+    getProcessInboxProjectChoices,
     getProcessInboxProgress,
     normalizeProcessInboxPickedDate,
     backProcessInboxStep,
@@ -34,7 +35,7 @@ import {
 import { resolveProcessInboxPlan } from './process-inbox-plan';
 import { buildQuickAddParseOptions, parseProcessInboxTitleInput } from './quick-add';
 import { resetForTests } from './store';
-import type { Task } from './types';
+import type { Project, Area, Task } from './types';
 
 const fixture = loadProcessInboxFixture();
 
@@ -500,5 +501,75 @@ describe('project section in Inbox processing', () => {
         ]);
         expect(offered?.options[1].edit).toEqual({ type: 'setSection', value: 's-design' });
         expect(view(draft, []).project).not.toHaveProperty('sections');
+    });
+});
+
+
+describe('processing project browsing and assignment (#1566)', () => {
+    const task: Task = { id: 'inbox', title: 'Draft', status: 'inbox', contexts: [], tags: [], createdAt: '', updatedAt: '' };
+    const plan = resolveProcessInboxPlan({});
+    const areas: Area[] = [{ id: 'work', name: 'Work', order: 0, createdAt: '', updatedAt: '' },
+        { id: 'home', name: 'Home', order: 1, createdAt: '', updatedAt: '' }];
+    const projects: Project[] = [
+        { id: 'work-project', title: 'Work project', areaId: 'work', status: 'active', order: 0, color: '#000', tagIds: [], createdAt: '', updatedAt: '' },
+        { id: 'home-project', title: 'Home project', areaId: 'home', status: 'active', order: 1, color: '#000', tagIds: [], createdAt: '', updatedAt: '' },
+        { id: 'free-project', title: 'Free project', status: 'active', order: 2, color: '#000', tagIds: [], createdAt: '', updatedAt: '' },
+    ];
+    const view = (draft: ReturnType<typeof createProcessInboxDraft>, offeredAreas = areas) => buildProcessInboxStepView({
+        task, draft, answers: { actionability: 'actionable', twoMinute: 'no', execution: 'defer', oneActionAnswered: true },
+        mode: 'guided', plan, settings: undefined, tasks: [task], projects, areas: offeredAreas, people: [],
+        sections: [{ id: 'section', projectId: 'work-project', title: 'Design', order: 0, createdAt: '', updatedAt: '' }],
+        similarityIndex: null, t: (key) => key, formatDate: ((value: unknown) => String(value)) as never, now: new Date(2026, 10, 15),
+    }).project!;
+    const ids = (scope?: Parameters<typeof getProcessInboxProjectChoices>[3], search = '') =>
+        getProcessInboxProjectChoices(projects, 'work', search, scope).filteredProjects.map((project) => project.id);
+
+    it('distinguishes All, No area and named areas while legacy calls keep their default', () => {
+        expect(ids()).toEqual(['work-project']);
+        expect(getProcessInboxProjectChoices(projects, null, '').filteredProjects).toHaveLength(3);
+        expect(ids({ kind: 'all' })).toEqual(['work-project', 'home-project', 'free-project']);
+        expect(ids({ kind: 'none' })).toEqual(['free-project']);
+        expect(ids({ kind: 'area', areaId: 'home' })).toEqual(['home-project']);
+        expect(ids({ kind: 'none' }, 'Home')).toEqual(['home-project']);
+        expect(getProcessInboxProjectChoices(projects, 'work', 'Home project', { kind: 'none' }).exactMatch?.id).toBe('home-project');
+        expect(ids({ kind: 'none' })).toEqual(['free-project']);
+    });
+
+    it('changes browsing alone and keeps the selected project and its sections outside the browse list', () => {
+        const draft = { ...createProcessInboxDraft({ ...task, projectId: 'work-project', sectionId: 'section' }),
+            description: 'Keep this note', nextAction: 'Keep this action', convertToProject: false };
+        for (const value of [{ kind: 'all' }, { kind: 'none' }, { kind: 'area', areaId: 'home' }] as const) {
+            const changed = applyProcessInboxDraftEdit(draft, { type: 'setProjectBrowseScope', value }, plan);
+            expect(changed).toEqual({ ...draft, projectBrowseScope: value });
+            const shown = view(changed);
+            expect(shown.current?.edit).toEqual({ type: 'selectProject', value: 'work-project' });
+            expect(shown.projects.some((option) => option.edit.type === 'selectProject' && option.edit.value === 'work-project')).toBe(false);
+            expect(shown.sections?.options.find((option) => option.selected)?.label).toBe('Design');
+            expect(shown.inheritedArea).toBe('Work');
+            expect(shown.areas).toEqual([]);
+        }
+    });
+
+    it('keeps explicit assignment separate, preserves scope on project selection and resets only when primed', () => {
+        let draft = createProcessInboxDraft({ ...task, areaId: 'work' });
+        draft = applyProcessInboxDraftEdit(draft, { type: 'setProjectBrowseScope', value: { kind: 'all' } }, plan);
+        expect(draft.areaId).toBe('work');
+        draft = applyProcessInboxDraftEdit(draft, { type: 'selectProject', value: 'home-project' }, plan);
+        expect(draft).toMatchObject({ projectId: 'home-project', areaId: null, projectBrowseScope: { kind: 'all' } });
+        draft = applyProcessInboxDraftEdit(draft, { type: 'selectProject', value: null }, plan);
+        expect(draft.areaId).toBeNull();
+        draft = applyProcessInboxDraftEdit(draft, { type: 'setArea', value: null }, plan);
+        expect(draft.projectBrowseScope).toEqual({ kind: 'none' });
+        draft = applyProcessInboxDraftEdit(draft, { type: 'setArea', value: 'work' }, plan);
+        expect(draft).toMatchObject({ areaId: 'work', projectBrowseScope: { kind: 'area', areaId: 'work' } });
+        expect(view(draft).areas.filter((option) => option.edit.type === 'setArea' && option.edit.value === 'work')).toHaveLength(1);
+        expect(view(draft).projectsLabel).toBe('projects.title');
+        expect(reloadProcessInboxDraft(draft, task)).not.toHaveProperty('projectBrowseScope');
+        expect(view({ ...draft, projectBrowseScope: { kind: 'area', areaId: 'removed' } }).browse?.options[0].selected).toBe(true);
+        const implicit = { ...createProcessInboxDraft({ ...task, areaId: 'removed' }) };
+        expect(view(implicit).browse?.options[0].selected).toBe(true);
+        expect(view(implicit).projects).toHaveLength(4);
+        expect(implicit.areaId).toBe('removed');
+        expect(view({ ...draft, projectId: 'free-project' }).inheritedArea).toBe('projects.noArea');
     });
 });

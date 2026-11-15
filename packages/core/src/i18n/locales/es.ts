@@ -1000,6 +1000,7 @@ export const esOverrides: Record<string, string> = {
 'projects.deleteSectionConfirm': "¿Eliminar esta sección? Sus tareas no se eliminan; pasan a Sin sección.",
 'projects.areaFilter': "Filtro de áreas",
 'projects.allAreas': "Todas las áreas",
+        'inbox.browseProjects': 'Explorar proyectos',
 'projects.noArea': "Sin área",
 'projects.areaReorderFailed': "No se pudieron reordenar las áreas",
 'projects.moveProjectFailed': "No se pudo mover el proyecto",

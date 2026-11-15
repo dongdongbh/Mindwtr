@@ -29,6 +29,9 @@ vi.mock('expo-haptics', () => ({
   notificationAsync: hapticsMock.notificationAsync,
 }));
 
+const queueClock = vi.hoisted(() => ({ revision: 0 }));
+vi.mock('@/hooks/use-task-display-clock', () => ({ useTaskDisplayClock: () => queueClock.revision }));
+
 const reducedMotionMock = vi.hoisted(() => ({ value: false }));
 const appleClarificationMocks = vi.hoisted(() => ({
   prototypeEnabled: false,
@@ -1233,7 +1236,7 @@ describe('InboxProcessingModal', () => {
   it('preselects the task area and filters project choices by it', () => {
     storeState.tasks = [{ ...baseInboxTask, areaId: workArea.id }];
     storeState.areas = [workArea, homeArea];
-    storeState.projects = [workProject, homeProject];
+    storeState.projects = [workProject, homeProject, { ...homeProject, id: 'unassigned', title: 'Unassigned Project', areaId: undefined }];
     const onClose = vi.fn();
     let tree: ReturnType<typeof create>;
 
@@ -1254,8 +1257,107 @@ describe('InboxProcessingModal', () => {
       findPressableWithText(root, 'projects.noArea').props.onPress();
     });
 
+    expect(findNodesWithText(root, 'Work Project')).toHaveLength(0);
+    expect(findNodesWithText(root, 'Home Project')).toHaveLength(0);
+    expect(findNodesWithText(root, 'Unassigned Project').length).toBeGreaterThan(0);
+    act(() => { root.findByProps({ accessibilityLabel: 'Browse projects: projects.noArea', accessibilityRole: 'button' }).props.onPress(); });
+    act(() => { root.findByProps({ accessibilityLabel: 'Browse projects: projects.allAreas', accessibilityRole: 'button' }).props.onPress(); });
     expect(findNodesWithText(root, 'Work Project').length).toBeGreaterThan(0);
     expect(findNodesWithText(root, 'Home Project').length).toBeGreaterThan(0);
+    expect(root.findByProps({ accessibilityLabel: 'taskEdit.areaLabel: projects.noArea', accessibilityRole: 'button' }).props.accessibilityState.selected).toBe(true);
+  });
+
+  it('refreshes the actual queue with the display clock and when an already mounted modal opens', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date(2026, 10, 15, 23, 59));
+    storeState.tasks = [{ ...baseInboxTask }, { ...baseInboxTask, id: 'returning', title: 'Due Someday', status: 'someday', reviewAt: '2026-11-16' }];
+    let tree!: ReturnType<typeof create>;
+    const onClose = vi.fn();
+    try {
+      act(() => { tree = create(<InboxProcessingModal visible={false} onClose={onClose} />); });
+      vi.setSystemTime(new Date(2026, 10, 16, 0, 1));
+      act(() => { tree.update(<InboxProcessingModal visible onClose={onClose} />); });
+      await flushAsyncActions();
+      expect(findNodesWithText(tree.root, '0/2 common.tasks').length).toBeGreaterThan(0);
+      act(() => { tree.update(<InboxProcessingModal visible={false} onClose={onClose} />); });
+      vi.setSystemTime(new Date(2026, 10, 15, 23, 59));
+      act(() => { tree.update(<InboxProcessingModal visible onClose={onClose} />); });
+      await flushAsyncActions();
+      expect(findNodesWithText(tree.root, '0/1 common.tasks').length).toBeGreaterThan(0);
+      act(() => {
+        vi.setSystemTime(new Date(2026, 10, 16, 0, 1));
+        queueClock.revision += 1;
+        tree.update(<InboxProcessingModal visible onClose={onClose} />);
+      });
+      expect(tree.root.findAll((node) => typeof node.props.children === 'string' && /^\d+\/\d+ common.tasks$/.test(node.props.children)).map((node) => node.props.children)).toContain('0/2 common.tasks');
+      expect(updateTask).not.toHaveBeenCalled();
+    } finally {
+      act(() => tree?.unmount());
+      queueClock.revision = 0;
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([false, true])('falls back to All browsing when a default Area is deleted (explicit=%s)', (explicit) => {
+    storeState.tasks = [{ ...baseInboxTask, areaId: workArea.id }];
+    storeState.areas = [workArea, homeArea];
+    storeState.projects = [workProject, homeProject];
+    let tree!: ReturnType<typeof create>;
+    act(() => { tree = create(<InboxProcessingModal visible onClose={vi.fn()} />); });
+    const root = tree.root;
+    revealDeferredOptions(root);
+    if (explicit) {
+      act(() => { root.findByProps({ accessibilityLabel: 'Browse projects: Work', accessibilityRole: 'button' }).props.onPress(); });
+      act(() => { root.findAllByProps({ accessibilityLabel: 'Browse projects: Work', accessibilityRole: 'button' }).find((node) => node.props.accessibilityState?.selected === true)!.props.onPress(); });
+    }
+    storeState.areas = [homeArea];
+    act(() => { tree.update(<InboxProcessingModal visible onClose={vi.fn()} />); });
+    expect(root.findByProps({ accessibilityLabel: 'Browse projects: projects.allAreas', accessibilityRole: 'button' })).toBeTruthy();
+    expect(findNodesWithText(root, 'Home Project').length).toBeGreaterThan(0);
+    expect(storeState.tasks[0].areaId).toBe(workArea.id);
+    expect(updateTask).not.toHaveBeenCalled();
+    act(() => tree.unmount());
+  });
+
+  it('keeps browsing, sections and drafts through a failed save, then resets browsing for the next task', async () => {
+    storeState.tasks = [{ ...baseInboxTask, areaId: workArea.id },
+      { ...baseInboxTask, id: 'second', title: 'Second task', areaId: homeArea.id, createdAt: '2025-02-01' }];
+    storeState.areas = [workArea, homeArea];
+    storeState.projects = [workProject, homeProject];
+    storeState.sections = [{ id: 'design', projectId: workProject.id, title: 'Design', order: 0 }];
+    updateTask.mockResolvedValueOnce({ success: false, error: 'disk unavailable' });
+    let tree!: ReturnType<typeof create>;
+    act(() => { tree = create(<InboxProcessingModal visible onClose={vi.fn()} />); });
+    const root = tree.root;
+    revealDeferredOptions(root);
+    act(() => { root.findByProps({ accessibilityLabel: 'taskEdit.projectLabel: Work Project', accessibilityRole: 'button' }).props.onPress(); });
+    act(() => { root.findByProps({ accessibilityLabel: 'taskEdit.sectionLabel: Design', accessibilityRole: 'button' }).props.onPress(); });
+    act(() => { root.findByProps({ accessibilityLabel: 'Browse projects: Work', accessibilityRole: 'button' }).props.onPress(); });
+    act(() => { root.findByProps({ accessibilityLabel: 'Browse projects: projects.noArea', accessibilityRole: 'button' }).props.onPress(); });
+    expect(root.findByProps({ accessibilityLabel: 'taskEdit.projectLabel: Work Project', accessibilityRole: 'button' }).props.accessibilityState.selected).toBe(true);
+    expect(root.findByProps({ accessibilityLabel: 'taskEdit.sectionLabel: Design', accessibilityRole: 'button' }).props.accessibilityState.selected).toBe(true);
+    expect(findNodesWithText(root, 'Home Project')).toHaveLength(0);
+    act(() => { root.findByProps({ placeholder: 'projects.addPlaceholder' }).props.onChangeText('Home Project'); });
+    expect(findNodesWithText(root, 'Home Project').length).toBeGreaterThan(0);
+    expect(findNodesWithText(root, 'projects.create')).toHaveLength(0);
+    act(() => { root.findByProps({ placeholder: 'projects.addPlaceholder' }).props.onChangeText(''); });
+    expect(findNodesWithText(root, 'Home Project')).toHaveLength(0);
+    openAnchorEditor(root);
+    act(() => { findTextInputByAccessibilityLabel(root, 'taskEdit.titleLabel').props.onChangeText('Keep this draft'); });
+    await act(async () => { findPressableWithText(root, 'File it').props.onPress(); await Promise.resolve(); });
+    expect(findTextInputByAccessibilityLabel(root, 'taskEdit.titleLabel').props.value).toBe('Keep this draft');
+    expect(root.findByProps({ accessibilityLabel: 'Browse projects: projects.noArea', accessibilityRole: 'button' })).toBeTruthy();
+    expect(root.findByProps({ accessibilityLabel: 'taskEdit.sectionLabel: Design', accessibilityRole: 'button' }).props.accessibilityState.selected).toBe(true);
+    expect(updateTask).toHaveBeenLastCalledWith(baseInboxTask.id, expect.objectContaining({ title: 'Keep this draft', projectId: workProject.id, sectionId: 'design', areaId: undefined }));
+    expect(updateTask.mock.lastCall?.[1]).not.toHaveProperty('projectBrowseScope');
+    updateTask.mockResolvedValue({ success: true });
+    await act(async () => { findPressableWithText(root, 'File it').props.onPress(); await Promise.resolve(); });
+    await flushAsyncActions();
+    revealDeferredOptions(root);
+    expect(root.findByProps({ accessibilityLabel: 'Browse projects: Home', accessibilityRole: 'button' })).toBeTruthy();
+    expect(findNodesWithText(root, 'Work Project')).toHaveLength(0);
+    expect(findNodesWithText(root, 'Home Project').length).toBeGreaterThan(0);
+    act(() => tree.unmount());
   });
 
   it('searches projects outside the selected area while the browse list stays scoped (#987)', () => {
@@ -3267,7 +3369,6 @@ describe('InboxProcessingModal', () => {
         const root = tree.root;
         scrollTo.mockClear();
         scrollToEnd.mockClear();
-
         pressStep(root, 'Start later');
         expect(scrollTo).toHaveBeenLastCalledWith({ y: 0, animated: true });
         expect(scrollToEnd).not.toHaveBeenCalled();
@@ -3281,6 +3382,39 @@ describe('InboxProcessingModal', () => {
         pressStep(root, 'inbox.delegate');
         expect(scrollTo).toHaveBeenLastCalledWith({ y: 0, animated: true });
         expect(scrollToEnd).not.toHaveBeenCalled();
+      } finally {
+        act(() => tree?.unmount());
+        frame.mockRestore();
+      }
+    });
+
+    it.each(['guided', 'quick'] as const)('keeps More disclosure stationary and preserves the draft in %s mode', async (mode) => {
+      asyncStorageMock.getItem.mockResolvedValue(mode);
+      const scrollTo = vi.fn();
+      const scrollToEnd = vi.fn();
+      const frame = vi.spyOn(globalThis, 'requestAnimationFrame').mockImplementation((callback) => { callback(0); return 0; });
+      let tree!: ReturnType<typeof create>;
+      try {
+        await act(async () => {
+          tree = create(<InboxProcessingModal visible onClose={vi.fn()} />, {
+            createNodeMock: (element) => element.type === 'ScrollView' ? { scrollTo, scrollToEnd } : null,
+          });
+          await Promise.resolve();
+        });
+        const root = tree.root;
+        if (mode === 'guided') walkToFileStep(root);
+        else pressStep(root, 'inbox.illDoIt');
+        openAnchorEditor(root);
+        act(() => { findTextInputByAccessibilityLabel(root, 'taskEdit.titleLabel').props.onChangeText('Preserved title'); });
+        scrollTo.mockClear();
+        scrollToEnd.mockClear();
+        expandMoreOptions(root);
+        expect(scrollTo).not.toHaveBeenCalled();
+        expect(scrollToEnd).not.toHaveBeenCalled();
+        act(() => { findPressableWithText(root, 'More options').props.onPress(); });
+        expect(scrollTo).not.toHaveBeenCalled();
+        expect(scrollToEnd).not.toHaveBeenCalled();
+        expect(findTextInputByAccessibilityLabel(root, 'taskEdit.titleLabel').props.value).toBe('Preserved title');
       } finally {
         act(() => tree?.unmount());
         frame.mockRestore();

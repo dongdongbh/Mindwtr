@@ -283,7 +283,7 @@ export function createCoreBackend(options: { t: Translate; toasts: unknown[] }):
         },
         async submitProjectSearch() {
             const { state, plan } = context();
-            const { exactMatch } = getProcessInboxProjectChoices(state.projects, draft!.areaId, draft!.projectSearch);
+            const { exactMatch } = getProcessInboxProjectChoices(state.projects, draft!.areaId, draft!.projectSearch, draft!.projectBrowseScope);
             const submit = resolveProcessInboxProjectSearchSubmit(draft!.projectSearch, exactMatch, draft!.areaId);
             if (submit.type === 'none') return;
             const projectId = submit.type === 'select'
@@ -300,7 +300,7 @@ export function createCoreBackend(options: { t: Translate; toasts: unknown[] }):
             const current = draft!;
             const pools = getProcessInboxTokenPools(state.tasks);
             const terms = getProcessInboxSuggestionTerms(current.title, current.description, current.tokenInput);
-            const choices = getProcessInboxProjectChoices(state.projects, current.areaId, current.projectSearch);
+            const choices = getProcessInboxProjectChoices(state.projects, current.areaId, current.projectSearch, current.projectBrowseScope);
             const similar = getProcessInboxSimilarTasks(createTaskSimilarityIndex(state._allTasks), current.title, task.id, state.projects);
             const remaining = getProcessInboxRemainingCandidates(session!, queue).length;
             return {
@@ -407,7 +407,7 @@ export async function performProcessInboxAction(backend: ReplayBackend, action: 
                         String(value),
                     ));
                 case 'project':
-                    return backend.edit(pick(view.project?.projects, (option) => option.edit.type === 'selectProject' && option.edit.value === value, `project ${value}`));
+                    return backend.edit(pick([...(view.project?.current ? [view.project.current] : []), ...(view.project?.projects ?? [])], (option) => option.edit.type === 'selectProject' && option.edit.value === value, `project ${value}`));
                 case 'area':
                     return backend.edit(pick(view.project?.areas, (option) => option.edit.type === 'setArea' && option.edit.value === value, `area ${value}`));
                 case 'priority':
@@ -465,7 +465,7 @@ export function observeProcessInbox(
     const writes = recorder.normalize(recorder.log.splice(0)) as unknown[];
     const toastEntries = recorder.normalize(toasts.splice(0)) as unknown[];
     if (!view) return { closed: true, step: 'none', writes, toasts: toastEntries };
-    const { dirtyScheduleFields: _dirty, ...draft } = view.draft;
+    const { dirtyScheduleFields: _dirty, projectBrowseScope: _browse, ...draft } = view.draft;
     if (draft.startTime) draft.startTime = { date: draft.startTime.date, dateOnly: draft.startTime.dateOnly };
     return recorder.normalize({
         closed: false,

@@ -1,6 +1,7 @@
 
 
 
+import { selectProcessInboxQueue } from './process-inbox-model';
 import { resolveAreaFilterSelection } from './area-filter';
 import { applyListFilterEdit, resolveListFilterState, type ListFilterEdit, type ListFilterState } from './list-filter-state';
 import {
@@ -182,7 +183,7 @@ export function createInboxViewMethods(deps: InboxViewDeps) {
         const allProjects = state._allProjects;
         return {
             model, resolved, options, summary,
-            screen: buildInboxScreenModel({ count: tasks.length, settings: state.settings, t }),
+            screen: buildInboxScreenModel({ count: selectProcessInboxQueue(state.tasks, state.projects, now).length, settings: state.settings, t }),
             header: getTaskListHeaderText({
                 sortByLabel: model.sortByLabel, groupByLabel: model.groupByLabel,
                 hasActiveFilters: summary.hasActive, filterActiveCount: summary.activeCount, t,

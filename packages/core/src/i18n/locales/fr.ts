@@ -874,6 +874,7 @@ export const frOverrides: Record<string, string> = {
         'projects.deleteSectionConfirm': 'Êtes-vous sûr de vouloir supprimer cette section ?',
         'projects.areaFilter': 'Filtre de domaine',
         'projects.allAreas': 'Tous les domaines',
+        'inbox.browseProjects': 'Parcourir les projets',
         'projects.noArea': 'Aucun domaine',
         'projects.areaReorderFailed': 'Impossible de réorganiser les domaines.',
         'projects.moveProjectFailed': 'Impossible de déplacer le projet vers un autre domaine.',

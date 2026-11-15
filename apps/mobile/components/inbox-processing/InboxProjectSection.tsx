@@ -1,5 +1,5 @@
-import { getProjectAccentColor, groupProjectsForPicker, tFallback, useTaskStore, type Project as CoreProject } from '@mindwtr/core';
-import React from 'react';
+import { getProjectAccentColor, groupProjectsForPicker, tFallback, useTaskStore, type ProcessInboxProjectBrowseScope, type Project as CoreProject } from '@mindwtr/core';
+import React, { useState } from 'react';
 import { Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Folder, X } from 'lucide-react-native';
 import { getProcessInboxConversionRows, replaceProcessInboxExtraAction } from '@mindwtr/core';
@@ -24,6 +24,8 @@ type Props = {
   selectedProjectId?: string | null;
   selectedAreaId?: string | null;
   setSelectedAreaId: (v: string | null) => void;
+  projectBrowseScope?: ProcessInboxProjectBrowseScope;
+  setProjectBrowseScope?: (scope: ProcessInboxProjectBrowseScope) => void;
   projectSearch: string;
   setProjectSearch: (v: string) => void;
   convertToProject: boolean;
@@ -54,6 +56,8 @@ export function InboxProjectSection({
   selectedProjectId,
   selectedAreaId,
   setSelectedAreaId,
+  projectBrowseScope,
+  setProjectBrowseScope,
   projectSearch,
   setProjectSearch,
   convertToProject,
@@ -71,6 +75,7 @@ export function InboxProjectSection({
   selectedSectionId = null,
   selectSection,
 }: Props) {
+  const [showBrowseOptions, setShowBrowseOptions] = useState(false);
   const filledButton = useFilledButtonColors();
   const einkSafe = useEinkSafeColor();
   const areas = useTaskStore((state) => state.areas);
@@ -82,68 +87,57 @@ export function InboxProjectSection({
   const optionLabel = (field: string, value: string) => `${field}: ${value}`;
 
   const renderAreaPicker = () => {
-    if (!showAreaField || selectedProjectId) return null;
+    if (!showAreaField) return null;
     const noAreaSelected = !selectedAreaId;
 
     return (
       <View style={styles.projectFieldGroup}>
-        <Text style={[styles.projectFieldLabel, { color: tc.secondaryText }]}>
+        <Text accessibilityRole="header" style={[styles.projectFieldLabel, { color: tc.secondaryText }]}>
           {t('taskEdit.areaLabel')}
         </Text>
-        {currentArea && (
-          <TouchableOpacity
-            accessibilityRole="button"
-            accessibilityLabel={optionLabel(areaLabel, currentArea.name)}
-            style={[
-              styles.projectChip,
-              { backgroundColor: tc.filterBg, borderWidth: 1, borderColor: tc.tint },
-            ]}
-            onPress={() => setSelectedAreaId(currentArea.id)}
-            accessibilityState={{ selected: selectedAreaId === currentArea.id }}
-          >
-            <View style={[styles.projectDot, { backgroundColor: einkSafe(currentArea.color || tc.secondaryText) }]} />
-            <Text style={[styles.projectChipText, { color: tc.text }]}>✓ {currentArea.name}</Text>
-          </TouchableOpacity>
+        {selectedProjectId ? (
+          <Text style={[styles.projectChipText, { color: tc.text }]}>{currentArea?.name ?? t('projects.noArea')}</Text>
+        ) : (
+          <View style={styles.projectListContainer}>
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel={optionLabel(areaLabel, t('projects.noArea'))}
+              style={[
+                styles.projectChip,
+                noAreaSelected
+                  ? { backgroundColor: tc.filterBg, borderWidth: 1, borderColor: tc.tint }
+                  : { backgroundColor: tc.cardBg, borderWidth: 1, borderColor: tc.border },
+              ]}
+              onPress={() => setSelectedAreaId(null)}
+              accessibilityState={{ selected: noAreaSelected }}
+            >
+              <Text style={[styles.projectChipText, { color: tc.text }]}>
+                {noAreaSelected ? '✓ ' : ''}{t('projects.noArea')}
+              </Text>
+            </TouchableOpacity>
+            {areaOptions.map((area) => {
+              const isSelected = selectedAreaId === area.id;
+              return (
+                <TouchableOpacity
+                  key={area.id}
+                  accessibilityRole="button"
+                  accessibilityLabel={optionLabel(areaLabel, area.name)}
+                  style={[
+                    styles.projectChip,
+                    isSelected
+                      ? { backgroundColor: tc.filterBg, borderWidth: 1, borderColor: tc.tint }
+                      : { backgroundColor: tc.cardBg, borderWidth: 1, borderColor: tc.border },
+                  ]}
+                  onPress={() => setSelectedAreaId(area.id)}
+                  accessibilityState={{ selected: isSelected }}
+                >
+                  <View style={[styles.projectDot, { backgroundColor: einkSafe(area.color || tc.secondaryText) }]} />
+                  <Text style={[styles.projectChipText, { color: tc.text }]}>{area.name}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
         )}
-        <View style={styles.projectListContainer}>
-          <TouchableOpacity
-            accessibilityRole="button"
-            accessibilityLabel={optionLabel(areaLabel, t('projects.noArea'))}
-            style={[
-              styles.projectChip,
-              noAreaSelected
-                ? { backgroundColor: tc.filterBg, borderWidth: 1, borderColor: tc.tint }
-                : { backgroundColor: tc.cardBg, borderWidth: 1, borderColor: tc.border },
-            ]}
-            onPress={() => setSelectedAreaId(null)}
-            accessibilityState={{ selected: noAreaSelected }}
-          >
-            <Text style={[styles.projectChipText, { color: tc.text }]}>
-              {noAreaSelected ? '✓ ' : ''}{t('projects.noArea')}
-            </Text>
-          </TouchableOpacity>
-          {areaOptions.map((area) => {
-            const isSelected = selectedAreaId === area.id;
-            return (
-              <TouchableOpacity
-                key={area.id}
-                accessibilityRole="button"
-                accessibilityLabel={optionLabel(areaLabel, area.name)}
-                style={[
-                  styles.projectChip,
-                  isSelected
-                    ? { backgroundColor: tc.filterBg, borderWidth: 1, borderColor: tc.tint }
-                    : { backgroundColor: tc.cardBg, borderWidth: 1, borderColor: tc.border },
-                ]}
-                onPress={() => setSelectedAreaId(area.id)}
-                accessibilityState={{ selected: isSelected }}
-              >
-                <View style={[styles.projectDot, { backgroundColor: einkSafe(area.color || tc.secondaryText) }]} />
-                <Text style={[styles.projectChipText, { color: tc.text }]}>{area.name}</Text>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
       </View>
     );
   };
@@ -153,8 +147,8 @@ export function InboxProjectSection({
     const sectionLabel = t('taskEdit.sectionLabel');
     const options = [{ id: null, title: t('taskEdit.noSectionOption') }, ...projectSections];
     return (
-      <View style={styles.projectFieldGroup}>
-        <Text style={[styles.projectFieldLabel, { color: tc.secondaryText }]}>{sectionLabel}</Text>
+      <View style={[styles.projectFieldGroup, { marginLeft: 16 }]}>
+        <Text accessibilityRole="header" style={[styles.projectFieldLabel, { color: tc.secondaryText }]}>{sectionLabel}</Text>
         <View style={styles.projectListContainer}>
           {options.map((section) => {
             const isSelected = (selectedSectionId ?? null) === section.id;
@@ -184,7 +178,7 @@ export function InboxProjectSection({
   };
 
 
-  const projectGroups = groupProjectsForPicker(filteredProjects, areas);
+  const projectGroups = groupProjectsForPicker(filteredProjects.filter((project) => project.id !== selectedProjectId), areas);
   const renderProjectChip = (project: Project) => {
     const projectColor = getProjectAccentColor(project, areaById);
     const isSelected = selectedProjectId === project.id;
@@ -208,28 +202,60 @@ export function InboxProjectSection({
     );
   };
 
+  const renderProjectBrowsePicker = () => {
+    if (!setProjectBrowseScope) return null;
+    const scope = projectBrowseScope ?? (selectedAreaId ? { kind: 'area' as const, areaId: selectedAreaId } : { kind: 'all' as const });
+    const browseLabel = tFallback(t, 'inbox.browseProjects', 'Browse projects');
+    const choices: { label: string; value: ProcessInboxProjectBrowseScope; selected: boolean }[] = [
+      { label: t('projects.allAreas'), value: { kind: 'all' }, selected: scope.kind === 'all' },
+      { label: t('projects.noArea'), value: { kind: 'none' }, selected: scope.kind === 'none' },
+      ...areaOptions.map((area) => ({ label: area.name, value: { kind: 'area' as const, areaId: area.id }, selected: scope.kind === 'area' && scope.areaId === area.id })),
+    ];
+    return (
+      <View style={styles.projectFieldGroup}>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel={`${browseLabel}: ${choices.find((choice) => choice.selected)?.label ?? t('projects.allAreas')}`}
+          accessibilityState={{ expanded: showBrowseOptions }} onPress={() => setShowBrowseOptions((open) => !open)}
+          style={styles.projectChip}>
+          <Text style={[styles.projectChipText, { color: tc.secondaryText }]}>{browseLabel}: {choices.find((choice) => choice.selected)?.label ?? t('projects.allAreas')} ▾</Text>
+        </TouchableOpacity>
+        {showBrowseOptions && <View style={styles.projectListContainer}>
+          {choices.map(({ label, value, selected }) => (
+            <TouchableOpacity key={value.kind === 'area' ? value.areaId : value.kind} accessibilityRole="button"
+              accessibilityLabel={optionLabel(browseLabel, label)} accessibilityState={{ selected }}
+              style={[styles.projectChip, { backgroundColor: selected ? tc.filterBg : tc.cardBg, borderWidth: 1, borderColor: selected ? tc.tint : tc.border }]}
+              onPress={() => { setProjectBrowseScope(value); setShowBrowseOptions(false); }}>
+              <Text style={[styles.projectChipText, { color: tc.text }]}>{label}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>}
+      </View>
+    );
+  };
+
   const renderProjectPicker = () => {
     const noProjectSelected = !selectedProjectId;
     return (
       <>
-      {showProjectField && currentProject && (
-        <TouchableOpacity
-          accessibilityRole="button"
-          accessibilityLabel={optionLabel(projectLabel, currentProject.title)}
-          style={[
-            styles.projectChip,
-            { backgroundColor: tc.filterBg, borderWidth: 1, borderColor: tc.tint },
-          ]}
-          onPress={() => selectProjectEarly(currentProject.id)}
-          accessibilityState={{ selected: selectedProjectId === currentProject.id }}
-        >
-          <Text style={[styles.projectChipText, { color: tc.text }]}>✓ {currentProject.title}</Text>
-        </TouchableOpacity>
-      )}
-      {renderSectionPicker()}
-      {renderAreaPicker()}
-      {showProjectField && (
-        <>
+        {renderAreaPicker()}
+        {showProjectField && (
+          <>
+          <Text accessibilityRole="header" style={[styles.projectFieldLabel, { color: tc.secondaryText }]}>{t('projects.title')}</Text>
+          {currentProject && (
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel={optionLabel(projectLabel, currentProject.title)}
+              style={[
+                styles.projectChip,
+                { backgroundColor: tc.filterBg, borderWidth: 1, borderColor: tc.tint },
+              ]}
+              onPress={() => selectProjectEarly(currentProject.id)}
+              accessibilityState={{ selected: selectedProjectId === currentProject.id }}
+            >
+              <Text style={[styles.projectChipText, { color: tc.text }]}>✓ {currentProject.title}</Text>
+            </TouchableOpacity>
+          )}
+          {renderSectionPicker()}
+          {renderProjectBrowsePicker()}
           <View style={styles.projectSearchRow}>
             <TextInput
               value={projectSearch}

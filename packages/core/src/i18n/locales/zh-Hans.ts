@@ -1022,6 +1022,7 @@ export const zhHans: Record<string, string> = {
         'projects.deleteSectionConfirm': '删除此分区？其中的任务不会被删除，会移到“无分区”。',
         'projects.areaFilter': '领域筛选',
         'projects.allAreas': '所有领域',
+        'inbox.browseProjects': '浏览项目',
         'projects.noArea': '无领域',
         'projects.deletedAreaFilterResetAlert': '所选领域已被删除，因此筛选器已重置为所有领域。',
         'projects.search': '搜索项目',

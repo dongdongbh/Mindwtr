@@ -72,6 +72,29 @@ describe('native host contract: the Inbox view', () => {
         }
     });
 
+    it('counts the processing queue independently of Inbox rows, filters and bulk scope', async () => {
+        freezeClock();
+        const { host } = await openHost(scenario('features'));
+        const before = value(host.getInboxView({ offset: 0, limit: 100 }));
+        const due = await useTaskStore.getState().addTask('Due review', { status: 'someday', reviewAt: '2020-01-01' });
+        expect(due).toBeTruthy();
+        const after = value(host.getInboxView({ offset: 0, limit: 100 }));
+        expect(after.process?.count).toBe((before.process?.count ?? 0) + 1);
+        expect(after.count).toBe(before.count);
+        expect(after.items).toEqual(before.items);
+        expect(after.filters).toEqual(before.filters);
+        const filtered = value(host.getInboxView({ offset: 0, limit: 100, filters: { ...EMPTY_LIST_FILTER_STATE, searchQuery: 'nothing matches' } }));
+        expect(filtered.count).toBe(0);
+        expect(filtered.process).toEqual(after.process);
+        const dueTask = useTaskStore.getState().tasks.find((task) => task.title === 'Due review');
+        if (!dueTask) throw new Error('Expected the due review');
+        useTaskStore.setState({ tasks: [dueTask], _allTasks: [dueTask] });
+        const onlyReview = value(host.getInboxView({ offset: 0, limit: 100 }));
+        expect(onlyReview.count).toBe(0);
+        expect(onlyReview.items).toEqual([]);
+        expect(onlyReview.process?.count).toBe(1);
+    });
+
     it('returns what core\'s models return when called directly, with the Inbox list\'s rows', async () => {
         freezeClock();
         const { host } = await openHost(scenario('features'));

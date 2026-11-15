@@ -1003,6 +1003,7 @@ export const ukOverrides: Record<string, string> = {
     "projects.deleteSectionConfirm": "Видалити цей розділ? Його завдання не буде видалено; вони перейдуть до розділу «Без розділу».",
     "projects.areaFilter": "Фільтр сфер",
     "projects.allAreas": "Усі сфери",
+        'inbox.browseProjects': 'Переглянути проєкти',
     "projects.noArea": "Без сфери",
     "projects.areaReorderFailed": "Не вдалося змінити порядок сфер",
     "projects.moveProjectFailed": "Не вдалося перемістити проект",

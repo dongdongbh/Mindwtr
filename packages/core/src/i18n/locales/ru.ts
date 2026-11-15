@@ -724,6 +724,7 @@ export const ruOverrides: Record<string, string> = {
         'projects.deleteSectionConfirm': 'Вы уверены, что хотите удалить этот раздел?',
         'projects.areaFilter': 'Фильтр области',
         'projects.allAreas': 'Все области',
+        'inbox.browseProjects': 'Просмотр проектов',
         'projects.noArea': 'Нет области',
         'projects.sortAreas': 'Сортировать области',
         'projects.sortByName': 'Сортировать по А–Я',

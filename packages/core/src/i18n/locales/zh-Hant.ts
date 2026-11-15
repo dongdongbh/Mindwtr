@@ -1022,6 +1022,7 @@ export const zhHant: Record<string, string> = {
         'projects.deleteSectionConfirm': '刪除此分區？其中的任務不會被刪除，會移到「無分區」。',
         'projects.areaFilter': '領域篩選',
         'projects.allAreas': '所有領域',
+        'inbox.browseProjects': '瀏覽專案',
         'projects.noArea': '無領域',
         'projects.deletedAreaFilterResetAlert': '所選領域已被刪除，因此篩選器已重設為所有領域。',
         'projects.search': '搜索專案',

@@ -1038,6 +1038,7 @@ export const en: Record<string, string> = {
         'projects.deleteSectionConfirm': 'Delete this section? Its tasks are not deleted; they move to No Section.',
         'projects.areaFilter': 'Area filter',
         'projects.allAreas': 'All areas',
+        'inbox.browseProjects': 'Browse projects',
         'projects.noArea': 'No area',
         'projects.areaReorderFailed': 'Failed to reorder areas',
         'projects.moveProjectFailed': 'Failed to move project',

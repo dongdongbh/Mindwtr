@@ -725,6 +725,7 @@ export const plOverrides: Record<string, string> = {
         'projects.deleteSectionConfirm': 'Czy na pewno chcesz usunąć tę sekcję?',
         'projects.areaFilter': 'Filtr obszarowy',
         'projects.allAreas': 'Wszystkie obszary',
+        'inbox.browseProjects': 'Przeglądaj projekty',
         'projects.noArea': 'Brak obszaru',
         'projects.sortAreas': 'Sortuj obszary',
         'projects.sortByName': 'Sortuj A–Z',

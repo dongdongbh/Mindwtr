@@ -989,6 +989,7 @@ export const koOverrides: Record<string, string> = {
         'projects.deleteSectionConfirm': '이 섹션을 삭제하시겠습니까?',
         'projects.areaFilter': '영역 필터',
         'projects.allAreas': '모든 영역',
+        'inbox.browseProjects': '프로젝트 찾아보기',
         'projects.noArea': '영역 없음',
         'projects.areaReorderFailed': '영역 순서 변경 실패',
         'projects.moveProjectFailed': '프로젝트 이동 실패',

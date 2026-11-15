@@ -916,6 +916,7 @@ export const viOverrides: Record<string, string> = {
         'projects.deleteSectionConfirm': 'Bạn có chắc muốn xóa phần này không?',
         'projects.areaFilter': 'Bộ lọc khu vực',
         'projects.allAreas': 'Tất cả khu vực',
+        'inbox.browseProjects': 'Duyệt dự án',
         'projects.noArea': 'Không có khu vực',
         'projects.areaReorderFailed': 'Sắp xếp lại khu vực thất bại',
         'projects.moveProjectFailed': 'Di chuyển dự án thất bại',

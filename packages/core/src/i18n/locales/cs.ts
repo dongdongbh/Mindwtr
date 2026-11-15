@@ -890,6 +890,7 @@ export const csOverrides: Record<string, string> = {
         'projects.deleteSectionConfirm': 'Opravdu chcete tuto sekci smazat?',
         'projects.areaFilter': 'Filtr oblasti',
         'projects.allAreas': 'Všechny oblasti',
+        'inbox.browseProjects': 'Procházet projekty',
         'projects.noArea': 'Bez oblasti',
         'projects.areaReorderFailed': 'Oblasti se nepodařilo přeuspořádat',
         'projects.moveProjectFailed': 'Projekt se nepodařilo přesunout',

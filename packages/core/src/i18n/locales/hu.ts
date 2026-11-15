@@ -1002,6 +1002,7 @@ export const huOverrides: Record<string, string> = {
     'projects.deleteSectionConfirm': 'Törli ezt a szakaszt? A benne lévő feladatok nem törlődnek, hanem átkerülnek a „Nincs szakasz” közé.',
     'projects.areaFilter': 'Területszűrő',
     'projects.allAreas': 'Összes terület',
+        'inbox.browseProjects': 'Projektek böngészése',
     'projects.noArea': 'Nincs terület',
     'projects.areaReorderFailed': 'Nem sikerült átrendezni a területeket',
     'projects.moveProjectFailed': 'Nem sikerült áthelyezni a projektet',

@@ -793,6 +793,7 @@ export const arOverrides: Record<string, string> = {
         'projects.deleteSectionConfirm': 'هل أنت متأكد أنك تريد حذف هذا القسم؟',
         'projects.areaFilter': 'مرشح المنطقة',
         'projects.allAreas': 'جميع المناطق',
+        'inbox.browseProjects': 'تصفح المشاريع',
         'projects.noArea': 'لا منطقة',
         'projects.sortAreas': 'فرز المناطق',
         'projects.sortByName': 'فرز من أ إلى ي',

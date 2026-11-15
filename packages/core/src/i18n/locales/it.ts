@@ -786,6 +786,7 @@ export const itOverrides: Record<string, string> = {
         'projects.deleteSectionConfirm': 'Sei sicuro di voler eliminare questa sezione?',
         'projects.areaFilter': 'Filtro area',
         'projects.allAreas': 'Tutte le aree',
+        'inbox.browseProjects': 'Sfoglia progetti',
         'projects.noArea': 'Nessuna area',
         'projects.deletedAreaFilterResetAlert': 'L\'area selezionata è stata rimossa, quindi il filtro è stato reimpostato su Tutte le aree.',
         'projects.search': 'Cerca progetti',

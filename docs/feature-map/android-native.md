@@ -70,6 +70,8 @@ The native client is a Kotlin and Jetpack Compose app in `apps/android-native`. 
 - Checks: `apps/android-native/scripts/check-process-inbox-device.mjs`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/ProcessInboxHeaderTest.kt`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/ProcessInboxScrollTest.kt`
 - Notes: The count shows 99+ above 99, but TalkBack reads the exact count. After a process death the app lands on the Inbox and resends the owed answer in the background. The project chips follow the Projects view order (areas in order, then each project's order), with Someday / Waiting projects after a heading (`process-inbox-deferred-projects`).
 
+- Notes: The processing count includes Inbox tasks and due Someday reviews. Area appears before Projects, with the selected project’s inherited Area and indented Section controls. Browse projects offers All areas, No area and named Areas without changing task assignment; search remains global.
+
 ## Mind Sweep
 
 - Reach: Inbox › Mind Sweep pill. An empty Inbox shows Mind Sweep in place of Process Inbox. The Weekly Review links to it too.

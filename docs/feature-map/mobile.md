@@ -46,7 +46,7 @@ Source: `apps/mobile`. Routes live in `apps/mobile/app` (expo-router). Labels be
 
 ## Inbox
 
-- Reach: Inbox tab. Header button "Process Inbox (N)". With an empty Inbox the main button is Mind Sweep.
+- Reach: Inbox tab. Header button "Process Inbox (N)". The count includes Inbox tasks and Someday tasks due for review; an otherwise empty processing queue shows Mind Sweep.
 - Shortcuts: Swipe right for Done or Focus. Swipe left for Organize, Dates…, Delete. Long press a row to start bulk selection. Pull down to sync.
 - Code: `apps/mobile/app/(drawer)/(tabs)/inbox.tsx`, `apps/mobile/components/task-list.tsx`
 - Checks: `apps/mobile/app/(drawer)/(tabs)/inbox.test.tsx`, `apps/mobile/components/task-list/inbox-view-parity.test.tsx`, `apps/mobile/components/task-list.test.tsx`
@@ -57,7 +57,7 @@ Source: `apps/mobile`. Routes live in `apps/mobile/app` (expo-router). Labels be
 - Reach: Inbox › Process Inbox (N). A step-by-step clarify flow opens for each task.
 - Code: `apps/mobile/components/inbox-processing-modal.tsx`, `apps/mobile/components/inbox-processing/InboxStepFlow.tsx`, `apps/mobile/components/inbox-processing/useInboxProcessingController.ts`
 - Checks: `apps/mobile/components/inbox-processing-modal.test.tsx`, `apps/mobile/components/inbox-processing/process-inbox-parity.test.tsx`, `apps/mobile/components/inbox-processing/InboxProjectSection.test.tsx`
-- Notes: Setting a project clears a direct area, because a task has one Container.
+- Notes: Area assignment precedes Projects. Selecting a project shows its inherited Area and indented Section controls; a project with no Area shows No area. Browse projects has All areas, No area and named Areas; changing browsing preserves assignment and sections. Search remains global. More opens and closes without moving the scroll position. Setting a project clears a direct area, because a task has one Container.
 
 ## Mind Sweep
 

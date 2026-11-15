@@ -810,6 +810,7 @@ export const deOverrides: Record<string, string> = {
         'projects.deleteSectionConfirm': 'Bist Du sicher, dass Du diesen Abschnitt löschen möchtest?',
         'projects.areaFilter': 'Bereichsfilter',
         'projects.allAreas': 'Alle Bereiche',
+        'inbox.browseProjects': 'Projekte durchsuchen',
         'projects.noArea': 'Keine Bereiche',
         'projects.sortAreas': 'Bereiche sortieren',
         'projects.sortByName': 'Von A-Z sortieren',

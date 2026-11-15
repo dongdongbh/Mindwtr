@@ -1023,6 +1023,7 @@ export const faOverrides: Record<string, string> = {
         'projects.deleteSectionConfirm': 'این بخش حذف شود؟ کارهای داخل آن حذف نمی‌شوند و به «بدون بخش» منتقل می‌شوند.',
         'projects.areaFilter': 'فیلتر حوزه',
         'projects.allAreas': 'همه حوزه‌ها',
+        'inbox.browseProjects': 'مرور پروژه‌ها',
         'projects.noArea': 'بدون حوزه',
         'projects.areaReorderFailed': 'تغییر ترتیب حوزه‌ها ناموفق بود',
         'projects.moveProjectFailed': 'انتقال پروژه ناموفق بود',

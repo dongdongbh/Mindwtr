@@ -3750,6 +3750,12 @@ function isValidInboxEdit(edit: unknown): edit is ProcessInboxDraftEdit {
                 && (state.settings.gtd?.viewSections?.someday ?? []).some((section) => section.id === value));
         case 'setArea':
             return value === null || state.areas.some((area) => area.id === value && !area.deletedAt);
+        case 'setProjectBrowseScope':
+            return isObjectRecord(value) && (
+                ((value.kind === 'all' || value.kind === 'none') && Object.keys(value).length === 1)
+                || (value.kind === 'area' && Object.keys(value).length === 2 && typeof value.areaId === 'string'
+                    && state.areas.some((area) => area.id === value.areaId && !area.deletedAt))
+            );
         case 'setSection':
 
             return value === null || state.sections.some((section) => section.id === value && !section.deletedAt);
@@ -3833,6 +3839,11 @@ function createInboxProcessingMethods(deps: InboxProcessingDeps) {
         if (!task) return null;
         const now = new Date();
         const t = deps.t();
+        const browseScope = entry.draft.projectBrowseScope ?? (entry.draft.areaId ? { kind: 'area', areaId: entry.draft.areaId } : { kind: 'all' });
+        if (browseScope?.kind === 'area'
+            && !state.areas.some((area) => area.id === browseScope.areaId && !area.deletedAt)) {
+            entry.draft = { ...entry.draft, projectBrowseScope: { kind: 'all' } };
+        }
         if (similarity?.tasks !== state._allTasks) {
             similarity = { tasks: state._allTasks, index: createTaskSimilarityIndex(state._allTasks) };
         }
@@ -4207,7 +4218,7 @@ function createInboxProcessingMethods(deps: InboxProcessingDeps) {
                 const { state, plan, parseTitle } = context();
                 if (input.decision.choice === 'submitProjectSearch') {
                     if (!buildView(entry)?.project?.search) return fail('INVALID_INPUT', 'This step has no project search');
-                    const { exactMatch } = getProcessInboxProjectChoices(state.projects, entry.draft.areaId, entry.draft.projectSearch);
+                    const { exactMatch } = getProcessInboxProjectChoices(state.projects, entry.draft.areaId, entry.draft.projectSearch, entry.draft.projectBrowseScope);
                     const submit = resolveProcessInboxProjectSearchSubmit(entry.draft.projectSearch, exactMatch, entry.draft.areaId);
                     if (submit.type === 'none') return { ok: true, value: { notice: null, toast: null, wrote: false } };
                     let projectId = submit.type === 'select' ? submit.projectId : null;
@@ -4286,7 +4297,7 @@ function createInboxProcessingMethods(deps: InboxProcessingDeps) {
                     return fail('INVALID_INPUT', 'This step does not offer project search');
                 }
                 const exact = getProcessInboxProjectChoices(state.projects, entry.draft.areaId,
-                    entry.draft.projectSearch).exactMatch;
+                    entry.draft.projectSearch, entry.draft.projectBrowseScope).exactMatch;
                 const submit = resolveProcessInboxProjectSearchSubmit(entry.draft.projectSearch, exact ?? undefined, entry.draft.areaId);
                 if (submit.type === 'none') return { ok: true, value: { kind: 'flow', result: result(entry, null, null) } };
                 if (submit.type === 'select') {

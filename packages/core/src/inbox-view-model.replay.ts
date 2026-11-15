@@ -1,6 +1,7 @@
 
 
 
+import { selectProcessInboxQueue } from './process-inbox-model';
 import { readFileSync } from 'node:fs';
 import { resolveAreaFilterSelection } from './area-filter';
 import { applyListFilterEdit, EMPTY_LIST_FILTER_STATE, resolveListFilterState, type ListFilterEdit, type ListFilterState } from './list-filter-state';
@@ -232,7 +233,7 @@ export async function replayInboxScenario(options: {
             kind: 'inbox', chips: resolved.chips, activeCount: resolved.activeCount, hasActive: resolved.hasActive,
             includeArchivedProjects: false, settings: state.settings, t,
         });
-        const screen = buildInboxScreenModel({ count: tasks.length, settings: state.settings, t });
+        const screen = buildInboxScreenModel({ count: selectProcessInboxQueue(state.tasks, state.projects).length, settings: state.settings, t });
         const header = getTaskListHeaderText({
             sortByLabel: model.sortByLabel, groupByLabel: model.groupByLabel,
             hasActiveFilters: summary.hasActive, filterActiveCount: summary.activeCount, t,

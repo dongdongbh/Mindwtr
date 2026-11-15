@@ -1,5 +1,6 @@
 
 export const nlOverrides: Record<string, string> = {
+        'inbox.browseProjects': 'Projecten bekijken',
     "projects.calendarLimit": "De eerste 200 resultaten worden getoond. Zoek om een andere afspraak te vinden.",
     "projects.calendarTitle": "Agenda",
     "projects.calendarLink": "Agenda-afspraak koppelen",

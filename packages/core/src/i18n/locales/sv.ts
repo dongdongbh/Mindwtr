@@ -1018,6 +1018,7 @@ export const svOverrides: Record<string, string> = {
         'projects.deleteSectionConfirm': 'Ta bort denna sektion? Uppgifterna i den tas inte bort utan flyttas till Ingen sektion.',
         'projects.areaFilter': 'Områdesfilter',
         'projects.allAreas': 'Alla områden',
+        'inbox.browseProjects': 'Bläddra bland projekt',
         'projects.noArea': 'Inget område',
         'projects.areaReorderFailed': 'Det gick inte att ändra ordning på områdena',
         'projects.moveProjectFailed': 'Det gick inte att flytta projektet',

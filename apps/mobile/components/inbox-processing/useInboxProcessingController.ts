@@ -5,6 +5,7 @@ import {
   type TextStyle,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useTaskDisplayClock } from '@/hooks/use-task-display-clock';
 import { useRouter } from 'expo-router';
 import {
   advanceProcessInboxSession,
@@ -66,6 +67,7 @@ import {
   type ProcessInboxDateField,
   type ProcessInboxDraft,
   type ProcessInboxMode,
+  type ProcessInboxProjectBrowseScope,
   type ProcessInboxSession,
   type Task,
   type TaskPriority,
@@ -171,6 +173,7 @@ export function useInboxProcessingController({
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [selectedSectionId, setSelectedSectionId] = useState<string | null>(null);
   const [selectedAreaId, setSelectedAreaId] = useState<string | null>(null);
+  const [projectBrowseScope, setProjectBrowseScope] = useState<ProcessInboxProjectBrowseScope>();
   const [selectedEnergyLevel, setSelectedEnergyLevel] = useState<Task['energyLevel']>(undefined);
   const [selectedAssignedTo, setSelectedAssignedTo] = useState('');
   const [selectedTimeEstimate, setSelectedTimeEstimate] = useState<TimeEstimate | undefined>(undefined);
@@ -253,11 +256,16 @@ export function useInboxProcessingController({
   );
 
   const { areaById } = useVisibleTaskContext();
+  const queueClockRevision = useTaskDisplayClock(visible && tasks.some((task) => task.status === 'someday' && Boolean(task.reviewAt)));
   const inboxTasks = useMemo(
 
 
-    () => selectProcessInboxQueue(tasks, projects),
-    [projects, tasks],
+    () => {
+      void queueClockRevision;
+      void visible;
+      return selectProcessInboxQueue(tasks, projects);
+    },
+    [projects, tasks, queueClockRevision, visible],
   );
 
   const processingQueue = useMemo(
@@ -380,9 +388,19 @@ export function useInboxProcessingController({
   const appleClarificationAssociationsRef = useRef(appleClarificationAssociations);
   appleClarificationAssociationsRef.current = appleClarificationAssociations;
 
+  const requestedProjectBrowseScope = useMemo<ProcessInboxProjectBrowseScope>(
+    () => projectBrowseScope ?? (selectedAreaId ? { kind: 'area', areaId: selectedAreaId } : { kind: 'all' }),
+    [projectBrowseScope, selectedAreaId],
+  );
+  const effectiveProjectBrowseScope = useMemo<ProcessInboxProjectBrowseScope>(
+    () => requestedProjectBrowseScope.kind === 'area' && !areaById.has(requestedProjectBrowseScope.areaId)
+      ? { kind: 'all' } : requestedProjectBrowseScope,
+    [areaById, requestedProjectBrowseScope],
+  );
+
   const { filteredProjects, exactMatch: exactProjectMatch } = useMemo(
-    () => getProcessInboxProjectChoices(projects, selectedAreaId, projectSearch),
-    [projectSearch, projects, selectedAreaId],
+    () => getProcessInboxProjectChoices(projects, selectedAreaId, projectSearch, effectiveProjectBrowseScope),
+    [projectSearch, projects, selectedAreaId, effectiveProjectBrowseScope],
   );
   const hasExactProjectMatch = Boolean(exactProjectMatch);
 
@@ -400,23 +418,25 @@ export function useInboxProcessingController({
     ? selectedSectionId
     : null;
   const currentArea = useMemo(
-    () => (selectedAreaId ? areas.find((area) => area.id === selectedAreaId) ?? null : null),
-    [areas, selectedAreaId],
+    () => areaById.get((currentProject ? currentProject.areaId : selectedAreaId) ?? '') ?? null,
+    [areaById, currentProject, selectedAreaId],
   );
 
 
-  const scrollProcessingToRevealedStep = useCallback(() => {
-    requestAnimationFrame(() => {
-      processingScrollRef.current?.scrollToEnd?.({ animated: true });
-    });
+  useEffect(() => {
+    if (requestedProjectBrowseScope.kind === 'area' && !areaById.has(requestedProjectBrowseScope.areaId)) {
+      setProjectBrowseScope({ kind: 'all' });
+    }
+  }, [areaById, requestedProjectBrowseScope]);
+
+  const assignArea = useCallback((areaId: string | null) => {
+    setSelectedAreaId(areaId);
+    setProjectBrowseScope(areaId ? { kind: 'area', areaId } : { kind: 'none' });
   }, []);
 
   const toggleAdvancedOptions = useCallback(() => {
-    setShowAdvancedOptions((previous) => {
-      if (!previous) scrollProcessingToRevealedStep();
-      return !previous;
-    });
-  }, [scrollProcessingToRevealedStep]);
+    setShowAdvancedOptions((previous) => !previous);
+  }, []);
 
   const resetTitleFocus = useCallback(() => {
     setProcessingTitleFocused(false);
@@ -476,6 +496,7 @@ export function useInboxProcessingController({
     setSelectedProjectId(defaults.projectId);
     setSelectedSectionId(defaults.sectionId);
     setSelectedAreaId(defaults.areaId);
+    setProjectBrowseScope(undefined);
     resetTitleFocus();
     setProcessingTitle(defaults.title);
     setProcessingDescription(defaults.description);
@@ -661,6 +682,7 @@ export function useInboxProcessingController({
       ...(effectiveSectionId ? { sectionId: effectiveSectionId } : {}),
       areaId: selectedAreaId,
       projectSearch,
+      ...(projectBrowseScope ? { projectBrowseScope } : {}),
       contexts: selectedContexts,
       tags: selectedTags,
       tokenInput: newContext,
@@ -699,6 +721,7 @@ export function useInboxProcessingController({
     processingDescription,
     processingTitle,
     projectSearch,
+    projectBrowseScope,
     selectedAreaId,
     selectedAssignedTo,
     selectedContexts,
@@ -901,12 +924,13 @@ export function useInboxProcessingController({
 
   const selectProjectEarly = useCallback((projectId: string | null) => {
     const next = selectProcessInboxProject(projectId);
+    setProjectBrowseScope(effectiveProjectBrowseScope);
     setConvertToProject(next.convertToProject);
     setSelectedProjectId(next.projectId);
     if (next.projectId !== selectedProjectId) setSelectedSectionId(null);
     if (next.areaId === null) setSelectedAreaId(null);
     setProjectSearch(next.projectSearch);
-  }, [selectedProjectId]);
+  }, [effectiveProjectBrowseScope, selectedProjectId]);
 
   const handleCreateProjectEarly = useCallback(async () => {
     const submit = resolveProcessInboxProjectSearchSubmit(projectSearch, exactProjectMatch, selectedAreaId);
@@ -1335,7 +1359,9 @@ export function useInboxProcessingController({
     selectedSomedaySectionId,
     selectedTags,
     selectedTimeEstimate,
-    setSelectedAreaId,
+    setSelectedAreaId: assignArea,
+    projectBrowseScope: effectiveProjectBrowseScope,
+    setProjectBrowseScope,
     setSelectedAssignedTo,
     setDelegateFollowUpDate: setDelegateFollowUpDateFromControl,
     setDelegateFollowUpDateOnly: setDelegateFollowUpDateOnlyFromControl,

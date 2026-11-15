@@ -369,6 +369,9 @@ struct ProcessInboxSheet: View {
                 Text(project.text("title")).rnFont(16, .bold).accessibilityAddTraits(.isHeader)
                 if !project.text("areaLabel").isEmpty {
                     Text(project.text("areaLabel")).rnFont(13, .semibold).foregroundStyle(palette.secondary)
+                    if !project.text("inheritedArea").isEmpty {
+                        Text(project.text("inheritedArea")).rnFont(14)
+                    }
                     options(project.objects("areas"), prefix: "process-inbox-area")
                 }
                 let conversion = project.object("conversion")
@@ -405,14 +408,33 @@ struct ProcessInboxSheet: View {
                         Task { await model.decideProcessInbox("createProject") }
                     }
                 } else {
+                    Text(project.text("projectsLabel")).rnFont(13, .semibold).foregroundStyle(palette.secondary)
+                        .accessibilityAddTraits(.isHeader)
                     if !project.object("current").isEmpty {
                         option(project.object("current"), id: "process-inbox-project-current")
+                        let sections = project.object("sections")
+                        if !sections.isEmpty {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text(sections.text("label")).rnFont(13, .semibold).foregroundStyle(palette.secondary)
+                                    .accessibilityAddTraits(.isHeader)
+                                options(sections.objects("options"), prefix: "process-inbox-section")
+                            }.padding(.leading, 16)
+                        }
                     }
-
-                    let sections = project.object("sections")
-                    if !sections.isEmpty {
-                        Text(sections.text("label")).rnFont(13, .semibold).foregroundStyle(palette.secondary)
-                        options(sections.objects("options"), prefix: "process-inbox-section")
+                    let browse = project.object("browse")
+                    if !browse.isEmpty {
+                        let choices = browse.objects("options")
+                        let selected = choices.first { $0["selected"] as? Bool == true }?.text("label") ?? ""
+                        Menu {
+                            ForEach(choices.indices, id: \.self) { index in
+                                Button(choices[index].text("label")) {
+                                    Task { await model.editProcessInbox(choices[index].object("edit")) }
+                                }
+                            }
+                        } label: {
+                            Label("\(browse.text("label")): \(selected)", systemImage: "chevron.down")
+                                .rnFont(13).foregroundStyle(palette.secondary)
+                        }.disabled(!enabled).accessibilityIdentifier("process-inbox-browse-projects")
                     }
                     let search = project.object("search")
                     if !search.isEmpty {

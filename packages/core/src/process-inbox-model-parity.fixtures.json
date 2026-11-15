@@ -1,5 +1,6 @@
 {
  "provenance": {
+  "processingBrowseScope1566": { "base": "20f8515bcc2624fa7449a216970d31b665646113", "scenario": "project search, create early, and area filter", "change": "After selecting a Home project, clearing search preserves Home browsing. Only that observation removes p-launch; writes and dates remain frozen." },
   "command": "cd apps/mobile && MINDWTR_CAPTURE_PROCESS_INBOX=1 [MINDWTR_CAPTURE_PROCESS_INBOX_SCENARIOS='<name>|<name>'] bunx vitest run components/inbox-processing/process-inbox-parity.test.tsx",
   "capturedAt": "67a4f7ab80b451949dcc7ef61a9842cba079cc9d",
   "capturedAtScenarios": "Every scenario except recapturedAfterDateFix.scenarios. The harness file was copied into a checkout of that commit; its RN code was unchanged.",
@@ -17211,7 +17212,6 @@
      "assignedTo": [],
      "delegateWho": [],
      "projects": [
-      "p-launch",
       "p-home",
       "<created:Garden>"
      ],

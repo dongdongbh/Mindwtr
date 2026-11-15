@@ -1021,6 +1021,7 @@ export const daOverrides: Record<string, string> = {
         'Vil du slette denne sektion? Dens opgaver slettes ikke; de flytter til ingen sektion.',
     'projects.areaFilter': 'Område filter',
     'projects.allAreas': 'Alle områder',
+        'inbox.browseProjects': 'Gennemse projekter',
     'projects.noArea': 'Intet område',
     'projects.areaReorderFailed': 'Kunne ikke omarrangere områder',
     'projects.moveProjectFailed': 'Projektet kunne ikke flyttes',

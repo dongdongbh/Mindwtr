@@ -726,6 +726,7 @@ export const hiOverrides: Record<string, string> = {
         'projects.deleteSectionConfirm': 'क्या आप वाकई इस अनुभाग को हटाना चाहते हैं?',
         'projects.areaFilter': 'क्षेत्र फ़िल्टर',
         'projects.allAreas': 'सभी क्षेत्र',
+        'inbox.browseProjects': 'प्रोजेक्ट ब्राउज़ करें',
         'projects.noArea': 'कोई क्षेत्र नहीं',
         'projects.sortAreas': 'क्षेत्रों को क्रमबद्ध करें',
         'projects.sortByName': 'ए-जेड क्रमबद्ध करें',

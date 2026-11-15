@@ -1040,6 +1040,7 @@ export const jaOverrides: Record<string, string> = {
         'projects.deleteSectionConfirm': 'このセクションを削除しますか？中のタスクは削除されず、「セクションなし」に移動します。',
         'projects.areaFilter': 'エリアで絞り込む',
         'projects.allAreas': 'すべてのエリア',
+        'inbox.browseProjects': 'プロジェクトを探す',
         'projects.noArea': 'エリアなし',
         'projects.areaReorderFailed': 'エリアの並べ替えに失敗しました',
         'projects.moveProjectFailed': 'プロジェクトを移動できませんでした',

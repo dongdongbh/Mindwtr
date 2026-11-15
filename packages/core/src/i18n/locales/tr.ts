@@ -736,6 +736,7 @@ export const trOverrides: Record<string, string> = {
         'projects.deleteSectionConfirm': 'Bu bölümü silmek istediğinizden emin misiniz?',
         'projects.areaFilter': 'Alan filtresi',
         'projects.allAreas': 'Tüm alanlar',
+        'inbox.browseProjects': 'Projelere göz at',
         'projects.noArea': 'Alan yok',
         'projects.sortAreas': 'Alanları sırala',
         'projects.sortByName': 'A\'dan Z\'ye sırala',

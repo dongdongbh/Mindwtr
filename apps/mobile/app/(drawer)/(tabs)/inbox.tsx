@@ -5,7 +5,7 @@ import { View, StyleSheet, TouchableOpacity } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Brain, ListChecks } from 'lucide-react-native';
 
-import { buildInboxScreenModel, isTaskVisibleInInbox, useTaskStore } from '@mindwtr/core';
+import { buildInboxScreenModel, selectProcessInboxQueue, useTaskStore } from '@mindwtr/core';
 import { TaskList, type TaskListGroupBy } from '../../../components/task-list';
 import { InboxProcessingModal } from '../../../components/inbox-processing-modal';
 import { ErrorBoundary } from '../../../components/ErrorBoundary';
@@ -15,7 +15,7 @@ import { useThemeColors } from '@/hooks/use-theme-colors';
 import { useThemeTokens } from '@/hooks/use-theme-tokens';
 import { useFilledButtonColors } from '@/hooks/use-filled-button-colors';
 import { CompactText } from '@/components/compact-text';
-import { useVisibleTaskContext } from '@/hooks/use-visible-tasks';
+import { useTaskDisplayClock } from '@/hooks/use-task-display-clock';
 import { useQuickCapture } from '../../../contexts/quick-capture-context';
 import { dismissMobileHint } from '@/lib/onboarding-hints';
 
@@ -23,6 +23,7 @@ export default function InboxScreen() {
   const onStartupLayout = useStartupScreenReady('inbox');
   const settings = useTaskStore((state) => state.settings);
   const tasks = useTaskStore((state) => state.tasks);
+  const projects = useTaskStore((state) => state.projects);
   const { t } = useLanguage();
   const tc = useThemeColors();
   const tokens = useThemeTokens();
@@ -37,18 +38,15 @@ export default function InboxScreen() {
   const router = useRouter();
   const [showProcessing, setShowProcessing] = useState(false);
   const [groupBy, setGroupBy] = useState<TaskListGroupBy>('none');
-  const { projectById } = useVisibleTaskContext();
-
-
-  const inboxTasks = useMemo(
-    () => tasks.filter((task) => (
-      task.status === 'inbox' && isTaskVisibleInInbox(task, { projectById })
-    )),
-    [projectById, tasks],
+  const displayRevision = useTaskDisplayClock(tasks.some((task) => task.status === 'someday' && Boolean(task.reviewAt)));
+  const processingCount = useMemo(
+    () => {
+      void displayRevision;
+      return selectProcessInboxQueue(tasks, projects).length;
+    },
+    [displayRevision, projects, tasks],
   );
-
-
-  const screen = buildInboxScreenModel({ count: inboxTasks.length, settings, t });
+  const screen = buildInboxScreenModel({ count: processingCount, settings, t });
   const inboxScopeHint = (
     <View style={styles.scopeHint}>
       <CompactText style={[styles.scopeHintText, { color: tc.secondaryText }]}>

@@ -331,6 +331,8 @@ export function InboxStepFlow({ controller, mode }: { controller: Controller; mo
       selectedProjectId={controller.selectedProjectId}
       selectedAreaId={controller.selectedAreaId}
       setSelectedAreaId={controller.setSelectedAreaId}
+      projectBrowseScope={controller.projectBrowseScope}
+      setProjectBrowseScope={controller.setProjectBrowseScope}
       projectSearch={controller.projectSearch}
       setProjectSearch={controller.setProjectSearch}
       convertToProject={allowConversion && convertToProject}

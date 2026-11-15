@@ -531,6 +531,69 @@ describe('native host contract: Process Inbox', () => {
         expect(recorder.log).toEqual([]);
     });
 
+    it('validates session-only browse scopes without touching assignment and falls back when its Area is deleted', async () => {
+        freezeClock();
+        const { host, recorder } = await openHost(scenario('guided next action'));
+        const started = host.startInboxProcessing();
+        if (!started.ok || !started.value.view) throw new Error('Expected an Inbox task');
+        const { sessionId, taskId, step } = started.value.view;
+        const request = { sessionId, taskId, step };
+        const initial = started.value.view.draft;
+        recorder.log.length = 0;
+        for (const value of [{ kind: 'all' }, { kind: 'none' }, { kind: 'area', areaId: 'a-work' }] as const) {
+            const changed = host.getInboxProcessingStep({ ...request, edit: { type: 'setProjectBrowseScope', value } });
+            expect(changed).toMatchObject({ ok: true, value: { draft: { ...initial, projectBrowseScope: value } } });
+        }
+        for (const value of [null, {}, { kind: 'all', areaId: 'a-work' }, { kind: 'none', extra: true },
+            { kind: 'area' }, { kind: 'area', areaId: 'missing' }, { kind: 'wrong' }]) {
+            expect(host.getInboxProcessingStep({ ...request, edit: { type: 'setProjectBrowseScope', value } } as never))
+                .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+        }
+        useTaskStore.setState({ areas: useTaskStore.getState().areas.map((area) => area.id === 'a-work' ? { ...area, deletedAt: '2026-09-01' } : area) });
+        expect(host.getInboxProcessingStep(request)).toMatchObject({ ok: true, value: { draft: { ...initial, projectBrowseScope: { kind: 'all' } } } });
+        expect(host.getInboxProcessingStep({ ...request, edit: { type: 'setProjectBrowseScope', value: { kind: 'area', areaId: 'a-work' } } }))
+            .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+        expect(recorder.log).toEqual([]);
+    });
+
+    it('falls back from an implicit deleted Area without changing direct assignment', async () => {
+        freezeClock();
+        const { host } = await openHost(scenario('guided next action'));
+        await useTaskStore.getState().updateTask('inbox-a', { areaId: 'a-work' });
+        const current = host.startInboxProcessing();
+        if (!current.ok || !current.value.view) throw new Error('Expected the updated task');
+        const view = current.value.view;
+        expect(view.draft.projectBrowseScope).toBeUndefined();
+        useTaskStore.setState({ areas: useTaskStore.getState().areas.filter((area) => area.id !== 'a-work') });
+        expect(host.getInboxProcessingStep({ sessionId: view.sessionId, taskId: view.taskId, step: view.step }))
+            .toMatchObject({ ok: true, value: { draft: { areaId: 'a-work', projectBrowseScope: { kind: 'all' } } } });
+    });
+
+    it('preserves a browse scope and editable draft after an action failure', async () => {
+        freezeClock();
+        const { host } = await openHost(scenario('guided next action'));
+        const started = host.startInboxProcessing();
+        if (!started.ok || !started.value.view) throw new Error('Expected an Inbox task');
+        let view = started.value.view;
+        const request = () => ({ sessionId: view.sessionId, taskId: view.taskId, step: view.step });
+        for (const choice of ['actionable', 'no', 'defer', 'single']) {
+            const result = await host.commitInboxProcessingStep({ ...request(), decision: { choice }, requestId: generateUUID() });
+            if (!result.ok || !result.value.view) throw new Error('Expected the next question');
+            view = result.value.view;
+        }
+        const scope = host.getInboxProcessingStep({ ...request(), edit: { type: 'setProjectBrowseScope', value: { kind: 'none' } } });
+        if (!scope.ok) throw new Error(scope.error.message);
+        const edited = host.getInboxProcessingStep({ ...request(), edit: { type: 'set', field: 'description', value: 'Keep this draft' } });
+        if (!edited.ok) throw new Error(edited.error.message);
+        const update = vi.spyOn(useTaskStore.getState(), 'updateTask').mockResolvedValue({ success: false, error: 'write unavailable' });
+        try {
+            expect(await host.commitInboxProcessingStep({ ...request(), decision: { choice: 'fileIt' }, requestId: generateUUID() }))
+                .toMatchObject({ ok: false, error: { code: 'ACTION_FAILED' } });
+            expect(host.getInboxProcessingStep(request())).toMatchObject({ ok: true, value: { draft: edited.value.draft } });
+            expect(update.mock.lastCall?.[1]).not.toHaveProperty('projectBrowseScope');
+        } finally { update.mockRestore(); }
+    });
+
     it('retries a failed save exactly: one write, then the same next step', async () => {
         freezeClock();
         const saveData = vi.fn().mockResolvedValue(undefined);
@@ -543,6 +606,8 @@ describe('native host contract: Process Inbox', () => {
             expect(await host.commitInboxProcessingStep({ sessionId, taskId: 'inbox-a', step, decision: { choice }, requestId: generateUUID() }))
                 .toMatchObject({ ok: true });
         }
+        expect(host.getInboxProcessingStep({ sessionId, taskId: 'inbox-a', step: 'file', edit: { type: 'setProjectBrowseScope', value: { kind: 'none' } } }))
+            .toMatchObject({ ok: true, value: { draft: { projectBrowseScope: { kind: 'none' } } } });
         recorder.log.length = 0;
         const input = { sessionId, taskId: 'inbox-a', step: 'file', decision: { choice: 'fileIt' }, requestId: generateUUID() };
         saveData.mockRejectedValue(new Error('disk unavailable'));
@@ -558,6 +623,8 @@ describe('native host contract: Process Inbox', () => {
             toast: { message: 'Call Alice about the launch moved to Next', undoLabel: 'Undo' },
             view: { taskId: 'inbox-c', step: 'actionable', progress: { label: '1/2 tasks' } },
         } });
+        expect(retried.ok && retried.value.view?.draft.projectBrowseScope).toBeUndefined();
+        expect(written).not.toHaveProperty('projectBrowseScope');
         expect(recorder.log).toHaveLength(1);
         expect(useTaskStore.getState()._tasksById.get('inbox-a')).toBe(written);
         expect((saveData.mock.lastCall?.[0] as { tasks: Array<{ id: string; status: string }> }).tasks.find(({ id }) => id === 'inbox-a')?.status).toBe('next');

@@ -86,6 +86,8 @@ Widgets, App Intents and Siri, the Share Extension and the Watch app belong to t
 - Checks: `apps/ios-native/App/UITests/FoundationUITests.swift` (testProcessInbox…), `apps/ios-native/Tests/MindwtrNativeCoreTests/NativeProcessInboxUndoHostTests.swift`
 - Notes: Filing, completion and Trash offer Undo for about 5.2 seconds. Settings › GTD › Inbox controls the two-minute prompt and the layout. Incubate and the "Back to clarify" label use a calendar-clock icon, as in RN (#1339). The project step lists Someday and Waiting projects after the active ones, under a "Someday / Waiting" heading (`process-inbox-deferred-projects`).
 
+- Notes: The processing count includes Inbox tasks and due Someday reviews. Area appears before Projects, with the selected project’s inherited Area and indented Section controls. Browse projects offers All areas, No area and named Areas without changing task assignment; search remains global.
+
 ## Today's Focus
 
 - Reach: Tab bar › Focus. The header has view options, Filters, a section toggle and a reorder toggle.

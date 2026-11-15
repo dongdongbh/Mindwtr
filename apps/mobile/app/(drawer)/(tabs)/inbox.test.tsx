@@ -1,13 +1,18 @@
 import React from 'react';
 import { act, create } from 'react-test-renderer';
-import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+
+import type { Project, Task } from '@mindwtr/core';
+import { AppState } from 'react-native';
 
 const taskStore = vi.hoisted(() => ({
   settings: { gtd: { defaultCaptureMethod: 'text' } },
-  tasks: [{ id: 'inbox-task', status: 'inbox' }],
+  tasks: [{ id: 'inbox-task', status: 'inbox' }] as Task[],
+  projects: [] as Project[],
 }));
 
 vi.mock('react-native', () => ({
+  AppState: { currentState: 'active', addEventListener: vi.fn(() => ({ remove: vi.fn() })) },
   StyleSheet: {
     create: (styles: Record<string, unknown>) => styles,
     hairlineWidth: 1,
@@ -27,7 +32,7 @@ vi.mock('lucide-react-native', () => ({
 
 vi.mock('@mindwtr/core', async (importOriginal) => ({
   buildInboxScreenModel: (await importOriginal<typeof import('@mindwtr/core')>()).buildInboxScreenModel,
-  isTaskVisibleInInbox: () => true,
+  selectProcessInboxQueue: (await importOriginal<typeof import('@mindwtr/core')>()).selectProcessInboxQueue,
   useTaskStore: (selector: (state: typeof taskStore) => unknown) => selector(taskStore),
 }));
 
@@ -140,5 +145,61 @@ describe('InboxScreen spacing', () => {
 
     expect(actionToScopeGap).toBe(12);
     expect(scopeToTaskGap).toBe(18);
+  });
+});
+
+
+describe('Inbox processing launcher queue', () => {
+  afterEach(() => {
+    taskStore.tasks = [{ id: 'inbox-task', status: 'inbox' }] as Task[];
+    taskStore.projects = [];
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+  const task = (id: string, extra: Partial<Task> = {}): Task => ({
+    id, title: id, status: 'inbox', contexts: [], tags: [], createdAt: '2026-01-01', updatedAt: '2026-01-01', ...extra,
+  });
+  const process = (tree: ReturnType<typeof create>) => tree.root.findAll((node) => String(node.type) === 'TouchableOpacity' && /^Process Inbox \(/.test(node.props.accessibilityLabel ?? ''));
+
+  it('includes due Someday without changing the Inbox list and excludes ineligible candidates', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-11-15T15:00:00Z'));
+    taskStore.projects = [
+      { id: 'hidden', status: 'someday' }, { id: 'deleted', status: 'active', deletedAt: '2026-11-01' },
+    ] as Project[];
+    taskStore.tasks = [task('inbox'), task('due', { status: 'someday', reviewAt: '2026-11-15' }),
+      task('future', { status: 'someday', reviewAt: '2026-11-16' }), task('waiting', { status: 'waiting', reviewAt: '2026-11-01' }),
+      task('next', { status: 'next', reviewAt: '2026-11-01' }), task('hidden', { projectId: 'hidden' }),
+      task('deleted-project', { projectId: 'deleted' }), task('deleted-task', { deletedAt: '2026-11-01' })];
+    let tree!: ReturnType<typeof create>;
+    act(() => { tree = create(<InboxScreen />); });
+    expect(process(tree)[0].props.accessibilityLabel).toBe('Process Inbox (2)');
+    expect(tree.root.findByType('TaskList' as never).props.statusFilter).toBe('inbox');
+    act(() => tree.unmount());
+  });
+
+  it('exposes a due-only queue and caps only the visible count', () => {
+    taskStore.tasks = Array.from({ length: 101 }, (_, index) => task(String(index), { status: 'someday', reviewAt: '2020-01-01' }));
+    let tree!: ReturnType<typeof create>;
+    act(() => { tree = create(<InboxScreen />); });
+    expect(process(tree)[0].props.accessibilityLabel).toBe('Process Inbox (101)');
+    expect(tree.root.findAll((node) => String(node.type) === 'CompactText').some((node) => node.props.children === 'Process Inbox (99+)')).toBe(true);
+    act(() => tree.unmount());
+  });
+
+  it('refreshes when a review becomes due at midnight and on foreground return', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 10, 15, 23, 59, 30));
+    let onState!: (state: 'active' | 'background') => void;
+    vi.mocked(AppState.addEventListener).mockImplementation((_, callback) => { onState = callback; return { remove: vi.fn() }; });
+    taskStore.tasks = [task('tomorrow', { status: 'someday', reviewAt: '2026-11-16' })];
+    let tree!: ReturnType<typeof create>;
+    act(() => { tree = create(<InboxScreen />); });
+    expect(process(tree)).toHaveLength(0);
+    act(() => { vi.advanceTimersByTime(30_001); });
+    expect(process(tree)[0].props.accessibilityLabel).toBe('Process Inbox (1)');
+    act(() => { onState('background'); vi.setSystemTime(new Date(2026, 10, 15, 12)); onState('active'); });
+    expect(process(tree)).toHaveLength(0);
+    act(() => tree.unmount());
   });
 });

@@ -34,6 +34,8 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -587,16 +589,44 @@ private fun InboxViewModel.ProjectSection(flow: InboxProcessing, project: JSONOb
     SectionTitle(Lucide.Folder, project.getString("title"))
     val conversion = project.child("conversion")
     val projectLabel = t("taskEdit.projectLabel")
-    if (conversion == null) project.child("current")?.let { OptionChip(it, projectLabel, locked, send) }
-
-    project.child("sections")?.let { sections ->
-        val sectionLabel = sections.getString("label")
-        Text(sectionLabel, style = rnText(12, 600), color = c.secondaryText, modifier = Modifier.padding(bottom = 6.dp))
-        for (option in sections.items("options")) OptionChip(option, sectionLabel, locked, send)
-    }
     project.text("areaLabel")?.let { areaLabel ->
-        Text(areaLabel, style = rnText(12, 600), color = c.secondaryText, modifier = Modifier.padding(bottom = 6.dp))
+        Text(areaLabel, style = rnText(12, 600), color = c.secondaryText,
+            modifier = Modifier.padding(bottom = 6.dp).semantics { heading() })
+        project.text("inheritedArea")?.let { Text(it, style = rnText(14, 400), color = c.text) }
         for (area in project.items("areas")) OptionChip(area, areaLabel, locked, send)
+    }
+    if (conversion == null) {
+        project.text("projectsLabel")?.let { label ->
+            Text(label, style = rnText(12, 600), color = c.secondaryText,
+                modifier = Modifier.padding(bottom = 6.dp).semantics { heading() })
+        }
+        project.child("current")?.let { current ->
+            OptionChip(current, projectLabel, locked, send)
+            project.child("sections")?.let { sections ->
+                Column(Modifier.padding(start = 16.dp)) {
+                    val sectionLabel = sections.getString("label")
+                    Text(sectionLabel, style = rnText(12, 600), color = c.secondaryText,
+                        modifier = Modifier.padding(bottom = 6.dp).semantics { heading() })
+                    for (option in sections.items("options")) OptionChip(option, sectionLabel, locked, send)
+                }
+            }
+        }
+        project.child("browse")?.let { browse ->
+            val label = browse.getString("label")
+            var expanded by remember(flow.taskId) { mutableStateOf(false) }
+            val options = browse.items("options")
+            val selected = options.firstOrNull { it.optBoolean("selected") }?.getString("label") ?: ""
+            Box {
+                Text("$label: $selected ▾", style = rnText(13, 500), color = c.secondaryText,
+                    modifier = Modifier.clickable(enabled = !locked, role = Role.Button) { expanded = !expanded }.padding(vertical = 8.dp))
+                DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                    for (option in options) DropdownMenuItem(text = { Text(option.getString("label")) }, onClick = {
+                        expanded = false
+                        send(option.getJSONObject("edit"))
+                    })
+                }
+            }
+        }
     }
     if (conversion != null) {
         val nextLabel = conversion.getString("nextActionLabel")

@@ -802,13 +802,20 @@ export function getProcessInboxPersonSuggestions(
 }
 
 
+export type ProcessInboxProjectBrowseScope = { kind: 'all' } | { kind: 'none' } | { kind: 'area'; areaId: string };
+
 export function getProcessInboxProjectChoices(
     projects: Project[],
     areaId: string | null,
     search: string,
+    browseScope?: ProcessInboxProjectBrowseScope,
 ): { filteredProjects: Project[]; exactMatch: Project | undefined } {
+    const browseProjects = browseScope?.kind === 'none'
+        ? projects.filter((project) => !project.areaId)
+        : filterProjectsBySelectedArea(projects, browseScope?.kind === 'all' ? undefined
+            : browseScope?.kind === 'area' ? browseScope.areaId : areaId || undefined);
     const { filteredProjects, exactMatch } = getProjectChoiceState(
-        filterProjectsBySelectedArea(projects, areaId || undefined),
+        browseProjects,
         search,
         projects,
     );
@@ -989,6 +996,7 @@ export type ProcessInboxDraft = {
     sectionId?: string | null;
     areaId: string | null;
     projectSearch: string;
+    projectBrowseScope?: ProcessInboxProjectBrowseScope;
     contexts: string[];
     tags: string[];
     tokenInput: string;
@@ -1086,6 +1094,7 @@ export type ProcessInboxDraftEdit =
 
     | { type: 'setSection'; value: string | null }
     | { type: 'setArea'; value: string | null }
+    | { type: 'setProjectBrowseScope'; value: ProcessInboxProjectBrowseScope }
     | { type: 'selectProject'; value: string | null }
     | { type: 'toggleContext'; value: string }
 
@@ -1131,10 +1140,14 @@ export function applyProcessInboxDraftEdit(
         case 'setSection':
             return draft.projectId ? { ...draft, sectionId: edit.value } : draft;
         case 'setArea':
-            return { ...draft, areaId: edit.value };
+            return { ...draft, areaId: edit.value, projectBrowseScope: edit.value ? { kind: 'area', areaId: edit.value } : { kind: 'none' } };
+        case 'setProjectBrowseScope':
+            return { ...draft, projectBrowseScope: edit.value };
         case 'selectProject': {
             const { convertToProject, projectId, areaId, projectSearch } = selectProcessInboxProject(edit.value);
-            return { ...draft, convertToProject, projectId, projectSearch, ...(areaId === null ? { areaId } : {}),
+            return { ...draft, convertToProject, projectId, projectSearch,
+                projectBrowseScope: draft.projectBrowseScope ?? (draft.areaId ? { kind: 'area', areaId: draft.areaId } : { kind: 'all' }),
+                ...(areaId === null ? { areaId } : {}),
 
                 ...(draft.sectionId && projectId !== draft.projectId ? { sectionId: null } : {}) };
         }
@@ -1477,6 +1490,9 @@ export type ProcessInboxStepView = {
         } | null;
         current: ProcessInboxViewOption | null;
         areaLabel: string | null;
+        inheritedArea?: string;
+        projectsLabel?: string;
+        browse?: { label: string; options: ProcessInboxViewOption[] };
         areas: ProcessInboxViewOption[];
         search: { label: string; placeholder: string; value: string; createLabel: string | null } | null;
         projects: ProcessInboxViewOption[];
@@ -1735,14 +1751,18 @@ export function buildProcessInboxStepView(input: ProcessInboxViewInput): Process
         const conversion = fields.project && allowConversion && draft.convertToProject;
         const conversionRows = getProcessInboxConversionRows(draft.nextAction, draft.extraActions);
         const currentProject = draft.projectId ? input.projects.find((project) => project.id === draft.projectId) ?? null : null;
-        const currentArea = draft.areaId ? input.areas.find((area) => area.id === draft.areaId) ?? null : null;
+        const inheritedArea = currentProject?.areaId ? areaById.get(currentProject.areaId) : null;
         const areaLabel = t('taskEdit.areaLabel');
-        const showAreas = fields.area && !draft.projectId;
-        const { filteredProjects: matches, exactMatch } = getProcessInboxProjectChoices(input.projects, draft.areaId, draft.projectSearch);
+        const showAreas = fields.area;
+        const requestedScope: ProcessInboxProjectBrowseScope = draft.projectBrowseScope ?? (draft.areaId ? { kind: 'area', areaId: draft.areaId } : { kind: 'all' });
+        const browseScope: ProcessInboxProjectBrowseScope = requestedScope.kind === 'area' && !areaById.has(requestedScope.areaId)
+            ? { kind: 'all' } : requestedScope;
+        const { filteredProjects: matches, exactMatch } = getProcessInboxProjectChoices(input.projects, draft.areaId, draft.projectSearch, browseScope);
         const projectGroups = input.groupDeferredProjects ? groupProjectsForPicker(matches, input.areas) : null;
-        const filteredProjects = projectGroups ? [...projectGroups.active, ...projectGroups.deferred] : matches;
+        const filteredProjects = (projectGroups ? [...projectGroups.active, ...projectGroups.deferred] : matches)
+            .filter((project) => project.id !== draft.projectId);
         const deferredFrom = projectGroups && projectGroups.deferred.length > 0 && !conversion && fields.project
-            ? { index: 1 + projectGroups.active.length, label: tf('projects.deferredSection', 'Someday / Waiting') } : null;
+            ? { index: 1 + projectGroups.active.filter((project) => project.id !== draft.projectId).length, label: tf('projects.deferredSection', 'Someday / Waiting') } : null;
         const projectSections = !conversion && fields.project && currentProject
             ? getProjectSectionsForView(currentProject, input.sections ?? [])
             : [];
@@ -1756,8 +1776,7 @@ export function buildProcessInboxStepView(input: ProcessInboxViewInput): Process
                 edit: { type: 'setSection' as const, value: section.id },
             })),
         ];
-        const areaOptions: ProcessInboxViewOption[] = showAreas ? [
-            ...(currentArea ? [{ label: `✓ ${currentArea.name}`, selected: true, color: currentArea.color ?? null, edit: { type: 'setArea' as const, value: currentArea.id } }] : []),
+        const areaOptions: ProcessInboxViewOption[] = showAreas && !currentProject ? [
             { label: `${!draft.areaId ? '✓ ' : ''}${t('projects.noArea')}`, selected: !draft.areaId, color: null, edit: { type: 'setArea', value: null } },
             ...Array.from(areaById.values()).map((area) => ({
                 label: area.name,
@@ -1787,6 +1806,21 @@ export function buildProcessInboxStepView(input: ProcessInboxViewInput): Process
                 ? { label: `✓ ${currentProject.title}`, selected: true, edit: { type: 'selectProject', value: currentProject.id } }
                 : null,
             areaLabel: showAreas ? areaLabel : null,
+            ...(showAreas && currentProject ? { inheritedArea: inheritedArea?.name ?? t('projects.noArea') } : {}),
+            ...(!conversion && fields.project ? {
+                projectsLabel: t('projects.title'),
+                browse: {
+                    label: tf('inbox.browseProjects', 'Browse projects'),
+                    options: [
+                        { label: t('projects.allAreas'), selected: browseScope.kind === 'all', edit: { type: 'setProjectBrowseScope' as const, value: { kind: 'all' as const } } },
+                        { label: t('projects.noArea'), selected: browseScope.kind === 'none', edit: { type: 'setProjectBrowseScope' as const, value: { kind: 'none' as const } } },
+                        ...Array.from(areaById.values()).map((area) => ({
+                            label: area.name, selected: browseScope.kind === 'area' && browseScope.areaId === area.id,
+                            edit: { type: 'setProjectBrowseScope' as const, value: { kind: 'area' as const, areaId: area.id } },
+                        })),
+                    ],
+                },
+            } : {}),
             areas: areaOptions,
             search: !conversion && fields.project ? {
                 label: t('projects.search'),
