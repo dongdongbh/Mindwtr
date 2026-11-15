@@ -6532,6 +6532,9 @@ private final class Engine: @unchecked Sendable {
             throw HostFailure("NOT_READY: Native search observation is unavailable")
         }
         let observation = try NativeSearchObservation(json: raw)
+        let priorAccess = reminderOwnerAccess
+        reminderOwnerAccess = priorAccess || reminderAdmissions.ownerActive
+        defer { reminderOwnerAccess = priorAccess }
         return .init(ready: observation.ready && (try? requireDeviceStorageAdmission()) != nil,
                      revision: observation.revision, nextAt: observation.nextAt)
     }

@@ -67,6 +67,8 @@ final class NativeReminderEffects: @unchecked Sendable {
         ordinaryReservations -= 1
     }
 
+    var ownerActive: Bool { lock.lock(); defer { lock.unlock() }; return active != nil }
+
     func takeOrdinaryReadyWake(ready: Bool) -> Bool {
         lock.lock(); defer { lock.unlock() }
         guard !closed, ready, ordinaryReservations == 0, ordinaryBlockedReminder else { return false }

@@ -126,6 +126,13 @@ private final class ReminderWakeRecorder: @unchecked Sendable {
     var events: [(String, UInt64)] { lock.lock(); defer { lock.unlock() }; return values }
 }
 
+private final class SearchWakeReader: @unchecked Sendable {
+    private let lock = NSLock()
+    private var values: [Bool] = []
+    func record(_ observation: NativeSearchObservation) { lock.lock(); defer { lock.unlock() }; values.append(observation.ready) }
+    var readiness: [Bool] { lock.lock(); defer { lock.unlock() }; return values }
+}
+
 private final class ReminderOrdinaryWriteHold: @unchecked Sendable {
     private let lock = NSLock()
     private var armed = false
@@ -1075,6 +1082,49 @@ final class ReminderEffectsHostTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: database.appendingPathExtension("pending.json").path))
         let pending = try await port.pending(namespace: namespace); XCTAssertEqual(pending.count, 1)
         XCTAssertEqual(try markers().count, 0)
+    }
+
+    func testSearchPassReadingOnEveryWakeCannotPreemptTheReminderTurnThatWokeIt() async throws {
+        let value = try await seed(), searches = SearchWakeReader(), reminders = ReminderWakeRecorder()
+        let initiallyReady = try await value.searchObservation().ready
+        XCTAssertTrue(initiallyReady)
+        try await value.setSearchObservationHandler { observation in
+            searches.record(observation)
+            Task { _ = try? await value.searchObservation() }
+        }
+        _ = try await value.observeReminders { reminders.record($0) }
+        for _ in 0..<5 { _ = try await value.readAboutUpdateState() }
+        let searchBaseline = searches.readiness.count, reads = await port.permissionCount
+        let entered = expectation(description: "Reminder turn holds its first permission read")
+        await port.holdPermission(at: reads + 1, entered: entered)
+        let reminder = Task { try await value.reconcileReminders() }
+        await fulfillment(of: [entered], timeout: 5)
+        try await Task.sleep(nanoseconds: 300_000_000)
+        XCTAssertEqual(searches.readiness.count, searchBaseline)
+        await port.releasePermission()
+        _ = try await reminder.value
+        for _ in 0..<5 { _ = try await value.readAboutUpdateState() }
+        XCTAssertEqual(searches.readiness.count, searchBaseline)
+        XCTAssertEqual(reminders.events.count, 0)
+        XCTAssertEqual(try markers().count, 1)
+    }
+
+    func testRetainedReminderTurnStillWithholdsSearchReadinessAndReturnsItOnceAfterSettlement() async throws {
+        let first = try await seed(); await first.close()
+        let fault = ReminderMapWriteFault(), value = host { store in store.faults.beforePromotion = { try fault.before() } }
+        _ = try await value.start()
+        let searches = SearchWakeReader()
+        try await value.setSearchObservationHandler { searches.record($0) }
+        await unavailable { try await value.reconcileReminders() }
+        await unavailable { try await value.readAboutUpdateState() }
+        try await Task.sleep(nanoseconds: 200_000_000)
+        XCTAssertEqual(searches.readiness, [false])
+        await unavailable { try await value.reconcileReminders() }
+        try await Task.sleep(nanoseconds: 200_000_000)
+        XCTAssertEqual(searches.readiness, [false, true])
+        _ = try await value.reconcileReminders(); _ = try await value.readAboutUpdateState()
+        try await Task.sleep(nanoseconds: 200_000_000)
+        XCTAssertEqual(searches.readiness, [false, true])
     }
 
     func testReminderBeginBlockedByHeldOrdinaryWriteReceivesOneReadyWakeAfterRelease() async throws {
