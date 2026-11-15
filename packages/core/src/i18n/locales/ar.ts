@@ -209,6 +209,8 @@ export const arOverrides: Record<string, string> = {
         'quickAdd.placeholder': 'أضف مهمة... استخدم @context +Project #tag',
         'quickAdd.inputLabel': 'إضافة سريعة',
         'quickAdd.inputHint': 'اكتب مهمة ثم اضغط إدخال للحفظ.',
+        'quickAdd.destinationUnavailable': "الوجهة غير متاحة. اختر وجهة أخرى.",
+        "quickAdd.destinationNeedsSelection": "اختر وجهة للحفظ.",
         'quickAdd.addAnother': 'أضف آخر',
         'quickAdd.audioCaptureLabel': 'التقاط صوت سريع',
         'quickAdd.audioRecord': 'ابدأ التسجيل',

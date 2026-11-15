@@ -29,6 +29,7 @@ class WidgetCaptureTokenTest {
     QuickCaptureAudioSessionStore.clearForTests()
     context.getSharedPreferences(WidgetListStore.PREFS_NAME, Context.MODE_PRIVATE).edit().clear().commit()
     queue.deleteRecursively()
+    WidgetPayloadStore.write(context, JSONObject().put("captureDestinations", captureDestinationCatalog()).toString())
   }
 
   private fun open(intent: Intent) = Robolectric.buildActivity(QuickCaptureActivity::class.java, intent).also {

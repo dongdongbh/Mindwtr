@@ -30,8 +30,14 @@ struct CaptureSheet: View {
             if model.contextPickerPresented {
                 Color.black.opacity(0.35).ignoresSafeArea()
                     .onTapGesture { model.closeContextPicker() }
-                ContextPicker(model: model, palette: palette)
-                    .padding(.horizontal, 20).frame(maxHeight: .infinity)
+                Group {
+                    if model.capturePickerKind == "destination" {
+                        CaptureDestinationPicker(model: model, palette: palette)
+                    } else {
+                        ContextPicker(model: model, palette: palette)
+                    }
+                }
+                .padding(.horizontal, 20).frame(maxHeight: .infinity)
             }
             if model.captureLinesConfirmationPresented { linesConfirmation }
         }
@@ -152,6 +158,20 @@ struct CaptureSheet: View {
                     .accessibilityIdentifier(model.captureVoiceIsRecording ? "capture-voice-stop" : "capture-voice-record")
             }
 
+            let autocomplete = model.captureAutocompleteItems
+            if !autocomplete.isEmpty {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(autocomplete.indices, id: \.self) { index in
+                        Button { Task { await model.acceptCaptureAutocomplete(autocomplete[index]) } } label: {
+                            Text(autocomplete[index].text("label")).rnFont(14, .semibold)
+                                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain).accessibilityIdentifier("capture-suggestion-\(index)")
+                    }
+                }
+                .padding(.horizontal, 12).accessibilityIdentifier("capture-suggestions")
+            }
+
             TextField(copy.text("notePlaceholder"), text: $model.noteDraft, axis: .vertical)
                 .rnFont(15).lineLimit(1...4).padding(.horizontal, 12).padding(.vertical, 10).frame(minHeight: 44)
                 .background(palette.input, in: RoundedRectangle(cornerRadius: 12))
@@ -180,12 +200,21 @@ struct CaptureSheet: View {
 
             captureCopilot
 
-            Text(model.capture.object("area").text("label")).rnFont(12, .bold)
-                .padding(.horizontal, 12).frame(minHeight: 40)
+            Button { model.openCaptureDestinationPicker() } label: {
+                HStack(spacing: 8) {
+                    AppIcon(name: "folder", size: 16)
+                    Text(model.label("task.destination") + ": " + model.capture.object("destination").text("label"))
+                        .rnFont(12, .bold).fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 0)
+                    AppIcon(name: "chevron", size: 16)
+                }
+                .foregroundStyle(model.capture.object("destination").flag("available") ? palette.text : palette.warning)
+                .padding(.horizontal, 12).frame(minHeight: 44)
                 .background(palette.filter, in: Capsule()).overlay(Capsule().stroke(palette.border, lineWidth: 1))
-                .accessibilityLabel(model.capture.object("area").text("accessibilityLabel"))
-                .accessibilityIdentifier("capture-area")
-                .fixedSize(horizontal: false, vertical: true).padding(.top, 10)
+            }
+            .buttonStyle(.plain).modifier(ModelDisabled { model.busy || model.retryNeeded || model.captureVoiceWorking })
+            .accessibilityLabel(model.label("task.destination") + ": " + model.capture.object("destination").text("accessibilityLabel"))
+            .accessibilityIdentifier("capture-destination").padding(.top, 10)
 
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: 8) { captureControls }
@@ -446,6 +475,72 @@ struct CaptureSheet: View {
     }
 }
 
+private struct CaptureDestinationPicker: View {
+    @Bindable var model: CoreModel
+    let palette: AppPalette
+    @FocusState private var focused: Bool
+    private var picker: CoreObject { model.capture.object("picker") }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(model.label("task.destination")).rnFont(14, .bold).accessibilityAddTraits(.isHeader)
+                Spacer()
+                Button { model.closeContextPicker() } label: {
+                    AppIcon(name: "x", size: 18).frame(width: 44, height: 44).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain).modifier(ModelDisabled { model.busy || model.retryNeeded })
+                .accessibilityLabel(model.label("common.close")).accessibilityIdentifier("capture-destination-close")
+            }
+            TextField(model.label("common.search"), text: $model.contextQuery)
+                .rnFont(14).padding(.horizontal, 10).padding(.vertical, 8)
+                .background(palette.input, in: RoundedRectangle(cornerRadius: 10))
+                .overlay(RoundedRectangle(cornerRadius: 10).stroke(palette.border, lineWidth: 1))
+                .focused($focused).textInputAutocapitalization(.never).autocorrectionDisabled()
+                .submitLabel(.done).modifier(ModelDisabled { model.busy || model.retryNeeded })
+                .accessibilityLabel(model.label("common.search")).accessibilityIdentifier("capture-destination-query")
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    if picker.text("kind") == "destination" {
+                        destination(picker.object("none"), identifier: "none")
+                        let items = picker.objects("items")
+                        ForEach(items.indices, id: \.self) { index in
+                            destination(items[index], identifier: items[index].text("id"))
+                        }
+                    }
+                    ModelShown { !model.contextPickerReady } content: { ProgressView().frame(maxWidth: .infinity).padding(12) }
+                }
+                .padding(.vertical, 6)
+            }
+            .frame(maxHeight: 260)
+            .overlay(RoundedRectangle(cornerRadius: 10).stroke(palette.border, lineWidth: 1))
+            if let notice = model.notice {
+                Text(notice).rnFont(13).foregroundStyle(palette.danger).fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(16).background(palette.card, in: RoundedRectangle(cornerRadius: 16))
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(palette.border, lineWidth: 1))
+        .accessibilityIdentifier("capture-destination-picker")
+        .onAppear { focused = true }
+    }
+
+    private func destination(_ item: CoreObject, identifier: String) -> some View {
+        Button {
+            Task { await model.editCapture(item.object("edit"), clearContextQuery: true, closeContextPicker: true) }
+        } label: {
+            HStack {
+                Text(item.text("label")).rnFont(14, .semibold).fixedSize(horizontal: false, vertical: true)
+                Spacer()
+                if item.flag("selected") { Image(systemName: "checkmark").foregroundStyle(palette.tint).accessibilityHidden(true) }
+            }
+            .frame(minHeight: 44).padding(.horizontal, 12).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain).modifier(ModelDisabled { !model.contextPickerReady })
+        .accessibilityLabel(item.text("label")).accessibilityAddTraits(item.flag("selected") ? .isSelected : [])
+        .accessibilityIdentifier("capture-destination-option-" + identifier)
+    }
+}
+
 private struct ContextPicker: View {
     @Bindable var model: CoreModel
     let palette: AppPalette
@@ -582,6 +677,9 @@ private struct CaptureDraftInput: View {
     var body: some View {
         CaptureTextInput(text: $model.draft, enabled: !model.busyShown && !model.retryNeeded && !model.captureLinesConfirmationPresented,
             accepts: { [model] in !model.busy && !model.retryNeeded && !model.captureLinesConfirmationPresented },
+            selection: model.captureTitleSelection, selectionRevision: model.captureTitleSelectionRevision,
+            selectionChanged: { model.captureSelectionChanged($0, composing: $1) },
+            focusChanged: { model.captureTitleFocusChanged($0) },
             color: UIColor(palette.text), label: copy.text("inputLabel"), hint: copy.text("inputHint")) {
             Task { await model.saveCapture() }
         }
@@ -592,6 +690,10 @@ private struct CaptureTextInput: UIViewRepresentable {
     @Binding var text: String
     let enabled: Bool
     let accepts: () -> Bool
+    let selection: NSRange
+    let selectionRevision: Int
+    let selectionChanged: (NSRange, Bool) -> Void
+    let focusChanged: (Bool) -> Void
     let color: UIColor
     let label: String
     let hint: String
@@ -600,6 +702,7 @@ private struct CaptureTextInput: UIViewRepresentable {
     func makeUIView(context: Context) -> UITextView {
         let view = UITextView()
         view.backgroundColor = .clear
+        view.smartQuotesType = .no
         view.returnKeyType = .done
         view.textContainerInset = UIEdgeInsets(top: 10, left: 8, bottom: 10, right: 8)
         view.adjustsFontForContentSizeCategory = true
@@ -618,6 +721,10 @@ private struct CaptureTextInput: UIViewRepresentable {
     func updateUIView(_ view: UITextView, context: Context) {
         context.coordinator.parent = self
         if view.text != text { view.text = text }
+        if context.coordinator.selectionRevision != selectionRevision {
+            context.coordinator.selectionRevision = selectionRevision
+            view.selectedRange = selection
+        }
         if view.isEditable != enabled || !context.coordinator.requestedInitialFocus {
             DispatchQueue.main.async { [weak view, weak coordinator = context.coordinator] in
                 guard let view, let coordinator else { return }
@@ -644,8 +751,17 @@ private struct CaptureTextInput: UIViewRepresentable {
     final class Coordinator: NSObject, UITextViewDelegate {
         var parent: CaptureTextInput
         var requestedInitialFocus = false
-        init(_ parent: CaptureTextInput) { self.parent = parent }
-        func textViewDidChange(_ view: UITextView) { parent.text = view.text }
+        var selectionRevision = 0
+        init(_ parent: CaptureTextInput) { self.parent = parent; selectionRevision = parent.selectionRevision }
+        func textViewDidChange(_ view: UITextView) {
+            parent.text = view.text
+            parent.selectionChanged(view.selectedRange, view.markedTextRange != nil)
+        }
+        func textViewDidChangeSelection(_ view: UITextView) {
+            parent.selectionChanged(view.selectedRange, view.markedTextRange != nil)
+        }
+        func textViewDidBeginEditing(_ view: UITextView) { parent.focusChanged(true) }
+        func textViewDidEndEditing(_ view: UITextView) { parent.focusChanged(false) }
         func textView(_ view: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {
             guard parent.enabled, parent.accepts() else { return false }
             if text == "\n", view.markedTextRange == nil { parent.submit(); return false }

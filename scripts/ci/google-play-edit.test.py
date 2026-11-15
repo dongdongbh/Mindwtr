@@ -625,6 +625,19 @@ class GooglePlayEditTest(unittest.TestCase):
         self.assertEqual(maximum, 19)
         self.assertEqual(transport.calls[-1]["method"], "DELETE")
 
+    def test_read_only_lookup_survives_a_failed_edit_cleanup(self) -> None:
+        transport = FakeTransport()
+        transport.fail_cleanup = True
+        stderr = io.StringIO()
+
+        with redirect_stderr(stderr):
+            maximum, releases = MODULE.read_track_version_codes("tech.dongdongbh.mindwtr", transport)
+
+        self.assertEqual(maximum, 19)
+        self.assertTrue(releases)
+        self.assertEqual(transport.calls[-1]["method"], "DELETE")
+        self.assertIn("cleanup failed", stderr.getvalue())
+
     def test_rollout_status_is_read_only_and_deletes_the_edit(self) -> None:
         transport = FakeTransport()
 
@@ -1139,6 +1152,14 @@ class GooglePlayEditTest(unittest.TestCase):
 
         self.assertEqual(exit_code, 0)
         self.assertEqual(result["maxVersionCode"], 19)
+        self.assertTrue(result["releases"])
+        for release in result["releases"]:
+            self.assertEqual(set(release), {"track", "name", "versionCodes"})
+            self.assertTrue(all(isinstance(code, int) for code in release["versionCodes"]))
+        self.assertEqual(
+            max(code for release in result["releases"] for code in release["versionCodes"]),
+            19,
+        )
         self.assertEqual(transport.calls[-1]["method"], "DELETE")
 
 

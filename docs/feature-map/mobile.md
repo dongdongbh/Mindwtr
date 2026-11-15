@@ -28,7 +28,7 @@ Source: `apps/mobile`. Routes live in `apps/mobile/app` (expo-router). Labels be
 
 ## Focus
 
-- Reach: Focus tab. Sections include Today's Focus, schedule, next actions, upcoming, and review-due projects.
+- Reach: Focus tab. Sections appear in this order: Today's Focus, Today (schedule), Review Due, Next Actions, Upcoming, then Projects to review.
 - Shortcuts: Swipe a row right for Done or Focus. Long press a review-due task to mark it reviewed. Long press a focused or next task to defer its start date. Reorder › long press and drag a row. Long press a saved filter chip to delete it.
 - Selectors: `focus-reorder-toggle`, `focus-reorder-list`, `focus-reorder-row-` (+ task id), `focus-reorder-handle-` (+ task id), `focus-reorder-done`, `focus-view-options-content`, `focus-hidden-by-area`
 - Code: `apps/mobile/app/(drawer)/(tabs)/focus.tsx`, `apps/mobile/components/focus/focus-list-layout.ts`
@@ -75,6 +75,8 @@ Source: `apps/mobile`. Routes live in `apps/mobile/app` (expo-router). Labels be
 - Code: `apps/mobile/components/quick-capture-sheet.tsx`, `apps/mobile/components/quick-capture-sheet/QuickCaptureSheetBody.tsx`, `apps/mobile/app/(drawer)/(tabs)/capture-quick.tsx`
 - Checks: `apps/mobile/tests/tab-layout-quick-capture.test.tsx`, `apps/mobile/components/quick-capture-sheet.save.test.tsx`, `apps/mobile/components/quick-capture-sheet/QuickCaptureSheetModal.test.tsx`, `apps/mobile/tests/capture-quick.test.tsx`
 - Notes: Buttons are Save, Add another, and Save & edit. A `+Project` token that names only an archived project creates a new project. Settings › GTD › Capture defaults picks text or voice as the default.
+- Destination is always visible, showing the contextual project/section, default Area, or None. A picker choice overrides title syntax without changing status; defaults stay fixed for the draft. An unavailable destination preserves the draft/audio for correction. Typing `@`, `+`, or `#` offers local suggestions at the caret; accepting a project selects its ID and replaces the whole token.
+- Autocomplete code and checks: `apps/mobile/components/quick-capture-sheet/QuickCaptureTitleInput.tsx`, `apps/mobile/components/quick-capture-sheet/QuickCaptureTitleInput.test.tsx`, `packages/core/src/capture-autocomplete.test.ts`
 
 ## Voice capture and Whisper
 
@@ -88,7 +90,8 @@ Source: `apps/mobile`. Routes live in `apps/mobile/app` (expo-router). Labels be
 - Reach: Android Quick capture widget, Quick Settings tile, or capture shortcut.
 - Code: `apps/mobile/modules/android-widget/android/src/main/java/tech/dongdongbh/mindwtr/androidwidget/QuickCaptureActivity.kt`, `packages/core/src/pending-captures.ts`
 - Checks: `packages/core/src/pending-captures.test.ts`, `apps/mobile/lib/pending-captures.test.ts`
-- Notes: Text and audio queue ingestion uses the configured default area, including active-filter mode. Explicit area/project choices take precedence. Missing or deleted default areas remain unassigned.
+- Notes: The standalone screen shows editable Status and Destination, a one-line expanding title, and local `@`, `+`, `#` suggestions. Save and Cancel stay labelled. The displayed destination is frozen into text/audio queue entries, including explicit None; later settings changes cannot redirect them. Missing destinations keep the draft or queued capture for recovery. Older queue entries without destination metadata retain legacy default-area handling. IME composition confirmation must not submit the title.
+- Mixed destination syntax that depends on unavailable parser settings or taxonomy requires an explicit Destination choice; the draft remains editable. Project autocomplete provides that choice. Shared agreement and ambiguity cases live in `packages/core/src/capture-destination-parser.test.ts` and the standalone destination tests.
 
 ## Full-screen capture (system entry)
 
@@ -104,7 +107,7 @@ Source: `apps/mobile`. Routes live in `apps/mobile/app` (expo-router). Labels be
 - Selectors: `task-preview-mark-done`, `task-edit-adaptive-surface`, `task-edit-preview-page`, `task-edit-read-only-hint`, `task-edit-focus-star`, `project-create-error`, `area-create-error`, `destination-create-error`
 - Code: `apps/mobile/components/task-edit-modal.tsx`, `apps/mobile/components/task-edit/TaskEditHeader.tsx`, `apps/mobile/components/task-edit/TaskEditFormTab.tsx`, `apps/mobile/components/task-edit/TaskEditViewTab.tsx`
 - Checks: `apps/mobile/components/task-edit-modal.test.tsx`, `apps/mobile/components/task-edit/TaskEditFormTab.test.tsx`, `apps/mobile/components/task-edit/TaskEditViewTab.test.tsx`, `apps/mobile/components/task-edit/use-task-edit-actions.save-result.test.tsx`, `apps/mobile/components/task-edit/use-task-edit-preview-completion.test.tsx`
-- Notes: Edits stay in the Task draft until Save. Sending a draft back to Inbox drops its Focus star. Field order and visibility come from Settings › GTD › Task editor layout.
+- Notes: Destination lists None, Areas, active Projects, then Someday / Waiting projects, preserving order within each group and direct project selection. Edits stay in the Task draft until Save. Sending a draft back to Inbox drops its Focus star. Field order and visibility come from Settings › GTD › Task editor layout.
 
 - Preview completion: Mark Done appears inside the visible Status card for editable active tasks. It saves the complete current draft, including pending checklist input, through one normal completion write. Repeated taps and competing Save/Close are blocked until persistence finishes; a failed barrier keeps the Done draft/files with inline error and Retry in Preview/header. Retry actively persists the applied state without creating another recurring successor. iOS sheet swipe attempts run the same Save/Discard/Cancel decision as Close before the sheet can disappear; Cancel and failed saves keep the draft visible. Close is blocked while submitting or retrying. Reference, terminal, Trash, projected and archived-project previews have no action.
 

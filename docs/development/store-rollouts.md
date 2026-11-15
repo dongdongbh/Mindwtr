@@ -13,7 +13,7 @@ Rollout promotion does not change the version or rebuild a package.
 | iOS and macOS App Store | Apple phased release, automatic after approval |
 | Google Play production | 5%, then scheduled 20% → 50% → 100% |
 | Microsoft Store production | 5%, then scheduled 20% → 50% → 100% |
-| Play beta/internal | Completed, same standard AAB and versionCode |
+| Play beta/internal | Not touched by stable releases; they keep the native RC ([native Android RCs](native-android-release.md)) |
 | RC TestFlight, Play testing, Microsoft Beta flight | Existing beta distribution |
 | GitHub downloads and other package channels | Existing distribution, no staging |
 

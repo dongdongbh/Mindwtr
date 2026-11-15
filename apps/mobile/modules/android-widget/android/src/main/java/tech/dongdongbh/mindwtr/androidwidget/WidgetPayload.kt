@@ -40,7 +40,33 @@ data class WidgetPayload(
   val viewAllLabel: String = "View all {{count}} tasks",
   val prioritiesEnabled: Boolean = true,
   val upcomingDays: UpcomingDays? = null,
+  val captureDestinations: CaptureDestinations? = null,
 ) {
+  data class CaptureDestination(val kind: String, val id: String? = null, val sectionId: String? = null) {
+    companion object {
+      fun parse(json: JSONObject?): CaptureDestination? {
+        json ?: return null
+        val kind = json.optString("kind")
+        val fields = json.keys().asSequence().toSet()
+        if (kind == "none" && fields == setOf("kind")) return CaptureDestination(kind)
+        val id = json.opt("id") as? String ?: return null
+        if (id.isBlank() || id != id.trim() || id.length > 500) return null
+        if (kind == "area" && fields == setOf("kind", "id")) return CaptureDestination(kind, id)
+        if (kind != "project" || fields.any { it !in setOf("kind", "id", "sectionId") }) return null
+        val sectionId = if (json.has("sectionId")) json.opt("sectionId") as? String ?: return null else null
+        if (sectionId != null && (sectionId.isBlank() || sectionId != sectionId.trim() || sectionId.length > 500)) return null
+        return CaptureDestination(kind, id, sectionId)
+      }
+    }
+  }
+  data class CaptureArea(val id: String, val name: String)
+  data class CaptureProject(val id: String, val title: String, val areaId: String? = null)
+  data class CaptureSection(val id: String, val title: String, val projectId: String)
+  data class CaptureDestinationLabels(val destination: String, val none: String, val areas: String, val projects: String,
+    val deferred: String, val unavailable: String, val search: String, val needsSelection: String)
+  data class CaptureDestinations(val defaultDestination: CaptureDestination, val areas: List<CaptureArea>,
+    val projects: List<CaptureProject>, val sections: List<CaptureSection>, val labels: CaptureDestinationLabels)
+
   data class DisplaySnapshot(val sourceTaskIds: Set<String>, val payload: WidgetPayload)
 
   data class Item(
@@ -348,6 +374,37 @@ data class WidgetPayload(
       return "$label ${time.format(date)}"
     }
 
+    private fun parseCaptureDestinations(json: JSONObject?): CaptureDestinations? {
+      json ?: return null
+      val destination = CaptureDestination.parse(json.optJSONObject("defaultDestination")) ?: return null
+      val areaArray = json.optJSONArray("areas") ?: return null
+      val projectArray = json.optJSONArray("projects") ?: return null
+      val sectionArray = json.optJSONArray("sections") ?: return null
+      fun text(row: JSONObject, field: String): String? = (row.opt(field) as? String)?.takeIf { it.isNotBlank() && it.length <= 2000 }
+      val areas = (0 until areaArray.length()).map { index ->
+        val row = areaArray.optJSONObject(index) ?: return null
+        CaptureArea(text(row, "id") ?: return null, text(row, "name") ?: return null)
+      }
+      val projects = (0 until projectArray.length()).map { index ->
+        val row = projectArray.optJSONObject(index) ?: return null
+        CaptureProject(text(row, "id") ?: return null, text(row, "title") ?: return null, text(row, "areaId"))
+      }
+      val sections = (0 until sectionArray.length()).map { index ->
+        val row = sectionArray.optJSONObject(index) ?: return null
+        CaptureSection(text(row, "id") ?: return null, text(row, "title") ?: return null, text(row, "projectId") ?: return null)
+      }
+      if (sections.any { section -> projects.none { it.id == section.projectId } }) return null
+      if (destination.kind == "area" && areas.none { it.id == destination.id }) return null
+      if (destination.kind == "project" && (projects.none { it.id == destination.id }
+          || (destination.sectionId != null && sections.none { it.id == destination.sectionId && it.projectId == destination.id }))) return null
+      val copy = json.optJSONObject("labels") ?: JSONObject()
+      fun label(field: String, fallback: String) = text(copy, field) ?: fallback
+      return CaptureDestinations(destination, areas, projects, sections, CaptureDestinationLabels(
+        label("destination", "Destination"), label("none", "None"), label("areas", "Areas"), label("projects", "Projects"),
+        label("deferred", "Deferred"), label("unavailable", "Destination unavailable"), label("search", "Search"),
+        label("needsSelection", "Choose a destination to save.")))
+    }
+
     private fun parseUpcomingDays(json: JSONObject?): UpcomingDays? {
       json ?: return null
       val weekdays = json.optJSONArray("weekdays")?.let { array -> (0 until array.length()).map { array.optString(it) } }
@@ -505,6 +562,7 @@ data class WidgetPayload(
         listTitles = listTitles,
         savedFilters = savedFilters,
         contexts = parseTokenOptions(root, "contexts", WidgetListStore.CONTEXT_PREFIX),
+        captureDestinations = parseCaptureDestinations(root.optJSONObject("captureDestinations")),
         tags = parseTokenOptions(root, "tags", WidgetListStore.TAG_PREFIX),
         emptyMessage = root.stringOr("emptyMessage", defaults.emptyMessage),
         focusUri = focusUri,

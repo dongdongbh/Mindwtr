@@ -1,3 +1,5 @@
+import type { CaptureDestination } from './capture-destination';
+import { resolveQuickCaptureDefaultAreaId } from './quick-capture-model';
 import { taskMatchesAreaFilterSelection } from './area-filter';
 import { format } from 'date-fns';
 import {
@@ -19,7 +21,7 @@ import { SUPPORTED_LANGUAGES } from './i18n/i18n-constants';
 import { getTranslationsSync, loadTranslations } from './i18n/i18n-loader';
 import type { Language } from './i18n/i18n-types';
 import { stripMarkdown } from './markdown';
-import { isTaskInActiveProject } from './project-utils';
+import { isSelectableProjectForTaskAssignment, isTaskInActiveProject } from './project-utils';
 import { resolveFeatureFlags } from './resolve-feature-flags';
 import { getAccentTint, getTaskAccentColor } from './task-accent-color';
 import { isTaskActionable } from './task-status';
@@ -217,7 +219,41 @@ export interface AndroidTaskPeekLabels {
     priority: string;
 }
 
+export type AndroidCaptureDestinationCatalog = {
+    defaultDestination: CaptureDestination;
+    areas: { id: string; name: string }[];
+    projects: { id: string; title: string; areaId?: string }[];
+    sections: { id: string; title: string; projectId: string }[];
+    labels: { destination: string; none: string; areas: string; projects: string; deferred: string; unavailable: string; needsSelection: string; search: string };
+};
+
+export function buildAndroidCaptureDestinationCatalog(data: AppData, language: Language): AndroidCaptureDestinationCatalog {
+    const t = getTranslator(language);
+    const areas = (data.areas ?? []).filter(area => !area.deletedAt);
+    const projects = data.projects.filter(project => isSelectableProjectForTaskAssignment(project));
+    const projectIds = new Set(projects.map(project => project.id));
+    const areaId = resolveQuickCaptureDefaultAreaId(data.settings, areas);
+    return {
+        defaultDestination: areaId ? { kind: 'area', id: areaId } : { kind: 'none' },
+        areas: areas.map(({ id, name }) => ({ id, name })),
+        projects: projects.map(({ id, title, areaId }) => ({ id, title, ...(areaId ? { areaId } : {}) })),
+        sections: (data.sections ?? []).filter(section => !section.deletedAt && projectIds.has(section.projectId))
+            .map(({ id, title, projectId }) => ({ id, title, projectId })),
+        labels: {
+            destination: resolveI18nText(t, 'task.destination', { fallback: 'Destination' }),
+            none: resolveI18nText(t, 'taskEdit.noProjectOption', { fallback: 'None' }),
+            areas: resolveI18nText(t, 'nav.areas', { fallback: 'Areas' }),
+            projects: resolveI18nText(t, 'nav.projects', { fallback: 'Projects' }),
+            deferred: resolveI18nText(t, 'projects.onHold', { fallback: 'Deferred' }),
+            unavailable: resolveI18nText(t, 'quickAdd.destinationUnavailable', { fallback: 'Destination unavailable. Choose another destination.' }),
+            needsSelection: resolveI18nText(t, 'quickAdd.destinationNeedsSelection', { fallback: 'Choose a destination to save.' }),
+            search: resolveI18nText(t, 'common.search', { fallback: 'Search' }),
+        },
+    };
+}
+
 export interface AndroidTasksWidgetPayload extends TasksWidgetPayload {
+    captureDestinations?: AndroidCaptureDestinationCatalog;
     quickCapture: AndroidQuickCaptureLabels;
     taskPeek: AndroidTaskPeekLabels;
 
@@ -914,10 +950,12 @@ export function buildAndroidTasksWidgetPayload(
     rendered: TasksWidgetPayload,
     language: Language,
     audioEnabled: boolean,
+    captureDestinations?: AndroidCaptureDestinationCatalog,
 ): AndroidTasksWidgetPayload {
     return {
         ...rendered,
         quickCapture: buildAndroidQuickCaptureLabels(language, audioEnabled),
+        ...(captureDestinations ? { captureDestinations } : {}),
         taskPeek: buildAndroidTaskPeekLabels(language),
         viewAllLabel: getTranslator(language)('widget.viewAllTasks'),
     };
@@ -937,6 +975,7 @@ export function buildAndroidWidgetPublication(
         projection.build(ANDROID_WIDGET_MAX_ITEMS),
         language,
         isWidgetAudioCaptureEnabled(data.settings),
+        buildAndroidCaptureDestinationCatalog(data, language),
     );
 }
 

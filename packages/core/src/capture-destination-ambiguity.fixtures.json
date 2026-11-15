@@ -1,0 +1,146 @@
+[
+  {
+    "input": "Task +One @ctx Two",
+    "expected": {
+      "destination": {
+        "kind": "project",
+        "id": "p-one-two"
+      }
+    }
+  },
+  {
+    "input": "Task +One #topic Two",
+    "expected": {
+      "destination": {
+        "kind": "project",
+        "id": "p-one-two"
+      }
+    }
+  },
+  {
+    "input": "Task +One @ctx/sub Two",
+    "expected": {
+      "destination": {
+        "kind": "project",
+        "id": "p-one-two"
+      }
+    }
+  },
+  {
+    "input": "Task !One #topic Two",
+    "expected": {
+      "destination": {
+        "kind": "area",
+        "id": "one-two"
+      }
+    }
+  },
+  {
+    "input": "Task +One @deep work Two",
+    "parseOptions": {
+      "knownContexts": [
+        "@deep work"
+      ]
+    },
+    "expected": {
+      "destination": {
+        "kind": "project",
+        "id": "p-one-two"
+      }
+    }
+  },
+  {
+    "input": "Task +One %person Two",
+    "expected": {
+      "destination": {
+        "kind": "project",
+        "id": "p-one-two"
+      }
+    }
+  },
+  {
+    "input": "Task !One /energy:low Two",
+    "expected": {
+      "destination": {
+        "kind": "area",
+        "id": "one-two"
+      }
+    }
+  },
+  {
+    "input": "Task +One /priority:high Two",
+    "expected": {
+      "destination": {
+        "kind": "project",
+        "id": "p-one-two"
+      }
+    }
+  },
+  {
+    "input": "Task +One /priority:high Two",
+    "parseOptions": {
+      "parsePriority": false
+    },
+    "expected": {
+      "destination": {
+        "kind": "area",
+        "id": "personal"
+      },
+      "projectToCreate": "One"
+    }
+  },
+  {
+    "input": "Task +One /due:2030-01-01 /next Two",
+    "expected": {
+      "destination": {
+        "kind": "project",
+        "id": "p-one-two"
+      }
+    }
+  },
+  {
+    "input": "Task +One @ctx Two",
+    "parseOptions": {
+      "knownContexts": [
+        "@ctx Two"
+      ]
+    },
+    "expected": {
+      "destination": {
+        "kind": "area",
+        "id": "personal"
+      },
+      "projectToCreate": "One"
+    }
+  },
+  {
+    "input": "Task +One @\"\" Two",
+    "expected": {
+      "destination": {
+        "kind": "area",
+        "id": "personal"
+      },
+      "projectToCreate": "One"
+    }
+  },
+  {
+    "input": "Task +One @\" \" Two",
+    "expected": {
+      "destination": {
+        "kind": "area",
+        "id": "personal"
+      },
+      "projectToCreate": "One"
+    }
+  },
+  {
+    "input": "Task +One #\"\" Two",
+    "expected": {
+      "destination": {
+        "kind": "area",
+        "id": "personal"
+      },
+      "projectToCreate": "One"
+    }
+  }
+]

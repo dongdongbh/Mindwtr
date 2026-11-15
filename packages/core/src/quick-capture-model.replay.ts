@@ -296,6 +296,7 @@ export async function replayQuickCaptureScenario(input: {
             settings: state.settings,
             projects: state.projects,
             areas: state.areas,
+            sections: state.sections,
             parseOptions: current.bag!,
             focusedCount: state.getFocusedCount(),
             defaultAreaId: resolveQuickCaptureDefaultAreaId(state.settings, state.areas),
@@ -381,6 +382,7 @@ export async function replayQuickCaptureScenario(input: {
     };
 
     const save = async (current: Ui, openAfterSave: boolean) => {
+        if (!viewOf(current).view.canSave) return;
         if (contract) {
             if (!current.text.trim()) return;
             const result = unwrap(await contract.submitQuickCapture({

@@ -52,6 +52,8 @@ import { normalizeTimeSpentMinutes } from './time-spent';
 import { hasTimeComponent } from './date';
 import { normalizeRelativeStartOffset } from './task-relative-start';
 
+const isDeferredDestinationProject = (project: Project) => project.status === 'someday' || project.status === 'waiting';
+
 export type NativeChecklistSaveRequest = NativeTaskDraftSaveRequest & {
     requestId: string;
     checklist: { base: ChecklistItem[]; value: ChecklistItem[] };
@@ -2878,11 +2880,12 @@ function createTaskChecklistSaveFactory(deps: NativeTaskChecklistSaveDependencie
             const query = input.query.trim().toLowerCase();
             const choices: NativeRowTaskDestinationOptions['choices'] = [
                 { kind: 'none', id: '', label: resolveI18nText(t, 'common.none'), selected: !source.projectId && !source.areaId },
-                ...getProjectChoiceState(selectVisibleProjects(state._allProjects), input.query).filteredProjects.map(row => ({
-                    kind: 'project' as const, id: row.id, label: row.title, selected: source.projectId === row.id })),
                 ...selectVisibleAreas(state._allAreas).filter(row => !row.deletedAt).sort(compareAreasByOrder)
                     .filter(row => !query || row.name.toLowerCase().includes(query)).map(row => ({
                         kind: 'area' as const, id: row.id, label: row.name, selected: source.areaId === row.id })),
+                ...getProjectChoiceState(selectVisibleProjects(state._allProjects), input.query).filteredProjects
+                    .sort((left, right) => Number(isDeferredDestinationProject(left)) - Number(isDeferredDestinationProject(right))).map(row => ({
+                    kind: 'project' as const, id: row.id, label: row.title, selected: source.projectId === row.id })),
             ];
             const page = choices.slice(input.offset, input.offset + input.limit), hasMore = input.offset + page.length < choices.length;
             const result: NativeRowTaskDestinationOptions = { version: 1, ...input, total: choices.length, hasMore,
@@ -2938,11 +2941,12 @@ function createTaskChecklistSaveFactory(deps: NativeTaskChecklistSaveDependencie
             const query = input.query.trim().toLowerCase();
             const choices: NativeReferenceTaskDestinationOptions['choices'] = [
                 { kind: 'none', id: '', label: resolveI18nText(t, 'common.none'), selected: !source.value.projectId && !source.value.areaId },
-                ...getProjectChoiceState(state.projects, input.query).filteredProjects.map((row) => ({
-                    kind: 'project' as const, id: row.id, label: row.title, selected: source.value.projectId === row.id })),
                 ...state.areas.filter((row) => !row.deletedAt).sort(compareAreasByOrder)
                     .filter((row) => !query || row.name.toLowerCase().includes(query)).map((row) => ({
                         kind: 'area' as const, id: row.id, label: row.name, selected: source.value.areaId === row.id })),
+                ...getProjectChoiceState(state.projects, input.query).filteredProjects
+                    .sort((left, right) => Number(isDeferredDestinationProject(left)) - Number(isDeferredDestinationProject(right))).map((row) => ({
+                    kind: 'project' as const, id: row.id, label: row.title, selected: source.value.projectId === row.id })),
             ];
             const page = choices.slice(input.offset, input.offset + input.limit);
             const hasMore = input.offset + page.length < choices.length;

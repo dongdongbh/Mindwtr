@@ -1,0 +1,178 @@
+name: Docker Image (MCP)
+
+on:
+  push:
+    tags:
+      - 'v[0-9]*.[0-9]*.[0-9]*'
+      - '!v*-*'
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Git ref to build (defaults to the selected branch)'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: docker-image-mcp-publish
+  cancel-in-progress: false
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+  IMAGE_NAME: dongdongbh/mindwtr-mcp
+
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.identity.outputs.version }}
+      revision: ${{ steps.identity.outputs.revision }}
+      image: ${{ steps.identity.outputs.image }}
+      exists: ${{ steps.existing.outputs.exists }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - name: Resolve MCP image identity
+        id: identity
+        run: |
+          set -euo pipefail
+          VERSION=$(node -p "require('./apps/mcp-server/package.json').version")
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Expected a stable MCP package version, got: $VERSION" >&2
+            exit 1
+          fi
+          if [[ "$GITHUB_EVENT_NAME" == push && ! "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo 'Automatic publication requires a stable release tag.' >&2
+            exit 1
+          fi
+          printf 'version=%s\nrevision=%s\nimage=ghcr.io/%s:%s\n' \
+            "$VERSION" "$(git rev-parse HEAD)" "$IMAGE_NAME" "$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Check immutable MCP version tag
+        id: existing
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MCP_VERSION: ${{ steps.identity.outputs.version }}
+        run: |
+          set -euo pipefail
+          TOKEN=$(curl --fail --silent --show-error \
+            --user "$GITHUB_ACTOR:$GHCR_TOKEN" \
+            "https://ghcr.io/token?service=ghcr.io&scope=repository:${IMAGE_NAME}:pull,push" \
+            | jq -er '.token | select(type == "string" and length > 0)')
+          STATUS=$(curl --silent --show-error --output "$RUNNER_TEMP/mcp-manifest.json" --write-out '%{http_code}' \
+            --header "Authorization: Bearer $TOKEN" \
+            --header 'Accept: application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.list.v2+json,application/vnd.oci.image.manifest.v1+json,application/vnd.docker.distribution.manifest.v2+json' \
+            "https://ghcr.io/v2/${IMAGE_NAME}/manifests/${MCP_VERSION}")
+          case "$STATUS" in
+            200)
+              echo 'exists=true' >> "$GITHUB_OUTPUT"
+              echo "ghcr.io/${IMAGE_NAME}:${MCP_VERSION} already exists; leaving it unchanged." >> "$GITHUB_STEP_SUMMARY"
+              ;;
+            404)
+              echo 'exists=false' >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "Cannot establish whether the MCP version exists (HTTP $STATUS); refusing publication." >&2
+              exit 1
+              ;;
+          esac
+
+  smoke:
+    needs: prepare
+    if: needs.prepare.outputs.exists == 'false'
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - name: Checkout resolved source
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
+        with:
+          ref: ${{ needs.prepare.outputs.revision }}
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+        with:
+          bun-version-file: .bun-version
+
+      - name: Install smoke test dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
+
+      - name: Build native smoke image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
+        with:
+          context: .
+          file: docker/mcp/Dockerfile
+          platforms: linux/${{ matrix.arch }}
+          load: true
+          tags: mindwtr-mcp:smoke-${{ matrix.arch }}
+          build-args: |
+            MCP_VERSION=${{ needs.prepare.outputs.version }}
+            SOURCE_REVISION=${{ needs.prepare.outputs.revision }}
+          cache-from: type=gha,scope=mcp-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=mcp-${{ matrix.arch }}
+
+      - name: Smoke test native image
+        env:
+          SMOKE_IMAGE: mindwtr-mcp:smoke-${{ matrix.arch }}
+        run: node scripts/ci/smoke-mcp-container.mjs "$SMOKE_IMAGE"
+
+  publish:
+    needs: [prepare, smoke]
+    if: needs.prepare.outputs.exists == 'false'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout resolved source
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
+        with:
+          ref: ${{ needs.prepare.outputs.revision }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
+
+      - name: Log in to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish tested multi-platform image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
+        with:
+          context: .
+          file: docker/mcp/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ needs.prepare.outputs.image }}
+          build-args: |
+            MCP_VERSION=${{ needs.prepare.outputs.version }}
+            SOURCE_REVISION=${{ needs.prepare.outputs.revision }}
+          cache-from: |
+            type=gha,scope=mcp-amd64
+            type=gha,scope=mcp-arm64

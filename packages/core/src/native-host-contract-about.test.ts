@@ -20,15 +20,16 @@ type GithubAnswer = { status: number; body?: unknown };
 
 
 function device(options: { storage?: Record<string, string>; github?: GithubAnswer[]; feedbackStatus?: number; foss?: boolean; feedbackEndpointUrl?: string;
-    releaseVersion?: string; heartbeatUrl?: string; channel?: string; isDev?: boolean } = {}) {
+    releaseVersion?: string; heartbeatUrl?: string; channel?: string; isDev?: boolean; version?: string; releaseCandidateUpdates?: boolean } = {}) {
     const storage = new Map(Object.entries(options.storage ?? {}));
     const events: Event[] = [];
     const github = [...(options.github ?? [])];
     const host: NativeAboutHost = {
         app: {
-            appName: 'Mindwtr', version: '1.3.4', releaseVersion: options.releaseVersion ?? '', build: '154', packageName: 'tech.dongdongbh.mindwtr',
+            appName: 'Mindwtr', version: options.version ?? '1.3.4', releaseVersion: options.releaseVersion ?? '', build: '154', packageName: 'tech.dongdongbh.mindwtr',
             isFossBuild: options.foss ?? false, isDev: options.isDev ?? false, platform: 'android', platformVersion: 34, osRelease: '14',
             feedbackEndpointUrl: options.feedbackEndpointUrl ?? '', analyticsHeartbeatUrl: options.heartbeatUrl ?? '', analyticsHeartbeatChannel: options.channel ?? '',
+            ...(options.releaseCandidateUpdates === undefined ? {} : { releaseCandidateUpdates: options.releaseCandidateUpdates }),
         },
         storage: {
             getItem: async (key) => storage.get(key) ?? null,
@@ -218,6 +219,31 @@ describe('native host contract: Settings › About against RN\'s frozen fixture'
         contract = await openContract(device({ foss: true }));
         expect(source('utm_source=google-play', 'com.android.vending')).toBe('sideload');
         expect(contract.getAboutInstallerSource({ referrer: 1 as never, installerPackageName: null })).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+    });
+
+    it('a native release candidate is offered only newer release candidates, never a React Native stable', async () => {
+        const release = (tag: string, prerelease: boolean, draft = false) => ({ tag_name: tag, prerelease, draft, html_url: `https://github.com/dongdongbh/Mindwtr/releases/tag/${tag}` });
+        const rc = { version: '1.4.0', releaseVersion: 'v1.4.0-rc.1', releaseCandidateUpdates: true };
+        const newer = device({ ...rc, github: [{ status: 200, body: [release('v1.4.1', false), release('v1.4.0-rc.9', true, true), release('v1.4.0-rc.2', true), release('v1.3.9-rc.3', true)] }] });
+        let contract = await openContract(newer);
+        const offered = value(await contract.runAboutUpdateCheck({ mode: 'manual', installerSource: 'sideload', play: null, marketAvailable: false }));
+        expect(offered.badge).toBe(true);
+        expect(offered.notices).toHaveLength(1);
+        expect(offered.notices[0]).toMatchObject({ kind: 'alert' });
+        expect((offered.notices[0] as { message: string }).message).toContain('v1.4.0-rc.1 → v1.4.0-rc.2');
+        expect((offered.notices[0] as { buttons: { url?: string }[] }).buttons[1].url).toBe('https://github.com/dongdongbh/Mindwtr/releases/tag/v1.4.0-rc.2');
+        expect(newer.events.find((event) => event[0] === 'fetch')![1]).toMatchObject({ url: 'https://api.github.com/repos/dongdongbh/Mindwtr/releases?per_page=30' });
+
+        contract = await openContract(device({ ...rc, github: [{ status: 200, body: [release('v1.4.5', false), release('v1.4.0-rc.1', true)] }] }));
+        const stableOnly = value(await contract.runAboutUpdateCheck({ mode: 'manual', installerSource: 'sideload', play: null, marketAvailable: false }));
+        expect(stableOnly.badge).toBe(false);
+        expect(stableOnly.notices[0]).toMatchObject({ kind: 'toast', tone: 'success' });
+
+        contract = await openContract(device({ ...rc, github: [{ status: 200, body: [release('v1.4.5', false)] }] }));
+        expect(value(await contract.runAboutUpdateCheck({ mode: 'manual', installerSource: 'play-store', play: { error: 'Play unavailable' }, marketAvailable: true })).badge).toBe(false);
+
+        contract = await openContract(device({ version: '1.4.0', releaseVersion: 'v1.4.0-rc.1', github: [{ status: 200, body: release('v1.4.5', false) }] }));
+        expect(value(await contract.runAboutUpdateCheck({ mode: 'manual', installerSource: 'sideload', play: null, marketAvailable: false })).badge).toBe(true);
     });
 
     it('a FOSS build\'s Check for updates is RN\'s info toast', async () => {

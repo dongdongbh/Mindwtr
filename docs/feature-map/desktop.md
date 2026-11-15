@@ -24,11 +24,11 @@ Source: `apps/desktop/src` (Tauri + React). Labels come from `packages/core/src/
 
 ## Focus
 
-- Reach: Sidebar › Focus. This is the default view at launch. Sections: Today's Focus, Due Today, Review Due, Next Actions, Upcoming. Select › choose tasks › Bulk organize opens the shared organizer.
+- Reach: Sidebar › Focus. This is the default view at launch. Sections: Today's Focus, Today (schedule), Review Due, Next Actions, Upcoming, then Projects to review. Select › choose tasks › Bulk organize opens the shared organizer.
 - Shortcuts: `gf` (Vim, Standard), `Alt+A` (Emacs). Standard style: `S` adds the selected task to Today's Focus.
 - Selectors: `todays-focus-section`, `focus-hidden-by-area`
 - Code: `apps/desktop/src/components/views/AgendaView.tsx`, `apps/desktop/src/components/views/agenda/AgendaHeader.tsx`, `apps/desktop/src/components/views/agenda/AgendaSections.tsx`, `apps/desktop/src/components/views/agenda/AgendaFiltersPanel.tsx`, `apps/desktop/src/components/views/agenda/SortableFocusRow.tsx`, `apps/desktop/src/components/FocusStarIcon.tsx`
-- Checks: `e2e/app.spec.ts`, `e2e/compact-filters.spec.ts`, `e2e/focus-area-selection.spec.ts`, `e2e/focus-bulk-selection.spec.ts`, `e2e/saved-focus-filter-toggle.spec.ts`, `e2e/desktop-direct-controls.spec.ts`, `apps/desktop/src/components/views/AgendaView.test.tsx`, `apps/desktop/src/components/views/AgendaView.selection.test.tsx`, `apps/desktop/src/components/views/agenda/AgendaHeader.test.tsx`, `apps/desktop/src/components/FocusStarIcon.test.tsx`
+- Checks: `e2e/app.spec.ts`, `e2e/compact-filters.spec.ts`, `e2e/focus-area-selection.spec.ts`, `e2e/focus-section-order.spec.ts`, `e2e/focus-bulk-selection.spec.ts`, `e2e/saved-focus-filter-toggle.spec.ts`, `e2e/desktop-direct-controls.spec.ts`, `apps/desktop/src/components/views/AgendaView.test.tsx`, `apps/desktop/src/components/views/AgendaView.selection.test.tsx`, `apps/desktop/src/components/views/agenda/AgendaHeader.test.tsx`, `apps/desktop/src/components/FocusStarIcon.test.tsx`
 - Notes: The star is the Focus star. Starring an Inbox task clarifies it to next; adding a star obeys the focus cap. An area filter hides Focus rows but they still use focus slots. Select All includes actual tasks in expanded filtered sections and groups, including offscreen rows, once per task ID. Folded sections, folded groups and project review cards are excluded. Selection mode disables task dragging and row quick actions; completing a selected sequential action leaves its newly exposed successor unchanged.
 - Notes: Focus task dates show Today, Tomorrow, or a full localized weekday for the next six days, with explicit times retained. Start uses an arrow and Due a calendar; accessible labels retain the field and exact date. Past dates and dates at least seven days away stay exact. Labels refresh at local midnight and when the app returns to the foreground.
 
@@ -56,6 +56,7 @@ Source: `apps/desktop/src` (Tauri + React). Labels come from `packages/core/src/
 - Code: `apps/desktop/src/components/QuickAddModal.tsx`, `apps/desktop/src/components/QuickAddPreview.tsx`, `apps/desktop/src/components/ui/QuickAddSyntaxHint.tsx`, `apps/desktop/src/components/QuickDateChips.tsx`
 - Checks: `e2e/unified-inbox.spec.ts`, `e2e/clarify.spec.ts`, `apps/desktop/src/components/QuickAddModal.test.tsx`, `apps/desktop/src/components/QuickAddModal.preview.test.tsx`, `apps/desktop/src/components/QuickAddModal.paste-hint.test.tsx`, `apps/desktop/src/components/QuickAddPreview.test.tsx`
 - Notes: Quick Add is a Capture. A `+Project` that names only an archived project creates a new project. Syntax: `/due:`, `/start:`, `/review:`, `/note:`, `/link:`, `@context`, `#tag`, `+Project`, `!Area`, `%Person`, `/*` (Focus star). The "Quick voice capture" button records audio.
+- Destination is always visible and editable. It shows the contextual project/section, default Area, or None; a picker choice overrides title syntax without changing status. Defaults stay fixed for the draft. An unavailable destination keeps the draft/audio for correction, and audio retry retains a project already created by that capture. Autocomplete replaces the complete token at the caret, including quoted names in the middle of a title.
 
 ## Global quick add and tray
 
@@ -248,7 +249,7 @@ Source: `apps/desktop/src` (Tauri + React). Labels come from `packages/core/src/
 - Shortcuts: `.` (Vim, Standard), `Ctrl+.` (Emacs). `F2` renames (Standard).
 - Code: `apps/desktop/src/components/Task/TaskQuickActionMenu.tsx`, `apps/desktop/src/components/Task/useTaskQuickActionMenuProps.ts`, `apps/desktop/src/lib/task-clipboard.ts`, `apps/desktop/src/components/ui/DestinationSelector.tsx`, `apps/desktop/src/components/TaskProjectConversionDialog.tsx`
 - Checks: `e2e/task-menu-dates.spec.ts`, `e2e/task-menu-contexts.spec.ts`, `e2e/task-menu-project-create.spec.ts`, `e2e/task-copy-title.spec.ts`, `e2e/ui-simplification.spec.ts`, `apps/desktop/src/components/Task/TaskQuickActionMenu.test.tsx`, `apps/desktop/src/components/Task/useTaskQuickActionMenuProps.test.tsx`, `apps/desktop/src/lib/task-clipboard.test.ts`, `apps/desktop/src/components/ui/DestinationSelector.test.tsx`
-- Notes: Move to… changes only the Container, never status or dates. Menu edits wait for Save; a project created there is not assigned until Save.
+- Notes: Destination browsing lists None, Areas, active Projects, then Someday / Waiting projects. Search shows matching Areas before Projects; the highlighted match and Enter selection agree. Projects remain directly selectable. Move to… changes only the Container, never status or dates. Menu edits wait for Save; a project created there is not assigned until Save.
 
 ## Bulk selection
 
@@ -475,3 +476,10 @@ Source: `apps/desktop/src` (Tauri + React). Labels come from `packages/core/src/
 - Ownership: `packages/core/src/task-reminder-policy.ts`, `packages/core/src/schedule-utils.ts`, `packages/core/src/task-editor-schedule.ts`; each platform consumes the shared reminder model and plan.
 - Checks: `packages/core/src/selective-reminders.test.ts`; confirm old alarms are withdrawn after changing modes, completion, or permission revocation. Review reminders remain separate.
 - Compatibility: older clients skip these selective reminders and cannot edit or preserve the new policy reliably. Update every device before using the new modes.
+
+## Standalone MCP container
+
+- Reach: Run the standalone `ghcr.io/dongdongbh/mindwtr-mcp` image from an MCP client or ToolHive; configure a Cloud URL and token. This does not require the desktop app.
+- Code: `docker/mcp/Dockerfile`, `docker/mcp/toolhive.yaml`, `.github/workflows/docker-image-mcp.yml`, `apps/mcp-server/src/index.ts`
+- Checks: `scripts/ci/smoke-mcp-container.mjs`
+- Notes: Stdio and read-only operations are the defaults. The non-root image supports API backends, not direct SQLite; image versions follow the helper package.

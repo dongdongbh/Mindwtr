@@ -26,15 +26,24 @@ class AndroidPlayReleasePlanTest(unittest.TestCase):
             ["internal", "beta"],
         )
 
-    def test_stable_tag_expands_production_to_all_shared_artifact_tracks(self) -> None:
+    def test_stable_tag_publishes_production_only_so_native_rcs_keep_beta_and_internal(self) -> None:
         self.assertEqual(
             MODULE.resolve_tracks(
                 "production",
                 internal_test_release=False,
                 stable_production_tag=True,
             ),
-            ["production", "beta", "internal"],
+            ["production"],
         )
+        with self.assertRaises(ValueError):
+            MODULE.build_plan(
+                package="tech.dongdongbh.mindwtr",
+                artifact_path="mindwtr-1.4.0.aab",
+                expected_version_code=200,
+                version="1.4.0",
+                tracks=["production", "beta", "internal"],
+                stable_production=True,
+            )
 
     def test_manual_production_does_not_gain_testing_tracks(self) -> None:
         self.assertEqual(
@@ -74,7 +83,7 @@ class AndroidPlayReleasePlanTest(unittest.TestCase):
                         stable_production_tag=False,
                     )
 
-    def test_stable_plan_uses_one_artifact_and_version_for_three_tracks(self) -> None:
+    def test_stable_plan_uses_one_artifact_and_version_for_production(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             notes = root / "notes"
@@ -90,7 +99,7 @@ class AndroidPlayReleasePlanTest(unittest.TestCase):
                 artifact_path="mindwtr-1.4.0.aab",
                 expected_version_code=200,
                 version="1.4.0",
-                tracks=["production", "beta", "internal"],
+                tracks=["production"],
                 stable_production=True,
                 stable_release_notes_directory=str(notes),
                 listing_assets_file=str(assets),
@@ -101,22 +110,19 @@ class AndroidPlayReleasePlanTest(unittest.TestCase):
         self.assertEqual(plan["expectedVersionCode"], 200)
         self.assertEqual(
             [release["track"] for release in plan["tracks"]],
-            ["production", "beta", "internal"],
+            ["production"],
         )
         self.assertEqual(plan["tracks"][0]["status"], "inProgress")
         self.assertEqual(plan["tracks"][0]["userFraction"], 0.05)
-        for release in plan["tracks"][1:]:
-            self.assertEqual(release["status"], "completed")
-            self.assertNotIn("userFraction", release)
         self.assertEqual(plan["tracks"][0]["releaseNotes"][0]["text"], "Stable notes")
 
-    def test_immediate_stable_plan_completes_every_track_without_fraction(self) -> None:
+    def test_immediate_stable_plan_completes_production_without_fraction(self) -> None:
         plan = MODULE.build_plan(
             package="tech.dongdongbh.mindwtr",
             artifact_path="mindwtr-1.4.0.aab",
             expected_version_code=200,
             version="1.4.0",
-            tracks=["production", "beta", "internal"],
+            tracks=["production"],
             stable_production=True,
             rollout_mode="immediate",
             rollout_percentage=99,
@@ -197,6 +203,32 @@ class AndroidPlayReleasePlanTest(unittest.TestCase):
             self.assertEqual(release["status"], "completed")
             self.assertNotIn("userFraction", release)
             self.assertEqual(release["releaseNotes"][0]["text"], "Test this release")
+
+    def test_native_release_candidate_names_mark_every_testing_release(self) -> None:
+        common = {
+            "package": "tech.dongdongbh.mindwtr",
+            "artifact_path": "mindwtr-1.4.0-rc.1.aab",
+            "expected_version_code": 175,
+            "version": "1.4.0-rc.1",
+            "tracks": ["internal", "beta"],
+            "stable_production": False,
+        }
+        native = MODULE.build_plan(**common, native_release_candidate=True)
+        react_native = MODULE.build_plan(**common)
+
+        self.assertEqual(
+            [release["name"] for release in native["tracks"]],
+            ["1.4.0-rc.1 native testing", "1.4.0-rc.1 native testing"],
+        )
+        self.assertEqual(
+            [release["name"] for release in react_native["tracks"]],
+            ["1.4.0-rc.1 testing", "1.4.0-rc.1 testing"],
+        )
+        with self.assertRaises(ValueError):
+            MODULE.build_plan(
+                **{**common, "tracks": ["production"], "stable_production": True},
+                native_release_candidate=True,
+            )
 
 
 if __name__ == "__main__":

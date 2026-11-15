@@ -300,6 +300,8 @@ export const huOverrides: Record<string, string> = {
     'quickAdd.syntaxHelp': 'Gyors hozzáadás szintaxis súgó',
     'quickAdd.pasteImagesHint': 'Képeket vagy képernyőképeket a {{shortcut}} billentyűkkel beillesztve csatolhat.',
     'quickAdd.placeholder': 'Adjon hozzá egy feladatot… használja: @kontextus +Projekt #címke',
+    'quickAdd.destinationUnavailable': "A cél nem érhető el. Válassz másik célt.",
+        "quickAdd.destinationNeedsSelection": "Válassz célhelyet a mentéshez.",
     'quickAdd.addAnother': 'Másik hozzáadása',
     'quickAdd.inputLabel': 'Feladat címe',
     'quickAdd.inputHint': 'Írja be a feladat címét, majd nyomja meg a hozzáadás gombot vagy az Enter billentyűt.',

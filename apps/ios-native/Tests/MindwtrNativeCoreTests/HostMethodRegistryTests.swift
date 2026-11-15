@@ -3,6 +3,13 @@ import JavaScriptCore
 @testable import MindwtrNativeCore
 
 final class HostMethodRegistryTests: XCTestCase {
+    func testCaptureContextAndAutocompleteAreBoundedReadsWithoutChangingLegacyOpenArity() {
+        XCTAssertEqual(HostMethod.registry["captureOpen"], .readNone)
+        XCTAssertEqual(HostMethod.registry["captureOpenContext"], .readText)
+        XCTAssertEqual(HostMethod.registry["captureAutocomplete"], .readText)
+        XCTAssertEqual(HostMethod.registry["captureAudioAdmit"], .readText)
+    }
+
     func testEveryDurableWriteStaysJournaled() {
         let durableWrites: Set<String> = [
             "appLock", "archiveTaskCompletedAtWrite", "archivedTaskRestoreWrite", "archivedTasksDeleteUndoWrite", "archivedTasksDeleteWrite",

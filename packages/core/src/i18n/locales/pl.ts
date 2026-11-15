@@ -227,6 +227,8 @@ export const plOverrides: Record<string, string> = {
         'calendar.visibleCalendars': 'Widoczne kalendarze',
         'calendar.openDayView': 'Otwórz widok dnia',
         'calendar.more': 'Więcej',
+        'quickAdd.destinationUnavailable': "Miejsce docelowe jest niedostępne. Wybierz inne.",
+        "quickAdd.destinationNeedsSelection": "Wybierz miejsce docelowe, aby zapisać.",
         'quickAdd.addAnother': 'Dodaj kolejny',
         'quickAdd.audioCaptureLabel': 'Szybkie przechwytywanie głosu',
         'quickAdd.audioRecord': 'Rozpocznij nagrywanie',

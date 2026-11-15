@@ -282,6 +282,26 @@ export function TaskEditDestinationPicker({
                             <Text style={[styles.pickerItemText, { color: tc.text }]}>{noneLabel}</Text>
                         </Pressable>
 
+                        {allowAreas ? (
+                            <>
+                                <Text style={[styles.pickerItemText, { color: tc.secondaryText, fontWeight: '700' }]}>
+                                    {areasLabel}
+                                </Text>
+                                {filteredAreas.map((area) => (
+                                    <Pressable
+                                        key={`area:${area.id}`}
+                                        onPress={() => selectAndClose({ kind: 'area', id: area.id })}
+                                        disabled={Boolean(creating)}
+                                        style={styles.pickerItem}
+                                        accessibilityRole="button"
+                                        accessibilityLabel={`${areasLabel}: ${area.name}`}
+                                        accessibilityState={{ selected: selectedAreaId === area.id, disabled: Boolean(creating) }}
+                                    >
+                                        <Text style={[styles.pickerItemText, { color: tc.text }]}>{area.name}</Text>
+                                    </Pressable>
+                                ))}
+                            </>
+                        ) : null}
                         {allowProjects ? [[projectsLabel, projectGroups.active] as const, [deferredLabel, projectGroups.deferred] as const]
                             .filter(([label, group]) => label === projectsLabel || group.length > 0)
                             .map(([label, group]) => (
@@ -305,26 +325,6 @@ export function TaskEditDestinationPicker({
                             </React.Fragment>
                         )) : null}
 
-                        {allowAreas ? (
-                            <>
-                                <Text style={[styles.pickerItemText, { color: tc.secondaryText, fontWeight: '700' }]}>
-                                    {areasLabel}
-                                </Text>
-                                {filteredAreas.map((area) => (
-                                    <Pressable
-                                        key={`area:${area.id}`}
-                                        onPress={() => selectAndClose({ kind: 'area', id: area.id })}
-                                        disabled={Boolean(creating)}
-                                        style={styles.pickerItem}
-                                        accessibilityRole="button"
-                                        accessibilityLabel={`${areasLabel}: ${area.name}`}
-                                        accessibilityState={{ selected: selectedAreaId === area.id, disabled: Boolean(creating) }}
-                                    >
-                                        <Text style={[styles.pickerItemText, { color: tc.text }]}>{area.name}</Text>
-                                    </Pressable>
-                                ))}
-                            </>
-                        ) : null}
                         {(!allowProjects || projectChoices.filteredProjects.length === 0)
                             && (!allowAreas || filteredAreas.length === 0) ? (
                             <View style={styles.pickerItem}>

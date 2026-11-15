@@ -264,6 +264,8 @@ export const csOverrides: Record<string, string> = {
         'quickAdd.syntaxHelp': 'Nápověda syntaxe rychlého přidání',
         'quickAdd.pasteImagesHint': 'Obrázky nebo snímky obrazovky připojíte vložením pomocí {{shortcut}}.',
         'quickAdd.placeholder': 'Přidat úkol… použijte @context +Project #tag',
+        'quickAdd.destinationUnavailable': "Cíl není k dispozici. Vyberte jiný cíl.",
+        "quickAdd.destinationNeedsSelection": "Pro uložení vyberte cíl.",
         'quickAdd.addAnother': 'Přidat další',
         'quickAdd.inputLabel': 'Název úkolu',
         'quickAdd.inputHint': 'Napište název úkolu a stiskněte přidat nebo Enter.',

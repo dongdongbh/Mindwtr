@@ -204,6 +204,8 @@ export const ptOverrides: Record<string, string> = {
         'quickAdd.placeholder': 'Adicione uma tarefa… use @context +Project #tag',
         'quickAdd.inputLabel': 'Adição rápida',
         'quickAdd.inputHint': 'Digite uma tarefa e pressione Enter para salvar.',
+        'quickAdd.destinationUnavailable': "Destino indisponível. Escolha outro destino.",
+        "quickAdd.destinationNeedsSelection": "Escolha um destino para salvar.",
         'quickAdd.addAnother': 'Adicionar outro',
         'quickAdd.audioCaptureLabel': 'Captura rápida de voz',
         'quickAdd.audioRecord': 'Comece a gravar',

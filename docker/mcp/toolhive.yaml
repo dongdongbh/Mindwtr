@@ -1,0 +1,15 @@
+apiVersion: toolhive.stacklok.dev/v1beta1
+kind: MCPServer
+metadata:
+  name: mindwtr
+spec:
+  image: ghcr.io/dongdongbh/mindwtr-mcp:1.1.14
+  transport: stdio
+  proxyPort: 8080
+  env:
+    - name: MINDWTR_MCP_CLOUD_URL
+      value: https://mindwtr.example.com
+  secrets:
+    - name: mindwtr-cloud
+      key: token
+      targetEnvName: MINDWTR_MCP_CLOUD_TOKEN

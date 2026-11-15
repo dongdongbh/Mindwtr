@@ -295,6 +295,8 @@ export const nlOverrides: Record<string, string> = {
         'calendar.visibleCalendars': 'Zichtbare agenda’s',
         'calendar.openDayView': 'Dagweergave openen',
         'calendar.more': 'Meer',
+        'quickAdd.destinationUnavailable': "Bestemming niet beschikbaar. Kies een andere bestemming.",
+        "quickAdd.destinationNeedsSelection": "Kies een bestemming om op te slaan.",
         'quickAdd.addAnother': 'Nog een toevoegen',
         'quickAdd.audioCaptureLabel': 'Snelle spraakopname',
         'quickAdd.audioRecord': 'Opnemen',

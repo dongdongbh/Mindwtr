@@ -51,12 +51,13 @@ Widgets, App Intents and Siri, the Share Extension and the Watch app belong to t
 
 ## Capture
 
-- Reach: Tab bar › + (Add Task). The description field sits under the title at all times, as in RN (#1406). The sheet also has @ contexts, focus star and Area controls; More shows syntax help and date chips.
+- Reach: Tab bar › + (Add Task). The description field sits under the title at all times, as in RN (#1406). The sheet also has @ contexts, focus star and Destination controls; More shows syntax help and date chips.
 - Shortcuts: Long-press the @ contexts button to reset contexts.
-- Selectors: `capture-input`, `capture-save`, `capture-save-edit`, `capture-add-another`, `capture-contexts`, `capture-focus`, `capture-area`, `capture-note`, `capture-close`, `capture-lines-create`
+- Selectors: `capture-input`, `capture-save`, `capture-save-edit`, `capture-add-another`, `capture-contexts`, `capture-focus`, `capture-destination`, `capture-destination-picker`, `capture-destination-query`, `capture-destination-close`, `capture-suggestions`, `capture-note`, `capture-close`, `capture-lines-create`
 - Code: `apps/ios-native/App/CaptureSheet.swift`
 - Checks: `apps/ios-native/App/UITests/FoundationUITests.swift` (testCapture…, testGtdCapture…, testQuickCaptureShowsDescriptionUnderTitleWithoutMore), `apps/ios-native/Tests/MindwtrNativeCoreTests/NativeCaptureLinesHostTests.swift`
 - Notes: Input with several lines opens a confirmation that creates one task per line. Core prepares the task before the write, and restart retries that exact task without parsing the text again.
+- Destination shows the contextual project/section, default Area, or None. Explicit choices override title syntax without changing status. Unavailable targets remain visible and prevent saving. Local `@`, `+`, `#` suggestions use core parsing and replace the token at the caret; marked-text composition does not accept a suggestion.
 
 ## Inbox
 
@@ -109,7 +110,7 @@ Widgets, App Intents and Siri, the Share Extension and the Watch app belong to t
 - Selectors: `task-preview-mark-done`, `task-mode-view`, `task-mode-edit`, `task-editor-title`, `task-editor-focus-star`, `task-editor-note`, `task-editor-save`, `task-editor-save-close`, `task-editor-discard`, `task-more`, `task-duplicate`, `task-share`, `task-cancel`, `task-delete`, `task-skip-occurrence`, `task-promote`, `task-reference-convert-to-action`, `task-view-close`
 - Code: `apps/ios-native/App/TaskViewSheet.swift`, `apps/ios-native/Sources/MindwtrNativeCore/EditorDraftStore.swift`, `apps/ios-native/App/CoreModel.swift`
 - Checks: `apps/ios-native/App/UITests/FoundationUITests.swift` (testTaskDuplicate…, testTaskShare…, testTaskCancellation…, testTaskDelete…, testTaskSkip…, testTaskPromotion…, testTaskPreview…, testGtdTaskEditor…, testTaskEditorFocusStar…)
-- Notes: The Title row has RN's Focus star. It changes the draft only; Save writes it, and core refuses the Save if the Focus limit filled meanwhile. The star is disabled with the limit text when Focus is full, and hidden for read-only, archived and Reference tasks (#1306). Settings › GTD › Task Editor sets the opening mode. Automatic opens Inbox taps in Edit and every other open in Preview. Tasks in archived projects stay read-only in Preview. Date pickers for due, start, review and recurrence end show a month calendar; time pickers stay wheels, as in RN. Bulk Organize dates use the same month calendar. The Destination picker (`task-destination-choice-project-<id>`) lists Someday and Waiting projects in their own "Someday / Waiting" group after the active projects.
+- Notes: The Title row has RN's Focus star. It changes the draft only; Save writes it, and core refuses the Save if the Focus limit filled meanwhile. The star is disabled with the limit text when Focus is full, and hidden for read-only, archived and Reference tasks (#1306). Settings › GTD › Task Editor sets the opening mode. Automatic opens Inbox taps in Edit and every other open in Preview. Tasks in archived projects stay read-only in Preview. Date pickers for due, start, review and recurrence end show a month calendar; time pickers stay wheels, as in RN. Bulk Organize dates use the same month calendar. The Destination picker (`task-destination-choice-project-<id>`) lists None, Areas, active Projects, then Someday and Waiting projects in their own "Someday / Waiting" group. The row Destination picker uses the same order before paging, preserving existing order within groups and direct project selection.
 
 - Checklist drag: Drag a checklist row by its handle (`task-checklist-drag-<index>`). The row follows the finger and the rows it passes shift to preview its slot, as in RN (#1483). Tap a handle for row actions.
 

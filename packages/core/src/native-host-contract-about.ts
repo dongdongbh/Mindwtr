@@ -64,6 +64,8 @@ export type NativeAboutHost = {
         analyticsHeartbeatChannel: string;
 
         githubReleasesApi?: string;
+
+        releaseCandidateUpdates?: boolean;
     };
     storage: AboutStorage;
     fetcher: (url: string, init?: RequestInit) => Promise<Response>;
@@ -266,6 +268,7 @@ export function createAboutMethods(deps: Deps) {
                 logWarn: host.logWarn,
                 logError: host.logWarn,
                 ...(host.app.githubReleasesApi ? { githubReleasesApi: host.app.githubReleasesApi } : {}),
+                ...(host.app.releaseCandidateUpdates ? { releaseCandidate: displayVersion(host) } : {}),
             });
             if (input.mode === 'silent') await checks.runSilentCheck();
             else await checks.runManualCheck();

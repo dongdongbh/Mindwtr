@@ -17,7 +17,8 @@ const isAppInfo = (value: unknown): value is NativeAppInfo => {
         'analyticsHeartbeatChannel'].every((key) => typeof info[key] === 'string')
         && typeof info.isFossBuild === 'boolean' && typeof info.isDev === 'boolean'
         && (typeof info.platformVersion === 'string' || typeof info.platformVersion === 'number')
-        && (info.githubReleasesApi === undefined || typeof info.githubReleasesApi === 'string');
+        && (info.githubReleasesApi === undefined || typeof info.githubReleasesApi === 'string')
+        && (info.releaseCandidateUpdates === undefined || typeof info.releaseCandidateUpdates === 'boolean');
 };
 
 

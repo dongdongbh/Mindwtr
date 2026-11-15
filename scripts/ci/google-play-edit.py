@@ -408,6 +408,12 @@ def _cleanup_after_failure(
 
 
 def read_max_version_code(package_name: str, transport: Transport) -> int:
+    return read_track_version_codes(package_name, transport)[0]
+
+
+def read_track_version_codes(
+    package_name: str, transport: Transport
+) -> tuple[int, list[dict[str, object]]]:
 
     validated_package = _package_name(package_name)
     edit_id = _edit_id(transport.request("POST", _edit_root(validated_package), json_body={}))
@@ -417,6 +423,7 @@ def read_max_version_code(package_name: str, transport: Transport) -> int:
             "tracks response",
         )
         maximum = 0
+        summary: list[dict[str, object]] = []
         for track_index, track_value in enumerate(_sequence(response.get("tracks", []), "tracks")):
             track = _mapping(track_value, f"tracks[{track_index}]")
             for release_index, release_value in enumerate(
@@ -425,25 +432,41 @@ def read_max_version_code(package_name: str, transport: Transport) -> int:
                 release = _mapping(
                     release_value, f"tracks[{track_index}].releases[{release_index}]"
                 )
+                codes: list[int] = []
                 for code_index, code in enumerate(
                     _sequence(
                         release.get("versionCodes", []),
                         f"tracks[{track_index}].releases[{release_index}].versionCodes",
                     )
                 ):
-                    maximum = max(
-                        maximum,
+                    codes.append(
                         _version_code(
                             code,
                             f"tracks[{track_index}].releases[{release_index}].versionCodes[{code_index}]",
-                        ),
+                        )
                     )
+                maximum = max([maximum, *codes])
+                summary.append(
+                    {
+                        "track": str(track.get("track", "")),
+                        "name": str(release.get("name") or ""),
+                        "versionCodes": codes,
+                    }
+                )
     except Exception as primary:
         _cleanup_after_failure(validated_package, edit_id, transport, primary)
         raise
 
-    _cleanup_edit(validated_package, edit_id, transport)
-    return maximum
+    try:
+        _cleanup_edit(validated_package, edit_id, transport)
+    except Exception as cleanup_error:
+        print(
+            _redact_secrets(
+                f"Google Play read-only edit cleanup failed; the unused edit expires on its own: {cleanup_error}"
+            ),
+            file=sys.stderr,
+        )
+    return maximum, summary
 
 
 def _rollout_percentage(value: object) -> float:
@@ -985,8 +1008,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             raise ValueError("GOOGLE_PLAY_ACCESS_TOKEN is required")
         transport = GooglePlayTransport()
         if args.command == "max-version-code":
-            maximum = read_max_version_code(args.package, transport)
-            result = {"package": args.package, "maxVersionCode": maximum}
+            maximum, releases = read_track_version_codes(args.package, transport)
+            result = {
+                "package": args.package,
+                "maxVersionCode": maximum,
+                "releases": releases,
+            }
         elif args.command == "publish":
             result = publish_release(_load_json(args.plan, "publish plan"), transport)
         elif args.command == "rollout":

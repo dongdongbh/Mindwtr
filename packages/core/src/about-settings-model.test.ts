@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { buildFeedbackSubmissionPayload } from './feedback';
-import { FEEDBACK_MESSAGE_MAX_LENGTH, getFeedbackMessageMaxLength, getFeedbackDraftState, planFeedbackSubmit, resolveAndroidInstallerSource } from './about-settings-model';
+import { compareReleaseCandidates, FEEDBACK_MESSAGE_MAX_LENGTH, getFeedbackMessageMaxLength, getFeedbackDraftState, planFeedbackSubmit, resolveAndroidInstallerSource } from './about-settings-model';
 import { getTranslator, resolveI18nText } from './i18n';
 
 const t = getTranslator('en');
@@ -36,5 +36,15 @@ describe('the Android installer source', () => {
         expect(resolveAndroidInstallerSource('utm_source=google-play', null)).toBe('play-store');
         expect(resolveAndroidInstallerSource('', null)).toBe('sideload');
         expect(resolveAndroidInstallerSource('', 'com.google.android.packageinstaller')).toBe('sideload');
+    });
+});
+
+describe('release candidate order', () => {
+    it('orders by base version, then by the rc number', () => {
+        expect(compareReleaseCandidates('v1.4.0-rc.2', '1.4.0-rc.1')).toBe(1);
+        expect(compareReleaseCandidates('1.4.0-rc.10', '1.4.0-rc.9')).toBe(1);
+        expect(compareReleaseCandidates('1.4.5-rc.1', '1.4.0-rc.7')).toBe(1);
+        expect(compareReleaseCandidates('1.4.0-rc.1', 'v1.4.0-rc.1')).toBe(0);
+        expect(compareReleaseCandidates('1.3.9-rc.4', '1.4.0-rc.1')).toBe(-1);
     });
 });

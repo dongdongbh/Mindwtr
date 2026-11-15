@@ -23,18 +23,22 @@ object PendingCaptureWriter {
 
   fun creationStatus(value: String?): String? = value?.takeIf { it in CREATION_STATUSES }
 
-  private fun JSONObject.putDestination(defaultStatus: String?, status: String?) {
+  private fun JSONObject.putCaptureOptions(defaultStatus: String?, status: String?, destination: QuickCaptureDestination? = null) {
     creationStatus(defaultStatus)?.let { put("defaultStatus", it) }
     creationStatus(status)?.let { put("status", it) }
+    destination?.let { resolved ->
+      put("destination", resolved.destination.toJson())
+      resolved.projectToCreate?.let { put("projectToCreate", JSONObject().put("title", it)) }
+    }
   }
 
 
   @Throws(IOException::class)
-  fun write(filesDir: File, rawTitle: String, now: Date = Date(), note: String = "", defaultStatus: String? = null, status: String? = null): File? {
+  internal fun write(filesDir: File, rawTitle: String, now: Date = Date(), note: String = "", defaultStatus: String? = null, status: String? = null, destination: QuickCaptureDestination? = null): File? {
     val title = rawTitle.trim().take(MAX_TITLE_LENGTH).trim()
     if (title.isEmpty()) return null
 
-    return writeCapture(filesDir, title, SOURCE, now, note, defaultStatus, status)
+    return writeCapture(filesDir, title, SOURCE, now, note, defaultStatus, status, destination)
   }
 
 
@@ -47,7 +51,7 @@ object PendingCaptureWriter {
     return writeCapture(filesDir, title, CAPTURE_INTENT_SOURCE, now)
   }
 
-  private fun writeCapture(filesDir: File, title: String, source: String, now: Date, note: String = "", defaultStatus: String? = null, status: String? = null): File {
+  private fun writeCapture(filesDir: File, title: String, source: String, now: Date, note: String = "", defaultStatus: String? = null, status: String? = null, destination: QuickCaptureDestination? = null): File {
     val id = UUID.randomUUID().toString()
     val json = JSONObject()
       .put("id", id)
@@ -55,7 +59,7 @@ object PendingCaptureWriter {
       .put("createdAt", isoTimestamp(now))
       .put("source", source)
       .apply { if (note.isNotBlank()) put("note", note) }
-      .apply { putDestination(defaultStatus, status) }
+      .apply { putCaptureOptions(defaultStatus, status, destination) }
       .toString()
     return publish(filesDir, id, json)
   }
@@ -94,7 +98,7 @@ object PendingCaptureWriter {
 
 
   @Throws(IOException::class)
-  fun publishAudio(filesDir: File, draft: QuickCaptureAudioDraft, rawTitle: String, note: String = "", defaultStatus: String? = null, status: String? = null): File {
+  internal fun publishAudio(filesDir: File, draft: QuickCaptureAudioDraft, rawTitle: String, note: String = "", defaultStatus: String? = null, status: String? = null, destination: QuickCaptureDestination? = null): File {
     val paths = ownedAudioPaths(filesDir, draft) ?: throw IOException("Invalid audio capture path")
     val staged = paths.first
     val target = paths.second
@@ -120,7 +124,7 @@ object PendingCaptureWriter {
       .put("audioPath", absoluteFileUri(target))
       .put("source", SOURCE)
       .put("createdAt", isoTimestamp(draft.createdAt))
-      .apply { putDestination(defaultStatus, status) }
+      .apply { putCaptureOptions(defaultStatus, status, destination) }
       .apply {
         if (title.isNotEmpty()) put("title", title)
         if (note.isNotBlank()) put("note", note)

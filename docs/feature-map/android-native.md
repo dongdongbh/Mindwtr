@@ -80,12 +80,13 @@ The native client is a Kotlin and Jetpack Compose app in `apps/android-native`. 
 
 ## Quick capture popup
 
-- Reach: Tab bar › center + button. The popup has the field, More (note, Focus, due time, contexts, area, project, priority, dates, Import .txt), Add another, Save & edit, and Save.
+- Reach: Tab bar › center + button. The popup has the title, visible Destination, More (note, Focus, due time, contexts, area, project, priority, dates, Import .txt), Add another, Save & edit, and Save.
 - Shortcuts: Link `mindwtr-native-dev:///open-feature?feature=capture`.
 - Selectors: `quick-capture`, `capture-title`, `capture-note`, `quick-add-preview`, `capture-scroll`, `capture-import-text`, `capture-processing`
 - Code: `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/CaptureScreen.kt`
 - Checks: `apps/android-native/scripts/check-capture-device.mjs`, `apps/android-native/scripts/check-keyboard-device.mjs`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/TokenCommitTest.kt`
 - Notes: Several lines ask core's question first. Create tasks writes a recovery snapshot, then one task per line in one write. Close discards the draft, as in RN.
+- Destination shows the contextual project/section, default Area, or None. Explicit choices override title syntax without changing status. Unavailable targets remain visible and prevent saving. Local `@`, `+`, `#` suggestions replace the complete token at the caret, with project choices retaining their IDs.
 
 ## Capture screen
 
@@ -95,6 +96,7 @@ The native client is a Kotlin and Jetpack Compose app in `apps/android-native`. 
 - Code: `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/CaptureModal.kt`, `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/CaptureModalModel.kt`
 - Checks: `apps/android-native/scripts/check-capture-modal-device.mjs`, `apps/android-native/scripts/check-keyboard-device.mjs`
 - Notes: The draft survives rotation and process death. A capture link with no title shows the toast "Capture shortcut unavailable" and opens nothing.
+- The Destination picker preserves the opening context/default and explicit None through draft restoration and prepared-write retries. A missing destination keeps the draft editable rather than assigning a different project or Area.
 
 ## Voice capture
 
@@ -111,7 +113,7 @@ The native client is a Kotlin and Jetpack Compose app in `apps/android-native`. 
 - Selectors: `task-row`, `task-edit-focus-star`
 - Code: `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/FocusScreen.kt`, `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/FocusModel.kt`, `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/FocusControls.kt`, `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/PullSync.kt`
 - Checks: `apps/android-native/scripts/check-focus-device.mjs`, `apps/android-native/scripts/check-focus-small2-device.mjs`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/FocusViewSameShownTest.kt`
-- Notes: Sections, titles, and totals are core's, in core's order. On the reorder screen only the dragged row moves (RN also slides the others); the stored order is the same.
+- Notes: Sections, titles, and totals are core's, in core's order: Today's Focus, Today (schedule), Review Due, Next Actions, Upcoming, then Projects to review. On the reorder screen only the dragged row moves (RN also slides the others); the stored order is the same.
 - Notes: Focus task dates show Today, Tomorrow, or a full localized weekday for the next six days, with explicit times retained. Start uses an arrow and Due a calendar; accessible labels retain the field and exact date. Past dates and dates at least seven days away stay exact. Labels refresh at local midnight and when the app returns to the foreground.
 
 ## Pomodoro
@@ -128,7 +130,7 @@ The native client is a Kotlin and Jetpack Compose app in `apps/android-native`. 
 - Selectors: `task-preview-mark-done`, `task-editor`, `markdown-toolbar`, `task-description-fullscreen`, `task-description-preview`, `editor-waiting-for`, `monthly-custom`, `monthly-custom-interval`, `editor-destination-search`
 - Code: `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/TaskEditor.kt`, `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/MarkdownToolbar.kt`
 - Checks: `apps/android-native/scripts/check-editor-device.mjs`, `apps/android-native/scripts/check-monthly-repeat-device.mjs`, `apps/android-native/scripts/check-keyboard-device.mjs`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/EditorNavigationTest.kt`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/EditorActionSaveTest.kt`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/PreviewCompletionTest.kt`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/MarkdownDraftTest.kt`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/MonthlyCustomTest.kt`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/TaskEditorFocusRevealTest.kt`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/DestinationMatchesTest.kt`
-- Notes: The draft survives rotation and process death. If a save was in flight at a death, the relaunch sends that same save again and closes the editor. Destination lists projects in the Projects view order, with Someday / Waiting projects after them under their own heading. Destination has RN's search field: it filters projects and areas by title, ignoring case and outer spaces.
+- Notes: The draft survives rotation and process death. If a save was in flight at a death, the relaunch sends that same save again and closes the editor. Destination lists None, Areas, active Projects, then Someday / Waiting projects under their own heading, preserving existing order within each group and direct project selection. Destination has RN's search field: it filters projects and areas by title, ignoring case and outer spaces.
 
 - View completion: Mark Done in the visible Status card queues pending checklist text before draft Done, then sends one normal owned Save. The draft queue and retained save request survive recovery; a refused draft edit cancels queued completion. Repeat taps, draft changes and Close are blocked during completion. A failed save retains the draft and existing Retry; acknowledgement precedes closing. Reference, terminal, Trash, projected and read-only/archived-project previews have no action.
 

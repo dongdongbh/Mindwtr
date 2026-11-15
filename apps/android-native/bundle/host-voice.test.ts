@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'bun:test';
+import { afterEach, describe, expect, it } from 'bun:test';
+import { consoleLogger, setLogger, type LogPayload } from '@mindwtr/core';
 import type { AppSettings, Attachment, Project, QuickCaptureAudioStore, QuickCaptureOptions, Task } from '@mindwtr/core';
 import { createNativeVoice, persistIntoManagedStorage, type NativeVoiceBindings, type VoiceCaptureLine } from './host-voice';
 
@@ -9,6 +10,7 @@ const OPTIONS: QuickCaptureOptions = {
     focus: false, addAnother: false,
 };
 const gemini = (extra: Record<string, unknown> = {}): AppSettings => ({ ai: { speechToText: { enabled: true, provider: 'gemini', ...extra } } } as never);
+afterEach(() => setLogger(consoleLogger));
 
 const deferred = <T,>() => {
     let resolve!: (value: T) => void;
@@ -55,6 +57,7 @@ const harness = (overrides: Partial<NativeVoiceBindings> = {}, setup: {
         },
         settings: () => state.settings,
         store,
+        admit: (_text, options) => options,
         isFossBuild: false,
         loadKey: async () => setup.key ?? 'secret-key',
         whisperModelReady: () => false,
@@ -99,6 +102,52 @@ const record = async (h: ReturnType<typeof harness>) => {
 };
 
 describe('native voice capture', () => {
+    it('keeps a refused recording on its original admitted project until an explicit picker change', async () => {
+        const diagnostics: LogPayload[] = [];
+        setLogger(line => diagnostics.push(line));
+        const stopped = deferred<{ uri: string; size: number }>();
+        let removed = false;
+        const h = harness({
+            admit: (_text, options) => ({ ...options, audioDestination: options.audioDestination
+                ?? { destination: options.destination ?? { kind: 'project', id: removed ? 'replacement' : 'original' } } }),
+            recorder: { permission: async () => 'granted', start: async () => ({ id: 'recording' }),
+                stop: async () => stopped.promise, cancel: async () => {} },
+        }, { save: 'refused' });
+        const session = await record(h);
+        const stop = h.voice.stop({ session, save: true, text: 'Call +Work', options: OPTIONS });
+        removed = true;
+        stopped.resolve({ uri: `${DOCS}voice-captures/held.m4a`, size: 20 });
+        expect((await stop).status).toBe('refused');
+        expect((await h.voice.save({ session, text: 'Call +Work', options: OPTIONS })).status).toBe('refused');
+        expect(h.submitted.map(input => input.options.audioDestination?.destination)).toEqual([
+            { kind: 'project', id: 'original' }, { kind: 'project', id: 'original' },
+        ]);
+        expect(h.deleted).toEqual([]);
+        expect((await h.voice.save({ session, text: 'Call +Work', options: { ...OPTIONS, destination: { kind: 'none' } } })).status).toBe('refused');
+        expect(h.submitted[2]?.options.audioDestination?.destination).toEqual({ kind: 'none' });
+        expect(h.deleted).toEqual([]);
+        expect(diagnostics.some(line => line.context?.releaseCheck === 'v1.3.9/native-capture-destination'
+            && line.context.kind === 'audio-retry' && line.context.outcome === 'retained')).toBe(true);
+    });
+
+    it('keeps the admitted destination when a late transcript suggests a project', async () => {
+        const diagnostics: LogPayload[] = [];
+        setLogger(line => diagnostics.push(line));
+        const late = deferred<string>();
+        const h = harness({ admit: (_text, options) => ({ ...options, audioDestination: { destination: { kind: 'none' } } }) },
+            { transcript: late.promise, projectTitle: 'Transcript project' });
+        const session = await record(h);
+        const saved = await h.voice.stop({ session, save: true, text: '', options: OPTIONS });
+        expect(saved.status).toBe('saved');
+        late.resolve('Keep my destination');
+        await h.voice.settled();
+        expect(h.state.projects).toEqual([]);
+        expect(h.state.tasks[0]?.projectId).toBeUndefined();
+        expect(h.state.tasks[0]?.title).toBe('Keep my destination');
+        expect(diagnostics.some(line => line.context?.releaseCheck === 'v1.3.9/native-capture-destination'
+            && line.context.kind === 'audio-transcript' && line.context.outcome === 'preserved')).toBe(true);
+    });
+
     it('saves the task first with its recording, then a late transcript updates the latest row (RN 78c151b2e)', async () => {
         const late = deferred<string>();
         const h = harness({}, { transcript: late.promise, tags: ['#errand'], projectTitle: 'Errands' });

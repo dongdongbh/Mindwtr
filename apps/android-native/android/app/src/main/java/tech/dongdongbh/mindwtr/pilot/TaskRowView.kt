@@ -495,13 +495,13 @@ private fun DestinationPicker(model: InboxViewModel) = with(model) {
             }
         }
         row(picker.getJSONObject("none"), null)
+        val areas = picker.getJSONObject("areas")
+        PickerHeading(areas.getString("title"))
+        for (area in areas.menuObjects("rows")) row(area, area.getString("accessibilityLabel"))
         for (group in picker.menuObjects("projectGroups")) {
             PickerHeading(group.getString("title"))
             for (project in group.menuObjects("rows")) row(project, project.getString("accessibilityLabel"))
         }
-        val areas = picker.getJSONObject("areas")
-        PickerHeading(areas.getString("title"))
-        for (area in areas.menuObjects("rows")) row(area, area.getString("accessibilityLabel"))
         picker.menuText("noMatches")?.let { Text(it, style = rnText(16, 400), color = c.secondaryText,
             modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp).semantics { liveRegion = LiveRegionMode.Polite }) }
     }

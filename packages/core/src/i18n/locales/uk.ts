@@ -325,6 +325,8 @@ export const ukOverrides: Record<string, string> = {
     "quickAdd.syntaxHelp": "Довідка щодо синтаксису швидкого додавання",
     "quickAdd.pasteImagesHint": "Вставте зображення або знімки екрана поєднанням {{shortcut}}, щоб прикріпити їх.",
     "quickAdd.placeholder": "Додайте завдання… використовуйте @context +Project #tag",
+    'quickAdd.destinationUnavailable': "Місце призначення недоступне. Виберіть інше.",
+        "quickAdd.destinationNeedsSelection": "Виберіть місце призначення для збереження.",
     "quickAdd.addAnother": "Додайте іншу",
     "quickAdd.inputLabel": "Назва завдання",
     "quickAdd.inputHint": "Введіть назву завдання, а потім натисніть клавішу додавання або повернення.",

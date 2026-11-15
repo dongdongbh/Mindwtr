@@ -75,7 +75,7 @@ describe('native task draft destination picker', () => {
             fieldId: 'project', label: 'Destination', value: ' Zeta ',
         }, section: { visible: true, label: 'Project section', value: 'Zulu' } });
         expect(picker.destination.groups.map(({ kind, label }) => [kind, label])).toEqual([
-            ['none', null], ['project', 'Projects'], ['area', 'Area'],
+            ['none', null], ['area', 'Area'], ['project', 'Projects'],
         ]);
         expect(groupIds()).toEqual({ none: [''], project: ['p-z', 'p-a', 'p-b', 'p-later'], area: ['a-home', 'a-2', 'a-10', 'a-work'] });
         const choices = picker.destination.groups.flatMap((group) => group.choices);
@@ -101,10 +101,11 @@ describe('native task draft destination picker', () => {
         const draft = value(grouped.getTaskEditorModel({ id: 'edit' })).draft;
         const picker = value(grouped.getTaskDraftDestinationPicker({ id: 'edit', draft, query: '' }));
         expect(picker.destination.groups.map((group) => [group.kind, group.label, group.choices.map((choice) => choice.id)])).toEqual([
-            ['none', null, ['']], ['project', 'Projects', ['p-b', 'p-a', 'p-z']], ['project', 'Someday / Waiting', ['p-later']],
-            ['area', 'Area', ['a-home', 'a-2', 'a-10', 'a-work']],
+            ['none', null, ['']], ['area', 'Area', ['a-home', 'a-2', 'a-10', 'a-work']],
+            ['project', 'Projects', ['p-b', 'p-a', 'p-z']], ['project', 'Someday / Waiting', ['p-later']],
         ]);
         const searched = value(grouped.getTaskDraftDestinationPicker({ id: 'edit', draft, query: 'a' }));
+        expect(searched.destination.groups.map((group) => group.kind)).toEqual(['none', 'area', 'project', 'project']);
         expect(searched.destination.groups.filter((group) => group.kind === 'project').map((group) => group.choices.map((choice) => choice.id)))
             .toEqual([['p-b', 'p-a', 'p-z'], ['p-later']]);
         expect(groupIds()).toEqual({ none: [''], project: ['p-z', 'p-a', 'p-b', 'p-later'], area: ['a-home', 'a-2', 'a-10', 'a-work'] });
@@ -193,7 +194,7 @@ describe('native task draft destination picker', () => {
         const t = getTranslator('zh');
         const picker = read();
         expect(picker.destination.label).toBe(t('task.destination'));
-        expect(picker.destination.groups.map((group) => group.label)).toEqual([null, t('nav.projects'), t('taskEdit.areaLabel')]);
+        expect(picker.destination.groups.map((group) => group.label)).toEqual([null, t('taskEdit.areaLabel'), t('nav.projects')]);
         expect(picker.destination.groups[0].choices[0].label).toBe(t('common.none'));
         expect(picker.section.label).toBe(t('taskEdit.sectionLabel'));
         expect(picker.section.choices[0].label).toBe(t('taskEdit.noSectionOption'));

@@ -2418,6 +2418,12 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     var noteDraft = ""
     var contextQuery = ""
     private(set) var contextPickerPresented = false
+    private(set) var capturePickerKind = "context"
+    private(set) var captureTitleSelection = NSRange(location: 0, length: 0)
+    private(set) var captureTitleSelectionRevision = 0
+    private var captureTitleComposing = false
+    private var captureTitleFocused = false
+    private var captureAutocomplete: CoreObject = [:]
     private(set) var notice: String?
     var bulkConfirm: CoreObject = [:] {
         didSet { if !bulkConfirm.isEmpty { foregroundSyncIntent = nil } }
@@ -4623,8 +4629,14 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
             && UIApplication.shared.applicationState == .active && captureLinesConfirmationCurrent(confirmation)
     }
     var contextPickerReady: Bool {
-        !busy && !retryNeeded && captureIsCurrent && capture.object("picker").text("kind") == "context"
+        !busy && !retryNeeded && captureIsCurrent && capture.object("picker").text("kind") == capturePickerKind
             && capture.object("picker").text("query") == contextQuery
+    }
+    var captureAutocompleteItems: [CoreObject] {
+        guard !busy, !retryNeeded, !contextPickerPresented, !captureTitleComposing, captureTitleFocused,
+              captureTitleSelection.length == 0, captureAutocomplete.text("originalText") == draft,
+              captureAutocomplete.number("caret") == captureTitleSelection.location else { return [] }
+        return captureAutocomplete.objects("items")
     }
     func label(_ key: String) -> String { strings.text(key) }
     private(set) var taskReferenceCopyNotice: String?
@@ -42852,9 +42864,13 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
                   draft.utf8.elementsEqual(text.utf8), noteDraft.utf8.elementsEqual(note.utf8),
                   try json(capture.object("options")) == optionsJSON else { return }
             capture = view
+            let admitted = try await query("captureAudioAdmit", [try json(["text": text, "options": view.object("options")])])
+            guard voiceCaptureCurrent(owner), !busy, !retryNeeded,
+                  draft.utf8.elementsEqual(text.utf8), noteDraft.utf8.elementsEqual(note.utf8),
+                  NativeValueEquality.same(capture.object("options"), view.object("options")) else { return }
             let applied = !(captureCopilotApplied["tags"] as? [String] ?? []).isEmpty
                 || captureCopilotApplied["context"] != nil || captureCopilotApplied["timeEstimate"] != nil
-            owner.requestJSON = try json(["text": text, "options": capture.object("options"),
+            owner.requestJSON = try json(["text": text, "options": admitted.object("options"),
                 "openAfterSave": openAfterSave, "applied": applied ? captureCopilotApplied as Any : NSNull()])
             owner.next = openAfterSave ? "open" : capture.object("options").flag("addAnother") ? "addAnother" : "close"
             beginVoiceCaptureSave(owner, retry: false)
@@ -43395,7 +43411,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
               !calendarComposerPresented, !mindSweepPresented, !processInboxPresented else { return }
         morePresented = false
         guard admission?() != false else { return }
-        if capture.isEmpty, let preread = takeCapturePreread() {
+        if capture.isEmpty, selectedSurface != .project, let preread = takeCapturePreread() {
             applyCaptureOpenView(preread.view)
             capturePrereadConfirming = true
             presentCapture()
@@ -43412,10 +43428,14 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     }
 
     private func openCaptureView(admission: (@MainActor () -> Bool)?) async -> Bool {
+        let initialProps: CoreObject = selectedSurface == .project && !projectHeader.text("id").isEmpty
+            ? ["projectId": projectHeader.text("id")] : [:]
+        dropCapturePreread()
         busy = true
         defer { finishOperation() }
         do {
-            guard let opened = try await readCaptureOpenView(addAnother: captureAddAnotherDefault, admission: admission) else { return false }
+            guard let opened = try await readCaptureOpenView(addAnother: captureAddAnotherDefault, admission: admission,
+                                                           initialProps: initialProps) else { return false }
             applyCaptureOpenView(opened)
             guard admission?() != false else { return false }
             presentCapture()
@@ -43428,8 +43448,9 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
 
     private var captureAddAnotherDefault: Bool { (preferenceDefaults.object(forKey: preference) as? Bool) ?? initialAddAnother }
 
-    private func readCaptureOpenView(addAnother: Bool, admission: (@MainActor () -> Bool)?) async throws -> CoreObject? {
-        var opened = try await query("captureOpen", beforeDispatch: admission)
+    private func readCaptureOpenView(addAnother: Bool, admission: (@MainActor () -> Bool)?, initialProps: CoreObject = [:]) async throws -> CoreObject? {
+        let arguments = initialProps.isEmpty ? [] : [try json(["initialProps": initialProps])]
+        var opened = try await query(initialProps.isEmpty ? "captureOpen" : "captureOpenContext", arguments, beforeDispatch: admission)
         guard admission?() != false else { return nil }
         if addAnother {
             let result = try await query("captureEdit", [try json([
@@ -43443,6 +43464,9 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
 
     private func applyCaptureOpenView(_ opened: CoreObject) {
         capture = opened
+        captureAutocomplete = [:]
+        captureTitleSelection = NSRange(location: 0, length: 0)
+        captureTitleComposing = false
         captureID = UUID().uuidString
         draft = ""
         noteDraft = opened.object("options").text("note")
@@ -44675,12 +44699,15 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
 
     func textChanged() {
         retireCaptureCopilot(clearApplied: false)
+        captureAutocomplete = [:]
         previewGeneration += 1
         let generation = previewGeneration
         let text = draft
         let note = noteDraft
         let options = capture.object("options")
-        let picker = contextPickerPresented ? ["kind": "context", "query": contextQuery] : nil
+        let picker = contextPickerPresented ? ["kind": capturePickerKind, "query": contextQuery] : nil
+        let selection = captureTitleSelection
+        let completing = captureTitleFocused && !captureTitleComposing && selection.length == 0 && picker == nil
         previewTask?.cancel()
         guard !busy, !retryNeeded, capturePresented, !captureLinesConfirmationPresented else { return }
         previewTask = Task {
@@ -44692,6 +44719,12 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
                 guard !Task.isCancelled, generation == previewGeneration, !busy, !retryNeeded else { return }
                 if !NativeValueEquality.same(capture, value) { capture = value }
                 if previewedText != text { previewedText = text }
+                if completing {
+                    let autocomplete = try? await query("captureAutocomplete", [try json([
+                        "text": text, "caret": selection.location, "selectionEnd": selection.location + selection.length])])
+                    guard !Task.isCancelled, generation == previewGeneration, !busy, !retryNeeded else { return }
+                    captureAutocomplete = autocomplete ?? [:]
+                }
                 await refreshCaptureCopilotOptions()
             } catch {
                 guard !Task.isCancelled, generation == previewGeneration else { return }
@@ -44700,9 +44733,43 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         }
     }
 
+    func captureSelectionChanged(_ range: NSRange, composing: Bool) {
+        guard range.location >= 0, range.length >= 0, range.location <= draft.utf16.count,
+              range.length <= draft.utf16.count - range.location else { return }
+        guard captureTitleSelection != range || captureTitleComposing != composing else { return }
+        captureTitleSelection = range
+        captureTitleComposing = composing
+        textChanged()
+    }
+
+    func captureTitleFocusChanged(_ focused: Bool) {
+        guard captureTitleFocused != focused else { return }
+        captureTitleFocused = focused
+        textChanged()
+    }
+
+    func acceptCaptureAutocomplete(_ item: CoreObject) async {
+        guard captureAutocompleteItems.contains(where: { NativeValueEquality.same($0, item) }) else { return }
+        draft = item.text("text")
+        captureTitleSelection = NSRange(location: item.number("caret"), length: 0)
+        captureTitleSelectionRevision &+= 1
+        captureAutocomplete = [:]
+        if !item.object("edit").isEmpty { await editCapture(item.object("edit")) }
+        else { textChanged() }
+    }
+
     func openContextPicker() {
         guard capturePresented, !busy, !retryNeeded, !captureLinesConfirmationPresented else { return }
         contextQuery = ""
+        capturePickerKind = "context"
+        contextPickerPresented = true
+        textChanged()
+    }
+
+    func openCaptureDestinationPicker() {
+        guard capturePresented, !busy, !retryNeeded, !captureLinesConfirmationPresented else { return }
+        contextQuery = ""
+        capturePickerKind = "destination"
         contextPickerPresented = true
         textChanged()
     }
@@ -44718,7 +44785,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     }
 
     func submitContextQuery() async {
-        guard contextPickerPresented else { return }
+        guard contextPickerPresented, capturePickerKind == "context" else { return }
         await applyCaptureEdit(nil, clearContextQuery: true)
     }
 
@@ -44733,7 +44800,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         let text = draft
         let note = noteDraft
         let originalQuery = contextQuery
-        let picker = contextPickerPresented ? ["kind": "context", "query": clearContextQuery ? "" : contextQuery] : nil
+        let picker = contextPickerPresented ? ["kind": capturePickerKind, "query": clearContextQuery ? "" : contextQuery] : nil
         do {
 
 

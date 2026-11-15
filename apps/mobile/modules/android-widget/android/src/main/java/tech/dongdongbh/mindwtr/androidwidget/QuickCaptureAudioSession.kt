@@ -9,7 +9,32 @@ internal class QuickCaptureAudioSession(
   val defaultStatus: String = "inbox",
   initialCaptureStatus: String? = null,
   initialTitle: String = "",
+  initialDestination: WidgetPayload.CaptureDestination? = null,
+  initialSelectedDestination: WidgetPayload.CaptureDestination? = null,
+  initialCatalog: WidgetPayload.CaptureDestinations? = null,
 ) {
+  var defaultDestination = initialDestination ?: initialCatalog?.defaultDestination
+    private set
+  var selectedDestination = initialSelectedDestination
+    private set
+  var destinationCatalog = initialCatalog
+    private set
+
+  fun updateDestinationCatalog(catalog: WidgetPayload.CaptureDestinations?) {
+    if (catalog == null || state == State.SAVING || state == State.SAVED || state == State.CLOSED) return
+    destinationCatalog = catalog
+    if (defaultDestination == null) defaultDestination = catalog.defaultDestination
+    notifyChanged()
+  }
+
+  fun selectDestination(destination: WidgetPayload.CaptureDestination) {
+    if (state == State.SAVING || state == State.SAVED || state == State.CLOSED) return
+    selectedDestination = destination
+    notifyChanged()
+  }
+
+  fun resolveDestination(text: String = title) = QuickCaptureDestination.resolve(text, destinationCatalog, defaultDestination, selectedDestination)
+
   var captureStatus: String? = PendingCaptureWriter.creationStatus(initialCaptureStatus)
     private set
 

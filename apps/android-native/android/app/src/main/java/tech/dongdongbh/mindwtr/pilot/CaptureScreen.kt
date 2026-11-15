@@ -89,6 +89,7 @@ import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -314,18 +315,19 @@ fun CapturePopup(model: InboxViewModel, draft: CaptureDraft) = with(model) {
                 val preview = view.items("preview")
                 if (preview.isNotEmpty()) PreviewStrip(preview, Modifier.padding(top = 8.dp))
                 RecordingRows(voice.state)
+                view.optJSONObject("destination")?.let { destination -> FlowRow(Modifier.padding(top = 10.dp).fillMaxWidth()) {
+                    OptionChip(Lucide.Folder, t("task.destination") + ": " + destination.getString("label"),
+                        t("task.destination") + ": " + destination.getString("accessibilityLabel"), !locked,
+                        iconTint = if (destination.getBoolean("available")) null else c.warning,
+                        modifier = Modifier.testTag("capture-destination"),
+                        onLongClick = { openCapturePicker("destination") }) { openCapturePicker("destination") }
+                } }
                 FlowRow(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp),
                     itemVerticalAlignment = Alignment.CenterVertically) {
                     if (!draft.expanded) {
-                        val project = view.getJSONObject("project")
-                        if (project.getBoolean("selected")) {
-                            OptionChip(Lucide.Folder, project.getString("label"), project.getString("accessibilityLabel"), !locked, collapsed = true,
-                                onLongClick = { editCapture(project.getJSONObject("reset")) }) { openCapturePicker("project") }
-                        } else {
-                            val contexts = view.getJSONObject("contexts")
-                            OptionChip(Lucide.AtSign, contexts.getString("label"), contexts.getString("accessibilityLabel"), !locked, collapsed = true,
-                                onLongClick = { editCapture(contexts.getJSONObject("reset")) }) { openCapturePicker("context") }
-                        }
+                        val contexts = view.getJSONObject("contexts")
+                        OptionChip(Lucide.AtSign, contexts.getString("label"), contexts.getString("accessibilityLabel"), !locked, collapsed = true,
+                            onLongClick = { editCapture(contexts.getJSONObject("reset")) }) { openCapturePicker("context") }
                         FocusChip(model, view, collapsed = true, locked = locked)
                     }
                     val moreLabel = copy.getString(if (draft.expanded) "hideOptions" else "more")
@@ -348,12 +350,6 @@ fun CapturePopup(model: InboxViewModel, draft: CaptureDraft) = with(model) {
                         val contexts = view.getJSONObject("contexts")
                         OptionChip(Lucide.AtSign, contexts.getString("label"), contexts.getString("accessibilityLabel"), !locked,
                             onLongClick = { editCapture(contexts.getJSONObject("reset")) }) { openCapturePicker("context") }
-                        val area = view.getJSONObject("area")
-                        OptionChip(Lucide.Layers, area.getString("label"), area.getString("accessibilityLabel"), !locked,
-                            onLongClick = { editCapture(area.getJSONObject("reset")) }) { openCapturePicker("area") }
-                        val project = view.getJSONObject("project")
-                        OptionChip(Lucide.Folder, project.getString("label"), project.getString("accessibilityLabel"), !locked,
-                            onLongClick = { editCapture(project.getJSONObject("reset")) }) { openCapturePicker("project") }
                         view.child("priority")?.let { priority ->
                             OptionChip(Lucide.Flag, priority.getString("label"), priority.getString("accessibilityLabel"), !locked,
                                 iconTint = theme.priority(priority.text("value")),
@@ -427,29 +423,51 @@ private fun RecordingRows(state: VoiceUi) {
 @Composable
 private fun InboxViewModel.TitleField(value: String, label: String, enabled: Boolean, modifier: Modifier, onChange: (String) -> Unit) {
     val c = LocalTheme.current.colors
-    var field by remember { mutableStateOf(TextFieldValue(value, TextRange(value.length))) }
+    var field by remember(capture?.session) { mutableStateOf(TextFieldValue(value, TextRange(value.length))) }
+    var suggestions by remember(capture?.session) { mutableStateOf<JSONObject?>(null) }
+    var focused by remember { mutableStateOf(false) }
     if (field.text != value) field = TextFieldValue(value, TextRange(value.length))
+    LaunchedEffect(field.text, field.selection, field.composition, enabled, focused) {
+        suggestions = null
+        if (!enabled || !focused || field.composition != null || !field.selection.collapsed) return@LaunchedEffect
+        suggestions = captureAutocomplete(field.text, field.selection.start, field.selection.end)
+    }
     val shape = RoundedCornerShape(12.dp)
-    BasicTextField(field, { typed -> field = typed; if (typed.text != value) onChange(typed.text) }, enabled = enabled,
-        textStyle = rnText(15, 400).copy(color = if (enabled) c.text else c.secondaryText), cursorBrush = SolidColor(c.tint),
+    Column(modifier) {
+        BasicTextField(field, { typed -> field = typed; if (typed.text != value) onChange(typed.text) }, enabled = enabled,
+            textStyle = rnText(15, 400).copy(color = if (enabled) c.text else c.secondaryText), cursorBrush = SolidColor(c.tint),
 
-        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Done),
-        keyboardActions = KeyboardActions(onDone = { saveCapture(openAfterSave = false) }),
+            keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Done),
+            keyboardActions = KeyboardActions(onDone = { saveCapture(openAfterSave = false) }),
 
 
-        modifier = modifier.onPreviewKeyEvent { event ->
-            if (field.composition != null) return@onPreviewKeyEvent false
-            val enter = event.key == Key.Enter || event.key == Key.NumPadEnter
-            if (enter && event.type == KeyEventType.KeyDown) saveCapture(openAfterSave = false)
-            enter
-        }.fillMaxWidth().heightIn(min = 44.dp, max = 120.dp).clip(shape).background(c.inputBg).rnBorder(1.dp, c.border, shape)
-            .testTag("capture-title").semantics { contentDescription = label },
-        decorationBox = { inner ->
-            Box(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), contentAlignment = Alignment.CenterStart) {
-                if (value.isEmpty()) Text(label, style = rnText(15, 400), color = c.secondaryText)
-                inner()
+            modifier = Modifier.onFocusChanged { focused = it.isFocused }.onPreviewKeyEvent { event ->
+                if (field.composition != null) return@onPreviewKeyEvent false
+                val enter = event.key == Key.Enter || event.key == Key.NumPadEnter
+                if (enter && event.type == KeyEventType.KeyDown) saveCapture(openAfterSave = false)
+                enter
+            }.fillMaxWidth().heightIn(min = 44.dp, max = 120.dp).clip(shape).background(c.inputBg).rnBorder(1.dp, c.border, shape)
+                .testTag("capture-title").semantics { contentDescription = label },
+            decorationBox = { inner ->
+                Box(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), contentAlignment = Alignment.CenterStart) {
+                    if (value.isEmpty()) Text(label, style = rnText(15, 400), color = c.secondaryText)
+                    inner()
+                }
+            })
+        val current = suggestions?.takeIf { it.optString("originalText") == field.text && it.optInt("caret") == field.selection.start
+            && field.selection.collapsed && field.composition == null && enabled && focused }
+        for (item in current?.items("items").orEmpty()) {
+            PickerRow(item.getString("label"), item.getString("label"), enabled = enabled) {
+                if (current?.optString("originalText") == field.text && current.optInt("caret") == field.selection.start
+                    && field.selection.collapsed && field.composition == null) {
+                    field = TextFieldValue(item.getString("text"), TextRange(item.getInt("caret")))
+                    suggestions = null
+                    onChange(field.text)
+                    item.optJSONObject("edit")?.let(::editCapture)
+                }
             }
-        })
+        }
+    }
 }
 
 
@@ -517,10 +535,11 @@ internal fun PreviewStrip(entries: List<JSONObject>, modifier: Modifier) {
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun RowScope.OptionChip(icon: ImageVector, label: String?, description: String, enabled: Boolean, collapsed: Boolean = false,
-                                iconOnly: Boolean = false, iconTint: Color? = null, onLongClick: () -> Unit, onClick: () -> Unit) {
+                                iconOnly: Boolean = false, iconTint: Color? = null, modifier: Modifier = Modifier,
+                                onLongClick: () -> Unit, onClick: () -> Unit) {
     val c = LocalTheme.current.colors
     val pill = RoundedCornerShape(999.dp)
-    Row(Modifier.then(if (collapsed || iconOnly) Modifier else Modifier.weight(1f).widthIn(min = 120.dp))
+    Row(modifier.then(if (collapsed || iconOnly) Modifier else Modifier.weight(1f).widthIn(min = 120.dp))
         .heightIn(min = if (collapsed) 40.dp else 44.dp).clip(pill).background(c.filterBg).rnBorder(1.dp, c.border, pill)
         .combinedClickable(enabled = enabled, role = Role.Button, onLongClick = onLongClick, onClick = onClick)
         .semantics { contentDescription = description }.padding(horizontal = if (collapsed) 12.dp else 10.dp, vertical = 8.dp),
@@ -624,6 +643,7 @@ private fun InboxViewModel.CapturePicker(model: InboxViewModel, draft: CaptureDr
             val submit = {
                 when (kind) {
                     "context" -> picker.child("add")?.let { add -> pickCapture(add.getJSONObject("edit"), close = false, clearQuery = true) }
+                    "destination" -> Unit
                     else -> if (query.isNotBlank()) submitCapturePicker()
                 }
             }
@@ -675,7 +695,7 @@ private fun InboxViewModel.CapturePicker(model: InboxViewModel, draft: CaptureDr
             }
             else -> list {
                 val none = picker.getJSONObject("none")
-                PickerRow(none.getString("label"), none.getString("label"), enabled = !locked) { pickCapture(none.getJSONObject("edit"), close = true, clearQuery = true) }
+                PickerRow(none.getString("label"), none.getString("label"), selected = none.optBoolean("selected"), enabled = !locked) { pickCapture(none.getJSONObject("edit"), close = true, clearQuery = true) }
                 for (row in picker.items("items")) {
                     PickerRow(row.getString("label"), row.getString("label"), selected = row.optBoolean("selected"), enabled = !locked) {
                         pickCapture(row.getJSONObject("edit"), close = true, clearQuery = true)

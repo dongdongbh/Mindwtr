@@ -33,6 +33,7 @@ class QuickCaptureActivityTest {
   fun reset() {
     QuickCaptureAudioSessionStore.clearForTests()
     queue.deleteRecursively()
+    WidgetPayloadStore.write(context, JSONObject().put("captureDestinations", captureDestinationCatalog()).toString())
   }
 
   private fun controller() = Robolectric.buildActivity(QuickCaptureActivity::class.java).also {

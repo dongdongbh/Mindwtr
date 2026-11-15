@@ -251,6 +251,8 @@ export const frOverrides: Record<string, string> = {
         'quickAdd.syntaxHelp': 'Aide sur la syntaxe d’ajout rapide',
         'quickAdd.pasteImagesHint': 'Collez des images ou des captures d’écran avec {{shortcut}} pour les joindre.',
         'quickAdd.placeholder': 'Ajouter une tâche… utilisez @context +Project #tag',
+        'quickAdd.destinationUnavailable': "Destination indisponible. Choisissez une autre destination.",
+        "quickAdd.destinationNeedsSelection": "Choisissez une destination pour enregistrer.",
         'quickAdd.addAnother': 'Ajoutez-en un autre',
         'quickAdd.inputLabel': 'Titre de la tâche',
         'quickAdd.inputHint': 'Saisissez une tâche puis appuyez sur Entrée pour l’enregistrer.',

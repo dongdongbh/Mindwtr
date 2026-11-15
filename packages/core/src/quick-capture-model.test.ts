@@ -127,7 +127,7 @@ describe('capture popup model', () => {
         expect(inProject).toMatchObject({ projectId: 'p-launch', areaId: null });
         expect(edit(inProject, { type: 'resetProject' })).toMatchObject({ projectId: null, areaId: 'a-home' });
         expect(edit(inProject, { type: 'selectArea', areaId: 'a-work' })).toMatchObject({ projectId: null, areaId: 'a-work' });
-        expect(edit(inProject, { type: 'selectArea', areaId: null })).toMatchObject({ projectId: 'p-launch', areaId: null });
+        expect(edit(inProject, { type: 'selectArea', areaId: null })).toMatchObject({ destination: { kind: 'none' }, projectId: null, areaId: null });
     });
 });
 
@@ -160,12 +160,15 @@ describe('capture popup save: what the popup shows is what is saved', () => {
         return { shown, props: (addTask.mock.calls[0] as unknown[] | undefined)?.[1] as Partial<Task> };
     };
 
-    it('does not save a preset project the popup dropped (archived or deleted); it saves the area it shows', async () => {
+    it('retains an unavailable contextual project and refuses saving until another destination is selected', async () => {
         for (const projectId of ['p-old', 'p-gone']) {
             const { shown, props } = await save({ projectId, areaId: 'a-home', status: 'next' });
-            expect(shown).toMatchObject({ projectId: null, areaId: 'a-home' });
-            expect(props.projectId).toBeUndefined();
-            expect(props).toMatchObject({ areaId: 'a-home', status: 'next' });
+            expect(shown).toMatchObject({ projectId, areaId: null });
+            expect(props).toBeUndefined();
+            const view = buildQuickCaptureView('Fix fence', shown, contextFor({ projectId, areaId: 'a-home' }));
+            expect(view.canSave).toBe(false);
+            expect(view.destination.available).toBe(false);
+            expect(view.destination.label).toBe('Destination unavailable. Choose another destination.');
         }
 
         expect((await save({ projectId: 'p-home', status: 'next' })).props).toMatchObject({ projectId: 'p-home', status: 'next' });
