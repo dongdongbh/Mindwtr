@@ -85,7 +85,7 @@ test('Reference editing preserves retained metadata and exposes a secondary conv
     const editor = page.locator('form').filter({ has: page.getByRole('combobox', { name: 'Title', exact: true }) });
     await expect(editor.getByRole('button', { name: 'Convert to action', exact: true })).toBeVisible();
     await expect(editor.getByRole('button', { name: /^Scheduling/ })).toHaveCount(0);
-    await expect(editor.getByText('@retained', { exact: true })).toHaveCount(0);
+    await expect(editor.getByText('@retained', { exact: true })).toBeVisible();
     await editor.getByRole('combobox', { name: 'Title', exact: true }).fill('Updated reference notes');
     await page.setViewportSize({ width: 900, height: 700 });
     await page.screenshot({ path: testInfo.outputPath('reference-editor-dark.png') });
