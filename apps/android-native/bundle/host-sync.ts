@@ -49,6 +49,7 @@ import {
     sanitizeLogMessage,
     setSha256HexProvider,
     shouldScheduleMobileBackgroundSync,
+    syncResultUploadedChangeAt,
     themeDescriptor,
     useTaskStore,
     FileSyncRetainedGenerationError,
@@ -694,7 +695,11 @@ export const createNativeSync = (bindings: NativeSyncBindings, fileEncryptionSta
             succeeded = answer.success;
             requeued = answer.skipped === 'requeued';
             if (platform === 'ios' && answer.success && (!answer.skipped || answer.skipped === 'unchanged') && !options.activationProbe) {
-                iosUploadedChangeAt = useTaskStore.getState().lastDataChangeAt;
+                iosUploadedChangeAt = syncResultUploadedChangeAt.get(answer) ?? useTaskStore.getState().lastDataChangeAt;
+                if (hasPendingLocalChange()) try {
+                    await logLine('info', 'Native iOS sync kept an edit made during the cycle pending', { scope: 'native-ios', force: true,
+                        extra: { releaseCheck: 'v1.3.9/sync-uploaded-mark', outcome: 'kept-pending' } });
+                } catch { }
             }
             if (dropbox && iosBackend === 'cloud' && answer.success && !answer.skipped
                 && (options.configOverride?.cloudProvider ?? await keyValue.get(CLOUD_PROVIDER_KEY)) === 'dropbox') try {

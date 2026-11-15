@@ -2416,6 +2416,7 @@ describe('mobile sync-service runtime', () => {
     expect(storeStateRef.current.fetchData).toHaveBeenCalledWith({
       silent: true,
       preloadedData: expect.objectContaining({ tasks: expect.any(Array) }),
+      onDataChangeAdvanced: expect.any(Function),
     });
     expect(logMocks.logSyncError).not.toHaveBeenCalled();
   });

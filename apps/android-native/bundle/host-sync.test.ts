@@ -726,6 +726,136 @@ describe('event-owned iOS stored/resume pacing', () => {
         expect(fixture.schedules).toEqual([]);
     });
 
+    it('keeps an edit made while a successful cycle finishes pending, because the cycle never read it', async () => {
+        resetForTests(); serve();
+        let now = 100_000;
+        spyOn(Date, 'now').mockImplementation(() => now);
+        const edit = () => core.useTaskStore.setState((state) => ({
+            _allTasks: [...state._allTasks, { id: `finalize-${now}`, title: 'Synthetic', status: 'inbox', tags: [], contexts: [],
+                createdAt: new Date(now).toISOString(), updatedAt: new Date(now).toISOString() }],
+            lastDataChangeAt: core.getNextDataChangeAt(state.lastDataChangeAt, now) }) as never);
+        const fixture = configured();
+        expect(await fixture.sync.performStoredAutomaticSync('startup')).toEqual({ success: true, skipped: false });
+        now += 1_000;
+        edit();
+        let lateEdits = 0;
+        const fetchData = core.useTaskStore.getState().fetchData;
+        core.useTaskStore.setState({ fetchData: async (options?: Parameters<typeof fetchData>[0]) => {
+            await fetchData(options);
+            if (!options?.preloadedData || lateEdits > 0) return;
+            lateEdits += 1;
+            now += 1;
+            edit();
+        } } as never);
+        try {
+            expect(await fixture.sync.performStoredAutomaticSync('leave')).toEqual({ success: true, skipped: false });
+        } finally {
+            core.useTaskStore.setState({ fetchData } as never);
+        }
+        expect(lateEdits).toBe(1);
+        expect(fixture.sync.state().cycles).toBe(2);
+        expect(fixture.sync.syncChangeObservation()).toEqual({ pending: true });
+        expect(fixture.sync.syncChangeSchedule(true)).toEqual({ delayMs: expect.any(Number) });
+        now += 60_000;
+        expect(await fixture.sync.performStoredAutomaticSync('change')).toEqual({ success: true, skipped: false });
+        expect(fixture.sync.syncChangeObservation()).toEqual({ pending: false });
+    });
+
+    it('keeps an edit made while an unchanged cycle records its status pending', async () => {
+        resetForTests(); serve();
+        let now = 100_000;
+        spyOn(Date, 'now').mockImplementation(() => now);
+        const fixture = configured();
+        expect(await fixture.sync.performStoredAutomaticSync('startup')).toEqual({ success: true, skipped: false });
+        now += 10 * 60_000;
+        expect(await fixture.sync.performStoredAutomaticSync('resume')).toEqual({ success: true, skipped: true });
+        expect(fixture.sync.syncChangeObservation()).toEqual({ pending: false });
+        let lateEdits = 0;
+        const unsubscribe = core.useTaskStore.subscribe((state, previous) => {
+            if (lateEdits > 0 || state.settings?.lastSyncAt === previous.settings?.lastSyncAt) return;
+            lateEdits += 1;
+            core.useTaskStore.setState((current) => ({
+                lastDataChangeAt: core.getNextDataChangeAt(current.lastDataChangeAt, now) }) as never);
+        });
+        now += 10 * 60_000;
+        try {
+            expect(await fixture.sync.performStoredAutomaticSync('resume')).toEqual({ success: true, skipped: true });
+        } finally {
+            unsubscribe();
+        }
+        expect(lateEdits).toBe(1);
+        expect(fixture.sync.state().cycles).toBe(3);
+        expect(fixture.sync.syncChangeObservation()).toEqual({ pending: true });
+    });
+
+    it('ends back-to-back cycles with no edit at no pending change, though each cycle moves its own change time', async () => {
+        resetForTests();
+        let now = 100_000;
+        spyOn(Date, 'now').mockImplementation(() => now);
+        let remoteTasks: AppData['tasks'] = [];
+        globalThis.fetch = (async () => new Response(JSON.stringify({ ...data(), tasks: remoteTasks }), {
+            status: 200, headers: { ETag: `"remote-${remoteTasks.length}"` },
+        })) as typeof fetch;
+        const fixture = configured();
+        const changeTimes = [core.useTaskStore.getState().lastDataChangeAt];
+        for (const reason of ['startup', 'resume', 'resume'] as const) {
+            now += 10 * 60_000;
+            const at = new Date(now).toISOString();
+            remoteTasks = [...remoteTasks, { id: `remote-${now}`, title: 'Synthetic', status: 'inbox', tags: [], contexts: [],
+                createdAt: at, updatedAt: at, rev: 1, revBy: 'other-device' } as AppData['tasks'][number]];
+            expect(await fixture.sync.performStoredAutomaticSync(reason)).toEqual({ success: true, skipped: false });
+            changeTimes.push(core.useTaskStore.getState().lastDataChangeAt);
+            expect(fixture.sync.syncChangeObservation()).toEqual({ pending: false });
+            expect(fixture.sync.syncChangeSchedule(true)).toEqual({ delayMs: null });
+        }
+        expect(fixture.sync.state().cycles).toBe(3);
+        expect(new Set(changeTimes).size).toBe(changeTimes.length);
+    });
+
+    it('keeps an edit to an existing task pending when it lands just before the store refresh that applies load migrations', async () => {
+        resetForTests();
+        let now = 100_000;
+        spyOn(Date, 'now').mockImplementation(() => now);
+        let remoteTasks: AppData['tasks'] = [];
+        const addRemoteTask = () => {
+            const at = new Date(now).toISOString();
+            remoteTasks = [...remoteTasks, { id: `refresh-remote-${now}`, title: 'Synthetic', status: 'inbox', tags: [], contexts: [],
+                createdAt: at, updatedAt: at, rev: 1, revBy: 'other-device' } as AppData['tasks'][number]];
+        };
+        globalThis.fetch = (async () => new Response(JSON.stringify({ ...data(), tasks: remoteTasks }), {
+            status: 200, headers: { ETag: `"remote-${remoteTasks.length}"` },
+        })) as typeof fetch;
+        const fixture = configured();
+        addRemoteTask();
+        expect(await fixture.sync.performStoredAutomaticSync('startup')).toEqual({ success: true, skipped: false });
+        const existingId = remoteTasks[0].id;
+        expect(core.useTaskStore.getState()._allTasks.some((task) => task.id === existingId)).toBe(true);
+        now += 10 * 60_000;
+        addRemoteTask();
+        const advanced: number[][] = [];
+        let editedAt: number | null = null;
+        const fetchData = core.useTaskStore.getState().fetchData;
+        core.useTaskStore.setState({ fetchData: async (options?: Parameters<typeof fetchData>[0]) => {
+            if (!options?.preloadedData || editedAt !== null) return fetchData(options);
+            now += 1;
+            await core.useTaskStore.getState().updateTask(existingId, { title: 'Edited before the refresh' });
+            editedAt = core.useTaskStore.getState().lastDataChangeAt;
+            const onDataChangeAdvanced = options.onDataChangeAdvanced;
+            return fetchData({ ...options, onDataChangeAdvanced: (previousChangeAt, nextChangeAt) => {
+                advanced.push([previousChangeAt, nextChangeAt]);
+                onDataChangeAdvanced?.(previousChangeAt, nextChangeAt);
+            } });
+        } } as never);
+        try {
+            expect(await fixture.sync.performStoredAutomaticSync('resume')).toEqual({ success: true, skipped: false });
+        } finally {
+            core.useTaskStore.setState({ fetchData } as never);
+        }
+        expect(editedAt).not.toBeNull();
+        expect(advanced).toEqual([[editedAt!, core.useTaskStore.getState().lastDataChangeAt]]);
+        expect(fixture.sync.syncChangeObservation()).toEqual({ pending: true });
+    });
+
     it('schedules a local change sync with the RN debounce and shared pacing, never for its own writes', async () => {
         resetForTests(); serve();
         let now = 100_000;

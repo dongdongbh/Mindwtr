@@ -609,6 +609,7 @@ export const createSettingsActions = ({
             let visibleTasksReused = false;
             let stateUpdateSkipped = false;
             let resultAccepted = false;
+            let dataChangeAdvance: { previousChangeAt: number; nextChangeAt: number } | null = null;
             const setStateStartedAt = Date.now();
             const notifyProfilingEnabled = nextSettings?.diagnostics?.loggingEnabled === true;
             let notifyProfile: NotifyProfile | null = null;
@@ -665,6 +666,9 @@ export const createSettingsActions = ({
                         const nextLastDataChangeAt = applied.length > 0
                             ? getNextDataChangeAt(state.lastDataChangeAt)
                             : state.lastDataChangeAt;
+                        dataChangeAdvance = nextLastDataChangeAt === state.lastDataChangeAt
+                            ? null
+                            : { previousChangeAt: state.lastDataChangeAt, nextChangeAt: nextLastDataChangeAt };
                         if (
                             visibleTasks === state.tasks
                             && visibleProjects === state.projects
@@ -743,6 +747,9 @@ export const createSettingsActions = ({
                             lastDataChangeAt: nextLastDataChangeAt,
                         };
                     });
+                    if (dataChangeAdvance) {
+                        options?.onDataChangeAdvanced?.(dataChangeAdvance.previousChangeAt, dataChangeAdvance.nextChangeAt);
+                    }
                 });
             } finally {
                 if (notifyProfilingEnabled) notifyProfile = endNotifyProfile();

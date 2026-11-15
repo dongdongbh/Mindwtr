@@ -21,6 +21,7 @@ const MAX_AUTO_SYNC_FAILURE_COOLDOWN_MS = 10 * 60_000;
 const AUTO_SYNC_FAILURE_REPORT_REPEAT_MS = 10 * 60 * 1000;
 const BACKGROUND_HOLD_RELEASE_CHECK = 'v1.3.7/ios-background-sync-hold';
 export const syncResultCycleStartChangeAt = new WeakMap<object, number>();
+export const syncResultUploadedChangeAt = new WeakMap<object, number>();
 export const MOBILE_AUTO_SYNC_CADENCE_FILE: MobileAutoSyncCadence = {
   minIntervalMs: 30_000,
   debounceFirstChangeMs: 8_000,

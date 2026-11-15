@@ -699,6 +699,8 @@ export interface TaskStore {
         recoveryLoad?: boolean;
 
         isResultStillRelevant?: () => boolean;
+
+        onDataChangeAdvanced?: (previousChangeAt: number, nextChangeAt: number) => void;
     }) => Promise<void>;
 
     seedGettingStarted: (options?: { language?: string; awaitSave?: boolean }) => Promise<StoreActionResult>;

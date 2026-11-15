@@ -1321,7 +1321,7 @@ class SharedSyncRunMachine {
     }
 
     private async persistUnchangedSyncStatus(): Promise<void> {
-        this.hooks.onUnchangedSkip?.();
+        this.hooks.onUnchangedSkip?.(this.state.localSnapshotChangeAt);
         this.store.setUiError(null);
         try {
             await this.storage.persistSyncStatus({

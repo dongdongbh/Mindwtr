@@ -17,7 +17,7 @@ import { SyncRemoteWriteConflict, type SyncEncryptionPosture, type SyncFollowUpR
 import { createSyncBackendIO, type FileSyncReadResult, type SyncBackendContext, type SyncTransport } from './sync-backend-io';
 import type { SyncBackendIO } from './sync-run-ports';
 import { createSyncOrchestrator } from './sync-orchestrator';
-import { syncResultCycleStartChangeAt } from './mobile-sync-triggers';
+import { syncResultCycleStartChangeAt, syncResultUploadedChangeAt } from './mobile-sync-triggers';
 import { NativeAttachmentCleanupUnconfirmedError } from './native-attachment-cleanup';
 import { runSerializedSyncDocumentOperation } from './data-transfer-transaction';
 import { isRetryableError, isRetryableWebdavReadError, isWebdavInvalidJsonError, withRetry } from './retry-utils';
@@ -919,6 +919,7 @@ export const createMobileSyncService = <Lease>(host: MobileSyncServiceHost<Lease
     private lastStep = 'init';
 
     private lastPreparedPublish: { data: AppData; storeData: readonly unknown[] } | null = null;
+    uploadedChangeAt: number | null = null;
     private readonly syncDiagnosticStartedAt = Date.now();
     private syncDiagnosticPhaseStartedAt = this.syncDiagnosticStartedAt;
     private attachmentPrepareStartedAt = this.syncDiagnosticStartedAt;
@@ -1961,10 +1962,14 @@ export const createMobileSyncService = <Lease>(host: MobileSyncServiceHost<Lease
             lastSyncHistory: history,
           });
         },
+        onUnchangedSkip: (localSnapshotChangeAt) => {
+          this.uploadedChangeAt = localSnapshotChangeAt;
+        },
         finalizeSuccess: async (mergedData, info) => {
 
 
           const refreshStartedAt = Date.now();
+          let uploadedChangeAt = info.getLocalSnapshotChangeAt();
 
 
           const published = this.lastPreparedPublish;
@@ -1982,8 +1987,15 @@ export const createMobileSyncService = <Lease>(host: MobileSyncServiceHost<Lease
 
             core.useTaskStore.setState((state) => (state.error === null ? state : { error: null }));
           } else if (!info.localWriteSkipped) {
-            await traceSectionAsync('sync:storeApply', () => core.useTaskStore.getState().fetchData({ silent: true, preloadedData: mergedData }));
+            await traceSectionAsync('sync:storeApply', () => core.useTaskStore.getState().fetchData({
+              silent: true,
+              preloadedData: mergedData,
+              onDataChangeAdvanced: (previousChangeAt, nextChangeAt) => {
+                if (previousChangeAt <= uploadedChangeAt) uploadedChangeAt = nextChangeAt;
+              },
+            }));
           }
+          this.uploadedChangeAt = uploadedChangeAt;
           if (!info.localWriteSkipped) {
 
 
@@ -2530,7 +2542,10 @@ export const createMobileSyncService = <Lease>(host: MobileSyncServiceHost<Lease
       const changeAtStart = core.useTaskStore.getState().lastDataChangeAt;
       try {
         const result = await runSerializedSyncDocumentOperation(() => syncRun.run());
-        if (!result.skipped || result.skipped === 'unchanged') syncResultCycleStartChangeAt.set(result, changeAtStart);
+        if (!result.skipped || result.skipped === 'unchanged') {
+          syncResultCycleStartChangeAt.set(result, changeAtStart);
+          if (syncRun.uploadedChangeAt !== null) syncResultUploadedChangeAt.set(result, syncRun.uploadedChangeAt);
+        }
         return result;
       } finally {
 

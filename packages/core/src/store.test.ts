@@ -3171,6 +3171,34 @@ describe('TaskStore', () => {
         expect((mockStorage.saveData as unknown as { mock: { calls: any[][] } }).mock.calls.length).toBe(saveCallsAfterFirstLoad);
     });
 
+    it('reports a load migration change time only after the store reached it', async () => {
+        const nowIso = '2026-07-21T12:00:00.000Z';
+        vi.setSystemTime(new Date(nowIso));
+        const settledSettings = {
+            deviceId: 'device-a',
+            analyticsProfileId: 'profile-a',
+            migrations: { version: 9999, lastAutoArchiveAt: nowIso, lastTombstoneCleanupAt: nowIso },
+            gtd: { taskEditor: { defaultsVersion: 9999 }, focusGroupByDefaultsVersion: 1 },
+        };
+        const library = (tasks: Task[]): AppData => ({ tasks, projects: [], sections: [], areas: [], people: [], settings: settledSettings });
+        const migrating = () => createStoreTask('task-trigger', { dueDate: '2020-01-01', createdAt: '2019-12-01T00:00:00.000Z', updatedAt: '2019-12-01T00:00:00.000Z' });
+        await useTaskStore.getState().fetchData({ silent: true, preloadedData: library([createStoreTask('task-victim-1')]) });
+        const advanced: number[][] = [];
+        const onDataChangeAdvanced = (previousChangeAt: number, nextChangeAt: number) => { advanced.push([previousChangeAt, nextChangeAt]); };
+        const changeAtBefore = useTaskStore.getState().lastDataChangeAt;
+
+        await useTaskStore.getState().fetchData({ silent: true, preloadedData: library([migrating()]), onDataChangeAdvanced });
+
+        expect(useTaskStore.getState().error).toMatch(/Refusing to save a partial task snapshot/);
+        expect(useTaskStore.getState().lastDataChangeAt).toBe(changeAtBefore);
+        expect(advanced).toEqual([]);
+
+        await useTaskStore.getState().fetchData({ silent: true, preloadedData: library([createStoreTask('task-victim-1'), migrating()]), onDataChangeAdvanced });
+
+        expect(advanced).toEqual([[changeAtBefore, useTaskStore.getState().lastDataChangeAt]]);
+        expect(useTaskStore.getState().lastDataChangeAt).toBeGreaterThan(changeAtBefore);
+    });
+
     it('does not overwrite same-millisecond task completions made during an in-flight fetch', async () => {
         const fixedNow = new Date('2026-03-22T10:00:00.000Z').getTime();
         vi.setSystemTime(fixedNow);

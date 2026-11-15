@@ -371,7 +371,7 @@ export interface SyncRunPlatformHooks {
     finalizeSuccess(mergedData: AppData, info: SyncRunSuccessInfo): Promise<void> | void;
 
 
-    onUnchangedSkip?(): void;
+    onUnchangedSkip?(localSnapshotChangeAt: number): void;
 }
 
 
