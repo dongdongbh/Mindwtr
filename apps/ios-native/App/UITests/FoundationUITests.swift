@@ -21521,7 +21521,9 @@ final class FoundationUITests: XCTestCase {
         let note = app.descendants(matching: .any).matching(identifier: "capture-note").firstMatch
         XCTAssertTrue(note.waitForExistence(timeout: 5), "The description field shows without opening More")
         XCTAssertGreaterThanOrEqual(note.frame.minY, input.frame.maxY)
-        XCTAssertLessThan(note.frame.minY, app.descendants(matching: .any).matching(identifier: "capture-area").firstMatch.frame.minY)
+        let destination = app.buttons["capture-destination"]
+        XCTAssertTrue(destination.exists)
+        XCTAssertLessThan(note.frame.minY, destination.frame.minY)
         note.tap()
         note.typeText("Description typed before More")
         XCTAssertEqual(note.value as? String, "Description typed before More")
@@ -21529,6 +21531,16 @@ final class FoundationUITests: XCTestCase {
         XCTAssertEqual(note.value as? String, "Description typed before More")
         app.buttons["capture-options"].tap()
         XCTAssertTrue(note.exists, "Closing More keeps the description field")
+        destination.tap()
+        let none = app.buttons["capture-destination-option-none"]
+        XCTAssertTrue(none.waitForExistence(timeout: 10))
+        expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: none)
+        waitForExpectations(timeout: 10)
+        none.tap()
+        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: app.otherElements["capture-destination-picker"])
+        waitForExpectations(timeout: 10)
+        XCTAssertTrue(destination.label.contains("None"))
+        XCTAssertEqual(note.value as? String, "Description typed before More")
     }
 
     func testAreaScopeCycleAndPersistence() {
@@ -23245,8 +23257,8 @@ final class FoundationUITests: XCTestCase {
 
     private func task106Capture(_ app: XCUIApplication, area: String) {
         task106Root(app); boardTap(app, "capture-open")
-        XCTAssertTrue(app.staticTexts["capture-area"].waitForExistence(timeout: 20))
-        XCTAssertTrue(app.staticTexts["capture-area"].label.contains(area))
+        XCTAssertTrue(app.buttons["capture-destination"].waitForExistence(timeout: 20))
+        XCTAssertTrue(app.buttons["capture-destination"].label.contains(area))
         let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Capture effective area"; shot.lifetime = .keepAlways; add(shot)
         boardTap(app, "capture-close"); boardEnabled(app.buttons["tab-menu"])
     }

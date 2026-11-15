@@ -1664,10 +1664,11 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
     }
 
 
-    fun openCapture(auto: AutoRecord = AutoRecord.OFF) {
+    fun openCapture(auto: AutoRecord = AutoRecord.OFF, projectId: String? = openProjectId, sectionId: String? = null) {
         if (capture != null) return
+        val initialProps = projectId?.let { id -> JSONObject().put("projectId", id).apply { sectionId?.let { put("sectionId", it) } } }
         perform { runtime ->
-            val view = runtime.openQuickCapture()
+            val view = runtime.openQuickCapture(initialProps)
             ui { openedCapture(view, "", auto) }
         }
     }

@@ -304,6 +304,8 @@ export const jaOverrides: Record<string, string> = {
         'quickAdd.syntaxHelp': 'クイック追加の記法ヘルプ',
         'quickAdd.pasteImagesHint': '{{shortcut}} で画像やスクリーンショットを貼り付けると添付できます。',
         'quickAdd.placeholder': 'タスクを追加… @context +Project #tag が使えます',
+        'quickAdd.destinationUnavailable': "保存先を利用できません。別の保存先を選んでください。",
+        "quickAdd.destinationNeedsSelection": "保存先を選択してください。",
         'quickAdd.addAnother': '続けて追加',
         'quickAdd.inputLabel': 'タスク名',
         'quickAdd.inputHint': 'タスク名を入力して、追加ボタンか Enter キーを押してください。',

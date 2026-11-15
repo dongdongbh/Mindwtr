@@ -1,3 +1,6 @@
+import { acceptCaptureSuggestion, captureAutocompleteSuggestions, captureAutocompleteTrigger } from './capture-autocomplete';
+import { isCaptureDestinationAvailable, readCaptureDestination, readCaptureDestinationSnapshot } from './capture-destination';
+import { freezeQuickCaptureAudioDestination } from './quick-capture-model';
 import { applyPreparedCaptureData, applyPreparedCaptureLinesData } from './prepared-capture-data';
 import { serializeBackupData } from './backup-transfer';
 import { applyCapturedProject, resolveCaptureAreaQuery, resolveCaptureProjectQuery, type CaptureTaskPlan } from './capture';
@@ -10,6 +13,7 @@ import { buildQuickAddParseOptions, type QuickAddParseOptions } from './quick-ad
 import {
     applyQuickCaptureEdit,
     buildQuickCaptureAreaPicker,
+    buildQuickCaptureDestinationPicker,
     buildQuickCaptureContextPicker,
     buildQuickCapturePriorityPicker,
     buildQuickCaptureProjectPicker,
@@ -68,7 +72,7 @@ export type QuickCaptureDeps = {
     requestIdPattern: RegExp;
 };
 
-export type NativeQuickCapturePickerKind = 'project' | 'area' | 'context' | 'priority';
+export type NativeQuickCapturePickerKind = 'project' | 'area' | 'context' | 'priority' | 'destination';
 type Windowed<T extends { items: unknown[] }> = Omit<T, 'items'> & { items: T['items']; total: number };
 type ProjectPicker = ReturnType<typeof buildQuickCaptureProjectPicker>;
 type AreaPicker = ReturnType<typeof buildQuickCaptureAreaPicker>;
@@ -77,6 +81,7 @@ type PriorityPicker = ReturnType<typeof buildQuickCapturePriorityPicker>;
 
 
 export type NativeQuickCapturePicker =
+    | ({ kind: 'destination'; query: string } & Windowed<ReturnType<typeof buildQuickCaptureDestinationPicker>>)
     | ({ kind: 'project'; query: string } & Windowed<ProjectPicker>)
     | ({ kind: 'area'; query: string } & Windowed<AreaPicker>)
     | ({ kind: 'context'; query: string } & Windowed<ContextPicker>)
@@ -171,7 +176,7 @@ const readOptionDate = (value: unknown): string | null | undefined => {
 };
 const isId = (value: unknown) => value === null || (isText(value) && value.length > 0);
 
-const OPTION_CHECKS: Record<keyof QuickCaptureOptions, (value: unknown) => boolean> = {
+const OPTION_CHECKS: Record<Exclude<keyof QuickCaptureOptions, 'destination' | 'sectionId' | 'audioDestination'>, (value: unknown) => boolean> = {
     note: (value) => isText(value, NOTE_LIMIT),
     dueDate: (value) => readOptionDate(value) !== undefined,
     dueDateHasTime: (value) => typeof value === 'boolean',
@@ -187,8 +192,11 @@ const OPTION_CHECKS: Record<keyof QuickCaptureOptions, (value: unknown) => boole
 
 const readOptions = (value: unknown): QuickCaptureOptions | null => {
     if (!isObjectRecord(value)) return null;
-    const keys = Object.keys(OPTION_CHECKS) as (keyof QuickCaptureOptions)[];
-    if (Object.keys(value).length !== keys.length || !keys.every((key) => key in value && OPTION_CHECKS[key](value[key]))) return null;
+    const keys = Object.keys(OPTION_CHECKS) as (keyof typeof OPTION_CHECKS)[];
+    if (!hasKeys(value, keys, ['destination', 'sectionId', 'audioDestination']) || !keys.every((key) => key in value && OPTION_CHECKS[key](value[key]))
+        || (value.destination !== undefined && !readCaptureDestination(value.destination))
+        || (value.audioDestination !== undefined && !readCaptureDestinationSnapshot(value.audioDestination))) return null;
+    if (value.sectionId !== undefined && (!isText(value.sectionId) || !value.sectionId || !value.projectId)) return null;
     if (value.dueDateHasTime === true && typeof value.dueDate === 'string' && DAY_PATTERN.test(value.dueDate)) return null;
     const options = {
         ...value,
@@ -216,11 +224,14 @@ const isNonemptyText = (value: unknown): value is string => isText(value, TEXT_L
 
 const readOriginalOptions = (value: unknown): QuickCaptureOptions | null => {
     if (!isObjectRecord(value)) return null;
-    const keys = Object.keys(OPTION_CHECKS) as (keyof QuickCaptureOptions)[];
-    if (!hasKeys(value, keys) || !keys.every((key) => key === 'dueDate' || key === 'startTime'
+    const keys = Object.keys(OPTION_CHECKS) as (keyof typeof OPTION_CHECKS)[];
+    if (!hasKeys(value, keys, ['destination', 'sectionId']) || (value.destination !== undefined && !readCaptureDestination(value.destination)) || !keys.every((key) => key === 'dueDate' || key === 'startTime'
         ? value[key] === null || isCaptureDate(value[key]) : OPTION_CHECKS[key](value[key]))) return null;
+    if (value.sectionId !== undefined && (!isText(value.sectionId) || !value.sectionId || !value.projectId)) return null;
     if (value.dueDateHasTime === true && typeof value.dueDate === 'string' && DAY_PATTERN.test(value.dueDate)) return null;
-    return Object.fromEntries(keys.map((key) => [key, key === 'contexts' ? [...value.contexts as string[]] : value[key]])) as QuickCaptureOptions;
+    return { ...Object.fromEntries(keys.map((key) => [key, key === 'contexts' ? [...value.contexts as string[]] : value[key]])),
+        ...(value.destination !== undefined ? { destination: readCaptureDestination(value.destination)! } : {}),
+        ...(typeof value.sectionId === 'string' ? { sectionId: value.sectionId } : {}) } as QuickCaptureOptions;
 };
 
 const readCaptureRequest = (value: unknown): NativeQuickCaptureInput | null => {
@@ -518,6 +529,10 @@ const isEdit = (edit: unknown): edit is QuickCaptureEdit => {
     if (!isObjectRecord(edit)) return false;
     const state = useTaskStore.getState();
     switch (edit.type) {
+        case 'selectDestination': {
+            const destination = readCaptureDestination(edit.destination);
+            return destination !== null;
+        }
         case 'setNote':
             return isText(edit.value, NOTE_LIMIT);
         case 'selectProject': {
@@ -552,7 +567,7 @@ const isEdit = (edit: unknown): edit is QuickCaptureEdit => {
     }
 };
 
-const PICKERS = new Set<string>(['project', 'area', 'context', 'priority']);
+const PICKERS = new Set<string>(['project', 'area', 'context', 'priority', 'destination']);
 const readPicker = (value: unknown): NativeQuickCapturePickerInput | null | false => {
     if (value === undefined || value === null) return null;
     if (!isObjectRecord(value) || !PICKERS.has(value.kind as string) || (value.query !== undefined && !isText(value.query, 10_000))) return false;
@@ -626,6 +641,7 @@ export function createQuickCaptureMethods(deps: QuickCaptureDeps) {
             settings: state.settings,
             projects: state.projects,
             areas: state.areas,
+            sections: state.sections,
             parseOptions: parseOptions ?? rebuildParseOptions(),
             focusedCount: state.getFocusedCount(),
             defaultAreaId: resolveQuickCaptureDefaultAreaId(state.settings, state.areas),
@@ -676,6 +692,7 @@ export function createQuickCaptureMethods(deps: QuickCaptureDeps) {
         const ctx = context();
         const built = buildQuickCaptureView(text, options, ctx);
         let shown: NativeQuickCapturePicker | null = null;
+        if (picker?.kind === 'destination') shown = { kind: 'destination', query: picker.query ?? '', ...windowed(buildQuickCaptureDestinationPicker(text, options, ctx, picker.query ?? '')) };
         if (picker?.kind === 'project') shown = { kind: 'project', query: picker.query ?? '', ...windowed(buildQuickCaptureProjectPicker(options, ctx, picker.query ?? '')) };
         if (picker?.kind === 'area') shown = { kind: 'area', query: picker.query ?? '', ...windowed(buildQuickCaptureAreaPicker(options, ctx, picker.query ?? '')) };
         if (picker?.kind === 'context') {
@@ -717,7 +734,7 @@ export function createQuickCaptureMethods(deps: QuickCaptureDeps) {
         const planned = planQuickCaptureTask({ text: plan.text, options }, ctx);
         if (!planned.success) return planned.reason === 'invalid-date-command'
             ? { ok: true, value: { kind: 'refused', notice: getQuickCaptureInvalidDateNotice(deps.t(), planned.invalidDateCommands) } }
-            : fail('INVALID_INPUT', 'Type something to capture');
+            : fail('INVALID_INPUT', planned.reason === 'destination-unavailable' ? deps.t()('quickAdd.destinationUnavailable') : 'Type something to capture');
         const state = useTaskStore.getState();
         if (state._allTasks.some((task) => task.id === request.captureId)) return fail('INVALID_INPUT', 'Capture ID already exists; replay its prepared journal');
         const device = ensureDeviceId(state.settings);
@@ -764,6 +781,34 @@ export function createQuickCaptureMethods(deps: QuickCaptureDeps) {
     }
 
     return {
+        admitQuickCaptureAudio(input: { text: string; options: QuickCaptureOptions }): NativeHostResult<{ options: QuickCaptureOptions }> {
+            const draft = readDraft(input);
+            if (!draft.ok) return draft;
+            const options = freezeQuickCaptureAudioDestination(draft.value.text, draft.value.options, context());
+            if (!buildQuickCaptureView(draft.value.text, options, context()).destination.available)
+                return fail('INVALID_INPUT', deps.t()('quickAdd.destinationUnavailable'));
+            return { ok: true, value: { options } };
+        },
+
+        getQuickCaptureAutocomplete(input: { text: string; caret: number; selectionEnd?: number }) {
+            const ready = deps.readiness();
+            if (!ready.ok) return ready;
+            if (!isObjectRecord(input) || !hasKeys(input, ['text', 'caret'], ['selectionEnd']) || !isText(input.text, TEXT_LIMIT)
+                || !Number.isInteger(input.caret) || input.caret < 0 || input.caret > input.text.length
+                || (input.selectionEnd !== undefined && (!Number.isInteger(input.selectionEnd)
+                    || input.selectionEnd < input.caret || input.selectionEnd > input.text.length)))
+                return fail('INVALID_INPUT', 'A valid capture caret is required');
+            const state = useTaskStore.getState();
+            const trigger = input.selectionEnd !== undefined && input.selectionEnd !== input.caret ? null : captureAutocompleteTrigger(input.text, input.caret);
+            const tags = [...getSavedTaxonomyTokens(state.settings, 'tag'), ...state._allTasks.filter(task => !task.deletedAt).flatMap(task => task.tags ?? [])];
+            const suggestions = captureAutocompleteSuggestions(trigger, state.projects, contextHistory(), tags);
+            const items = trigger ? suggestions.map(suggestion => ({ label: suggestion.label,
+                ...acceptCaptureSuggestion(input.text, trigger, suggestion),
+                ...(suggestion.kind === 'project' ? { edit: { type: 'selectDestination' as const,
+                    destination: { kind: 'project' as const, id: suggestion.id } } } : {}),
+            })) : [];
+            return { ok: true as const, value: { originalText: input.text, caret: input.caret, items } };
+        },
         getCaptureCopilotOptions(input: NativeCaptureCopilotOptionsInput) {
             const draft = readDraft(input);
             if (!draft.ok) return draft;
@@ -824,7 +869,7 @@ export function createQuickCaptureMethods(deps: QuickCaptureDeps) {
                 const checked = planQuickCaptureTask({ text: line, options }, ctx);
                 if (!checked.success) return checked.reason === 'invalid-date-command'
                     ? { ok: true, value: { kind: 'refused', notice: getQuickCaptureInvalidDateNotice(deps.t(), checked.invalidDateCommands) } }
-                    : fail('INVALID_INPUT', 'A line cannot be captured');
+                    : fail('INVALID_INPUT', checked.reason === 'destination-unavailable' ? deps.t()('quickAdd.destinationUnavailable') : 'A line cannot be captured');
             }
             if (request.captureIds.some((id) => state._allTasks.some((task) => task.id === id))) return fail('INVALID_INPUT', 'Capture ID already exists; replay its prepared journal');
             const device = ensureDeviceId(state.settings), now = ctx.now.toISOString();
@@ -922,11 +967,31 @@ export function createQuickCaptureMethods(deps: QuickCaptureDeps) {
         },
 
 
-        openQuickCapture(): NativeHostResult<NativeQuickCaptureView> {
+        openQuickCapture(input?: { initialProps?: Pick<Partial<Task>, 'projectId' | 'sectionId' | 'areaId'> }): NativeHostResult<NativeQuickCaptureView> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
             rebuildParseOptions();
-            return view('', freshOptions(false), null);
+            if (!input?.initialProps) return view('', freshOptions(false), null);
+            if (!isObjectRecord(input) || !hasKeys(input, [], ['initialProps']) || !isObjectRecord(input.initialProps)
+                || !hasKeys(input.initialProps, [], ['projectId', 'sectionId', 'areaId'])
+                || !Object.values(input.initialProps).every(value => isText(value) && value.length > 0))
+                return fail('INVALID_INPUT', 'Capture context is invalid');
+            const state = useTaskStore.getState();
+            const initial = input.initialProps;
+            const requested = initial.projectId ? { kind: 'project' as const, id: initial.projectId,
+                ...(initial.sectionId ? { sectionId: initial.sectionId } : {}) }
+                : initial.areaId ? { kind: 'area' as const, id: initial.areaId } : { kind: 'none' as const };
+            if ((initial.sectionId && !initial.projectId)
+                || !isCaptureDestinationAvailable(requested, { projects: state.projects, areas: state.areas, sections: state.sections }))
+                return fail('INVALID_INPUT', 'Capture context is not available');
+            const options = createQuickCaptureOptions({ initialProps: input.initialProps, projects: state.projects,
+                defaultAreaId: resolveQuickCaptureDefaultAreaId(state.settings, state.areas) });
+            const destination = options.projectId ? { kind: 'project' as const, id: options.projectId,
+                ...(options.sectionId ? { sectionId: options.sectionId } : {}) }
+                : options.areaId ? { kind: 'area' as const, id: options.areaId } : { kind: 'none' as const };
+            if (!isCaptureDestinationAvailable(destination, { projects: state.projects, areas: state.areas, sections: state.sections }))
+                return fail('INVALID_INPUT', 'Capture context is not available');
+            return view('', options, null);
         },
 
 
@@ -984,7 +1049,7 @@ export function createQuickCaptureMethods(deps: QuickCaptureDeps) {
             if (!planned.success) {
                 return planned.reason === 'invalid-date-command'
                     ? { ok: true, value: { kind: 'refused', notice: getQuickCaptureInvalidDateNotice(deps.t(), planned.invalidDateCommands) } }
-                    : fail('INVALID_INPUT', 'Type something to capture');
+                    : fail('INVALID_INPUT', planned.reason === 'destination-unavailable' ? deps.t()('quickAdd.destinationUnavailable') : 'Type something to capture');
             }
             const openAfterSave = input.openAfterSave === true;
             return receipts.run<NativeQuickCaptureSubmitResult>(
@@ -1068,6 +1133,10 @@ export function createQuickCaptureMethods(deps: QuickCaptureDeps) {
                     if (existing) {
                         return existing.deletedAt ? fail('INVALID_INPUT', 'Capture ID already belongs to a deleted task')
                             : saved(existing.id, existing.projectId);
+                    }
+                    if (!buildQuickCaptureView(text, options, context()).destination.available) {
+                        return { ok: true, value: { kind: 'refused', notice: { tone: 'warning', title: deps.t()('common.notice'),
+                            message: deps.t()('quickAdd.destinationUnavailable') } } };
                     }
                     try {
                         const projects = captureProjects(captureId);

@@ -49,6 +49,18 @@ afterEach(async () => {
 });
 
 describe('prepared native quick capture', () => {
+    it('round-trips an explicit destination through a prepared journal and rejects malformed snapshot shapes', async () => {
+        const { host, options } = await open();
+        const command = prepare(host, { text: 'Capture +Never create', options: { ...options, destination: { kind: 'none' } }, captureId: generateUUID() });
+        expect(command.prepared.project).toBeNull();
+        expect(command.prepared.task.projectId).toBeUndefined();
+        expect(value(await host.commitPreparedQuickCapture(command))).toEqual(command.prepared.result);
+        const restarted = await activate(true);
+        expect(value(await restarted.commitPreparedQuickCapture(command))).toEqual(command.prepared.result);
+        expect(restarted.prepareQuickCapture({ text: 'Capture', options: { ...options, destination: { kind: 'none', id: 'bad' } } as never,
+            captureId: generateUUID() })).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+    });
+
     it.each([
         { due: '1d', start: '30m', dueMinutes: 1440, startMinutes: 30 },
         { due: '0m', start: '0m', dueMinutes: 0, startMinutes: 0 },

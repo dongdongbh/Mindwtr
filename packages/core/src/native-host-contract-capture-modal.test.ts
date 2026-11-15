@@ -127,7 +127,7 @@ function screenOf(view: NativeCaptureModalView, question: Question | null): Scre
             view.actions.cancel, view.actions.saveAndEdit, view.actions.save,
 
             ...(question ? [question.cancelLabel, question.confirmLabel, question.cancelLabel] : []),
-        ].map((label) => ({ label, disabled: false })),
+        ].map((label) => ({ label, disabled: !view.destination.available && [view.actions.save, view.actions.saveAndEdit].includes(label) })),
     };
 }
 
@@ -282,13 +282,28 @@ describe('native host contract: the capture confirmation screen', () => {
         resetForTests();
     });
 
-    it("replays React Native's frozen screen: what it shows, writes, says and where it goes", async () => {
+    const archivedPreset = 'link presets: status, contexts, tags, an area, and an archived project';
+
+    it("replays React Native's frozen screen for available destinations", async () => {
         vi.useFakeTimers({ toFake: ['Date'] });
-        for (const scenario of fixture.scenarios) {
+        for (const scenario of fixture.scenarios.filter(scenario => scenario.name !== archivedPreset)) {
             const frozen = fixture.observations[scenario.name].map(withoutSharedFiles);
             expect({ [scenario.name]: await replay(scenario) }).toEqual({ [scenario.name]: frozen });
         }
     }, 120_000);
+
+    it('retains the archived preset destination instead of the frozen RN fallback to its area', async () => {
+        vi.useFakeTimers({ toFake: ['Date'] });
+        const scenario = fixture.scenarios.find(scenario => scenario.name === archivedPreset);
+        if (!scenario) throw new Error('Archived destination fixture missing');
+        const observed = await replay(scenario);
+        expect(observed).toHaveLength(2);
+        expect(observed.every(entry => entry.writes.length === 0 && entry.navigation.length === 0)).toBe(true);
+        expect(observed[0].screen?.controls).toEqual(expect.arrayContaining([
+            { label: 'Save', disabled: true }, { label: 'Save & edit', disabled: true },
+        ]));
+        expect(observed[1].screen?.texts).toContain('Failed to add task');
+    });
 
 
     const data = { tasks: fixture.tasks, projects: fixture.projects, areas: fixture.areas, settings: fixture.settings.ai };
@@ -308,7 +323,8 @@ describe('native host contract: the capture confirmation screen', () => {
         const log: unknown[][] = [];
         const host = await openScreenHost({ data, record: { addTask: 2, addTasks: 1, addProject: 1 }, log });
         const opened = value(host.openCaptureModal({ params: linkParams }));
-        expect(opened.draft).toEqual({ text: 'Plan trip', description: 'Book flights', showHelp: false, suggestion: null, applied: { tags: [] }, failed: false });
+        expect(opened.draft).toEqual({ text: 'Plan trip', description: 'Book flights', showHelp: false, suggestion: null, applied: { tags: [] }, failed: false,
+            initialDestination: { kind: 'none' } });
         const help = value(host.editCaptureModal({ params: linkParams, draft: opened.draft, edit: opened.view.help.edit }));
         const discarded = value(host.discardCaptureModal({ params: linkParams }));
         expect(discarded).toEqual({ close: { returnTo: null, returnToPreviousApp: false } });

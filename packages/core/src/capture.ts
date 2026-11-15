@@ -1,4 +1,5 @@
-import type { Area, Project, Task } from './types';
+import { captureDestinationProps, isCaptureDestinationAvailable, type CaptureDestination } from './capture-destination';
+import type { Area, Project, Section, Task } from './types';
 import type { QuickAddResult } from './quick-add';
 import type { StoreActionResult } from './store-types';
 import { getQuickAddProjectInitialProps } from './quick-add';
@@ -20,6 +21,9 @@ export type CaptureAssemblyInput = {
     extraProps?: Partial<Task>;
 
     selectedAreaId?: string | null;
+    destination?: CaptureDestination;
+    areas?: readonly Area[];
+    sections?: readonly Section[];
 
     starNewTask?: boolean;
 
@@ -33,7 +37,7 @@ export type CaptureProjectToCreate = {
 };
 
 export type CaptureAssembly =
-    | { ok: false; reason: 'empty-title' }
+    | { ok: false; reason: 'empty-title' | 'destination-unavailable' }
     | {
         ok: true;
         title: string;
@@ -59,7 +63,7 @@ export type CaptureTransactionOptions = {
 };
 
 export type CapturePreparationFailure =
-    | { success: false; reason: 'empty-title' }
+    | { success: false; reason: 'empty-title' | 'destination-unavailable' }
     | { success: false; reason: 'invalid-date-command'; invalidDateCommands: string[] }
     | { success: false; reason: 'project-create-failed'; error: string };
 
@@ -198,6 +202,7 @@ export function resolveCaptureAreaQuery(areas: readonly Area[], query: string): 
 
 export function buildCaptureTaskProps(input: CaptureAssemblyInput): CaptureAssembly {
     const { parsed, projects } = input;
+    if (input.destination && !isCaptureDestinationAvailable(input.destination, input)) return { ok: false, reason: 'destination-unavailable' };
 
 
     const parsedProps = { ...parsed.props };
@@ -234,7 +239,7 @@ export function buildCaptureTaskProps(input: CaptureAssemblyInput): CaptureAssem
     }
 
     let projectToCreate: CaptureProjectToCreate | undefined;
-    if (!props.projectId && parsed.projectTitle) {
+    if (!input.destination && !props.projectId && parsed.projectTitle) {
         const existing = findSelectableProjectByTitle(projects, parsed.projectTitle);
         if (existing) {
             props.projectId = existing.id;
@@ -253,6 +258,13 @@ export function buildCaptureTaskProps(input: CaptureAssemblyInput): CaptureAssem
         props.areaId = undefined;
     } else if (!parsedProps.areaId && !props.areaId) {
         props.areaId = input.selectedAreaId || undefined;
+    }
+
+    if (input.destination) {
+        const destinationProps = captureDestinationProps(input.destination);
+        for (const field of ['projectId', 'areaId', 'sectionId'] as const) {
+            if (field in props || destinationProps[field] !== undefined) props[field] = destinationProps[field];
+        }
     }
 
     return {
@@ -306,6 +318,13 @@ export function planCaptureTask(
         ? options.transformProps({ ...assembly.props })
         : assembly.props;
 
+
+    if (input.destination) {
+        const destinationProps = captureDestinationProps(input.destination);
+        for (const field of ['projectId', 'areaId', 'sectionId'] as const) {
+            if (field in props || destinationProps[field] !== undefined) props[field] = destinationProps[field];
+        }
+    }
 
     const statusChosen = Boolean(input.parsed.props.status || input.extraProps?.status);
     if (!statusChosen && props.status === 'inbox') {

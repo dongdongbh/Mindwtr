@@ -55,6 +55,7 @@ const harness = (overrides: Partial<NativeVoiceBindings> = {}, setup: {
         },
         settings: () => state.settings,
         store,
+        admit: (_text, options) => options,
         isFossBuild: false,
         loadKey: async () => setup.key ?? 'secret-key',
         whisperModelReady: () => false,
@@ -99,6 +100,20 @@ const record = async (h: ReturnType<typeof harness>) => {
 };
 
 describe('native voice capture', () => {
+    it('keeps the admitted destination when a late transcript suggests a project', async () => {
+        const late = deferred<string>();
+        const h = harness({ admit: (_text, options) => ({ ...options, audioDestination: { destination: { kind: 'none' } } }) },
+            { transcript: late.promise, projectTitle: 'Transcript project' });
+        const session = await record(h);
+        const saved = await h.voice.stop({ session, save: true, text: '', options: OPTIONS });
+        expect(saved.status).toBe('saved');
+        late.resolve('Keep my destination');
+        await h.voice.settled();
+        expect(h.state.projects).toEqual([]);
+        expect(h.state.tasks[0]?.projectId).toBeUndefined();
+        expect(h.state.tasks[0]?.title).toBe('Keep my destination');
+    });
+
     it('saves the task first with its recording, then a late transcript updates the latest row (RN 78c151b2e)', async () => {
         const late = deferred<string>();
         const h = harness({}, { transcript: late.promise, tags: ['#errand'], projectTitle: 'Errands' });

@@ -226,6 +226,8 @@ export const ruOverrides: Record<string, string> = {
         'calendar.visibleCalendars': 'Видимые календари',
         'calendar.openDayView': 'Открыть вид дня',
         'calendar.more': 'Еще',
+        'quickAdd.destinationUnavailable': "Место назначения недоступно. Выберите другое.",
+        "quickAdd.destinationNeedsSelection": "Выберите место назначения для сохранения.",
         'quickAdd.addAnother': 'Добавить еще',
         'quickAdd.audioCaptureLabel': 'Быстрый захват голоса',
         'quickAdd.audioRecord': 'Начать запись',

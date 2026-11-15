@@ -366,6 +366,11 @@ describe('release diagnostics field names', () => {
         expect(JSON.parse(rejected?.currentColumn ?? 'null').height).toBe(53.25000000000001);
     });
 
+    it.each(['created', 'already-created', 'destination-unavailable', 'invalid-destination'])('preserves capture destination %s evidence', outcome => {
+        const receipt = { releaseCheck: 'v1.3.9/android-capture-destination', kind: 'audio', destination: 'area', outcome };
+        expect(sanitizeLogContext(receipt)).toEqual(receipt);
+    });
+
     it('survive the log sanitizer intact', () => {
         const probe = Object.fromEntries(RELEASE_CHECK_FIELD_NAMES.map((name) => [name, 'probe-value']));
         const sanitized = sanitizeLogContext(probe) ?? {};

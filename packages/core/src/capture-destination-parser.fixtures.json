@@ -1,0 +1,331 @@
+{
+  "baseline": {
+    "kind": "area",
+    "id": "personal"
+  },
+  "projects": [
+    {
+      "id": "p-alpha",
+      "title": "alpha"
+    },
+    {
+      "id": "p-beta",
+      "title": "beta gamma"
+    },
+    {
+      "id": "p-work",
+      "title": "Work"
+    },
+    {
+      "id": "p-plus",
+      "title": "a+b"
+    },
+    {
+      "id": "p-one-two",
+      "title": "One Two"
+    },
+    {
+      "id": "p-weekend",
+      "title": "週末 planning"
+    }
+  ],
+  "areas": [
+    {
+      "id": "personal",
+      "name": "Personal"
+    },
+    {
+      "id": "work",
+      "name": "Work"
+    },
+    {
+      "id": "one-two",
+      "name": "One Two"
+    }
+  ],
+  "cases": [
+    {
+      "input": "Task /link:https://example.com !Work",
+      "expected": {
+        "destination": {
+          "kind": "area",
+          "id": "personal"
+        }
+      }
+    },
+    {
+      "input": "Task +alpha +\"beta gamma\"",
+      "expected": {
+        "destination": {
+          "kind": "project",
+          "id": "p-beta"
+        }
+      }
+    },
+    {
+      "input": "Task !Nobody !\"Work\"",
+      "expected": {
+        "destination": {
+          "kind": "area",
+          "id": "work"
+        }
+      }
+    },
+    {
+      "input": "Task @„person +Work“",
+      "expected": {
+        "destination": {
+          "kind": "area",
+          "id": "personal"
+        }
+      }
+    },
+    {
+      "input": "Task +\"a\\+b\"",
+      "expected": {
+        "destination": {
+          "kind": "project",
+          "id": "p-plus"
+        }
+      }
+    },
+    {
+      "input": "Task +One !Work Two",
+      "expected": {
+        "destination": {
+          "kind": "project",
+          "id": "p-one-two"
+        }
+      }
+    },
+    {
+      "input": "Task /note: +Work !Work",
+      "expected": {
+        "destination": {
+          "kind": "area",
+          "id": "work"
+        }
+      }
+    },
+    {
+      "input": "Task /link:https://example.com +Work /area:work",
+      "expected": {
+        "destination": {
+          "kind": "area",
+          "id": "work"
+        }
+      }
+    },
+    {
+      "input": "Task /note: !Work /project:p-alpha",
+      "expected": {
+        "destination": {
+          "kind": "area",
+          "id": "work"
+        }
+      }
+    },
+    {
+      "input": "Task @\"person +Work\"",
+      "expected": {
+        "destination": {
+          "kind": "area",
+          "id": "personal"
+        }
+      }
+    },
+    {
+      "input": "Task #\"topic !Work\"",
+      "expected": {
+        "destination": {
+          "kind": "area",
+          "id": "personal"
+        }
+      }
+    },
+    {
+      "input": "Task @“person +Work”",
+      "expected": {
+        "destination": {
+          "kind": "area",
+          "id": "personal"
+        }
+      }
+    },
+    {
+      "input": "Task @”person +Work”",
+      "expected": {
+        "destination": {
+          "kind": "area",
+          "id": "personal"
+        }
+      }
+    },
+    {
+      "input": "Task \\+Work",
+      "expected": {
+        "destination": {
+          "kind": "area",
+          "id": "personal"
+        }
+      }
+    },
+    {
+      "input": "Task \\!Work",
+      "expected": {
+        "destination": {
+          "kind": "area",
+          "id": "personal"
+        }
+      }
+    },
+    {
+      "input": "Task +‘週末 planning’",
+      "expected": {
+        "destination": {
+          "kind": "project",
+          "id": "p-weekend"
+        }
+      }
+    },
+    {
+      "input": "Task +週末   planning",
+      "expected": {
+        "destination": {
+          "kind": "project",
+          "id": "p-weekend"
+        }
+      }
+    },
+    {
+      "input": "Task +New Project",
+      "expected": {
+        "destination": {
+          "kind": "area",
+          "id": "personal"
+        },
+        "projectToCreate": "New Project"
+      }
+    },
+    {
+      "input": "Task +\"New \\+ plan\"",
+      "expected": {
+        "destination": {
+          "kind": "area",
+          "id": "personal"
+        },
+        "projectToCreate": "New + plan"
+      }
+    },
+    {
+      "input": "Task +\"beta gamma\" +alpha",
+      "expected": {
+        "destination": {
+          "kind": "project",
+          "id": "p-beta"
+        }
+      }
+    },
+    {
+      "input": "Task +alpha /project:p-work",
+      "expected": {
+        "destination": {
+          "kind": "project",
+          "id": "p-work"
+        }
+      }
+    },
+    {
+      "input": "Task !Work /area:personal",
+      "expected": {
+        "destination": {
+          "kind": "area",
+          "id": "personal"
+        }
+      }
+    },
+    {
+      "input": "Task +Work !Personal",
+      "expected": {
+        "destination": {
+          "kind": "project",
+          "id": "p-work"
+        }
+      }
+    },
+    {
+      "input": "Task /note:+Work",
+      "expected": {
+        "destination": {
+          "kind": "area",
+          "id": "personal"
+        }
+      }
+    },
+    {
+      "input": "Task /link: !Work /next",
+      "expected": {
+        "destination": {
+          "kind": "area",
+          "id": "personal"
+        }
+      }
+    },
+    {
+      "input": "Task +Work",
+      "expected": {
+        "destination": {
+          "kind": "none"
+        }
+      },
+      "selected": {
+        "kind": "none"
+      }
+    },
+    {
+      "input": "Task +One /next Two",
+      "expected": {
+        "destination": {
+          "kind": "project",
+          "id": "p-one-two"
+        }
+      }
+    },
+    {
+      "input": "Task +One /* Two",
+      "expected": {
+        "destination": {
+          "kind": "project",
+          "id": "p-one-two"
+        }
+      }
+    },
+    {
+      "input": "Task +One %\"person\" Two",
+      "expected": {
+        "destination": {
+          "kind": "project",
+          "id": "p-one-two"
+        }
+      }
+    },
+    {
+      "input": "Task +One %„person“ Two",
+      "expected": {
+        "destination": {
+          "kind": "project",
+          "id": "p-one-two"
+        }
+      }
+    },
+    {
+      "input": "Task /area:work/extra",
+      "expected": {
+        "destination": {
+          "kind": "area",
+          "id": "work"
+        }
+      }
+    }
+  ]
+}

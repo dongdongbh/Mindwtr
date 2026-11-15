@@ -56,6 +56,7 @@ Source: `apps/desktop/src` (Tauri + React). Labels come from `packages/core/src/
 - Code: `apps/desktop/src/components/QuickAddModal.tsx`, `apps/desktop/src/components/QuickAddPreview.tsx`, `apps/desktop/src/components/ui/QuickAddSyntaxHint.tsx`, `apps/desktop/src/components/QuickDateChips.tsx`
 - Checks: `e2e/unified-inbox.spec.ts`, `e2e/clarify.spec.ts`, `apps/desktop/src/components/QuickAddModal.test.tsx`, `apps/desktop/src/components/QuickAddModal.preview.test.tsx`, `apps/desktop/src/components/QuickAddModal.paste-hint.test.tsx`, `apps/desktop/src/components/QuickAddPreview.test.tsx`
 - Notes: Quick Add is a Capture. A `+Project` that names only an archived project creates a new project. Syntax: `/due:`, `/start:`, `/review:`, `/note:`, `/link:`, `@context`, `#tag`, `+Project`, `!Area`, `%Person`, `/*` (Focus star). The "Quick voice capture" button records audio.
+- Destination is always visible and editable. It shows the contextual project/section, default Area, or None; a picker choice overrides title syntax without changing status. Defaults stay fixed for the draft. An unavailable destination keeps the draft/audio for correction, and audio retry retains a project already created by that capture. Autocomplete replaces the complete token at the caret, including quoted names in the middle of a title.
 
 ## Global quick add and tray
 

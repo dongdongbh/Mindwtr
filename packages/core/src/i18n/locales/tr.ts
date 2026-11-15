@@ -232,6 +232,8 @@ export const trOverrides: Record<string, string> = {
         'calendar.visibleCalendars': 'Görünen takvimler',
         'calendar.openDayView': 'Gün görünümünü aç',
         'calendar.more': 'Daha fazla',
+        'quickAdd.destinationUnavailable': "Hedef kullanılamıyor. Başka bir hedef seçin.",
+        "quickAdd.destinationNeedsSelection": "Kaydetmek için bir hedef seçin.",
         'quickAdd.addAnother': 'Başka ekle',
         'quickAdd.audioCaptureLabel': 'Hızlı ses yakalama',
         'quickAdd.audioRecord': 'Kaydı başlat',

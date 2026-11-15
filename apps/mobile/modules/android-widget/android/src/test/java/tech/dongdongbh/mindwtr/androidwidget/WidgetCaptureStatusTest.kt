@@ -38,6 +38,7 @@ class WidgetCaptureStatusTest {
     context.getSharedPreferences(WidgetListStore.PREFS_NAME, Context.MODE_PRIVATE).edit().clear().commit()
     context.getSharedPreferences(WidgetPayloadStore.PREFS_NAME, Context.MODE_PRIVATE).edit().clear().commit()
     queue.deleteRecursively()
+    WidgetPayloadStore.write(context, JSONObject().put("captureDestinations", captureDestinationCatalog()).toString())
   }
 
   private fun intent(id: Int, kind: WidgetKind = WidgetKind.TASKS): Intent =
@@ -143,7 +144,7 @@ class WidgetCaptureStatusTest {
   }
 
   @Test fun queuedTextDoesNotSpeculateAboutInboxCountOrClaimTaskCreation() {
-    WidgetPayloadStore.write(context, """{"inboxCount":7,"subtitle":"Inbox: 7"}""")
+    WidgetPayloadStore.write(context, JSONObject().put("inboxCount", 7).put("subtitle", "Inbox: 7").put("captureDestinations", captureDestinationCatalog()).toString())
     WidgetListStore.write(context, 41, "next")
     val host = controller(intent(41)).setup()
     save(host.get())
@@ -192,7 +193,7 @@ class WidgetCaptureStatusTest {
   }
 
   @Test fun queuedAudioDoesNotSpeculateAboutInboxCount() {
-    WidgetPayloadStore.write(context, """{"inboxCount":7,"subtitle":"Inbox: 7"}""")
+    WidgetPayloadStore.write(context, JSONObject().put("inboxCount", 7).put("subtitle", "Inbox: 7").put("captureDestinations", captureDestinationCatalog()).toString())
     val draft = QuickCaptureAudioDraft("01234567-89ab-cdef-0123-456789abcdef", Date(0), File(context.filesDir, "audio.tmp"), 6_400)
     val session = QuickCaptureAudioSessionStore.acquire("TASKS/41") {
       QuickCaptureAudioSession(

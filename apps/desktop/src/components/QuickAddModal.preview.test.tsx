@@ -82,6 +82,10 @@ describe('QuickAddModal live preview', () => {
         'keeps the previewed person on section capture: $quotedName, known=$knownPerson, trailingSpace=$trailingSpace (#849)',
         async ({ quotedName, knownPerson, trailingSpace }) => {
             const user = userEvent.setup();
+            useTaskStore.setState({
+                _allProjects: [{ id: 'project-849', title: 'Existing project', status: 'active', color: '#123456', order: 0, tagIds: [], createdAt: '', updatedAt: '' }],
+                _allSections: [{ id: 'section-849', projectId: 'project-849', title: 'Existing section', order: 0, createdAt: '', updatedAt: '' }],
+            });
             if (knownPerson) {
                 useTaskStore.setState({ _allPeople: [{
                     id: 'person-849', name: 'John Smith',

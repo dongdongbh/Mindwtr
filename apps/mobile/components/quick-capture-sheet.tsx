@@ -25,6 +25,11 @@ import {
   applyQuickCaptureEdit,
   buildQuickAddParseOptions,
   buildQuickCapturePreview,
+  buildQuickCaptureView,
+  resolveQuickCaptureDestination,
+  isCaptureDestinationAvailable,
+  readCaptureDestination,
+  type CaptureDestination,
   buildQuickCaptureRequest,
   createQuickCaptureOptions,
   getQuickCaptureBulkConfirm,
@@ -33,7 +38,6 @@ import {
   getSavedTaxonomyTokens,
   getQuickCaptureContextPicker,
   getQuickCaptureLabels,
-  isSelectableProjectForTaskAssignment,
   isSandboxMode,
   parseQuickCaptureContextQuery,
   planQuickCaptureSave,
@@ -71,6 +75,7 @@ import { openTaskScreen } from '@/lib/task-meta-navigation';
 import { buildCaptureExtra } from './quick-capture-sheet.utils';
 import { styles } from './quick-capture-sheet/quick-capture-sheet.styles';
 import { QuickAddPreview } from './QuickAddPreview';
+import { TaskEditDestinationPicker } from './task-edit/TaskEditDestinationPicker';
 import { QuickCaptureSheetBody } from './quick-capture-sheet/QuickCaptureSheetBody';
 import { QuickCaptureSheetPickers } from './quick-capture-sheet/QuickCaptureSheetPickers';
 import { useQuickCaptureAudio } from './use-quick-capture-audio';
@@ -91,6 +96,7 @@ type QuickCaptureActivityState = {
   startTime: string | null;
   contextTags: string[];
   projectId: string | null;
+  destination?: CaptureDestination;
   selectedAreaId: string | null;
   priority: TaskPriority | null;
   optionsExpanded: boolean;
@@ -263,6 +269,7 @@ const isQuickCaptureActivityState = (value: unknown): value is QuickCaptureActiv
     && isNullableString(candidate.startTime)
     && Array.isArray(candidate.contextTags)
     && candidate.contextTags.every((item) => typeof item === 'string')
+    && (candidate.destination === undefined || readCaptureDestination(candidate.destination) !== null)
     && isNullableString(candidate.projectId)
     && isNullableString(candidate.selectedAreaId)
     && (candidate.priority === null || QUICK_CAPTURE_PRIORITY_OPTIONS.includes(candidate.priority as TaskPriority))
@@ -365,13 +372,14 @@ export function QuickCaptureSheet({
   onSubmissionStart?: () => void;
   onSubmissionSettled?: () => void;
 }) {
-  const { addTask, addTasks, addProject, addArea, updateSettings, projects, settings, areas, getFocusedCount, setHighlightTask } = useTaskStore((state) => ({
+  const { addTask, addTasks, addProject, addArea, updateSettings, projects, sections, settings, areas, getFocusedCount, setHighlightTask } = useTaskStore((state) => ({
     addTask: state.addTask,
     addTasks: state.addTasks,
     addProject: state.addProject,
     addArea: state.addArea,
     updateSettings: state.updateSettings,
     projects: state.projects,
+    sections: state.sections,
     settings: state.settings,
     areas: state.areas,
     getFocusedCount: state.getFocusedCount,
@@ -446,6 +454,7 @@ export function QuickCaptureSheet({
   const [showContextPicker, setShowContextPicker] = useState(false);
   const contextSourceRevision = useTaskStore((state) => showContextPicker ? state._allTasks : null);
   const [contextQuery, setContextQuery] = useState('');
+  const [showDestinationPicker, setShowDestinationPicker] = useState(false);
   const [showProjectPicker, setShowProjectPicker] = useState(false);
   const [projectQuery, setProjectQuery] = useState('');
   const [showAreaPicker, setShowAreaPicker] = useState(false);
@@ -510,6 +519,11 @@ export function QuickCaptureSheet({
     startTime: options.startTime,
     contextTags,
     projectId,
+    destination: options.destination ?? (() => {
+      const resolved = resolveQuickCaptureDestination(value, options, { projects, areas, sections,
+        initialProps: captureInitialProps, parseOptions: quickAddParseOptions, now: new Date() });
+      return resolved.projectToCreate ? undefined : resolved.destination;
+    })(),
     selectedAreaId,
     priority,
     optionsExpanded,
@@ -529,7 +543,12 @@ export function QuickCaptureSheet({
     projectId,
     recoveryAttachments,
     recoveryOwnedAttachmentUris,
-    options.startTime,
+    options,
+    areas,
+    projects,
+    sections,
+    captureInitialProps,
+    quickAddParseOptions,
     selectedAreaId,
     value,
   ]);
@@ -537,17 +556,15 @@ export function QuickCaptureSheet({
     restoredActivitySessionRef.current = true;
     setQuickAddParseOptions(readQuickAddParseOptions());
     setValue(recovered.value);
-    const restoredProjectId = recovered.projectId && projectsRef.current.some((project) => (
-      project.id === recovered.projectId && isSelectableProjectForTaskAssignment(project)
-    )) ? recovered.projectId : null;
     setOptions({
       note: recovered.noteValue,
       dueDate: toInstant(recovered.dueDate),
       dueDateHasTime: recovered.dueDateHasTime,
       startTime: toInstant(recovered.startTime),
       contexts: recovered.contextTags,
-      projectId: restoredProjectId,
-      areaId: restoredProjectId ? null : recovered.selectedAreaId,
+      projectId: recovered.projectId,
+      areaId: recovered.projectId ? null : recovered.selectedAreaId,
+      destination: recovered.destination,
       priority: recovered.priority,
       focus: recovered.focusNewTask,
       addAnother: recovered.addAnother,
@@ -832,6 +849,7 @@ export function QuickCaptureSheet({
     setShowContextPicker(false);
     setProjectQuery('');
     setShowProjectPicker(false);
+    setShowDestinationPicker(false);
     setShowAreaPicker(false);
     setAreaQuery('');
     setShowPriorityPicker(false);
@@ -865,11 +883,15 @@ export function QuickCaptureSheet({
     setSaving(false);
   }, [openRequestId, visible]);
 
+  const initializedDraftRequestRef = useRef<{ id: number | undefined } | null>(null);
   useEffect(() => {
     if (!visible) {
+      initializedDraftRequestRef.current = null;
       modalShownRef.current = false;
       return;
     }
+    if (initializedDraftRequestRef.current?.id === openRequestId && initializedDraftRequestRef.current !== null) return;
+    initializedDraftRequestRef.current = { id: openRequestId };
     if (restoredActivitySessionRef.current) {
       restoredActivitySessionRef.current = false;
     } else {
@@ -910,12 +932,13 @@ export function QuickCaptureSheet({
     t,
     formatDate: safeFormatDate,
     now: new Date(),
-  }), [areas, previewOptions, projects, quickAddParseOptions, t, value]);
+  }).filter((entry) => entry.kind !== 'project' && entry.kind !== 'area'), [areas, previewOptions, projects, quickAddParseOptions, t, value]);
 
   const captureContext = useCallback((): QuickCaptureContext => ({
     settings,
     projects,
     areas,
+    sections,
     parseOptions: quickAddParseOptions,
     focusedCount,
     defaultAreaId,
@@ -923,7 +946,11 @@ export function QuickCaptureSheet({
     t,
     formatDate: safeFormatDate,
     now: new Date(),
-  }), [areas, captureInitialProps, defaultAreaId, focusedCount, projects, quickAddParseOptions, settings, t]);
+  }), [areas, captureInitialProps, defaultAreaId, focusedCount, projects, sections, quickAddParseOptions, settings, t]);
+
+  const destinationView = buildQuickCaptureView(value, options, captureContext()).destination;
+  const destinationLabel = destinationView.value.kind === 'none' && !destinationView.pendingProjectTitle
+    ? t('common.none') : destinationView.label;
 
   const buildCaptureRequestForInput = useCallback((
     inputValue: string,
@@ -937,8 +964,16 @@ export function QuickCaptureSheet({
 
   const buildTaskPropsForInput = useCallback(async (inputValue: string, fallbackTitle: string, extraProps?: Partial<Task>) => {
     const request = buildCaptureRequestForInput(inputValue, fallbackTitle, extraProps);
-    const prepared = await prepareCaptureTask(request.input, { addProject }, request.options);
+    const current = useTaskStore.getState();
+    const resolved = resolveQuickCaptureDestination(inputValue, options, captureContext());
+    const prepared = await prepareCaptureTask({ ...request.input,
+      destination: request.input.destination ?? (isCaptureDestinationAvailable(resolved.destination, current) ? undefined : resolved.destination),
+      projects: current.projects,
+      areas: current.areas, sections: current.sections }, { addProject }, request.options);
     if (!prepared.success) {
+      if (prepared.reason === 'destination-unavailable') {
+        showToast({ tone: 'error', title: t('task.destination'), message: tFallback(t, 'quickAdd.destinationUnavailable', 'Destination unavailable. Choose another destination.') });
+      }
       return {
         title: '',
         props: { status: 'inbox' as const, ...captureInitialProps, ...extraProps },
@@ -952,7 +987,7 @@ export function QuickCaptureSheet({
       props: prepared.props,
       invalidDateCommands: prepared.invalidDateCommands,
     };
-  }, [addProject, buildCaptureRequestForInput, captureInitialProps]);
+  }, [addProject, buildCaptureRequestForInput, captureContext, captureInitialProps, options, showToast, t]);
 
   const buildTaskProps = useCallback((fallbackTitle: string, extraProps?: Partial<Task>) => (
     buildTaskPropsForInput(value, fallbackTitle, extraProps)
@@ -971,6 +1006,7 @@ export function QuickCaptureSheet({
     setShowContextPicker(false);
     setProjectQuery('');
     setShowProjectPicker(false);
+    setShowDestinationPicker(false);
     setShowAreaPicker(false);
     setAreaQuery('');
     setShowPriorityPicker(false);
@@ -1392,6 +1428,13 @@ export function QuickCaptureSheet({
     <>
       <QuickCaptureSheetBody
         addAnother={addAnother}
+        destinationLabel={destinationLabel}
+        destinationAvailable={destinationView.available}
+        onOpenDestinationPicker={() => setShowDestinationPicker(true)}
+        autocompleteProjects={projects}
+        autocompleteContexts={quickAddParseOptions.knownContexts ?? []}
+        autocompleteTags={quickAddParseOptions.knownTags ?? []}
+        onAutocompleteProject={(id) => editOptions({ type: 'selectDestination', destination: { kind: 'project', id } })}
         areaLabel={labels.area}
         contextLabel={labels.contexts}
         dueDate={dueDate}
@@ -1462,6 +1505,11 @@ export function QuickCaptureSheet({
         value={value}
         visible={visible}
       >
+        {showDestinationPicker ? <TaskEditDestinationPicker visible projects={projects} areas={areas}
+          selectedProjectId={destinationView.value.kind === 'project' ? destinationView.value.id : undefined}
+          selectedAreaId={destinationView.value.kind === 'area' ? destinationView.value.id : undefined}
+          tc={tc} t={t} onClose={() => setShowDestinationPicker(false)}
+          onSelect={(destination) => editOptions({ type: 'selectDestination', destination })} /> : null}
         <QuickCaptureSheetPickers {...pickerProps} pickerLayer="overlay" overlayKeyboardInset={overlayKeyboardInset} />
         {bulkConfirm ? (
           <BulkQuickAddConfirm

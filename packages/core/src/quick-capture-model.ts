@@ -1,3 +1,6 @@
+import { compareAreasByOrder } from './task-utils';
+import { captureDestinationProps, isCaptureDestinationAvailable, resolveCaptureDestination, type CaptureDestination, type CaptureDestinationSnapshot } from './capture-destination';
+import { DEFAULT_PROJECT_COLOR } from './color-constants';
 
 
 
@@ -19,16 +22,19 @@ import { getQuickDate, hasTimeComponent, isQuickDatePresetSelected, safeParseDat
 import { canStarNewCapture } from './focus-star';
 import { formatFocusTaskLimitText, normalizeFocusTaskLimit } from './focus-utils';
 import { tFallback, type TranslateFn } from './i18n';
-import { isSelectableProjectForTaskAssignment } from './project-utils';
+import { groupProjectsForPicker, isSelectableProjectForTaskAssignment } from './project-utils';
 import { buildQuickAddPreviewEntries, formatQuickAddHelp, parseQuickAdd, splitQuickAddBulkLines, type QuickAddParseOptions, type QuickAddPreviewEntry } from './quick-add';
 import { resolveFeatureFlags } from './resolve-feature-flags';
 import type { StoreActionResult } from './store-types';
 import { getQuickDateLabel } from './task-editor-schedule';
 import { getRetainedTaskContexts, getTaskContextMatches } from './task-token-usage';
-import type { AppSettings, Area, Project, Task, TaskPriority } from './types';
+import type { AppSettings, Area, Project, Section, Task, TaskPriority } from './types';
 
 
 export type QuickCaptureOptions = {
+    destination?: CaptureDestination;
+    audioDestination?: CaptureDestinationSnapshot;
+    sectionId?: string;
 
     note: string;
 
@@ -53,6 +59,7 @@ export type QuickCaptureContext = {
     settings: AppSettings;
     projects: readonly Project[];
     areas: readonly Area[];
+    sections?: readonly Section[];
 
     parseOptions: QuickAddParseOptions;
 
@@ -158,9 +165,7 @@ export function createQuickCaptureOptions(input: {
     addAnother?: boolean;
 }): QuickCaptureOptions {
     const { initialProps } = input;
-    const projectId = initialProps?.projectId && input.projects.some((project) => (
-        project.id === initialProps.projectId && isSelectableProjectForTaskAssignment(project)
-    )) ? initialProps.projectId : null;
+    const projectId = initialProps?.projectId || null;
     return {
         note: initialProps?.description ?? '',
         dueDate: toInstant(initialProps?.dueDate),
@@ -168,6 +173,7 @@ export function createQuickCaptureOptions(input: {
         startTime: toInstant(initialProps?.startTime),
         contexts: normalizeInitialContexts(initialProps?.contexts),
         projectId,
+        ...(projectId && initialProps?.sectionId ? { sectionId: initialProps.sectionId } : {}),
         areaId: projectId ? null : (initialProps?.areaId ?? input.defaultAreaId),
         priority: (initialProps?.priority as TaskPriority) ?? null,
         focus: Boolean(initialProps?.isFocusedToday),
@@ -177,6 +183,7 @@ export function createQuickCaptureOptions(input: {
 
 
 export type QuickCaptureEdit =
+    | { type: 'selectDestination'; destination: CaptureDestination }
     | { type: 'setNote'; value: string }
     | { type: 'selectProject'; projectId: string | null }
 
@@ -235,12 +242,17 @@ export function applyQuickCaptureEdit(
     switch (edit.type) {
         case 'setNote':
             return done({ ...options, note: edit.value });
+        case 'selectDestination':
+            return done({ ...options, audioDestination: undefined, destination: edit.destination,
+                sectionId: edit.destination.kind === 'project' ? edit.destination.sectionId : undefined,
+                projectId: edit.destination.kind === 'project' ? edit.destination.id : null,
+                areaId: edit.destination.kind === 'area' ? edit.destination.id : null });
         case 'selectProject':
-            return done({ ...options, projectId: edit.projectId, areaId: edit.projectId ? null : options.areaId });
+            return done({ ...options, audioDestination: undefined, destination: edit.projectId ? { kind: 'project', id: edit.projectId } : { kind: 'none' }, sectionId: undefined, projectId: edit.projectId, areaId: null });
         case 'resetProject':
-            return done({ ...options, projectId: null, areaId: context.defaultAreaId });
+            return done({ ...options, audioDestination: undefined, destination: undefined, sectionId: undefined, projectId: null, areaId: context.defaultAreaId });
         case 'selectArea':
-            return done({ ...options, areaId: edit.areaId, projectId: edit.areaId ? null : options.projectId });
+            return done({ ...options, audioDestination: undefined, destination: edit.areaId ? { kind: 'area', id: edit.areaId } : { kind: 'none' }, sectionId: undefined, areaId: edit.areaId, projectId: null });
         case 'toggleContext':
             return done({
                 ...options,
@@ -311,13 +323,18 @@ export function getQuickCapturePickedDueDate(
 
 export function buildQuickCapturePreview(
     text: string,
-    options: Pick<QuickCaptureOptions, 'projectId' | 'dueDate' | 'dueDateHasTime' | 'startTime'>,
+    options: Pick<QuickCaptureOptions, 'projectId' | 'destination' | 'dueDate' | 'dueDateHasTime' | 'startTime'>,
     context: Pick<QuickCaptureContext, 'projects' | 'areas' | 'parseOptions' | 't' | 'formatDate' | 'now'>,
 ): QuickAddPreviewEntry[] {
     const trimmed = text.trim();
     if (!trimmed) return [];
+    const parsed = parseQuickAdd(trimmed, [...context.projects], context.now, [...context.areas], context.parseOptions);
+    if (options.destination) {
+        parsed.props = { ...parsed.props, ...captureDestinationProps(options.destination) };
+        parsed.projectTitle = undefined;
+    }
     return buildQuickAddPreviewEntries(
-        parseQuickAdd(trimmed, context.projects as Project[], context.now, context.areas as Area[], context.parseOptions),
+        parsed,
         {
             t: context.t,
             projects: context.projects,
@@ -325,7 +342,7 @@ export function buildQuickCapturePreview(
             rawInput: trimmed,
 
             overrides: {
-                projectId: options.projectId || undefined,
+                projectId: options.destination ? (options.destination.kind === 'project' ? options.destination.id : undefined) : options.projectId || undefined,
                 dueDate: getQuickCapturePickedDueDate(options, context.formatDate),
                 startTime: options.startTime ?? undefined,
             },
@@ -398,6 +415,12 @@ export const getQuickCaptureAddFailedNotice = (t: TranslateFn): QuickCaptureNoti
 });
 
 
+export const getQuickCaptureDestinationUnavailableNotice = (t: TranslateFn): QuickCaptureNotice => ({
+    ...getQuickCaptureAddFailedNotice(t),
+    message: tFallback(t, 'quickAdd.destinationUnavailable', 'Destination unavailable. Choose another destination.'),
+});
+
+
 export const getQuickCaptureInvalidDateNotice = (t: TranslateFn, commands: readonly string[]): QuickCaptureNotice => ({
     tone: 'warning',
     title: t('common.notice'),
@@ -451,6 +474,29 @@ const presetUnderOptions = (initialProps: Partial<Task> | undefined, options: Qu
 };
 
 
+export function resolveQuickCaptureDestination(text: string, options: QuickCaptureOptions, context: Pick<QuickCaptureContext,
+    'projects' | 'areas' | 'sections' | 'initialProps' | 'parseOptions' | 'now'>) {
+    if (options.audioDestination) {
+        const { destination, projectToCreate } = options.audioDestination;
+        return { destination, available: isCaptureDestinationAvailable(destination, context),
+            projectToCreate: projectToCreate ? { title: projectToCreate.title, color: DEFAULT_PROJECT_COLOR,
+                ...(destination.kind === 'area' ? { initialProps: { areaId: destination.id } } : {}) } : undefined };
+    }
+    const parsed = parseQuickAdd(text.trim(), [...context.projects], context.now, [...context.areas], context.parseOptions);
+    return resolveCaptureDestination({ parsed, projects: context.projects, areas: context.areas, sections: context.sections,
+        initialProps: { ...context.initialProps, projectId: options.projectId ?? undefined,
+            sectionId: options.sectionId ?? (context.initialProps?.projectId === options.projectId ? context.initialProps?.sectionId : undefined),
+            areaId: options.areaId ?? undefined }, selectedAreaId: options.areaId, destination: options.destination });
+}
+
+export function freezeQuickCaptureAudioDestination(text: string, options: QuickCaptureOptions,
+    context: Parameters<typeof resolveQuickCaptureDestination>[2]): QuickCaptureOptions {
+    if (options.audioDestination) return options;
+    const resolved = resolveQuickCaptureDestination(text, options, context);
+    return { ...options, audioDestination: { destination: resolved.destination,
+        ...(resolved.projectToCreate ? { projectToCreate: { title: resolved.projectToCreate.title } } : {}) } };
+}
+
 export function buildQuickCaptureRequest(
     input: {
         text: string;
@@ -462,7 +508,7 @@ export function buildQuickCaptureRequest(
 
         projects?: readonly Project[];
     },
-    context: Pick<QuickCaptureContext, 'projects' | 'areas' | 'parseOptions' | 'settings' | 'focusedCount' | 'initialProps' | 'formatDate' | 'now'>,
+    context: Pick<QuickCaptureContext, 'projects' | 'areas' | 'sections' | 'parseOptions' | 'settings' | 'focusedCount' | 'initialProps' | 'formatDate' | 'now'>,
 ): { input: CaptureAssemblyInput; options: CaptureTransactionOptions } {
     const { options } = input;
     const projects = input.projects ?? context.projects;
@@ -470,6 +516,13 @@ export function buildQuickCaptureRequest(
     const parsed = trimmed
         ? parseQuickAdd(trimmed, projects as Project[], context.now, context.areas as Area[], context.parseOptions)
         : { title: '', props: {}, projectTitle: undefined, detectedDate: undefined, invalidDateCommands: undefined };
+    const resolvedDestination = resolveQuickCaptureDestination(input.text, options, { ...context, projects });
+    if (options.audioDestination) {
+        delete parsed.props.projectId;
+        delete parsed.props.sectionId;
+        delete parsed.props.areaId;
+        parsed.projectTitle = options.audioDestination.projectToCreate?.title;
+    }
     const pickedDueDate = getQuickCapturePickedDueDate(options, context.formatDate);
     const prioritiesEnabled = resolveFeatureFlags(context.settings).priorities;
     return {
@@ -480,7 +533,10 @@ export function buildQuickCaptureRequest(
             projects,
             initialProps: presetUnderOptions(context.initialProps, options),
             extraProps: input.extraProps,
-            selectedAreaId: options.areaId,
+            selectedAreaId: options.audioDestination ? (options.audioDestination.destination.kind === 'area' ? options.audioDestination.destination.id : null) : options.areaId,
+            destination: resolvedDestination.projectToCreate && resolvedDestination.available ? undefined : resolvedDestination.destination,
+            areas: context.areas,
+            sections: context.sections,
             starNewTask: options.focus && canFocus(options, context),
 
             suppressDetectedDate: Boolean(pickedDueDate),
@@ -495,7 +551,7 @@ export function buildQuickCaptureRequest(
                     const parsedNote = typeof taskProps.description === 'string' ? taskProps.description.trim() : '';
                     taskProps.description = parsedNote && parsedNote !== note ? `${note}\n${parsedNote}` : note;
                 }
-                if (options.projectId) taskProps.projectId = options.projectId;
+
                 if (options.contexts.length > 0) {
                     taskProps.contexts = Array.from(new Set([...(taskProps.contexts ?? []), ...options.contexts]));
                 }
@@ -555,7 +611,7 @@ export async function saveQuickCapture(input: {
         return {
             kind: 'refused',
             reason: 'write-failed',
-            notice: getQuickCaptureAddFailedNotice(context.t),
+            notice: result.reason === 'destination-unavailable' ? getQuickCaptureDestinationUnavailableNotice(context.t) : getQuickCaptureAddFailedNotice(context.t),
             error: 'error' in result ? result.error : result.reason,
         };
     }
@@ -596,6 +652,7 @@ export async function saveQuickCaptureBulk(input: {
 
     for (const line of input.lines) {
         const plan = planQuickCaptureTask({ text: line, options: input.options }, input.context);
+        if (!plan.success && plan.reason === 'destination-unavailable') return { kind: 'refused', notice: getQuickCaptureDestinationUnavailableNotice(input.context.t) };
         if (!plan.success && plan.reason === 'invalid-date-command') {
             return { kind: 'refused', notice: getQuickCaptureInvalidDateNotice(input.context.t, plan.invalidDateCommands) };
         }
@@ -628,6 +685,7 @@ export type QuickCaptureView = {
 
     canSave: boolean;
     preview: QuickAddPreviewEntry[];
+    destination: { value: CaptureDestination; label: string; accessibilityLabel: string; available: boolean; pendingProjectTitle?: string };
     project: { label: string; selected: boolean; accessibilityLabel: string; reset: QuickCaptureEdit };
     area: { label: string; accessibilityLabel: string; reset: QuickCaptureEdit };
     contexts: { label: string; accessibilityLabel: string; reset: QuickCaptureEdit };
@@ -654,10 +712,23 @@ export function buildQuickCaptureView(text: string, options: QuickCaptureOptions
     const labels = getQuickCaptureLabels(options, context);
     const copy = getQuickCaptureText(t, { priorities: labels.prioritiesEnabled, timeEstimates: resolveFeatureFlags(context.settings).timeEstimates });
     const dueDate = options.dueDate ? new Date(options.dueDate) : null;
+    const resolved = resolveQuickCaptureDestination(text, options, context);
+    const destination = resolved.destination;
+    let destinationLabel = resolved.projectToCreate?.title ?? (destination.kind === 'project'
+        ? context.projects.find(project => project.id === destination.id)?.title
+        : destination.kind === 'area' ? context.areas.find(area => area.id === destination.id)?.name
+            : tFallback(t, 'common.none', 'None')) ?? tFallback(t, 'quickAdd.destinationUnavailable', 'Destination unavailable. Choose another destination.');
+    if (!resolved.available) destinationLabel = tFallback(t, 'quickAdd.destinationUnavailable', 'Destination unavailable. Choose another destination.');
+    if (destination.kind === 'project' && destination.sectionId) {
+        const section = context.sections?.find(section => section.id === destination.sectionId && section.projectId === destination.id && !section.deletedAt);
+        if (section) destinationLabel = `${destinationLabel} / ${section.title}`;
+    }
     return {
         options,
+        destination: { value: resolved.destination, label: destinationLabel, accessibilityLabel: destinationLabel,
+            available: resolved.available, ...(resolved.projectToCreate ? { pendingProjectTitle: resolved.projectToCreate.title } : {}) },
         text: copy,
-        canSave: Boolean(text.trim()),
+        canSave: Boolean(text.trim()) && resolved.available,
         preview: buildQuickCapturePreview(text, options, context),
         project: {
             label: labels.project,
@@ -715,6 +786,31 @@ export function buildQuickCaptureView(text: string, options: QuickCaptureOptions
     };
 }
 
+
+export function buildQuickCaptureDestinationPicker(text: string, options: QuickCaptureOptions, context: QuickCaptureContext, query: string) {
+    const selected = resolveQuickCaptureDestination(text, options, context).destination;
+    const filter = query.trim().toLowerCase();
+    const choice = (destination: CaptureDestination, label: string, group: 'area' | 'project' | 'deferred') => ({
+        id: destination.kind === 'none' ? '' : destination.id, label, group,
+        selected: destination.kind === selected.kind && destination.kind !== 'none' && selected.kind !== 'none' && destination.id === selected.id,
+        edit: { type: 'selectDestination' as const, destination },
+    });
+    const areas = context.areas.filter(area => !area.deletedAt && (!filter || area.name.toLowerCase().includes(filter))).sort(compareAreasByOrder);
+    const projects = context.projects.filter(project => isSelectableProjectForTaskAssignment(project)
+        && (!filter || project.title.toLowerCase().includes(filter)));
+    const { active, deferred } = groupProjectsForPicker(projects, context.areas);
+    return {
+        title: tFallback(context.t, 'task.destination', 'Destination'),
+        placeholder: tFallback(context.t, 'common.search', 'Search'),
+        none: { label: tFallback(context.t, 'common.none', 'None'), selected: selected.kind === 'none',
+            edit: { type: 'selectDestination' as const, destination: { kind: 'none' as const } } },
+        items: [
+            ...areas.map(area => choice({ kind: 'area', id: area.id }, area.name, 'area')),
+            ...active.map(project => choice({ kind: 'project', id: project.id }, project.title, 'project')),
+            ...deferred.map(project => choice({ kind: 'project', id: project.id }, project.title, 'deferred')),
+        ],
+    };
+}
 
 export function buildQuickCaptureProjectPicker(options: QuickCaptureOptions, context: Pick<QuickCaptureContext, 'projects' | 't'>, query: string) {
     const { t } = context;

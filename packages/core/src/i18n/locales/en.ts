@@ -300,6 +300,8 @@ export const en: Record<string, string> = {
         'quickAdd.syntaxHelp': 'Quick Add syntax help',
         'quickAdd.pasteImagesHint': 'Paste images or screenshots with {{shortcut}} to attach them.',
         'quickAdd.placeholder': 'Add a task… use @context +Project #tag',
+        'quickAdd.destinationUnavailable': "Destination unavailable. Choose another destination.",
+        "quickAdd.destinationNeedsSelection": "Choose a destination to save.",
         'quickAdd.addAnother': 'Add another',
         'quickAdd.inputLabel': 'Task title',
         'quickAdd.inputHint': 'Type a task title, then press add or the return key.',

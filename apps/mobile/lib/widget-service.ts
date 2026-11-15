@@ -9,6 +9,8 @@ import {
     ANDROID_WIDGET_MAX_ITEMS,
     androidWidgetProjectionOptions,
     buildAndroidTasksWidgetPayload,
+    buildAndroidCaptureDestinationCatalog,
+    type AndroidCaptureDestinationCatalog,
     createPublishedWidgetProjection,
     IOS_WIDGET_FAMILY_CACHE_ITEMS,
     iosWidgetProjectionOptions,
@@ -112,7 +114,7 @@ function logFocusAvailablePublished(payload: TasksWidgetPayload, platform: 'andr
     });
 }
 
-async function updateAndroidWidgetsFromData(rendered: TasksWidgetPayload, language: Language, audioEnabled: boolean): Promise<boolean> {
+async function updateAndroidWidgetsFromData(rendered: TasksWidgetPayload, language: Language, audioEnabled: boolean, captureDestinations: AndroidCaptureDestinationCatalog): Promise<boolean> {
     if (Platform.OS !== 'android') return false;
 
     if (!AndroidWidget.isSupported()) {
@@ -124,7 +126,7 @@ async function updateAndroidWidgetsFromData(rendered: TasksWidgetPayload, langua
     }
 
     try {
-        const payload = buildAndroidTasksWidgetPayload(rendered, language, audioEnabled);
+        const payload = buildAndroidTasksWidgetPayload(rendered, language, audioEnabled, captureDestinations);
         AndroidWidget.setPayload(JSON.stringify(payload));
         const refreshResult = AndroidWidget.updateWidgets();
 
@@ -422,7 +424,8 @@ export async function updateMobileWidgetFromData(data: AppData): Promise<boolean
 
 
     const audioEnabled = isWidgetAudioCaptureEnabled(data.settings);
-    const nativeCaptureFingerprint = Platform.OS === 'android' ? `:audio=${audioEnabled}` : '';
+    const captureDestinations = buildAndroidCaptureDestinationCatalog(data, language);
+    const nativeCaptureFingerprint = Platform.OS === 'android' ? `:audio=${audioEnabled}:destinations=${JSON.stringify(captureDestinations)}` : '';
     const widgetFingerprint = `${WIDGET_RENDER_SCHEMA_REVISION}:${WIDGET_RENDER_APP_VERSION}:${language}:${JSON.stringify(fingerprintPayload)}${nativeCaptureFingerprint}`;
     let widgetUpdated = true;
     if (widgetFingerprint !== lastRenderedWidgetFingerprint) {
@@ -431,6 +434,7 @@ export async function updateMobileWidgetFromData(data: AppData): Promise<boolean
                 fingerprintPayload,
                 language,
                 audioEnabled,
+                captureDestinations,
             )
             : await updateIosWidgetPayloads(iosProjection as WidgetPayloadProjection);
         if (widgetUpdated) {

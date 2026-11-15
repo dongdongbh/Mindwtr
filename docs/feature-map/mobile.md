@@ -75,6 +75,8 @@ Source: `apps/mobile`. Routes live in `apps/mobile/app` (expo-router). Labels be
 - Code: `apps/mobile/components/quick-capture-sheet.tsx`, `apps/mobile/components/quick-capture-sheet/QuickCaptureSheetBody.tsx`, `apps/mobile/app/(drawer)/(tabs)/capture-quick.tsx`
 - Checks: `apps/mobile/tests/tab-layout-quick-capture.test.tsx`, `apps/mobile/components/quick-capture-sheet.save.test.tsx`, `apps/mobile/components/quick-capture-sheet/QuickCaptureSheetModal.test.tsx`, `apps/mobile/tests/capture-quick.test.tsx`
 - Notes: Buttons are Save, Add another, and Save & edit. A `+Project` token that names only an archived project creates a new project. Settings › GTD › Capture defaults picks text or voice as the default.
+- Destination is always visible, showing the contextual project/section, default Area, or None. A picker choice overrides title syntax without changing status; defaults stay fixed for the draft. An unavailable destination preserves the draft/audio for correction. Typing `@`, `+`, or `#` offers local suggestions at the caret; accepting a project selects its ID and replaces the whole token.
+- Autocomplete code and checks: `apps/mobile/components/quick-capture-sheet/QuickCaptureTitleInput.tsx`, `apps/mobile/components/quick-capture-sheet/QuickCaptureTitleInput.test.tsx`, `packages/core/src/capture-autocomplete.test.ts`
 
 ## Voice capture and Whisper
 
@@ -88,7 +90,8 @@ Source: `apps/mobile`. Routes live in `apps/mobile/app` (expo-router). Labels be
 - Reach: Android Quick capture widget, Quick Settings tile, or capture shortcut.
 - Code: `apps/mobile/modules/android-widget/android/src/main/java/tech/dongdongbh/mindwtr/androidwidget/QuickCaptureActivity.kt`, `packages/core/src/pending-captures.ts`
 - Checks: `packages/core/src/pending-captures.test.ts`, `apps/mobile/lib/pending-captures.test.ts`
-- Notes: Text and audio queue ingestion uses the configured default area, including active-filter mode. Explicit area/project choices take precedence. Missing or deleted default areas remain unassigned.
+- Notes: The standalone screen shows editable Status and Destination, a one-line expanding title, and local `@`, `+`, `#` suggestions. Save and Cancel stay labelled. The displayed destination is frozen into text/audio queue entries, including explicit None; later settings changes cannot redirect them. Missing destinations keep the draft or queued capture for recovery. Older queue entries without destination metadata retain legacy default-area handling. IME composition confirmation must not submit the title.
+- Mixed destination syntax that depends on unavailable parser settings or taxonomy requires an explicit Destination choice; the draft remains editable. Project autocomplete provides that choice. Shared agreement and ambiguity cases live in `packages/core/src/capture-destination-parser.test.ts` and the standalone destination tests.
 
 ## Full-screen capture (system entry)
 

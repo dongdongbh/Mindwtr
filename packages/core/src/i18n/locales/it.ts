@@ -228,6 +228,8 @@ export const itOverrides: Record<string, string> = {
         'calendar.visibleCalendars': 'Calendari visibili',
         'calendar.openDayView': 'Apri vista giorno',
         'calendar.more': 'Altro',
+        'quickAdd.destinationUnavailable': "Destinazione non disponibile. Scegli un’altra destinazione.",
+        "quickAdd.destinationNeedsSelection": "Scegli una destinazione per salvare.",
         'quickAdd.addAnother': 'Aggiungi un\'altra',
         'quickAdd.audioCaptureLabel': 'Acquisizione vocale rapida',
         'quickAdd.audioRecord': 'Avvia registrazione',

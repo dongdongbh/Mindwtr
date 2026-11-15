@@ -40,6 +40,22 @@ function TaskInputHarness({
 
 describe('TaskInput autocomplete', () => {
     it.each([
+        { text: 'Before @persn after', caret: 12, label: '@personal', expected: 'Before @personal after' },
+        { text: 'Before #famly after', caret: 11, label: '#family', expected: 'Before #family after' },
+        { text: 'Before +Launh after', caret: 11, label: 'Launch', expected: 'Before +Launch after' },
+        { text: 'Before @"personal space" after', caret: 13, label: '@personal space', expected: 'Before @"personal space" after' },
+    ])('replaces the full token around a middle caret: $text (#1560)', async ({ text, caret, label, expected }) => {
+        const onChange = vi.fn();
+        const view = render(<TaskInput value={text} onChange={onChange} projects={[buildProject('Launch')]}
+            contexts={['@personal', '@personal space', '#family']} />);
+        const input = view.getByRole('combobox') as HTMLInputElement;
+        input.setSelectionRange(caret, caret);
+        fireEvent.click(input);
+        fireEvent.click(view.getByRole('option', { name: label }));
+        await waitFor(() => expect(onChange).toHaveBeenCalledWith(expected));
+    });
+
+    it.each([
         { key: 'Enter', isComposing: true },
         { key: 'Enter', keyCode: 229 },
         { key: 'Process' },

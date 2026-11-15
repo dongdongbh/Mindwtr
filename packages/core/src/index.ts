@@ -477,3 +477,6 @@ export type { NativeRowTaskFocusRequest, NativeRowTaskFocusResult, NativePrepare
 export * from './project-calendar-reference';
 
 export * from './native-host-contract-project-calendar-reference';
+
+export * from './capture-destination';
+export * from './capture-autocomplete';

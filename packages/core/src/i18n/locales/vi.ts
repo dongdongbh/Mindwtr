@@ -275,6 +275,8 @@ export const viOverrides: Record<string, string> = {
         'quickAdd.example': 'Ví dụ: Gọi cho mẹ /start:tomorrow /due:tomorrow 5pm @phone #family',
         'quickAdd.pasteImagesHint': 'Dán hình ảnh hoặc ảnh chụp màn hình bằng {{shortcut}} để đính kèm.',
         'quickAdd.placeholder': 'Thêm nhiệm vụ… dùng @ngữ cảnh +Dự án #thẻ',
+        'quickAdd.destinationUnavailable': "Đích đến không khả dụng. Hãy chọn đích đến khác.",
+        "quickAdd.destinationNeedsSelection": "Chọn nơi lưu để lưu.",
         'quickAdd.addAnother': 'Thêm cái khác',
         'quickAdd.inputLabel': 'Tiêu đề nhiệm vụ',
         'quickAdd.inputHint': 'Nhập tiêu đề nhiệm vụ, sau đó nhấn thêm hoặc phím Enter.',

@@ -85,6 +85,21 @@ const settings = (db: Database) => db.prepare('SELECT data FROM settings WHERE i
 const receipts = (db: Database) => db.prepare('SELECT * FROM native_request_receipts').all();
 
 describe('native voice real SQLite metadata ownership', () => {
+    it('keeps a newly admitted audio destination when late speech suggests a project', async () => {
+        const env = await open(newPath(), true);
+        const request = captureRequest();
+        request.options = { ...request.options, audioDestination: { destination: { kind: 'none' } } };
+        const audio = await preparedCapture(env, request);
+        command(await env.methods.commitCapture(audio));
+        const speech = await preparedResult(env, request, { transcript: 'Stay here', title: 'Stay here', projectTitle: 'Do not create', tags: ['voice'] });
+        expect(speech.prepared.project).toBeNull();
+        command(await env.methods.commitResult(speech));
+        const data = await env.adapter.getData({ rawTasks: true });
+        expect(data.projects).toEqual([]);
+        expect(data.tasks.find(task => task.id === ID)).toMatchObject({ title: 'Stay here', tags: ['#voice'] });
+        expect(data.tasks.find(task => task.id === ID)?.projectId).toBeUndefined();
+    });
+
     it('saves one generated task/audio first, then atomically creates a suggested project and applies late shared metadata', async () => {
         const env = await open(newPath(), true), beforeRaw = rows(env.db), beforeSettings = settings(env.db);
         const audio = await preparedCapture(env);

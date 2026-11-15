@@ -900,6 +900,7 @@ const nativeVoice = (() => {
             managedDirectory: managed,
         }),
         submit: (input) => contract.submitQuickCaptureAudio(input),
+        admit: (text, options) => unwrap(contract.admitQuickCaptureAudio({ text, options })).options,
         readBytes: async (uri) => await channels.files({ op: 'readBytes', uri }) as Uint8Array,
         deleteFile: (uri) => {
 
@@ -6112,10 +6113,31 @@ globalThis.MindwtrHost = {
         });
     },
 
+    captureOpenContext(json: string): string {
+        return submit(async () => {
+            requireSaved();
+            return unwrap(contract.openQuickCapture(JSON.parse(json)));
+        });
+    },
+
     captureView(json: string): string {
         return submit(async () => {
             requireSaved();
             return unwrap(contract.getQuickCaptureView(JSON.parse(json)));
+        });
+    },
+
+    captureAutocomplete(json: string): string {
+        return submit(async () => {
+            requireSaved();
+            return unwrap(contract.getQuickCaptureAutocomplete(JSON.parse(json)));
+        });
+    },
+
+    captureAudioAdmit(json: string): string {
+        return submit(async () => {
+            requireSaved();
+            return unwrap(contract.admitQuickCaptureAudio(JSON.parse(json)));
         });
     },
 

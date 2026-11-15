@@ -303,6 +303,8 @@ export const svOverrides: Record<string, string> = {
         'quickAdd.syntaxHelp': 'Hjälp för Snabbtillägg-syntax',
         'quickAdd.pasteImagesHint': 'Klistra in bilder eller skärmbilder med {{shortcut}} för att bifoga dem.',
         'quickAdd.placeholder': 'Lägg till en uppgift… använd @context +Project #tag',
+        'quickAdd.destinationUnavailable': "Destinationen är inte tillgänglig. Välj en annan destination.",
+        "quickAdd.destinationNeedsSelection": "Välj en destination för att spara.",
         'quickAdd.addAnother': 'Lägg till en till',
         'quickAdd.inputLabel': 'Uppgiftens titel',
         'quickAdd.inputHint': 'Skriv en uppgiftstitel och tryck sedan på Lägg till eller Retur.',

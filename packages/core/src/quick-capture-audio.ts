@@ -14,7 +14,7 @@ import {
 import { runStoreCommand } from './store-write-gate';
 import { buildTaskUpdatesFromSpeechResult } from './task-speech';
 import type { TaskStore } from './store-types';
-import type { AppSettings, Attachment, SpeechToTextSettings } from './types';
+import type { AppSettings, Attachment, SpeechToTextSettings, Task } from './types';
 import { generateUUID } from './uuid';
 
 
@@ -253,13 +253,23 @@ export async function applySpeechResult(
     taskId: string,
     result: SpeechToTaskResult,
     store: QuickCaptureAudioStore,
-    options: { titleAtSave?: string } = {},
+    options: { titleAtSave?: string; preserveDestination?: boolean } = {},
 ): Promise<SpeechApplyResult> {
     const { tasks: currentTasks, settings: currentSettings } = store.getState();
     const existing = currentTasks.find((task) => task.id === taskId);
     if (!existing) return 'skipped';
 
-    const { updates, suggestedProjectTitle } = buildTaskUpdatesFromSpeechResult(existing, result, currentSettings);
+    const speechPlan = (task: Task, settings: AppSettings) => {
+        const plan = buildTaskUpdatesFromSpeechResult(task, result, settings);
+        if (options.preserveDestination) {
+            delete plan.updates.projectId;
+            delete plan.updates.areaId;
+            delete plan.updates.sectionId;
+            plan.suggestedProjectTitle = undefined;
+        }
+        return plan;
+    };
+    const { updates, suggestedProjectTitle } = speechPlan(existing, currentSettings);
     if (!Object.keys(updates).length && !suggestedProjectTitle) return 'empty';
     let outcome: SpeechApplyResult = 'applied';
 
@@ -268,7 +278,7 @@ export async function applySpeechResult(
         const state = store.getState();
         const latest = state.tasks.find((task) => task.id === taskId);
         if (!latest) return;
-        const plan = buildTaskUpdatesFromSpeechResult(latest, result, state.settings);
+        const plan = speechPlan(latest, state.settings);
         const rebuilt = plan.updates;
         if (options.titleAtSave !== undefined && latest.title !== options.titleAtSave) delete rebuilt.title;
         if (plan.suggestedProjectTitle && !latest.projectId) {

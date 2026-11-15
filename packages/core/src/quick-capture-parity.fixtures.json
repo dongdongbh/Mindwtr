@@ -22,6 +22,22 @@
      "due date chips, a picked date and time, and clearing them"
     ]
    }
+  ],
+  "amendments": [
+   {
+    "reason": "#1559: explicit destination picker selection including None overrides inline destination; preview and saved destination agree.",
+    "scenarios": [
+     "the project picker: search, select, create and reset",
+     "the area picker: search, select, create and reset"
+    ]
+   },
+   {
+    "reason": "#1559: unavailable explicit contextual project IDs remain selected and Save stays disabled until another destination is chosen; original inputs/actions preserved.",
+    "scenarios": [
+     "an unavailable archived contextual project is retained and capture cannot save",
+     "an unavailable deleted contextual project is retained and capture cannot save"
+    ]
+   }
   ]
  },
  "timeZone": "America/New_York",
@@ -1141,7 +1157,7 @@
    ]
   },
   {
-   "name": "an archived preset project is dropped and the area is kept",
+   "name": "an unavailable archived contextual project is retained and capture cannot save",
    "settings": "base",
    "initialProps": {
     "projectId": "p-old",
@@ -1158,7 +1174,7 @@
    ]
   },
   {
-   "name": "a preset project deleted elsewhere is not saved; the task goes to the area the popup shows",
+   "name": "an unavailable deleted contextual project is retained and capture cannot save",
    "settings": "base",
    "initialProps": {
     "projectId": "p-gone",
@@ -5587,7 +5603,15 @@
      "note": "",
      "saveEnabled": true,
      "saveAndEditEnabled": true,
-     "preview": [],
+     "preview": [
+      {
+       "id": "area",
+       "kind": "area",
+       "label": "Area",
+       "value": "Home",
+       "tone": "default"
+      }
+     ],
      "labels": {
       "due": "Due Date",
       "dueTime": "Change time",
@@ -5651,7 +5675,15 @@
      "note": "",
      "saveEnabled": true,
      "saveAndEditEnabled": true,
-     "preview": [],
+     "preview": [
+      {
+       "id": "area",
+       "kind": "area",
+       "label": "Area",
+       "value": "Home",
+       "tone": "default"
+      }
+     ],
      "labels": {
       "due": "Due Date",
       "dueTime": "Change time",
@@ -5719,7 +5751,15 @@
      "note": "",
      "saveEnabled": true,
      "saveAndEditEnabled": true,
-     "preview": [],
+     "preview": [
+      {
+       "id": "area",
+       "kind": "area",
+       "label": "Area",
+       "value": "Home",
+       "tone": "default"
+      }
+     ],
      "labels": {
       "due": "Due Date",
       "dueTime": "Change time",
@@ -5787,7 +5827,15 @@
      "note": "",
      "saveEnabled": true,
      "saveAndEditEnabled": true,
-     "preview": [],
+     "preview": [
+      {
+       "id": "area",
+       "kind": "area",
+       "label": "Area",
+       "value": "Home",
+       "tone": "default"
+      }
+     ],
      "labels": {
       "due": "Due Date",
       "dueTime": "Change time",
@@ -5851,7 +5899,15 @@
      "note": "",
      "saveEnabled": true,
      "saveAndEditEnabled": true,
-     "preview": [],
+     "preview": [
+      {
+       "id": "area",
+       "kind": "area",
+       "label": "Area",
+       "value": "Home",
+       "tone": "default"
+      }
+     ],
      "labels": {
       "due": "Due Date",
       "dueTime": "Change time",
@@ -5919,7 +5975,15 @@
      "note": "",
      "saveEnabled": true,
      "saveAndEditEnabled": true,
-     "preview": [],
+     "preview": [
+      {
+       "id": "area",
+       "kind": "area",
+       "label": "Area",
+       "value": "Home",
+       "tone": "default"
+      }
+     ],
      "labels": {
       "due": "Due Date",
       "dueTime": "Change time",
@@ -6832,10 +6896,10 @@
        "tone": "default"
       },
       {
-       "id": "project",
-       "kind": "project",
-       "label": "Project",
-       "value": "Launch",
+       "id": "area",
+       "kind": "area",
+       "label": "Area",
+       "value": "Home",
        "tone": "default"
       }
      ],
@@ -6911,10 +6975,10 @@
        "tone": "default"
       },
       {
-       "id": "project",
-       "kind": "project",
-       "label": "Project",
-       "value": "Launch",
+       "id": "area",
+       "kind": "area",
+       "label": "Area",
+       "value": "Home",
        "tone": "default"
       }
      ],
@@ -7252,10 +7316,10 @@
        "tone": "default"
       },
       {
-       "id": "project",
-       "kind": "project",
-       "label": "Project",
-       "value": "Launch",
+       "id": "area",
+       "kind": "area",
+       "label": "Area",
+       "value": "Garden",
        "tone": "default"
       }
      ],
@@ -7322,22 +7386,7 @@
      "note": "",
      "saveEnabled": true,
      "saveAndEditEnabled": true,
-     "preview": [
-      {
-       "id": "title",
-       "kind": "title",
-       "label": "Title",
-       "value": "Tidy garage",
-       "tone": "default"
-      },
-      {
-       "id": "project",
-       "kind": "project",
-       "label": "Project",
-       "value": "Launch",
-       "tone": "default"
-      }
-     ],
+     "preview": [],
      "labels": {
       "due": "Due Date",
       "dueTime": "Change time",
@@ -7401,22 +7450,7 @@
      "note": "",
      "saveEnabled": true,
      "saveAndEditEnabled": true,
-     "preview": [
-      {
-       "id": "title",
-       "kind": "title",
-       "label": "Title",
-       "value": "Tidy garage",
-       "tone": "default"
-      },
-      {
-       "id": "project",
-       "kind": "project",
-       "label": "Project",
-       "value": "Launch",
-       "tone": "default"
-      }
-     ],
+     "preview": [],
      "labels": {
       "due": "Due Date",
       "dueTime": "Change time",
@@ -7488,22 +7522,7 @@
      "note": "",
      "saveEnabled": true,
      "saveAndEditEnabled": true,
-     "preview": [
-      {
-       "id": "title",
-       "kind": "title",
-       "label": "Title",
-       "value": "Tidy garage",
-       "tone": "default"
-      },
-      {
-       "id": "project",
-       "kind": "project",
-       "label": "Project",
-       "value": "Launch",
-       "tone": "default"
-      }
-     ],
+     "preview": [],
      "labels": {
       "due": "Due Date",
       "dueTime": "Change time",
@@ -7582,10 +7601,10 @@
        "tone": "default"
       },
       {
-       "id": "project",
-       "kind": "project",
-       "label": "Project",
-       "value": "Launch",
+       "id": "area",
+       "kind": "area",
+       "label": "Area",
+       "value": "Work",
        "tone": "default"
       }
      ],
@@ -7661,10 +7680,10 @@
        "tone": "default"
       },
       {
-       "id": "project",
-       "kind": "project",
-       "label": "Project",
-       "value": "Launch",
+       "id": "area",
+       "kind": "area",
+       "label": "Area",
+       "value": "Work",
        "tone": "default"
       }
      ],
@@ -7739,22 +7758,7 @@
      "note": "",
      "saveEnabled": true,
      "saveAndEditEnabled": true,
-     "preview": [
-      {
-       "id": "title",
-       "kind": "title",
-       "label": "Title",
-       "value": "Tidy garage",
-       "tone": "default"
-      },
-      {
-       "id": "project",
-       "kind": "project",
-       "label": "Project",
-       "value": "Launch",
-       "tone": "default"
-      }
-     ],
+     "preview": [],
      "labels": {
       "due": "Due Date",
       "dueTime": "Change time",
@@ -7814,7 +7818,7 @@
       "Tidy garage",
       {
        "status": "inbox",
-       "projectId": "p-launch",
+       "projectId": "<undefined>",
        "areaId": "<undefined>"
       }
      ],
@@ -7825,7 +7829,7 @@
         "title": "Tidy garage",
         "initialProps": {
          "status": "inbox",
-         "projectId": "p-launch",
+         "projectId": "<undefined>",
          "areaId": "<undefined>"
         }
        }
@@ -15260,7 +15264,7 @@
     "sheet": null
    }
   ],
-  "an archived preset project is dropped and the area is kept": [
+  "an unavailable archived contextual project is retained and capture cannot save": [
    {
     "writes": [],
     "toasts": [],
@@ -15277,16 +15281,16 @@
       "due": "Due Date",
       "dueTime": "Change time",
       "contexts": "Contexts",
-      "project": "Project",
-      "area": "Home",
+      "project": "Old stuff",
+      "area": "No area",
       "priority": "Priority"
      },
      "dueDate": null,
      "showDueTime": false,
-     "projectSelected": false,
+     "projectSelected": true,
      "prioritiesEnabled": true,
      "priority": null,
-     "areaId": "a-home",
+     "areaId": null,
      "contexts": [],
      "focus": {
       "on": false,
@@ -15318,23 +15322,23 @@
     "sheet": {
      "text": "Old thing",
      "note": "",
-     "saveEnabled": true,
-     "saveAndEditEnabled": true,
+     "saveEnabled": false,
+     "saveAndEditEnabled": false,
      "preview": [],
      "labels": {
       "due": "Due Date",
       "dueTime": "Change time",
       "contexts": "Contexts",
-      "project": "Project",
-      "area": "Home",
+      "project": "Old stuff",
+      "area": "No area",
       "priority": "Priority"
      },
      "dueDate": null,
      "showDueTime": false,
-     "projectSelected": false,
+     "projectSelected": true,
      "prioritiesEnabled": true,
      "priority": null,
-     "areaId": "a-home",
+     "areaId": null,
      "contexts": [],
      "focus": {
       "on": false,
@@ -15358,36 +15362,55 @@
     }
    },
    {
-    "writes": [
-     [
-      "addTask",
-      "Old thing",
-      {
-       "status": "inbox",
-       "areaId": "a-home"
-      }
-     ],
-     [
-      "addTasks",
-      [
-       {
-        "title": "Old thing",
-        "initialProps": {
-         "status": "inbox",
-         "areaId": "a-home"
-        }
-       }
-      ]
-     ]
-    ],
+    "writes": [],
     "toasts": [],
     "navigation": [],
-    "closed": true,
-    "highlight": "<created:Old thing>",
-    "sheet": null
+    "closed": false,
+    "highlight": null,
+    "sheet": {
+     "text": "Old thing",
+     "note": "",
+     "saveEnabled": false,
+     "saveAndEditEnabled": false,
+     "preview": [],
+     "labels": {
+      "due": "Due Date",
+      "dueTime": "Change time",
+      "contexts": "Contexts",
+      "project": "Old stuff",
+      "area": "No area",
+      "priority": "Priority"
+     },
+     "dueDate": null,
+     "showDueTime": false,
+     "projectSelected": true,
+     "prioritiesEnabled": true,
+     "priority": null,
+     "areaId": null,
+     "contexts": [],
+     "focus": {
+      "on": false,
+      "canFocus": true,
+      "disabledReason": "Max 3 focus item(s)",
+      "label": "Add to today's focus"
+     },
+     "addAnother": false,
+     "expanded": false,
+     "moreLabel": "More",
+     "quickDates": null,
+     "customDate": null,
+     "dueTimeChip": null,
+     "pickers": {
+      "project": null,
+      "area": null,
+      "context": null,
+      "priority": null
+     },
+     "bulk": null
+    }
    }
   ],
-  "a preset project deleted elsewhere is not saved; the task goes to the area the popup shows": [
+  "an unavailable deleted contextual project is retained and capture cannot save": [
    {
     "writes": [],
     "toasts": [],
@@ -15405,7 +15428,7 @@
       "dueTime": "Change time",
       "contexts": "Contexts",
       "project": "Project",
-      "area": "Work",
+      "area": "No area",
       "priority": "Priority"
      },
      "dueDate": null,
@@ -15413,7 +15436,7 @@
      "projectSelected": false,
      "prioritiesEnabled": true,
      "priority": null,
-     "areaId": "a-work",
+     "areaId": null,
      "contexts": [],
      "focus": {
       "on": false,
@@ -15445,15 +15468,15 @@
     "sheet": {
      "text": "Orphan",
      "note": "",
-     "saveEnabled": true,
-     "saveAndEditEnabled": true,
+     "saveEnabled": false,
+     "saveAndEditEnabled": false,
      "preview": [],
      "labels": {
       "due": "Due Date",
       "dueTime": "Change time",
       "contexts": "Contexts",
       "project": "Project",
-      "area": "Work",
+      "area": "No area",
       "priority": "Priority"
      },
      "dueDate": null,
@@ -15461,7 +15484,7 @@
      "projectSelected": false,
      "prioritiesEnabled": true,
      "priority": null,
-     "areaId": "a-work",
+     "areaId": null,
      "contexts": [],
      "focus": {
       "on": false,
@@ -15485,33 +15508,52 @@
     }
    },
    {
-    "writes": [
-     [
-      "addTask",
-      "Orphan",
-      {
-       "status": "inbox",
-       "areaId": "a-work"
-      }
-     ],
-     [
-      "addTasks",
-      [
-       {
-        "title": "Orphan",
-        "initialProps": {
-         "status": "inbox",
-         "areaId": "a-work"
-        }
-       }
-      ]
-     ]
-    ],
+    "writes": [],
     "toasts": [],
     "navigation": [],
-    "closed": true,
-    "highlight": "<created:Orphan>",
-    "sheet": null
+    "closed": false,
+    "highlight": null,
+    "sheet": {
+     "text": "Orphan",
+     "note": "",
+     "saveEnabled": false,
+     "saveAndEditEnabled": false,
+     "preview": [],
+     "labels": {
+      "due": "Due Date",
+      "dueTime": "Change time",
+      "contexts": "Contexts",
+      "project": "Project",
+      "area": "No area",
+      "priority": "Priority"
+     },
+     "dueDate": null,
+     "showDueTime": false,
+     "projectSelected": false,
+     "prioritiesEnabled": true,
+     "priority": null,
+     "areaId": null,
+     "contexts": [],
+     "focus": {
+      "on": false,
+      "canFocus": true,
+      "disabledReason": "Max 3 focus item(s)",
+      "label": "Add to today's focus"
+     },
+     "addAnother": false,
+     "expanded": false,
+     "moreLabel": "More",
+     "quickDates": null,
+     "customDate": null,
+     "dueTimeChip": null,
+     "pickers": {
+      "project": null,
+      "area": null,
+      "context": null,
+      "priority": null
+     },
+     "bulk": null
+    }
    }
   ],
   "the fixed default area": [

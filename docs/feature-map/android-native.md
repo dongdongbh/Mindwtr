@@ -80,12 +80,13 @@ The native client is a Kotlin and Jetpack Compose app in `apps/android-native`. 
 
 ## Quick capture popup
 
-- Reach: Tab bar › center + button. The popup has the field, More (note, Focus, due time, contexts, area, project, priority, dates, Import .txt), Add another, Save & edit, and Save.
+- Reach: Tab bar › center + button. The popup has the title, visible Destination, More (note, Focus, due time, contexts, area, project, priority, dates, Import .txt), Add another, Save & edit, and Save.
 - Shortcuts: Link `mindwtr-native-dev:///open-feature?feature=capture`.
 - Selectors: `quick-capture`, `capture-title`, `capture-note`, `quick-add-preview`, `capture-scroll`, `capture-import-text`, `capture-processing`
 - Code: `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/CaptureScreen.kt`
 - Checks: `apps/android-native/scripts/check-capture-device.mjs`, `apps/android-native/scripts/check-keyboard-device.mjs`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/TokenCommitTest.kt`
 - Notes: Several lines ask core's question first. Create tasks writes a recovery snapshot, then one task per line in one write. Close discards the draft, as in RN.
+- Destination shows the contextual project/section, default Area, or None. Explicit choices override title syntax without changing status. Unavailable targets remain visible and prevent saving. Local `@`, `+`, `#` suggestions replace the complete token at the caret, with project choices retaining their IDs.
 
 ## Capture screen
 
@@ -95,6 +96,7 @@ The native client is a Kotlin and Jetpack Compose app in `apps/android-native`. 
 - Code: `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/CaptureModal.kt`, `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/CaptureModalModel.kt`
 - Checks: `apps/android-native/scripts/check-capture-modal-device.mjs`, `apps/android-native/scripts/check-keyboard-device.mjs`
 - Notes: The draft survives rotation and process death. A capture link with no title shows the toast "Capture shortcut unavailable" and opens nothing.
+- The Destination picker preserves the opening context/default and explicit None through draft restoration and prepared-write retries. A missing destination keeps the draft editable rather than assigning a different project or Area.
 
 ## Voice capture
 

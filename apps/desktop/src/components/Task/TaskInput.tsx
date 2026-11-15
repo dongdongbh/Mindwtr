@@ -1,6 +1,6 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { ClipboardEventHandler, KeyboardEventHandler, RefObject } from 'react';
-import { getTaskContextMatches, resolveFeatureFlags, useTaskStore, type Area, type Project, type TaskPriority } from '@mindwtr/core';
+import { captureAutocompleteTrigger, getTaskContextMatches, resolveFeatureFlags, useTaskStore, type Area, type Project, type TaskPriority } from '@mindwtr/core';
 import { cn } from '../../lib/utils';
 import { isImeComposing } from '../../lib/ime';
 import {
@@ -209,6 +209,13 @@ function getTrigger(text: string, caret: number): TriggerState | null {
             };
         }
     }
+    const captureTrigger = captureAutocompleteTrigger(text, caret);
+    if (captureTrigger) return {
+        type: captureTrigger.marker === '+' ? 'project' : captureTrigger.marker === '@' ? 'context' : 'tag',
+        start: captureTrigger.start,
+        end: captureTrigger.end,
+        query: captureTrigger.query,
+    };
     const lastSpace = Math.max(before.lastIndexOf(' '), before.lastIndexOf('\n'), before.lastIndexOf('\t'));
     const start = lastSpace + 1;
     const token = before.slice(start);
@@ -530,20 +537,14 @@ export function TaskInput({
                 return;
             }
         }
-        if (activeTrigger.type === 'project') {
-            tokenValue = `+${tokenValue}`;
-        } else if (activeTrigger.type === 'area') {
-            tokenValue = `!${tokenValue}`;
-        } else if (activeTrigger.type === 'person') {
-
-
-            tokenValue = /\s/.test(tokenValue) ? `%"${tokenValue}"` : `%${tokenValue}`;
-        } else if (activeTrigger.type === 'tag') {
-            tokenValue = tokenValue.startsWith('#') ? tokenValue : `#${tokenValue}`;
-        } else if (activeTrigger.type === 'command' && option.kind === 'command') {
+        if (activeTrigger.type === 'command' && option.kind === 'command') {
             tokenValue = option.requiresArgument ? `/${option.command}:${option.value}` : `/${option.command}`;
         } else {
-            tokenValue = tokenValue.startsWith('@') ? tokenValue : `@${tokenValue}`;
+            const marker = activeTrigger.type === 'project' ? '+' : activeTrigger.type === 'area' ? '!'
+                : activeTrigger.type === 'person' ? '%' : activeTrigger.type === 'tag' ? '#' : '@';
+            const name = (activeTrigger.type === 'tag' || activeTrigger.type === 'context') && tokenValue.startsWith(marker)
+                ? tokenValue.slice(1) : tokenValue;
+            tokenValue = marker + (/\s|["\\]/u.test(name) ? JSON.stringify(name) : name);
         }
 
         const before = active.text.slice(0, activeTrigger.start);

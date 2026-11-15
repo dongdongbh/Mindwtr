@@ -524,10 +524,13 @@ class CoreHost(
         callAsync("focusWindow", key, offset, limit, revision, controls, folds)
 
 
-    fun openQuickCapture(): JSONObject = callAsync("captureOpen")
+    fun openQuickCapture(initialProps: JSONObject? = null): JSONObject = if (initialProps == null) callAsync("captureOpen")
+        else callAsync("captureOpenContext", JSONObject().put("initialProps", initialProps).toString())
 
 
     fun quickCaptureView(json: String): JSONObject = callAsync("captureView", json)
+
+    fun quickCaptureAutocomplete(json: String): JSONObject = callAsync("captureAutocomplete", json)
 
 
     fun editQuickCapture(json: String): JSONObject = callAsync("captureEdit", json)
