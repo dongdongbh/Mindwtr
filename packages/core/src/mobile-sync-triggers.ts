@@ -20,6 +20,7 @@ const MAX_AUTO_SYNC_FAILURE_COOLDOWN_MS = 10 * 60_000;
 
 const AUTO_SYNC_FAILURE_REPORT_REPEAT_MS = 10 * 60 * 1000;
 const BACKGROUND_HOLD_RELEASE_CHECK = 'v1.3.7/ios-background-sync-hold';
+export const syncResultCycleStartChangeAt = new WeakMap<object, number>();
 export const MOBILE_AUTO_SYNC_CADENCE_FILE: MobileAutoSyncCadence = {
   minIntervalMs: 30_000,
   debounceFirstChangeMs: 8_000,
@@ -98,6 +99,7 @@ export const createMobileSyncTriggers = (ports: MobileSyncTriggerPorts) => {
 
 
   let localChangeSeq = 0;
+  let latestLocalChangeAt: number | null = null;
   let coveredLocalChangeSeq = 0;
   let uploadedFingerprint: string | null = null;
   let publishedLocalChangePending = false;
@@ -277,9 +279,17 @@ export const createMobileSyncTriggers = (ports: MobileSyncTriggerPorts) => {
             });
           requireActiveRuntime();
           if (result.success && abortRequests === startAbortRequests) {
-            coveredLocalChangeSeq = Math.max(coveredLocalChangeSeq, startSeq);
-            uploadedFingerprint = startFingerprint;
+            const answeringCycleSawEveryChange = latestLocalChangeAt !== null
+              && syncResultCycleStartChangeAt.get(result) === latestLocalChangeAt;
+            const uploadedSeq = answeringCycleSawEveryChange ? localChangeSeq : startSeq;
+            coveredLocalChangeSeq = Math.max(coveredLocalChangeSeq, uploadedSeq);
+            uploadedFingerprint = uploadedSeq === startSeq ? startFingerprint : null;
             publishLocalChangePending();
+            if (uploadedSeq > startSeq) {
+              void ports.logInfo?.('Auto sync marked edits made while it waited as uploaded', {
+                scope: 'sync', force: true, extra: { releaseCheck: 'v1.3.9/sync-queued-result', outcome: 'covered' },
+              });
+            }
           }
           return result;
         } catch (error) {
@@ -393,6 +403,7 @@ export const createMobileSyncTriggers = (ports: MobileSyncTriggerPorts) => {
 
       if (state.lastDataChangeAt === prevState.lastDataChangeAt) return;
       localChangeSeq += 1;
+      latestLocalChangeAt = state.lastDataChangeAt;
       publishLocalChangePending();
       activeController.handleDataChange();
     },

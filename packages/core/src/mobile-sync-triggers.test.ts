@@ -10,6 +10,7 @@ import {
   MOBILE_AUTO_SYNC_CADENCE_FILE,
   MOBILE_AUTO_SYNC_CADENCE_OFF,
   MOBILE_AUTO_SYNC_CADENCE_REMOTE,
+  syncResultCycleStartChangeAt,
   type MobileSyncTriggerPorts,
 } from './mobile-sync-triggers';
 
@@ -769,8 +770,10 @@ describe('mobile sync triggers over a shared sync orchestrator', () => {
     const service = createSyncOrchestrator<undefined, CycleResult>({
       runCycle: async () => {
         cycleStarts.push(Date.now());
+        const changeAtStart = lastDataChangeAt;
         await new Promise((resolve) => setTimeout(resolve, cycleMs));
-        const outcome = outcomes.shift() ?? { success: true };
+        const outcome = { ...(outcomes.shift() ?? { success: true }) };
+        syncResultCycleStartChangeAt.set(outcome, changeAtStart);
         const before = snapshot('idle');
         lastSyncAt += 1;
         triggers?.handleStoreChange(snapshot(outcome.success ? 'success' : 'error'), before);
@@ -872,6 +875,49 @@ describe('mobile sync triggers over a shared sync orchestrator', () => {
       'Auto sync kept a pending local change owed after another cycle succeeded',
       { scope: 'sync', force: true, extra: { releaseCheck: 'v1.3.9/sync-queued-result', outcome: 'requested' } },
     );
+    harness.triggers.dispose();
+  });
+
+  it('clears the pending change once the follow-up cycle that carried a second edit made during the failed cycle succeeds', async () => {
+    const harness = createSyncServiceHarness([{ success: false, error: 'WebDAV PUT failed (500): write failed' }, { success: true }], 30_000);
+    harness.triggers.start();
+    await flush();
+
+    void harness.service.run(undefined);
+    await vi.advanceTimersByTimeAsync(1_000);
+    harness.editTask();
+    await vi.advanceTimersByTimeAsync(19_000);
+    harness.editTask();
+    await vi.advanceTimersByTimeAsync(45_000);
+
+    expect(harness.cycleStarts).toHaveLength(2);
+    expect(harness.cycleStarts[1]).toBeGreaterThan(harness.cycleStarts[0] + 20_000);
+    expect(harness.triggers.hasPendingLocalChange()).toBe(false);
+    expect(harness.ports.logInfo).toHaveBeenCalledWith(
+      'Auto sync marked edits made while it waited as uploaded',
+      { scope: 'sync', force: true, extra: { releaseCheck: 'v1.3.9/sync-queued-result', outcome: 'covered' } },
+    );
+    harness.triggers.dispose();
+  });
+
+  it('keeps an edit made after the follow-up cycle started pending once that cycle succeeds', async () => {
+    const harness = createSyncServiceHarness([{ success: false, error: 'WebDAV PUT failed (500): write failed' }, { success: true }], 30_000);
+    harness.triggers.start();
+    await flush();
+
+    void harness.service.run(undefined);
+    await vi.advanceTimersByTimeAsync(1_000);
+    harness.editTask();
+    await vi.advanceTimersByTimeAsync(19_000);
+    harness.editTask();
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(harness.cycleStarts).toHaveLength(2);
+    harness.editTask();
+    await vi.advanceTimersByTimeAsync(25_000);
+
+    expect(harness.cycleStarts).toHaveLength(2);
+    expect(harness.service.getState().inFlight).toBe(false);
+    expect(harness.triggers.hasPendingLocalChange()).toBe(true);
     harness.triggers.dispose();
   });
 });

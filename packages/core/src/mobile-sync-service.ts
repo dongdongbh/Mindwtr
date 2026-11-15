@@ -17,6 +17,7 @@ import { SyncRemoteWriteConflict, type SyncEncryptionPosture, type SyncFollowUpR
 import { createSyncBackendIO, type FileSyncReadResult, type SyncBackendContext, type SyncTransport } from './sync-backend-io';
 import type { SyncBackendIO } from './sync-run-ports';
 import { createSyncOrchestrator } from './sync-orchestrator';
+import { syncResultCycleStartChangeAt } from './mobile-sync-triggers';
 import { NativeAttachmentCleanupUnconfirmedError } from './native-attachment-cleanup';
 import { runSerializedSyncDocumentOperation } from './data-transfer-transaction';
 import { isRetryableError, isRetryableWebdavReadError, isWebdavInvalidJsonError, withRetry } from './retry-utils';
@@ -2528,7 +2529,9 @@ export const createMobileSyncService = <Lease>(host: MobileSyncServiceHost<Lease
       const syncRun = new MobileSyncRun(backend, request, requestFollowUp, requestFollowUpAfter);
       const changeAtStart = core.useTaskStore.getState().lastDataChangeAt;
       try {
-        return await runSerializedSyncDocumentOperation(() => syncRun.run());
+        const result = await runSerializedSyncDocumentOperation(() => syncRun.run());
+        if (!result.skipped || result.skipped === 'unchanged') syncResultCycleStartChangeAt.set(result, changeAtStart);
+        return result;
       } finally {
 
 

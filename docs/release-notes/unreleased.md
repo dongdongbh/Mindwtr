@@ -2,7 +2,7 @@
 
 Changes collected since the latest stable release.
 
-- Sync: on mobile, when a sync failed while you edited and the next sync carried your edit, the sync badge no longer stays on syncing until your next edit. On desktop, React Native mobile and native Android, a sync you start while another is running now reports the result of the sync that carries your change. On mobile, when you pull to refresh during a sync, your sync starts about 1 s after the running one ends.
+- Sync: on mobile, when you edited once or more while a sync failed and the next sync carried your edits, the sync badge no longer stays on syncing until your next edit. On desktop, React Native mobile and native Android, a sync you start while another is running now reports the result of the sync that carries your change. On mobile, when you pull to refresh during a sync, your sync starts about 1 s after the running one ends.
 - Sync: changing a setting in Appearance, Language or another settings group whose sync is not switched on no longer makes Self-hosted sync run over and over. A group's change time now travels only with its values, and the Self-hosted server ignores groups that are not synced when it decides whether a device should sync again. (feedback d4644bd4)
 - Sync: switching on Appearance, Language or GTD settings sync no longer makes Self-hosted sync run over and over when two devices held different values under the same change time; all devices now settle on one value. A change time that an older version left on the server no longer decides which value wins. (feedback d4644bd4)
 - Self-hosted sync: update the Mindwtr server along with the apps. Until the server is updated, each change costs one extra sync cycle. (feedback d4644bd4)

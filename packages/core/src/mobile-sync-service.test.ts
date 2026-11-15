@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { createMobileSyncService, type MobileSyncServiceHost } from './mobile-sync-service';
+import { createMobileSyncTriggers, syncResultCycleStartChangeAt } from './mobile-sync-triggers';
 import { classifySyncFailure } from './mobile-sync-utils';
 import { NativeAttachmentCleanupUnconfirmedError } from './native-attachment-cleanup';
 import { LocalSyncAbort } from './sync-client-helpers';
@@ -545,15 +546,77 @@ describe('mobile sync service behind fake ports', () => {
 
     const active = service.performMobileSync();
     await vi.waitFor(() => expect(performSyncCycle).toHaveBeenCalled());
+    const changeAtActiveStart = fake.store.lastDataChangeAt;
+    fake.store.lastDataChangeAt += 1;
     const coalesced = service.performMobileSync();
     release();
 
     await expect(active).resolves.toMatchObject({ success: false, error: expect.stringContaining('500') });
     await expect(coalesced).resolves.toMatchObject({ success: true });
+    expect(syncResultCycleStartChangeAt.get(await active)).toBe(changeAtActiveStart);
+    expect(syncResultCycleStartChangeAt.get(await coalesced)).toBe(changeAtActiveStart + 1);
     expect(performSyncCycle).toHaveBeenCalledTimes(2);
     await vi.waitFor(() => expect(fake.logs).toContainEqual(expect.objectContaining({ force: true,
       extra: { releaseCheck: 'v1.3.9/sync-queued-result', requestClass: 'auto', outcome: 'success' },
     })));
+    await service.waitForMobileSyncIdle();
+  });
+
+  it('keeps an edit made while a request waited pending when the follow-up cycle that answers it skips as offline', async () => {
+    const fake = createFakeHost({ values: WEBDAV_VALUES });
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const performSyncCycle = vi.mocked(fake.host.core!.performSyncCycle!);
+    performSyncCycle.mockImplementationOnce(async () => {
+      await gate;
+      throw new Error('WebDAV PUT failed (500): write failed');
+    });
+    performSyncCycle.mockImplementationOnce(async () => {
+      throw new TypeError('Network request failed');
+    });
+    const service = createMobileSyncService(fake.host);
+    let requests = 0;
+    const answers: Array<{ success: boolean; skipped?: string }> = [];
+    const triggers = createMobileSyncTriggers({
+      initialAppState: 'active',
+      performSync: async () => {
+        requests += 1;
+        const answer = await service.performMobileSync();
+        answers.push(answer);
+        return answer;
+      },
+      abortSync: () => undefined,
+      flushPendingSave: async () => undefined,
+      reconcileBackgroundSync: () => undefined,
+      readStoredBackend: async () => 'webdav',
+      resolveSupportedBackend: (raw) => raw ?? 'off',
+      getSyncChangeFingerprint: () => `sync-change:${fake.store.lastDataChangeAt}`,
+      isLikelyOfflineSyncError: () => false,
+      classifySyncFailure: () => 'unknown',
+      reportError: () => undefined,
+      logWarn: () => undefined,
+      showSyncIssue: () => undefined,
+    });
+    const edit = () => {
+      const before = { lastDataChangeAt: fake.store.lastDataChangeAt };
+      fake.store.lastDataChangeAt += 1;
+      triggers.handleStoreChange({ lastDataChangeAt: fake.store.lastDataChangeAt }, before);
+    };
+    triggers.start();
+
+    const active = service.performMobileSync();
+    await vi.waitFor(() => expect(performSyncCycle).toHaveBeenCalledTimes(1));
+    edit();
+    triggers.requestSync(0);
+    await vi.waitFor(() => expect(requests).toBe(1));
+    edit();
+    release();
+
+    await expect(active).resolves.toMatchObject({ success: false });
+    await vi.waitFor(() => expect(answers).toHaveLength(1), { timeout: 10_000 });
+    expect(answers[0]).toMatchObject({ success: true, skipped: 'offline' });
+    expect(triggers.hasPendingLocalChange()).toBe(true);
+    triggers.dispose();
     await service.waitForMobileSyncIdle();
   });
 
