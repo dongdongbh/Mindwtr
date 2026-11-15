@@ -622,14 +622,20 @@ private struct KeptTabSurfaces: View {
     let palette: AppPalette
     let selected: CoreModel.Surface
     @State private var visited: Set<CoreModel.Surface> = []
+    @State private var accessibilityProbe = ""
     private static let kept: [CoreModel.Surface] = [.inbox, .review, .focus]
 
     var body: some View {
-        TabView(selection: Binding(get: { Self.kept.contains(selected) ? selected : .calendar }, set: { _ in })) {
+        ZStack {
             tab(.inbox) { InboxSurface(model: model, palette: palette) }
             tab(.review) { ReviewScreen(model: model, palette: palette) }
             tab(.focus) { FocusSurface(model: model, palette: palette) }
-            tab(.calendar) { EmptyView() }
+        }
+        .overlay(alignment: .topLeading) {
+            if KeptTabAccessibilityProbe.enabled {
+                Text(accessibilityProbe).font(.system(size: 1)).frame(width: 1, height: 1).clipped()
+                    .accessibilityIdentifier("kept-tab-accessibility-probe")
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.didReceiveMemoryWarningNotification)) { _ in
             visited = [selected]
@@ -640,6 +646,15 @@ private struct KeptTabSurfaces: View {
                 UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
             }
             if surface == .inbox { Task { await model.recordInboxViewBoundaryRendered() } }
+            if KeptTabAccessibilityProbe.enabled {
+                Task {
+                    for delay: UInt64 in [1_000_000_000, 2_000_000_000] {
+                        try? await Task.sleep(nanoseconds: delay)
+                        guard surface == selected else { return }
+                        accessibilityProbe = "shown=\(surface) reachable=" + KeptTabAccessibilityProbe.reachable().joined(separator: ",")
+                    }
+                }
+            }
         }
     }
 
@@ -651,10 +666,112 @@ private struct KeptTabSurfaces: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(palette.bg)
+        .background(KeptTabListAccessibility(listID: "\(surface)-scroll", covered: surface != selected))
+        .opacity(surface == selected ? 1 : 0)
+        .zIndex(surface == selected ? 1 : 0)
+        .accessibilityElement(children: surface != selected ? .ignore : .contain)
         .accessibilityHidden(surface != selected)
         .allowsHitTesting(surface == selected)
-        .toolbar(.hidden, for: .tabBar)
-        .tag(surface)
+    }
+}
+
+private struct KeptTabListAccessibility: UIViewRepresentable {
+    let listID: String
+    let covered: Bool
+
+    func makeUIView(context: Context) -> KeptTabListAccessibilityView { KeptTabListAccessibilityView(frame: .zero) }
+    func updateUIView(_ view: KeptTabListAccessibilityView, context: Context) { view.update(listID: listID, covered: covered) }
+}
+
+final class KeptTabListAccessibilityView: UIView {
+    private var listID = ""
+    private var covered = false
+    private weak var coveredList: UIScrollView?
+    private var listScrollsToTop = true
+    private var listInteraction = true
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        isUserInteractionEnabled = false
+        isAccessibilityElement = false
+        accessibilityElementsHidden = true
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    func update(listID: String, covered: Bool) {
+        self.listID = listID
+        self.covered = covered
+        DispatchQueue.main.async { [weak self] in self?.apply() }
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        if window != nil { DispatchQueue.main.async { [weak self] in self?.apply() } }
+    }
+
+    private func apply() {
+        guard let window else { return }
+        if !covered {
+            if let list = coveredList { uncover(list) }
+            return
+        }
+        guard let list = Self.list(listID, in: window), list !== coveredList else { return }
+        if let previous = coveredList { uncover(previous) }
+        listScrollsToTop = list.scrollsToTop
+        listInteraction = list.isUserInteractionEnabled
+        list.scrollsToTop = false
+        list.isUserInteractionEnabled = false
+        list.accessibilityElementsHidden = true
+        coveredList = list
+    }
+
+    private func uncover(_ list: UIScrollView) {
+        list.scrollsToTop = listScrollsToTop
+        list.isUserInteractionEnabled = listInteraction
+        list.accessibilityElementsHidden = false
+        coveredList = nil
+    }
+
+    private static func list(_ identifier: String, in window: UIWindow) -> UIScrollView? {
+        var stack: [UIView] = [window]
+        while let view = stack.popLast() {
+            if let scroll = view as? UIScrollView, scroll.accessibilityIdentifier == identifier { return scroll }
+            stack.append(contentsOf: view.subviews)
+        }
+        return nil
+    }
+}
+
+@MainActor enum KeptTabAccessibilityProbe {
+    static let enabled = ProcessInfo.processInfo.arguments.contains("--native-ui-test-kept-tab-accessibility")
+
+    static func reachable() -> [String] {
+        var found = Set<String>()
+        for case let scene as UIWindowScene in UIApplication.shared.connectedScenes {
+            if let window = scene.keyWindow { visit(window, into: &found, depth: 0) }
+        }
+        return found.sorted()
+    }
+
+    private static func visit(_ node: NSObject, into found: inout Set<String>, depth: Int) {
+        guard depth < 400, !node.accessibilityElementsHidden else { return }
+        if let view = node as? UIView, view.isHidden { return }
+        if let identifier = identifier(of: node) { found.insert(identifier) }
+        if node.isAccessibilityElement { return }
+        for child in children(of: node) { visit(child, into: &found, depth: depth + 1) }
+    }
+
+    static func identifier(of node: NSObject) -> String? {
+        guard node.responds(to: #selector(getter: UIAccessibilityIdentification.accessibilityIdentifier)),
+              let identifier = node.value(forKey: "accessibilityIdentifier") as? String, !identifier.isEmpty else { return nil }
+        return identifier
+    }
+
+    static func children(of node: NSObject) -> [NSObject] {
+        if let elements = node.accessibilityElements, !elements.isEmpty { return elements.compactMap { $0 as? NSObject } }
+        let count = node.accessibilityElementCount()
+        if count > 0 && count != NSNotFound { return (0..<count).compactMap { node.accessibilityElement(at: $0) as? NSObject } }
+        return (node as? UIView)?.subviews ?? []
     }
 }
 

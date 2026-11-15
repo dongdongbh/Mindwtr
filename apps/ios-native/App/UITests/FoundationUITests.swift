@@ -38123,6 +38123,33 @@ extension FoundationUITests {
         XCTAssertFalse(app.buttons["tab-focus"].isSelected)
     }
 
+    func testKeptTabsKeepCoveredTabsOutOfVoiceOverReach() {
+        continueAfterFailure = false
+        let app = XCUIApplication(), library = UUID().uuidString.lowercased()
+        app.launchArguments = ["--native-ui-test-library", library, "--native-ui-test-kept-tab-accessibility",
+                               "-AppleLanguages", "(en-US)", "-AppleLocale", "en_US"]
+        app.launch(); defer { app.terminate() }
+        boardEnabled(app.buttons["tab-inbox"], timeout: 40)
+        let probe = app.staticTexts["kept-tab-accessibility-probe"]
+        let owned = ["inbox": ["inbox-scroll", "inbox-group-open", "inbox-sort-open", "inbox-filters-open", "inbox-mind-sweep-primary", "inbox-empty-capture"],
+                     "focus": ["focus-scroll"], "review": ["review-scroll"]]
+        let tabs = app.buttons["tab-review"].exists ? ["inbox", "focus", "review"] : ["inbox", "focus"]
+        for _ in 0..<2 {
+            for shown in tabs {
+                boardTap(app, "tab-" + shown)
+                let ready = expectation(for: NSPredicate(format: "label BEGINSWITH %@", "shown=" + shown + " "), evaluatedWith: probe)
+                wait(for: [ready], timeout: 15)
+                sleep(3)
+                let reachable = Set(probe.label.components(separatedBy: "reachable=").last?.split(separator: ",").map(String.init) ?? [])
+                XCTAssertTrue(reachable.contains(shown + "-scroll"), shown + " list is reachable: " + probe.label)
+                for covered in tabs where covered != shown {
+                    XCTAssertTrue(reachable.isDisjoint(with: owned[covered] ?? []), covered + " is out of reach under " + shown + ": " + probe.label)
+                }
+                XCTAssertEqual(app.keyboards.count, 0)
+            }
+        }
+    }
+
     func testTaskNoteMarkdownToolbarPairingAndListContinuationMatchRN() {
         continueAfterFailure = false
         let app = XCUIApplication(), library = UUID().uuidString.lowercased()
