@@ -6,6 +6,7 @@ import type { AppData, AppSettings, Area, Project, StorageAdapter, Task } from '
 
 import FocusScreen from '../app/(drawer)/(tabs)/focus';
 import { SwipeableTaskItem } from '@/components/swipeable-task-item';
+import { WidgetLaunchDestination } from '@/hooks/use-widget-launch';
 
 const areaSelection = vi.hoisted(() => ({ included: [] as string[], excluded: [] as string[] }));
 const routeParams = vi.hoisted(() => ({ current: {} as Record<string, string> }));
@@ -2196,6 +2197,13 @@ describe('FocusScreen', () => {
     appStateSpy.mockRestore();
   });
 
+  it('acknowledges the Focus route when rendered as its own screen', () => {
+    let tree!: ReturnType<typeof create>;
+    act(() => { tree = create(<FocusScreen />); });
+    expect(tree.root.findByType(WidgetLaunchDestination).props.path).toBe('/focus');
+    act(() => { tree.unmount(); });
+  });
+
   it('selects the widget Focus filter once after settings hydrate and keeps controls editable', () => {
     storeState.tasks = [makeTask('desk', { contexts: ['@desk'] }), makeTask('phone', { contexts: ['@phone'] })];
     let tree!: ReturnType<typeof create>;
@@ -2209,6 +2217,7 @@ describe('FocusScreen', () => {
     act(() => { tree.update(<FocusScreen initialSavedFilterId="desk-filter" />); });
     expect(tree.root.findAllByType(SwipeableTaskItem).map((node) => node.props.task.id)).toEqual(['desk']);
     expect(findButtonByText(tree, 'Desk').props.accessibilityState.selected).toBe(true);
+    expect(tree.root.findAllByType(WidgetLaunchDestination)).toHaveLength(0);
     expect(() => findButtonByLabel(tree, 'Filters')).not.toThrow();
     act(() => { findButtonByText(tree, 'All').props.onPress(); });
     storeState.settings = { ...storeState.settings, savedFilters: [{ ...saved, name: 'Renamed' }] };

@@ -1419,7 +1419,7 @@ export default function FocusScreen({ initialSavedFilterId }: { initialSavedFilt
 
   return (
     <View onLayout={onStartupLayout} style={[styles.container, { backgroundColor: tc.bg }]}>
-      <WidgetLaunchDestination path="/focus" />
+      {!initialSavedFilterId && <WidgetLaunchDestination path="/focus" />}
       {focusReorderMode ? (
         <View style={styles.reorderContainer}>
           <View style={[styles.reorderHeader, { borderBottomColor: tc.border }]}>
