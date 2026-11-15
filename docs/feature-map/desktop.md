@@ -248,7 +248,7 @@ Source: `apps/desktop/src` (Tauri + React). Labels come from `packages/core/src/
 - Shortcuts: `.` (Vim, Standard), `Ctrl+.` (Emacs). `F2` renames (Standard).
 - Code: `apps/desktop/src/components/Task/TaskQuickActionMenu.tsx`, `apps/desktop/src/components/Task/useTaskQuickActionMenuProps.ts`, `apps/desktop/src/lib/task-clipboard.ts`, `apps/desktop/src/components/ui/DestinationSelector.tsx`, `apps/desktop/src/components/TaskProjectConversionDialog.tsx`
 - Checks: `e2e/task-menu-dates.spec.ts`, `e2e/task-menu-contexts.spec.ts`, `e2e/task-menu-project-create.spec.ts`, `e2e/task-copy-title.spec.ts`, `e2e/ui-simplification.spec.ts`, `apps/desktop/src/components/Task/TaskQuickActionMenu.test.tsx`, `apps/desktop/src/components/Task/useTaskQuickActionMenuProps.test.tsx`, `apps/desktop/src/lib/task-clipboard.test.ts`, `apps/desktop/src/components/ui/DestinationSelector.test.tsx`
-- Notes: Move to… changes only the Container, never status or dates. Menu edits wait for Save; a project created there is not assigned until Save.
+- Notes: Destination browsing lists None, Areas, active Projects, then Someday / Waiting projects. Search shows matching Areas before Projects; the highlighted match and Enter selection agree. Projects remain directly selectable. Move to… changes only the Container, never status or dates. Menu edits wait for Save; a project created there is not assigned until Save.
 
 ## Bulk selection
 

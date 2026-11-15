@@ -97,13 +97,14 @@ describe('Reference destination uses actual RN row filing', () => {
             expect(Object.keys(first).sort()).toEqual(['version', 'id', 'taskRevision', 'query', 'offset', 'limit', 'total', 'hasMore', 'nextOffset', 'choices', 'labels'].sort());
             expect(Object.keys(first.labels).sort()).toEqual(['title', 'search', 'projects', 'areas', 'cancel', 'more', 'retry', 'noMatches'].sort());
             expect(first.choices[0]).toMatchObject({ kind: 'none', id: '', selected: false });
-            expect(first.choices[1]).toMatchObject({ kind: 'project', id: 'parent', selected: false });
-            expect(first.choices[2]).toMatchObject({ kind: 'project', id: 'other' });
+            expect(first.choices.slice(1, 4).map(c => [c.kind, c.id])).toEqual([['area', 'early-area'], ['area', 'area'], ['area', 'late-area']]);
+            expect(first.choices[4]).toMatchObject({ kind: 'project', id: 'parent', selected: false });
+            expect(first.choices[5]).toMatchObject({ kind: 'project', id: 'other' });
             expect(first.nextOffset).toBe(100); expect(first.hasMore).toBe(true);
             const last = value(sqlite.host.getReferenceTaskDestinationOptions({ ...displayed(), query: '', offset: 100, limit: 100 }));
             expect(last.choices.every(c => c.kind !== 'none')).toBe(true); expect(last.hasMore).toBe(false); expect(last.nextOffset).toBeNull();
-            expect(last.choices.filter(c => c.kind === 'area').map(c => c.id)).toEqual(['early-area', 'area', 'late-area']);
-            expect(last.choices.find(c => c.id === 'area')?.selected).toBe(true);
+            expect(last.choices.every(c => c.kind === 'project')).toBe(true);
+            expect(first.choices.find(c => c.id === 'area')?.selected).toBe(true);
             expect(last.choices.map(c => c.id)).toContain('project-e\u0301'); expect(last.choices.map(c => c.id)).toContain('project-é');
             const found = value(sqlite.host.getReferenceTaskDestinationOptions({ ...displayed(), query: '  CAFÉ  ', offset: 0, limit: 100 }));
             expect(found.query).toBe('  CAFÉ  '); expect(found.choices.map(c => c.id)).toEqual(['', 'project-132']);

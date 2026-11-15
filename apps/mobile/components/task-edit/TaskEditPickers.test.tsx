@@ -66,6 +66,34 @@ describe('Task edit pickers', () => {
         expect(optionLabels.includes('taskEdit.areaLabel: Area One')).toBe(areaVisible);
     });
 
+    it('lists None, ordered areas, active projects and deferred projects through search (#1558)', () => {
+        const onSelect = vi.fn();
+        const onClose = vi.fn();
+        const project = (id: string, status: 'active' | 'someday' | 'waiting', order: number) => ({
+            id, title: `Home ${id}`, status, order, color: '#123456', tagIds: [], createdAt: '', updatedAt: '',
+        });
+        let tree!: renderer.ReactTestRenderer;
+        act(() => {
+            tree = renderer.create(
+                <TaskEditDestinationPicker visible
+                    projects={[project('later', 'someday', 0), project('active', 'active', 1), project('waiting', 'waiting', 2)]}
+                    areas={[{ id: 'second', name: 'Home second', order: 1, createdAt: '', updatedAt: '' },
+                        { id: 'first', name: 'Home first', order: 0, createdAt: '', updatedAt: '' }]}
+                    tc={{ ...tc, danger: '#f00' } as any} t={(key) => key} onClose={onClose} onSelect={onSelect} />,
+            );
+        });
+        const labels = () => tree.root.findAll((node) => typeof node.type === 'string' && node.props.accessibilityRole === 'button')
+            .map((node) => node.props.accessibilityLabel).filter((label) => label !== 'common.cancel');
+        const expected = ['common.none', 'taskEdit.areaLabel: Home first', 'taskEdit.areaLabel: Home second',
+            'nav.projects: Home active', 'nav.projects: Home later', 'nav.projects: Home waiting'];
+        expect(labels()).toEqual(expected);
+        act(() => tree.root.findByProps({ accessibilityLabel: 'task.destination', accessibilityHint: 'common.search' }).props.onChangeText('Home'));
+        expect(labels()).toEqual(expected);
+        act(() => tree.root.findByProps({ accessibilityLabel: 'nav.projects: Home active' }).props.onPress());
+        expect(onSelect).toHaveBeenCalledExactlyOnceWith({ kind: 'project', id: 'active' });
+        expect(onClose).toHaveBeenCalledOnce();
+    });
+
     it('adds modal accessibility metadata to the area picker', () => {
         let tree: renderer.ReactTestRenderer;
         act(() => {

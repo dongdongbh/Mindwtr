@@ -75,11 +75,11 @@ describe('ordinary row destination selected direct planner', () => {
         }finally{await sqlite.close();}
     });
     it('returns the exact existing picker shape and paging/search semantics without writes',async()=>{
-        vi.useFakeTimers({toFake:['Date']});vi.setSystemTime(new Date(NOW));const fixture=seed();fixture.projects!.push(...Array.from({length:103},(_,i)=>({...fixture.projects![0],id:`p${i}`,title:i===102?'Café terminal':`Project ${i}`,order:i+2})));const sqlite=await openSqliteHost(fixture);
+        vi.useFakeTimers({toFake:['Date']});vi.setSystemTime(new Date(NOW));const fixture=seed();fixture.projects!.push(...Array.from({length:103},(_,i)=>({...fixture.projects![0],id:`p${i}`,title:i===102?'Café terminal':`Project ${i}`,order:i+2})));fixture.projects![0].status = 'someday';const sqlite=await openSqliteHost(fixture);
         try{const input={...displayed(),query:'',offset:0,limit:100},before=await raw(sqlite),first=value(await sqlite.host.getRowTaskDestinationOptions(input));
             expect(Object.keys(first).sort()).toEqual(['version','id','taskRevision','query','offset','limit','total','hasMore','nextOffset','choices','labels'].sort());expect(Object.keys(first.labels).sort()).toEqual(['title','search','projects','areas','cancel','more','retry','noMatches'].sort());
-            expect(first.choices[0]).toEqual({kind:'none',id:'',label:'None',selected:false});expect(first.choices[1]).toMatchObject({kind:'project',id:'parent',selected:true});expect(first.nextOffset).toBe(100);
-            const last=value(await sqlite.host.getRowTaskDestinationOptions({...input,offset:100}));expect(last.hasMore).toBe(false);expect(last.nextOffset).toBeNull();
+            expect(first.choices[0]).toEqual({kind:'none',id:'',label:'None',selected:false});expect(first.choices[1]).toMatchObject({kind:'area',id:'area',selected:false});expect(first.choices[2]).toMatchObject({kind:'project',id:'other',selected:false});expect(first.nextOffset).toBe(100);
+            const last=value(await sqlite.host.getRowTaskDestinationOptions({...input,offset:100}));expect(last.hasMore).toBe(false);expect(last.nextOffset).toBeNull();expect(last.choices.at(-1)).toMatchObject({kind:'project',id:'parent',selected:true});
             const search=value(await sqlite.host.getRowTaskDestinationOptions({...input,query:'  CAFÉ  '}));expect(search.query).toBe('  CAFÉ  ');expect(search.choices.map(row=>row.id)).toEqual(['','p102']);
             expect(value(await sqlite.host.getRowTaskDestinationOptions({...input,query:'界'.repeat(2000)})).choices.map(row=>row.id)).toEqual(['']);
             expect(value(await sqlite.host.getRowTaskDestinationOptions({...input,offset:10_000,limit:1})).choices).toEqual([]);expect(await raw(sqlite)).toEqual(before);expect(await sqlite.receiptIds()).toEqual([]);

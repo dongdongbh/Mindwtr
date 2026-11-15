@@ -613,12 +613,12 @@ fun TaskEditorScreen(model: InboxViewModel, editor: TaskEditor) = with(model) {
             val projects = editor.view.projects.filter { destinationMatches(destinationQuery, it.title) }
             val areas = editor.view.areas.filter { destinationMatches(destinationQuery, it.title) }
             val (deferred, active) = projects.partition { it.id in editor.view.deferredProjectIds }
+            PickerHeading(t("taskEdit.areaLabel"))
+            for (area in areas) PickerItem(area.title) { editFields(mapOf("projectId" to "", "areaId" to area.id)); picker = null }
             PickerHeading(t("nav.projects"))
             for (project in active) PickerItem(project.title, "destination-project") { editFields(mapOf("projectId" to project.id)); picker = null }
             if (deferred.isNotEmpty()) PickerHeading(t("projects.deferredSection"))
             for (project in deferred) PickerItem(project.title, "destination-project") { editFields(mapOf("projectId" to project.id)); picker = null }
-            PickerHeading(t("taskEdit.areaLabel"))
-            for (area in areas) PickerItem(area.title) { editFields(mapOf("projectId" to "", "areaId" to area.id)); picker = null }
             if (projects.isEmpty() && areas.isEmpty()) Text(t("common.noMatches"), style = rnText(16, 400), color = LocalTheme.current.colors.secondaryText,
                 modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp).semantics { liveRegion = LiveRegionMode.Polite })
         }

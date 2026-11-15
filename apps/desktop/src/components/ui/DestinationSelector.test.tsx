@@ -69,13 +69,46 @@ describe('DestinationSelector', () => {
         expect(groupTitles('Projects')).toEqual(['Beta active']);
         expect(groupTitles('Someday / Waiting')).toEqual(['Alpha someday', 'Ceta waiting']);
         const optionTitles = () => view.getAllByRole('option').map((option) => option.textContent);
-        expect(optionTitles()).toEqual(['None', 'Beta active', 'Alpha someday', 'Ceta waiting', 'Home']);
+        expect(optionTitles()).toEqual(['None', 'Home', 'Beta active', 'Alpha someday', 'Ceta waiting']);
 
         const input = view.getByLabelText('Search') as HTMLInputElement;
         setInputValue(input, 'a');
         expect(optionTitles().slice(0, 3)).toEqual(['Beta active', 'Alpha someday', 'Ceta waiting']);
         fireEvent.keyDown(input, { key: 'Enter' });
         expect(onChange).toHaveBeenCalledWith({ kind: 'project', id: 'p-active' });
+    });
+
+    it('puts areas before projects and keeps keyboard search selection on the first visible match (#1558)', () => {
+        const onChange = vi.fn();
+        const view = renderSelector({
+            projects: [{ ...projects[0], title: 'Home project' }],
+            areas: [{ ...areas[0], name: 'Home area' }],
+            onChange,
+        });
+        fireEvent.click(view.getByRole('button', { name: 'Destination' }));
+        const search = view.getByLabelText('Search') as HTMLInputElement;
+        setInputValue(search, 'Home');
+        expect(view.getAllByRole('option').slice(0, 2).map((option) => option.textContent)).toEqual(['Home area', 'Home project']);
+        const first = view.getByRole('option', { name: 'Home area' });
+        expect(search).toHaveAttribute('aria-activedescendant', first.id);
+        expect(first.className).toContain('bg-primary/10');
+        fireEvent.keyDown(search, { key: 'ArrowDown' });
+        expect(first).toHaveFocus();
+        fireEvent.keyDown(first, { key: 'ArrowDown' });
+        expect(view.getByRole('option', { name: 'Home project' })).toHaveFocus();
+        act(() => search.focus());
+        fireEvent.keyDown(search, { key: 'Enter' });
+        expect(onChange).toHaveBeenCalledExactlyOnceWith({ kind: 'area', id: 'area-home' });
+    });
+
+    it.each([
+        { showProjects: true, showAreas: false, labels: ['None', 'Work'] },
+        { showProjects: false, showAreas: true, labels: ['None', 'Home'] },
+        { showProjects: false, showAreas: false, labels: ['None'] },
+    ])('keeps None and enabled destination kinds: $showProjects/$showAreas', ({ labels, ...visibility }) => {
+        const view = renderSelector(visibility);
+        fireEvent.click(view.getByRole('button', { name: 'Destination' }));
+        expect(view.getAllByRole('option').map((option) => option.textContent)).toEqual(labels);
     });
 
     it('does not offer inactive projects while still naming the current assignment', () => {
