@@ -344,7 +344,7 @@ enum MindwtrGetTasksError: Error, CustomLocalizedStringResourceConvertible {
     case appLocked
 
     var localizedStringResource: LocalizedStringResource {
-        "Mindwtr is locked. Open Mindwtr and unlock it, then run this shortcut again."
+        "Get Mindwtr Tasks is off while App Lock is on. Turn off App Lock in Mindwtr Settings to use it."
     }
 }
 
