@@ -276,8 +276,11 @@ export const createNativeSync = (bindings: NativeSyncBindings, fileEncryptionSta
         }
     };
     const dropbox = bindings.isFossBuild || !bindings.dropbox ? null : platform === 'ios'
-        ? createNativeIosDropbox(bindings.dropbox, { storage, secrets: secretStorage, vault, fetch: (input, init) => fetch(input, init) })
-        : createNativeIosDropbox(bindings.dropbox, { storage, secrets: androidDropboxSecrets, vault, fetch: (input, init) => fetch(input, init) },
+        ? createNativeIosDropbox(bindings.dropbox, { storage, secrets: secretStorage, vault, fetch: (input, init) => fetch(input, init),
+            onStaleRefreshDropped: () => void logLine('warn', 'Native iOS Dropbox refresh dropped after Disconnect or reconnect', { scope: 'native-ios', force: true,
+                extra: { releaseCheck: 'v1.3.9/ios-dropbox', operation: 'refresh', outcome: 'stale-refresh-dropped' } }) })
+        : createNativeIosDropbox(bindings.dropbox, { storage, secrets: androidDropboxSecrets, vault, fetch: (input, init) => fetch(input, init),
+            onStaleRefreshDropped: () => logDropbox('stale-refresh-dropped', true) },
             { read: readNativeAndroidDropboxConfiguration, observe: observeAndroidDropbox });
     const encryptionState = fileEncryptionState ?? createSyncEncryptionStateStore({
         storage,
@@ -1184,7 +1187,7 @@ export const createIosDirectoryFileSync = (bindings: NativeSyncBindings, call: N
         prepared = null;
         try {
             if (candidate && (candidate.syncPath !== selected.selection.canonicalPath || candidate.syncPathBookmark !== selected.bookmark)) throw new Error('Directory selection changed');
-            const fresh = createIosFileSync({ ...bindings, performFileSync: undefined, pickSyncFolder: undefined,
+            const fresh = createIosFileSync({ ...bindings, dropbox: undefined, performFileSync: undefined, pickSyncFolder: undefined,
                 emit: () => {}, trace: () => {}, scheduleBackgroundSync: () => {},
                 retireLocalAttachment: async () => { throw new NativeAttachmentCleanupUnconfirmedError(); },
             }, selected.selection, call);

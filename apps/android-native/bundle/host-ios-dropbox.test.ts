@@ -47,4 +47,15 @@ describe('private iOS Dropbox factory capability',()=>{
   await binding.settings.clearTokens();expect(durable.has('mindwtr_dropbox_tokens')).toBe(false);
  });
 
+ it('refreshes expired legacy-stored tokens through a keychain that cannot read them back and still runs the file request',async()=>{
+  const legacy=new Map([['@mindwtr_dropbox_tokens',JSON.stringify({accessToken:'expired-synthetic',refreshToken:'controlled-refresh',expiresAt:0})]]),secretWrites:string[]=[];
+  const secretPort={isAvailable:async()=>true,getItem:async()=>null,setItem:async(k:string)=>{secretWrites.push(k);},deleteItem:async()=>{}};
+  const refreshes:string[]=[];
+  const capability:NativeIosDropboxCapability={configuration:()=>configuration,assertCurrent:()=>{},authorizationRequestId:()=>{throw new Error('No Connect');},authorize:async()=>{throw new Error('No browser');}};
+  const binding=createNativeIosDropbox(capability,{storage:{getItem:async k=>legacy.get(k)??null,setItem:async()=>{throw new Error('No legacy write');},removeItem:async k=>{legacy.delete(k);}},secrets:secretPort,vault:createSyncSecretVault(secretPort),
+   fetch:async(_input,init)=>{refreshes.push(String(init?.body));return new Response(JSON.stringify({access_token:'controlled-refreshed',expires_in:14400}));},now:()=>now})!;
+  const used:string[]=[];
+  await expect(binding.runAuthorized(configuration.clientId,async token=>{used.push(token);return 'downloaded';})).resolves.toBe('downloaded');
+  expect(refreshes).toHaveLength(1);expect(used).toEqual(['controlled-refreshed']);expect(legacy.size).toBe(0);expect(secretWrites).toEqual(['mindwtr_dropbox_tokens','mindwtr_dropbox_tokens']);
+ });
 });

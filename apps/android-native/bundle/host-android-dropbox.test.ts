@@ -23,7 +23,9 @@ const date = '2026-11-14T00:00:00.000Z';
 const local = (title: string): AppData => ({ tasks: [{ id: `t-${title}`, title, status: 'inbox', contexts: [], tags: [], createdAt: date, updatedAt: date }],
     projects: [], sections: [], areas: [], settings: {} });
 
-const fixture = (options: { kv?: Record<string, string>; secrets?: Record<string, string>; foss?: boolean; data?: AppData } = {}) => {
+const fixture = (options: { kv?: Record<string, string>; secrets?: Record<string, string>; foss?: boolean; data?: AppData; ios?: boolean } = {}) => {
+    const redirectUri = options.ios ? 'mindwtr-native-dev://redirect' : REDIRECT;
+    if (options.ios) { globals.__mindwtrHostPlatform = 'ios'; androidFiles(); }
     const fake = createDropboxFake({ clientId: CLIENT });
     const kv = new Map(Object.entries(options.kv ?? {}));
     const secrets = new Map(Object.entries(options.secrets ?? {}));
@@ -33,7 +35,7 @@ const fixture = (options: { kv?: Record<string, string>; secrets?: Record<string
     let answer: 'redirect' | 'dismiss' = 'redirect';
     const verifier = 'n'.repeat(43);
     const capability: NativeIosDropboxCapability = {
-        configuration: () => ({ version: 1, clientId: CLIENT, redirectUri: REDIRECT }),
+        configuration: () => ({ version: 1, clientId: CLIENT, redirectUri }),
         assertCurrent: () => {},
         authorizationRequestId: core.generateUUID,
         authorize: async (request) => {
@@ -76,6 +78,7 @@ const fixture = (options: { kv?: Record<string, string>; secrets?: Record<string
         trace: () => {},
         scheduleBackgroundSync: () => {},
         isFossBuild: options.foss === true,
+        ...(options.ios ? { retireLocalAttachment: async () => false } : {}),
     });
     const contract = core.createNativeHostContract({ syncSettings: sync.settingsHost });
     const outcomes = () => entries.filter((entry) => entry.context?.releaseCheck === 'v1.3.9/native-dropbox').map((entry) => entry.context?.outcome);
@@ -294,6 +297,36 @@ describe('native Android Dropbox sign-in and sync (RN fix history)', () => {
         expect(f.fake.state.refresh.has(seeded.refreshToken)).toBe(false);
         expect(f.secrets.has(DROPBOX_SECURESTORE_TOKENS_KEY)).toBe(false);
         expect(f.outcomes()).toEqual(['migrated-from-rn', 'refreshed', 'revoked']);
+    });
+
+    it.each([['Android', false], ['iOS', true]] as const)('%s: a refresh still running when the user taps Disconnect leaves Dropbox disconnected and uploads nothing', async (_platform, ios) => {
+        const f = fixture({ kv: rnDropboxBackend, ios });
+        f.secrets.set(DROPBOX_SECURESTORE_TOKENS_KEY, JSON.stringify(seedConnected(f, Date.now() - 1_000)));
+        await open(f);
+        const fetcher = f.fake.fetch;
+        let release!: () => void;
+        const released = new Promise<void>((resolve) => { release = resolve; });
+        let started!: () => void;
+        const refreshing = new Promise<void>((resolve) => { started = resolve; });
+        let held = false;
+        globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+            const response = await fetcher(input, init);
+            if (!held && String(input) === 'https://api.dropboxapi.com/oauth2/token') { held = true; started(); await released; }
+            return response;
+        }) as typeof fetch;
+        const syncing = f.sync.settingsHost.performSync(undefined, { manual: true });
+        await refreshing;
+        expect((await f.contract.disconnectDropbox({ requestId: core.generateUUID() })).ok).toBe(true);
+        release();
+        expect(await syncing).toMatchObject({ success: false });
+        expect(f.secrets.has(DROPBOX_SECURESTORE_TOKENS_KEY)).toBe(false);
+        expect(remoteTitles(f)).toBeNull();
+        const dropped = f.entries.filter((entry) => entry.context?.outcome === 'stale-refresh-dropped').map((entry) => entry.context);
+        expect(dropped).toEqual([ios
+            ? { releaseCheck: 'v1.3.9/ios-dropbox', operation: 'refresh', outcome: 'stale-refresh-dropped' }
+            : { releaseCheck: 'v1.3.9/native-dropbox', outcome: 'stale-refresh-dropped' }]);
+        expect(await f.contract.selectSyncBackend({ requestId: core.generateUUID(), option: 'dropbox' })).toMatchObject({ ok: true });
+        expect((await f.view()).panel).toMatchObject({ kind: 'dropbox', connected: false });
     });
 
     it('a revoke Dropbox refuses logs revoke-failed, not revoked, and still clears the tokens', async () => {

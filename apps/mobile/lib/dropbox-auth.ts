@@ -8,6 +8,7 @@ import {
 
 import { secureSecretStorage, secureSecretVault } from './secure-secret-store';
 import { backgroundSafeFetch } from './background-safe-fetch';
+import { logWarn } from './app-log';
 
 
 export { isDropboxClientConfigured } from '@mindwtr/core/dropbox-auth-tokens';
@@ -22,6 +23,12 @@ const tokenStore: DropboxTokenStore = createDropboxTokenStore({
     secrets: secureSecretStorage,
     vault: secureSecretVault,
     fetch: (input, init) => backgroundSafeFetch(input, init),
+    onStaleRefreshDropped: () => {
+        void logWarn('Dropbox refresh finished after Disconnect; tokens not saved', {
+            scope: 'sync',
+            extra: { releaseCheck: 'v1.3.9/dropbox-stale-refresh' },
+        });
+    },
 });
 
 export async function getStoredDropboxTokens(): Promise<DropboxAuthTokens | null> {

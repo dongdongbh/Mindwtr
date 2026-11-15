@@ -37,7 +37,8 @@ export const createNativeIosDropbox = (capability: NativeIosDropboxCapability, d
     const resolveStored = (force: boolean, id: string, fetcher = deps.fetch) => owned(async () => {
         client(id); const before = await store.getStoredDropboxTokens(current); current(); if (!before) throw new Error('Dropbox is not connected');
         const result = await (force ? store.forceRefreshDropboxAccessTokenForTokens : store.getValidDropboxAccessTokenForTokens)(id, before, ownedFetch(fetcher));
-        current(); if (result.tokens !== before && JSON.stringify(result.tokens) !== JSON.stringify(before)) await store.saveDropboxTokens(result.tokens, current);
+        current(); if (result.tokens !== before && JSON.stringify(result.tokens) !== JSON.stringify(before)
+            && !await store.saveRefreshedDropboxTokens(before.refreshToken, result.tokens, current)) throw new Error('Dropbox is not connected');
         return result.accessToken;
     });
     const authorize = async (id: string): Promise<DropboxAuthTokens> => owned(async () => {

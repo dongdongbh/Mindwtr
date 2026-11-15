@@ -21,14 +21,19 @@ const jsonResponse = (body: unknown, status = 200) => new Response(JSON.stringif
     headers: { 'Content-Type': 'application/json' },
 });
 
-const createStore = (options: { available?: boolean; fetch?: typeof fetch; now?: number } = {}) => {
+const createStore = (options: { available?: boolean; fetch?: typeof fetch; now?: number; secretRead?: () => Promise<void>; secretWrite?: () => Promise<void> } = {}) => {
     const plain = new Map<string, string>();
     const secure = new Map<string, { value: string; accessibility: SyncSecretAccessibility }>();
     const clock = { now: options.now ?? 0 };
     const secrets = {
         isAvailable: async () => options.available ?? true,
-        getItem: async (key: string) => secure.get(key)?.value ?? null,
+        getItem: async (key: string) => {
+            const value = secure.get(key)?.value ?? null;
+            await options.secretRead?.();
+            return value;
+        },
         setItem: async (key: string, value: string, accessibility: SyncSecretAccessibility) => {
+            await options.secretWrite?.();
             secure.set(key, { value, accessibility });
         },
         deleteItem: async (key: string) => {
@@ -205,5 +210,111 @@ describe('Dropbox access token refresh', () => {
 
         expect(fetcher).toHaveBeenCalledTimes(2);
         await expect(store.getStoredDropboxTokens()).resolves.toBeNull();
+    });
+    const heldRefresh = () => {
+        let release!: () => void;
+        const released = new Promise<void>((resolve) => { release = resolve; });
+        let started!: () => void;
+        const refreshing = new Promise<void>((resolve) => { started = resolve; });
+        const fetch = (async (url: string) => {
+            if (!url.endsWith('/oauth2/token')) return new Response('null');
+            started();
+            await released;
+            return jsonResponse({ access_token: 'late-access', expires_in: 14_400 });
+        }) as unknown as typeof globalThis.fetch;
+        return { fetch, refreshing, release };
+    };
+
+    it('a refresh still running when Disconnect clears the tokens leaves them cleared and returns no access token', async () => {
+        const held = heldRefresh();
+        const { store } = createStore({ fetch: held.fetch, now: tokens.expiresAt });
+        await store.saveDropboxTokens(tokens);
+
+        const resolving = store.getValidDropboxAccessToken('app-key');
+        await held.refreshing;
+        await store.disconnectDropbox('app-key');
+        held.release();
+
+        await expect(resolving).rejects.toThrow('Dropbox is not connected');
+        await expect(store.getStoredDropboxTokens()).resolves.toBeNull();
+        await expect(store.isDropboxConnected()).resolves.toBe(false);
+    });
+
+    it('a refresh of the old grant still running after a reconnect keeps the new grant', async () => {
+        const held = heldRefresh();
+        const { store } = createStore({ fetch: held.fetch, now: tokens.expiresAt });
+        await store.saveDropboxTokens(tokens);
+        const reconnected = { accessToken: 'new-access', refreshToken: 'new-refresh', expiresAt: tokens.expiresAt * 2 };
+
+        const resolving = store.forceRefreshDropboxAccessToken('app-key');
+        await held.refreshing;
+        await store.clearDropboxTokens();
+        await store.saveDropboxTokens(reconnected);
+        held.release();
+
+        await expect(resolving).rejects.toThrow('Dropbox is not connected');
+        await expect(store.getStoredDropboxTokens()).resolves.toEqual(reconnected);
+    });
+
+    it('a stale refresh can be dropped only for tokens that are no longer stored', async () => {
+        const { store } = createStore();
+        const refreshed = { ...tokens, accessToken: 'refreshed' };
+        await expect(store.saveRefreshedDropboxTokens(tokens.refreshToken, refreshed)).resolves.toBe(false);
+        await store.saveDropboxTokens(tokens);
+        await expect(store.saveRefreshedDropboxTokens(tokens.refreshToken, refreshed)).resolves.toBe(true);
+        await expect(store.getStoredDropboxTokens()).resolves.toEqual(refreshed);
+    });
+    it('a refresh of tokens read from a keystore that cannot read them back still saves and returns its access token', async () => {
+        const { store, plain, secure } = createStore({ now: tokens.expiresAt });
+        plain.set(DROPBOX_ASYNC_TOKENS_KEY, JSON.stringify(tokens));
+        secure.get = () => undefined;
+
+        await expect(store.getValidDropboxAccessToken('app-key')).resolves.toBe('refreshed');
+        expect(plain.has(DROPBOX_ASYNC_TOKENS_KEY)).toBe(false);
+    });
+
+    const heldSecretAccess = () => {
+        const hold = { armed: false, entered: () => {}, release: () => {} };
+        const entered = new Promise<void>((resolve) => { hold.entered = resolve; });
+        const released = new Promise<void>((resolve) => { hold.release = resolve; });
+        const secretAccess = async () => {
+            if (!hold.armed) return;
+            hold.armed = false;
+            hold.entered();
+            await released;
+        };
+        return { hold, entered, secretAccess };
+    };
+
+    it('a clear that starts while a refreshed save is still writing runs after that save', async () => {
+        const held = heldSecretAccess();
+        const { store } = createStore({ secretWrite: held.secretAccess });
+        await store.saveDropboxTokens(tokens);
+        held.hold.armed = true;
+
+        const saving = store.saveRefreshedDropboxTokens(tokens.refreshToken, { ...tokens, accessToken: 'refreshed' });
+        await held.entered;
+        const clearing = store.clearDropboxTokens();
+        held.hold.release();
+
+        await Promise.all([saving, clearing]);
+        await expect(store.getStoredDropboxTokens()).resolves.toBeNull();
+    });
+
+    it('a clear that starts while a read moves legacy tokens into the keystore runs after that move', async () => {
+        const held = heldSecretAccess();
+        const { store, plain, secure } = createStore({ secretRead: held.secretAccess });
+        plain.set(DROPBOX_ASYNC_TOKENS_KEY, JSON.stringify(tokens));
+        held.hold.armed = true;
+
+        const reading = store.getStoredDropboxTokens();
+        await held.entered;
+        const clearing = store.clearDropboxTokens();
+        held.hold.release();
+
+        await expect(reading).resolves.toEqual(tokens);
+        await clearing;
+        expect(secure.has(DROPBOX_SECURESTORE_TOKENS_KEY)).toBe(false);
+        expect(plain.has(DROPBOX_ASYNC_TOKENS_KEY)).toBe(false);
     });
 });

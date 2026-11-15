@@ -51,6 +51,7 @@ const requireDropboxTokens = (tokens: DropboxAuthTokens): DropboxAuthTokens => {
 export type DropboxTokenStore = {
     getStoredDropboxTokens(beforeMutation?: () => void): Promise<DropboxAuthTokens | null>;
     saveDropboxTokens(tokens: DropboxAuthTokens, beforeMutation?: () => void): Promise<void>;
+    saveRefreshedDropboxTokens(refreshedFrom: string, refreshed: DropboxAuthTokens, beforeMutation?: () => void): Promise<boolean>;
     clearDropboxTokens(beforeMutation?: () => void): Promise<void>;
     isDropboxConnected(beforeMutation?: () => void): Promise<boolean>;
     refreshDropboxAccessToken(clientId: string, refreshToken: string, fetcher?: typeof fetch): Promise<DropboxAuthTokens>;
@@ -80,6 +81,7 @@ export type DropboxTokenStoreDeps = {
 
     fetch: typeof fetch;
     now?: () => number;
+    onStaleRefreshDropped?: () => void;
 };
 
 export const createDropboxTokenStore = ({
@@ -88,7 +90,16 @@ export const createDropboxTokenStore = ({
     vault,
     fetch: defaultFetcher,
     now = () => Date.now(),
+    onStaleRefreshDropped,
 }: DropboxTokenStoreDeps): DropboxTokenStore => {
+    let tokenWrites: Promise<unknown> = Promise.resolve();
+    let currentRefreshToken: string | null | undefined;
+    const serializeTokenWrite = <T>(write: () => Promise<T>): Promise<T> => {
+        const result = tokenWrites.then(write);
+        tokenWrites = result.catch(() => undefined);
+        return result;
+    };
+
     const readRawTokenPayload = async (beforeMutation?: () => void): Promise<string | null> => {
         if (await vault.isSecureStoreAvailable()) {
             const secureValue = await secrets.getItem(DROPBOX_SECURESTORE_TOKENS_KEY);
@@ -151,9 +162,7 @@ export const createDropboxTokenStore = ({
         vault.deleteSessionSecret(DROPBOX_SECURESTORE_TOKENS_KEY);
     };
 
-    const getStoredDropboxTokens = async (beforeMutation?: () => void): Promise<DropboxAuthTokens | null> => {
-        const raw = await readRawTokenPayload(beforeMutation);
-        if (!raw) return null;
+    const parseTokenPayload = (raw: string): DropboxAuthTokens | null => {
         try {
             return sanitizeTokens(JSON.parse(raw));
         } catch {
@@ -161,16 +170,59 @@ export const createDropboxTokenStore = ({
         }
     };
 
-    const saveDropboxTokens = async (tokens: DropboxAuthTokens, beforeMutation?: () => void): Promise<void> => {
+    const readStoredDropboxTokens = async (beforeMutation?: () => void): Promise<DropboxAuthTokens | null> => {
+        const raw = await readRawTokenPayload(beforeMutation);
+        const tokens = raw ? parseTokenPayload(raw) : null;
+        currentRefreshToken = tokens?.refreshToken ?? null;
+        return tokens;
+    };
+
+    const getStoredDropboxTokens = (beforeMutation?: () => void): Promise<DropboxAuthTokens | null> => (
+        serializeTokenWrite(() => readStoredDropboxTokens(beforeMutation))
+    );
+
+    const requireSanitizedTokens = (tokens: DropboxAuthTokens): DropboxAuthTokens => {
         const sanitized = sanitizeTokens(tokens);
         if (!sanitized) {
             throw new Error('Invalid Dropbox token payload');
         }
-        await writeRawTokenPayload(JSON.stringify(sanitized), beforeMutation);
+        return sanitized;
+    };
+
+    const writeStoredDropboxTokens = async (tokens: DropboxAuthTokens, beforeMutation?: () => void): Promise<void> => {
+        await writeRawTokenPayload(JSON.stringify(tokens), beforeMutation);
+        currentRefreshToken = tokens.refreshToken;
+    };
+
+    const saveDropboxTokens = async (tokens: DropboxAuthTokens, beforeMutation?: () => void): Promise<void> => {
+        const sanitized = requireSanitizedTokens(tokens);
+        await serializeTokenWrite(() => writeStoredDropboxTokens(sanitized, beforeMutation));
+    };
+
+    const saveRefreshedDropboxTokens = async (
+        refreshedFrom: string,
+        refreshed: DropboxAuthTokens,
+        beforeMutation?: () => void,
+    ): Promise<boolean> => {
+        const sanitized = requireSanitizedTokens(refreshed);
+        return serializeTokenWrite(async () => {
+            const connectedRefreshToken = currentRefreshToken === undefined
+                ? (await readStoredDropboxTokens(beforeMutation))?.refreshToken ?? null
+                : currentRefreshToken;
+            if (connectedRefreshToken !== refreshedFrom.trim()) {
+                onStaleRefreshDropped?.();
+                return false;
+            }
+            await writeStoredDropboxTokens(sanitized, beforeMutation);
+            return true;
+        });
     };
 
     const clearDropboxTokens = async (beforeMutation?: () => void): Promise<void> => {
-        await clearRawTokenPayload(beforeMutation);
+        await serializeTokenWrite(() => {
+            currentRefreshToken = null;
+            return clearRawTokenPayload(beforeMutation);
+        });
     };
 
     const requestDropboxAccessToken = async (
@@ -233,7 +285,9 @@ export const createDropboxTokenStore = ({
         fetcher: typeof fetch = defaultFetcher,
     ): Promise<DropboxAuthTokens> => {
         const tokens = await requestDropboxAccessToken(clientId, refreshToken, fetcher);
-        await saveDropboxTokens(tokens);
+        if (!await saveRefreshedDropboxTokens(refreshToken, tokens)) {
+            throw new Error('Dropbox is not connected');
+        }
         return tokens;
     };
 
@@ -264,6 +318,7 @@ export const createDropboxTokenStore = ({
     return {
         getStoredDropboxTokens,
         saveDropboxTokens,
+        saveRefreshedDropboxTokens,
         clearDropboxTokens,
         isDropboxConnected: async (beforeMutation) => {
             const tokens = await getStoredDropboxTokens(beforeMutation);
