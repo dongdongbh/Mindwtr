@@ -374,7 +374,6 @@ class QuickCaptureActivity : AppCompatActivity() {
     val editable = snapshot.state == QuickCaptureAudioSession.State.IDLE ||
       snapshot.state == QuickCaptureAudioSession.State.READY
     save.isEnabled = snapshot.canSaveText || snapshot.canSaveAudio
-    save.alpha = if (save.isEnabled) 1f else 0.5f
     cancel.isEnabled = snapshot.state != QuickCaptureAudioSession.State.SAVING &&
       snapshot.state != QuickCaptureAudioSession.State.SAVED &&
       snapshot.state != QuickCaptureAudioSession.State.CLOSED
@@ -400,6 +399,7 @@ class QuickCaptureActivity : AppCompatActivity() {
     destinationButton.text = if (needsSelection) destinationLabels?.needsSelection ?: "Choose a destination to save."
       else "${destinationLabels?.destination ?: "Destination"}: ${destinationName ?: destinationLabels?.unavailable ?: "Unavailable"}"
     save.isEnabled = save.isEnabled && destination != null
+    save.alpha = if (save.isEnabled) 1f else 0.5f
     if (!input.isEnabled && contextPanel.visibility == View.VISIBLE) contextPanel.visibility = View.GONE
     val captureStatus = audioSession.captureStatus ?: audioSession.defaultStatus
     statusButton.text = "${labels.statusLabel}: ${labels.statusLabels.getValue(captureStatus)}"

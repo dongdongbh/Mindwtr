@@ -112,5 +112,35 @@
       },
       "projectToCreate": "One"
     }
+  },
+  {
+    "input": "Task +One @\"\" Two",
+    "expected": {
+      "destination": {
+        "kind": "area",
+        "id": "personal"
+      },
+      "projectToCreate": "One"
+    }
+  },
+  {
+    "input": "Task +One @\" \" Two",
+    "expected": {
+      "destination": {
+        "kind": "area",
+        "id": "personal"
+      },
+      "projectToCreate": "One"
+    }
+  },
+  {
+    "input": "Task +One #\"\" Two",
+    "expected": {
+      "destination": {
+        "kind": "area",
+        "id": "personal"
+      },
+      "projectToCreate": "One"
+    }
   }
 ]

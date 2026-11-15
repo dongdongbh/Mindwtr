@@ -130,6 +130,8 @@ describe('native host contract: the capture popup', () => {
         useTaskStore.setState(state => ({ _allProjects: state._allProjects.map(project => project.id === 'p-launch'
             ? { ...project, deletedAt: fixture.now } : project) }));
         const captureId = generateUUID();
+        expect(value(host.admitQuickCaptureAudio({ text: 'Call +Launch', options: admitted })).options.audioDestination)
+            .toEqual(admitted.audioDestination);
         expect(value(await host.submitQuickCaptureAudio({ text: 'Call +Launch', options: admitted, captureId,
             fallbackTitle: 'Audio note', attachments: [] }))).toMatchObject({ kind: 'refused' });
         expect(useTaskStore.getState()._allTasks.some(task => task.id === captureId)).toBe(false);

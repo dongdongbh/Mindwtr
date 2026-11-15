@@ -27,6 +27,10 @@
     {
       "id": "p-weekend",
       "title": "週末 planning"
+    },
+    {
+      "id": "p-dotted-i",
+      "title": "İ"
     }
   ],
   "areas": [
@@ -324,6 +328,53 @@
         "destination": {
           "kind": "area",
           "id": "work"
+        }
+      }
+    },
+    {
+      "input": "Task +One Two",
+      "expected": {
+        "destination": {
+          "kind": "project",
+          "id": "p-one-two"
+        }
+      }
+    },
+    {
+      "input": "Task　!Work",
+      "expected": {
+        "destination": {
+          "kind": "area",
+          "id": "work"
+        }
+      }
+    },
+    {
+      "input": "Task +i",
+      "expected": {
+        "destination": {
+          "kind": "area",
+          "id": "personal"
+        },
+        "projectToCreate": "i"
+      }
+    },
+    {
+      "input": "Task +One /ınbox Two",
+      "expected": {
+        "destination": {
+          "kind": "area",
+          "id": "personal"
+        },
+        "projectToCreate": "One"
+      }
+    },
+    {
+      "input": "Task /link:https://example.com /next界 +Work",
+      "expected": {
+        "destination": {
+          "kind": "project",
+          "id": "p-work"
         }
       }
     }

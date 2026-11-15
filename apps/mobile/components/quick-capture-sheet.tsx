@@ -932,7 +932,7 @@ export function QuickCaptureSheet({
     t,
     formatDate: safeFormatDate,
     now: new Date(),
-  }).filter((entry) => entry.kind !== 'project' && entry.kind !== 'area'), [areas, previewOptions, projects, quickAddParseOptions, t, value]);
+  }), [areas, previewOptions, projects, quickAddParseOptions, t, value]);
 
   const captureContext = useCallback((): QuickCaptureContext => ({
     settings,

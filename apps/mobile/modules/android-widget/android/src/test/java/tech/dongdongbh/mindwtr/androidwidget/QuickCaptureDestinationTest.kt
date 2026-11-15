@@ -81,6 +81,7 @@ class QuickCaptureDestinationTest {
     val save = activity.findViewById<Button>(R.id.mindwtr_quick_capture_save)
     input.setText("Task +One @deep work Two")
     assertFalse(save.isEnabled)
+    assertEquals(0.5f, save.alpha, 0f)
     assertEquals("Task +One @deep work Two", input.text.toString())
     assertTrue(queue.listFiles().isNullOrEmpty())
     activity.findViewById<Button>(R.id.mindwtr_quick_capture_destination).performClick()
@@ -88,6 +89,7 @@ class QuickCaptureDestinationTest {
     val choices = dialog.findViewById<ListView>(R.id.mindwtr_capture_destination_choices)!!
     choices.performItemClick(choices.adapter.getView(0, null, choices), 0, 0)
     assertTrue(save.isEnabled)
+    assertEquals(1f, save.alpha, 0f)
     save.performClick()
     assertEquals("none", saved().getJSONObject("destination").getString("kind"))
     assertFalse(saved().has("projectToCreate"))

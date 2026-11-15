@@ -225,12 +225,15 @@ const isNonemptyText = (value: unknown): value is string => isText(value, TEXT_L
 const readOriginalOptions = (value: unknown): QuickCaptureOptions | null => {
     if (!isObjectRecord(value)) return null;
     const keys = Object.keys(OPTION_CHECKS) as (keyof typeof OPTION_CHECKS)[];
-    if (!hasKeys(value, keys, ['destination', 'sectionId']) || (value.destination !== undefined && !readCaptureDestination(value.destination)) || !keys.every((key) => key === 'dueDate' || key === 'startTime'
+    if (!hasKeys(value, keys, ['destination', 'sectionId', 'audioDestination'])
+        || (value.destination !== undefined && !readCaptureDestination(value.destination))
+        || (value.audioDestination !== undefined && !readCaptureDestinationSnapshot(value.audioDestination)) || !keys.every((key) => key === 'dueDate' || key === 'startTime'
         ? value[key] === null || isCaptureDate(value[key]) : OPTION_CHECKS[key](value[key]))) return null;
     if (value.sectionId !== undefined && (!isText(value.sectionId) || !value.sectionId || !value.projectId)) return null;
     if (value.dueDateHasTime === true && typeof value.dueDate === 'string' && DAY_PATTERN.test(value.dueDate)) return null;
     return { ...Object.fromEntries(keys.map((key) => [key, key === 'contexts' ? [...value.contexts as string[]] : value[key]])),
         ...(value.destination !== undefined ? { destination: readCaptureDestination(value.destination)! } : {}),
+        ...(value.audioDestination !== undefined ? { audioDestination: readCaptureDestinationSnapshot(value.audioDestination)! } : {}),
         ...(typeof value.sectionId === 'string' ? { sectionId: value.sectionId } : {}) } as QuickCaptureOptions;
 };
 
@@ -785,8 +788,6 @@ export function createQuickCaptureMethods(deps: QuickCaptureDeps) {
             const draft = readDraft(input);
             if (!draft.ok) return draft;
             const options = freezeQuickCaptureAudioDestination(draft.value.text, draft.value.options, context());
-            if (!buildQuickCaptureView(draft.value.text, options, context()).destination.available)
-                return fail('INVALID_INPUT', deps.t()('quickAdd.destinationUnavailable'));
             return { ok: true, value: { options } };
         },
 

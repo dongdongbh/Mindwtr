@@ -1,5 +1,5 @@
 import { compareAreasByOrder } from './task-utils';
-import { captureDestinationProps, isCaptureDestinationAvailable, resolveCaptureDestination, type CaptureDestination, type CaptureDestinationSnapshot } from './capture-destination';
+import { isCaptureDestinationAvailable, resolveCaptureDestination, type CaptureDestination, type CaptureDestinationSnapshot } from './capture-destination';
 import { DEFAULT_PROJECT_COLOR } from './color-constants';
 
 
@@ -329,10 +329,6 @@ export function buildQuickCapturePreview(
     const trimmed = text.trim();
     if (!trimmed) return [];
     const parsed = parseQuickAdd(trimmed, [...context.projects], context.now, [...context.areas], context.parseOptions);
-    if (options.destination) {
-        parsed.props = { ...parsed.props, ...captureDestinationProps(options.destination) };
-        parsed.projectTitle = undefined;
-    }
     return buildQuickAddPreviewEntries(
         parsed,
         {
@@ -348,7 +344,7 @@ export function buildQuickCapturePreview(
             },
             formatDate: context.formatDate,
         },
-    );
+    ).filter(entry => entry.kind !== 'project' && entry.kind !== 'area');
 }
 
 
