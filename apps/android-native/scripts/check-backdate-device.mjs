@@ -6,7 +6,7 @@ import { createHash, randomInt } from 'node:crypto';
 import { mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { box, button, check, connect, evidenced, fail, hasText, inboxCount, inEditor, inList, projectTitled, Stopped, tab, tabSelected, tagged, taskRow, withDescription } from './device.mjs';
+import { box, button, check, connect, evidenced, fail, hasText, inEditor, inList, projectTitled, Stopped, tab, tabSelected, tagged, taskRow, withDescription } from './device.mjs';
 
 const [serial, apkArg] = process.argv.slice(2);
 if (!serial) {
@@ -72,7 +72,7 @@ const saves = () => device.logs(pid(), TAG).split('\n').filter((line) => line.in
 
 const inPopup = (nodes) => Boolean(tagged(nodes, 'quick-capture'));
 const sheetOpen = (nodes) => Boolean(tagged(nodes, 'more-sheet'));
-const onInbox = (nodes) => !inPopup(nodes) && !tagged(nodes, 'menu-screen') && !inEditor(nodes) && Number.isFinite(inboxCount(nodes));
+const onInbox = (nodes) => !inPopup(nodes) && !tagged(nodes, 'menu-screen') && !inEditor(nodes) && tabSelected(nodes, en['tab.inbox']);
 const inHistory = (nodes) => Boolean(tagged(nodes, 'menu-screen')) && hasText(nodes, en['nav.history']);
 const center = (node) => { const [l, t, r, b] = box(node); return [Math.round((l + r) / 2), Math.round((t + b) / 2)]; };
 const longPress = (node) => {

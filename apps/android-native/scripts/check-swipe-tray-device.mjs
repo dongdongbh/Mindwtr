@@ -3,7 +3,7 @@ import { createHash, randomInt } from 'node:crypto';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { box, button, check, connect, EDGE_SAFE_X, evidenced, fail, hasText, inboxCount, inEditor, Stopped, tab, tabSelected, tagged, taskRow, withDescription } from './device.mjs';
+import { box, button, check, connect, EDGE_SAFE_X, evidenced, fail, hasText, inEditor, Stopped, tab, tabSelected, tagged, taskRow, withDescription } from './device.mjs';
 
 const [serial, apkArg] = process.argv.slice(2);
 if (!serial) {
@@ -51,7 +51,7 @@ const pad = (n) => String(n).padStart(2, '0');
 const dayOf = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 
 const inPopup = (nodes) => Boolean(tagged(nodes, 'quick-capture'));
-const onInbox = (nodes) => !inPopup(nodes) && !tagged(nodes, 'menu-screen') && !inEditor(nodes) && Number.isFinite(inboxCount(nodes));
+const onInbox = (nodes) => !inPopup(nodes) && !tagged(nodes, 'menu-screen') && !inEditor(nodes) && tabSelected(nodes, en['tab.inbox']);
 const trayButtons = (nodes) => nodes.filter((node) => /swipe-\w+$/.test(node['resource-id'] ?? ''))
     .sort((a, b) => box(a)[0] - box(b)[0]).map((node) => (node['resource-id'] ?? '').split('swipe-').pop());
 const center = (node) => { const [l, t, r, b] = box(node); return [Math.round((l + r) / 2), Math.round((t + b) / 2)]; };

@@ -5,7 +5,7 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSyn
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
-import { apkDrift, buildSteps, checkApks, checkArgs, closingLines, defaultChecks, DISPOSABLE_PACKAGES, harnessChecks, KNOWN_STALE, parseArgs, pinApks, resetLibrary, setenvArgs, staleEntryProblem, staleLines, staleProblems, unreachable, verdict,
+import { apkDrift, buildSteps, checkApks, checkArgs, closingLines, defaultChecks, DISPOSABLE_PACKAGES, eachCheck, harnessChecks, KNOWN_STALE, parseArgs, pinApks, resetLibrary, setenvArgs, staleEntryProblem, staleLines, staleProblems, unreachable, verdict,
     withAdbPort } from './run-device-batch.mjs';
 import { DEFAULT_ADB } from './device.mjs';
 
@@ -132,6 +132,20 @@ test('the batch reset clears only the two disposable dev packages', () => {
     assert.ok(!calls.includes('past onboarding'), 'every upgradetest check uninstalls first, so only the dev library needs onboarding passed');
     assert.throws(() => resetLibrary(adb, 'tech.dongdongbh.mindwtr', past), /refusing to clear tech\.dongdongbh\.mindwtr$/);
     assert.equal(resetLibrary(() => '', 'tech.dongdongbh.mindwtr.upgradetest', past), 'not installed');
+});
+
+test('every check starts on a fresh library, so no check leans on what the one before it left', () => {
+    const steps = [];
+    const results = eachCheck(['a', 'b', 'c', 'd'], {
+        stopped: () => steps.includes('run d'),
+        skipped: (check) => check === 'b',
+        reset: (check) => steps.push(`reset ${check}`),
+        run: (check) => { steps.push(`run ${check}`); return check === 'a' ? 1 : 0; },
+    });
+    assert.deepEqual(steps, ['reset a', 'run a', 'reset c', 'run c', 'reset d', 'run d']);
+    assert.deepEqual(results, [{ check: 'a', exit: 1 }, { check: 'b', exit: 1 }, { check: 'c', exit: 0 }, { check: 'd', exit: 0 }]);
+    const drifted = eachCheck(['a', 'b'], { stopped: () => true, skipped: () => false, reset: () => assert.fail('reset after a stop'), run: () => assert.fail('run after a stop') });
+    assert.deepEqual(drifted, [{ check: 'a', exit: 1 }, { check: 'b', exit: 1 }]);
 });
 
 test('the batch ends with the dev library past onboarding, so the old runner on other branches finds it as it expects', () => {

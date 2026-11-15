@@ -162,6 +162,23 @@ export function resetLibrary(adb, pkg, pastOnboarding) {
     return `${cleared}, ${granted.length} permissions granted again, exact alarms ${exactBefore} (now ${exactMode()})${onboarding}`;
 }
 
+export function eachCheck(checks, { stopped, skipped, reset, run }) {
+    const results = [];
+    for (const [index, check] of checks.entries()) {
+        if (stopped()) {
+            for (const rest of checks.slice(index)) results.push({ check: rest, exit: 1 });
+            break;
+        }
+        if (skipped(check)) {
+            results.push({ check, exit: 1 });
+            continue;
+        }
+        reset(check);
+        results.push({ check, exit: run(check) });
+    }
+    return results;
+}
+
 export const closingLines = (results, pastOnboarding, stale = KNOWN_STALE) => [...staleLines(results, stale), `past onboarding=${pastOnboarding()}`, verdict(results, stale)];
 
 const hhmm = () => new Date().toTimeString().slice(0, 5);
@@ -275,36 +292,41 @@ function main() {
     }
     for (const { path, sha } of pinned) say(`apk ${path} sha256 ${sha} head ${head}`);
     const pinnedPath = new Map(pinned.map(({ apk, path }) => [apk, path]));
-    for (const pkg of DISPOSABLE_PACKAGES) say(`reset ${pkg}: ${resetLibrary(adb, pkg, pastOnboarding)}`);
-
-    const results = [];
-    for (const [index, check] of checks.entries()) {
-        const drift = apkDrift(pinned);
-        if (drift) {
-            say(drift);
-            for (const skipped of checks.slice(index)) results.push({ check: skipped, exit: 1 });
-            finish(results);
-        }
-        if (harnessFailed && needHarness.includes(check)) {
+    const topActivity = () => adb('dumpsys', 'activity', 'activities').split('\n').find((l) => l.includes('topResumedActivity')) ?? '';
+    const timedReset = (pkg) => {
+        const started = Date.now();
+        const outcome = resetLibrary(adb, pkg, pastOnboarding);
+        return `${outcome} (${Math.round((Date.now() - started) / 1000)} s)`;
+    };
+    const results = eachCheck(checks, {
+        stopped: () => {
+            const drift = apkDrift(pinned);
+            if (drift) say(drift);
+            return Boolean(drift);
+        },
+        skipped: (check) => {
+            if (!harnessFailed || !needHarness.includes(check)) return false;
             say(`## ${check} ${hhmm()}`);
             say('EXIT=1 not run, harness failed');
-            results.push({ check, exit: 1 });
-            continue;
-        }
-        const top = adb('dumpsys', 'activity', 'activities').split('\n').find((l) => l.includes('topResumedActivity')) ?? '';
-        const leftOpen = DISPOSABLE_PACKAGES.find((pkg) => top.includes(` ${pkg}/`));
-        if (leftOpen) {
-            adb('am', 'force-stop', leftOpen);
-            say(`force-stopped ${leftOpen}: it was still in front`);
-        }
-        if (!top.includes('launcher')) adb('input', 'keyevent', 'KEYCODE_HOME');
-        adb('settings', 'put', 'system', 'accelerometer_rotation', '1');
-        say(`## ${check} ${hhmm()}`);
-        const code = run('timeout', ['3600', process.execPath, `${scriptsDir}/${check}.mjs`, SERIAL, ...checkArgs(check, apksOf.get(check).map((apk) => pinnedPath.get(apk)))], `${check}.log`);
-        say(`EXIT=${code} rotation=${adb('settings', 'get', 'system', 'accelerometer_rotation')}`);
-        results.push({ check, exit: code });
-        if (code !== 0) for (const pkg of DISPOSABLE_PACKAGES) say(`reset ${pkg} after the failure: ${resetLibrary(adb, pkg, pastOnboarding)}`);
-    }
+            return true;
+        },
+        reset: (check) => {
+            const leftOpen = DISPOSABLE_PACKAGES.find((pkg) => topActivity().includes(` ${pkg}/`));
+            if (leftOpen) {
+                adb('am', 'force-stop', leftOpen);
+                say(`force-stopped ${leftOpen}: it was still in front`);
+            }
+            say(`## ${check} ${hhmm()}`);
+            for (const pkg of DISPOSABLE_PACKAGES) say(`reset ${pkg}: ${timedReset(pkg)}`);
+            if (!topActivity().includes('launcher')) adb('input', 'keyevent', 'KEYCODE_HOME');
+            adb('settings', 'put', 'system', 'accelerometer_rotation', '1');
+        },
+        run: (check) => {
+            const code = run('timeout', ['3600', process.execPath, `${scriptsDir}/${check}.mjs`, SERIAL, ...checkArgs(check, apksOf.get(check).map((apk) => pinnedPath.get(apk)))], `${check}.log`);
+            say(`EXIT=${code} rotation=${adb('settings', 'get', 'system', 'accelerometer_rotation')}`);
+            return code;
+        },
+    });
     finish(results);
 }
 
