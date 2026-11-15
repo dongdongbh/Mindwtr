@@ -137,6 +137,40 @@ Native Android first ships as release candidates, starting with `1.4.0-rc.1`. Un
 
 **Before `1.4.0-rc.1` goes to the open-testing track,** announce the change to the existing RN beta users (see "Play permits one open-testing track" above). The announcement includes backup instructions and the list of capabilities native does not have yet.
 
+### iOS: native ships on TestFlight first, RN stable continues (maintainer decision, 2026-11-15)
+
+Native iOS first ships as TestFlight release candidates, starting with `1.4.0-rc.1`. The plan has three steps:
+
+1. **Finish building and testing native iOS.** The upgrade, recovery and parity checks in this document come first.
+2. **Release native iOS RCs on TestFlight.** Each RC goes to the external Native Beta TestFlight group (see the Apple column in the table above).
+3. **Release native iOS stable when the TestFlight builds are stable.** The App Store switches to native only then.
+
+Until native iOS becomes stable, two release lines run in parallel:
+
+- **Stable releases stay on React Native.** After `1.4.0-rc.1` ships, the stable workflow can still build `apps/mobile` and release RN iOS to the App Store.
+- **Release candidates are native only.** An iOS RC is a TestFlight build of `apps/ios-native` under the existing app identity, `tech.dongdongbh.mindwtr`. There is no React Native iOS RC.
+- **Users only move from RN to native, never back.** A user on RN stable can move to native by joining the Native Beta TestFlight group, and later by the native stable App Store update. A user on native must never be updated to an RN build.
+- **A bug found in an RC is fixed in native** and ships as a new native RC, not as an RN release.
+- **When native is stable,** the stable workflow switches to native, and the RN iOS release line ends.
+
+**Version numbers keep native users on native.** The App Store version string allows only numbers and dots. So a TestFlight build of `1.4.0-rc.1` shows as version `1.4.0` with its own build number, and the `rc.1` name lives in the release tag and notes. The rules are:
+
+- **RN stable releases keep `1.3.x` versions.** Every RN version stays below every native version, so iOS never treats an RN release as an update to a native install.
+- **The first native App Store release is `1.4.0` or higher.** It is an update for RN users, and RN users can only move up to it.
+- **No RN build goes to the Native Beta TestFlight group.** A tester there only ever gets native builds.
+- **A new native RC ships before the current one expires.** A TestFlight build stops opening 90 days after upload. A tester whose build expired has only the App Store RN app left, so ship a new RC well inside 90 days.
+- **The release workflow refuses a wrong version.** An RN stable tag at `1.4.0` or higher stops the workflow, and so does a native RC below the newest RN version.
+
+Only a manual step by the tester leads back to RN: the tester installs the App Store version, which replaces the TestFlight build and keeps its data. No release may do this for them. The tester announcement warns against this step, and section 5 covers what RN can read after native has written the data.
+
+**Open work before `1.4.0-rc.1`:**
+
+- `release-ios-appstore.yml` builds `apps/mobile` only, and reads its version from `apps/mobile/app.json`. It needs a native path that archives `apps/ios-native` for an RC tag and uploads it to TestFlight only.
+- The Native Beta TestFlight group must not pick up RN stable builds, and the normal RN beta audience must not get native builds without notice.
+- Prove one install of the RC build over the App Store RN app on a real iPhone. The check covers data, settings and Shortcuts saved under RN. The native Shortcuts actions keep RN's internal names, but only a build under `tech.dongdongbh.mindwtr` can prove saved Shortcuts still work.
+- Add the version checks above to the release workflows.
+- Prove on a real iPhone that a TestFlight native `1.4.0` install is not replaced when an RN `1.3.x` release ships on the App Store. Write the result in the tester announcement.
+
 Proposed observation policy: two weekly-review cycles in opt-in beta, then at least seven days on an RC with no unresolved release blocker. These intervals do not replace coverage. Material fixes repeat affected checks and the affected RC observation period; sparse observations remain explicitly uncertain.
 
 ## 5. Upgrade compatibility and recovery
