@@ -4,6 +4,7 @@ import {
     PENDING_CAPTURE_LAST_APPLIED_STORAGE_KEY,
     PENDING_CAPTURES_DIRECTORY,
     drainPendingCaptureQueue,
+    useTaskStore,
     type AppData,
     type PendingAudioCapture,
     type PendingCaptureStoreDeps,
@@ -124,6 +125,10 @@ export async function ingestPendingCaptures({ transcribeAudio, ...deps }: Ingest
     const dir = `${documentDirectory}${PENDING_CAPTURES_DIRECTORY}`;
     return drainPendingCaptureQueue({
         ...deps,
+        sections: deps.sections ?? useTaskStore.getState().sections,
+        getProjects: deps.getProjects ?? (() => useTaskStore.getState()._allProjects),
+        getAreas: deps.getAreas ?? (() => useTaskStore.getState()._allAreas),
+        getSections: deps.getSections ?? (() => useTaskStore.getState()._allSections),
         settleWatchChecklist,
         queue: {
             list: async () => ((await getInfoAsync(dir)).exists ? readDirectoryAsync(dir) : null),

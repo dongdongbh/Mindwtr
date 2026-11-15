@@ -306,6 +306,8 @@ export const faOverrides: Record<string, string> = {
         'quickAdd.syntaxHelp': 'راهنمای نحو افزودن سریع',
         'quickAdd.pasteImagesHint': 'برای پیوست تصویر یا اسکرین‌شات، آن را با {{shortcut}} بچسبانید.',
         'quickAdd.placeholder': 'افزودن یک کار… از @زمینه +پروژه #برچسب استفاده کنید',
+        'quickAdd.destinationUnavailable': "مقصد در دسترس نیست. مقصد دیگری انتخاب کنید.",
+        "quickAdd.destinationNeedsSelection": "برای ذخیره، یک مقصد انتخاب کنید.",
         'quickAdd.addAnother': 'افزودن مورد دیگر',
         'quickAdd.inputLabel': 'عنوان کار',
         'quickAdd.inputHint': 'عنوان یک کار را بنویسید، سپس افزودن یا کلید Enter را بزنید.',

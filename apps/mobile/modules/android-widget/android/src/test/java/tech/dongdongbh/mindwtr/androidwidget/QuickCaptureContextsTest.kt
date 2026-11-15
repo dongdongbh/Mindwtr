@@ -33,13 +33,14 @@ class QuickCaptureContextsTest {
     QuickCaptureAudioSessionStore.clearForTests()
     context.getSharedPreferences(WidgetPayloadStore.PREFS_NAME, Context.MODE_PRIVATE).edit().clear().commit()
     queue.deleteRecursively()
+    WidgetPayloadStore.write(context, JSONObject().put("captureDestinations", captureDestinationCatalog()).toString())
   }
 
   private fun publish(vararg names: String) {
     val contexts = JSONArray()
     names.forEach { contexts.put(JSONObject().put("id", "context:$it").put("name", it)) }
     WidgetPayloadStore.write(context, JSONObject().put("headerTitle", "Focus").put("contexts", contexts)
-      .put("listTitles", JSONObject().put("contexts", "Kontexte").put("search", "Suchen")).toString())
+      .put("captureDestinations", captureDestinationCatalog()).put("listTitles", JSONObject().put("contexts", "Kontexte").put("search", "Suchen")).toString())
   }
 
   private fun open() = Robolectric.buildActivity(QuickCaptureActivity::class.java, Intent(context, QuickCaptureActivity::class.java)).also {

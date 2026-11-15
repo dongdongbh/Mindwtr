@@ -739,7 +739,11 @@ assert.match(source('AppLock.kt'), /LaunchedEffect\(c\.bg, theme\.isDark\) \{ ac
 assert.match(processUi, /\.verticalScroll\(scroll\)/);
 const captureUi = source('CaptureScreen.kt');
 
-assert.match(captureUi, /private fun InboxViewModel\.TitleField\([\s\S]{0,1200}keyboardOptions = KeyboardOptions\(capitalization = KeyboardCapitalization\.Sentences, imeAction = ImeAction\.Done\)/);
+const captureTitleField = captureUi.match(/private fun InboxViewModel\.TitleField\([\s\S]*?\n\}/)?.[0] ?? '';
+assert.match(captureTitleField, /keyboardOptions = KeyboardOptions\(capitalization = KeyboardCapitalization\.Sentences, imeAction = ImeAction\.Done\)/);
+assert.match(captureTitleField, /suggestions = captureAutocomplete\(field\.text, field\.selection\.start, field\.selection\.end\)/);
+assert.doesNotMatch(captureTitleField, /\bcoreHost\(/);
+assert.match(model, /internal suspend fun captureAutocomplete\(text: String, caret: Int, selectionEnd: Int\): JSONObject\? \{\s+val runtime = host \?: return null\s+val input = JSONObject\(\)\.put\("text", text\)\.put\("caret", caret\)\.put\("selectionEnd", selectionEnd\)\.toString\(\)\s+delay\(120\)\s+return runCatching \{ withContext\(Dispatchers\.IO\) \{ runtime\.quickCaptureAutocomplete\(input\) \} \}\.getOrNull\(\)/);
 assert.match(captureUi, /private fun NoteField\([\s\S]{0,1200}keyboardOptions = KeyboardOptions\(capitalization = KeyboardCapitalization\.Sentences\)/);
 const captureModalUi = source('CaptureModal.kt');
 const captureModalModel = source('CaptureModalModel.kt');
@@ -2557,7 +2561,8 @@ assert.match(inboxUi, /ActionButton\(Lucide\.ListChecks, process\.getString\("la
 assert.doesNotMatch(code(activity), /"\$inbox · \$total"/, 'the "Inbox · N" count line is gone, as in RN');
 
 
-for (const [fn, js] of [['openQuickCapture', 'captureOpen'], ['quickCaptureView', 'captureView'], ['editQuickCapture', 'captureEdit'],
+assert.match(coreHost, /fun openQuickCapture\(initialProps: JSONObject\? = null\): JSONObject = if \(initialProps == null\) callAsync\("captureOpen"\)\s+else callAsync\("captureOpenContext", JSONObject\(\)\.put\("initialProps", initialProps\)\.toString\(\)\)/);
+for (const [fn, js] of [['quickCaptureView', 'captureView'], ['editQuickCapture', 'captureEdit'],
     ['submitQuickCapture', 'captureSubmit'], ['submitQuickCaptureLines', 'captureLines'],
     ['submitQuickCapturePickerQuery', 'capturePicker']]) {
     assert.match(coreHost, new RegExp(`fun ${fn}\\([^)]*\\): JSONObject = callAsync\\("${js}"`), `CoreHost.${fn} reaches host method ${js}`);
@@ -2823,7 +2828,7 @@ for (const [file, handler] of [
     ['ArchiveScreen.kt', /BackHandler\(enabled = selecting && dialog == null && model\.failedAction == null\) \{ selecting\(false\) \}/],
     ['FocusScreen.kt', /BackHandler\(enabled = failedAction == null && reorder != null && menu\.focusControls\.dialog == null\) \{ menu\.focusControls\.reorder\(false\) \}/],
     ['CaptureScreen.kt', /draft\.confirm != null -> cancelCaptureLines\(\)/],
-    ['CaptureModal.kt', /if \(modal\.confirm != null\) cancelLines\(\) else cancel\(leave = false\)/],
+    ['CaptureModal.kt', /if \(modal\.confirm != null\) cancelLines\(\) else if \(modal\.destinationQuery != null\) closeDestination\(\) else cancel\(leave = false\)/],
 ]) assert.match(source(file), handler, `${file}: Back leaves its mode before the screen`);
 
 assert.match(searchUi, /listed != null -> \{ closeSearch\(\); menu\.openRoute\(listed\); highlight\(task\.id\) \}/);
@@ -4030,7 +4035,7 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
 {
     const rnSheet = readFileSync(resolve(app, '../../apps/mobile/components/quick-capture-sheet/QuickCaptureSheetBody.tsx'), 'utf8');
     assert.equal(rnSheet.match(/opacity: value\.trim\(\) && !saving \? 1 : 0\.5/g)?.length, 2);
-    assert.equal(rnSheet.match(/disabled=\{saving \|\| !value\.trim\(\)\}/g)?.length, 2);
+    assert.equal(rnSheet.match(/disabled=\{saving \|\| !destinationAvailable \|\| !value\.trim\(\)\}/g)?.length, 2);
     const buttons = code(captureUi).match(/Box\(Modifier\.fade\(if \(canSave\) 1f else 0\.5f\)\.widthIn\(min = 1(12|04)\.dp\)[^\n]*/g) ?? [];
     assert.equal(buttons.length, 2, 'Save and edit and Save fade as a whole');
     assert.doesNotMatch(code(captureUi), /\.clickable\(enabled = canSave[^\n]*\n[^\n]*\.fade\(/, 'no fade after a pill\'s background');
@@ -4123,7 +4128,7 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     assert.match(activity, /if \(modal != null && writable\) CaptureModalScreen\(model, modal\)\s+else if \(open != null && writable\) Box\(Modifier\.fillMaxSize\(\)\) \{\s+TaskEditorScreen\(model, open\)/);
     assert.match(modalKt, /if \(leave && close\.getBoolean\("returnToPreviousApp"\)\) shell\.leaveApp = true/);
 
-    assert.match(captureModalUi, /if \(modal\.confirm != null\) cancelLines\(\) else cancel\(leave = false\)/);
+    assert.match(captureModalUi, /if \(modal\.confirm != null\) cancelLines\(\) else if \(modal\.destinationQuery != null\) closeDestination\(\) else cancel\(leave = false\)/);
 
 
     assert.match(captureModalUi, /Box\(Modifier\.fillMaxSize\(\)\.background\(c\.bg\)\.imePadding\(\)\.semantics \{ testTagsAsResourceId = true \}\.testTag\("capture-modal"\)\)/);

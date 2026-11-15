@@ -4,6 +4,7 @@ import android.Manifest
 import android.appwidget.AppWidgetManager
 import android.content.Context
 import android.content.Intent
+import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.content.res.ColorStateList
 import android.graphics.drawable.GradientDrawable
@@ -11,6 +12,7 @@ import android.os.Bundle
 import android.util.Log
 import android.view.KeyEvent
 import android.view.View
+import android.view.inputmethod.BaseInputConnection
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import android.widget.Button
@@ -27,19 +29,31 @@ import androidx.core.content.ContextCompat
 import androidx.core.widget.doAfterTextChanged
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
+import org.json.JSONObject
 import java.io.IOException
 import java.util.UUID
 import java.util.concurrent.Executors
 
 
 class QuickCaptureActivity : AppCompatActivity() {
-  private lateinit var input: EditText
+  private lateinit var input: QuickCaptureInput
+  private lateinit var autocompleteMatches: LinearLayout
+  private lateinit var capturePayload: WidgetPayload
   private lateinit var description: EditText
   private lateinit var save: Button
   private lateinit var cancel: Button
   private lateinit var audio: ImageButton
   private lateinit var audioStatus: TextView
   private lateinit var statusButton: Button
+  private lateinit var destinationButton: Button
+  private var payloadPreferences: SharedPreferences? = null
+  private val payloadListener = SharedPreferences.OnSharedPreferenceChangeListener { _, name ->
+    if (name == WidgetPayloadStore.KEY_PAYLOAD && ::audioSession.isInitialized) {
+      capturePayload = WidgetPayloadStore.read(this)
+      audioSession.updateDestinationCatalog(capturePayload.captureDestinations)
+      showAutocomplete()
+    }
+  }
   private lateinit var contextsButton: Button
   private lateinit var contextPanel: View
   private lateinit var contextFilter: EditText
@@ -74,6 +88,7 @@ class QuickCaptureActivity : AppCompatActivity() {
     super.onCreate(savedInstanceState)
     setContentView(R.layout.mindwtr_quick_capture)
     val payload = WidgetPayloadStore.read(this)
+    capturePayload = payload
     labels = payload.quickCapture
     audioSession = obtainAudioSession(savedInstanceState)
 
@@ -83,6 +98,7 @@ class QuickCaptureActivity : AppCompatActivity() {
     val title = findViewById<TextView>(R.id.mindwtr_quick_capture_title)
     title.text = labels.title
     input = findViewById(R.id.mindwtr_quick_capture_input)
+    autocompleteMatches = findViewById(R.id.mindwtr_quick_capture_autocomplete)
     input.hint = labels.placeholder
     input.setText(audioSession.snapshot.title)
     input.setSelection(input.text?.length ?: 0)
@@ -117,6 +133,9 @@ class QuickCaptureActivity : AppCompatActivity() {
           .show()
       }
     }
+    destinationButton = findViewById<Button>(R.id.mindwtr_quick_capture_destination).apply {
+      setOnClickListener { openDestinationPicker() }
+    }
     contextOptions = payload.contexts
     contextPanel = findViewById(R.id.mindwtr_quick_capture_context_panel)
     contextMatches = findViewById(R.id.mindwtr_quick_capture_context_matches)
@@ -147,10 +166,13 @@ class QuickCaptureActivity : AppCompatActivity() {
     }
     input.doAfterTextChanged { text ->
       if (!rendering) audioSession.updateTitle(text?.toString().orEmpty())
+      input.post { showAutocomplete() }
     }
+    input.onSelectionChange = { if (::contextPanel.isInitialized) showAutocomplete() }
     input.setOnEditorActionListener { _, actionId, event ->
       val enterPressed = event?.keyCode == KeyEvent.KEYCODE_ENTER && event.action == KeyEvent.ACTION_DOWN
       if (actionId == EditorInfo.IME_ACTION_DONE || enterPressed) {
+        if ((input.text?.let(BaseInputConnection::getComposingSpanStart) ?: -1) >= 0) return@setOnEditorActionListener true
         save()
         true
       } else {
@@ -166,6 +188,9 @@ class QuickCaptureActivity : AppCompatActivity() {
       }
     })
     observerToken = audioSession.attach(::render)
+    payloadPreferences = getSharedPreferences(WidgetPayloadStore.PREFS_NAME, Context.MODE_PRIVATE)
+    payloadPreferences?.registerOnSharedPreferenceChangeListener(payloadListener)
+    CaptureSyncHeadlessService.startWidgetRefresh(this)
     val cleanupFilesDir = filesDir
     val activeIds = QuickCaptureAudioSessionStore.activeIds()
     CAPTURE_IO.execute { QuickCaptureAudioCleanup.sweep(cleanupFilesDir, activeIds) }
@@ -219,6 +244,8 @@ class QuickCaptureActivity : AppCompatActivity() {
   }
 
   override fun onDestroy() {
+    payloadPreferences?.unregisterOnSharedPreferenceChangeListener(payloadListener)
+    payloadPreferences = null
     observerToken?.let(audioSession::detach)
     observerToken = null
     super.onDestroy()
@@ -227,6 +254,8 @@ class QuickCaptureActivity : AppCompatActivity() {
   override fun onSaveInstanceState(outState: Bundle) {
     outState.putString(STATE_DEFAULT_STATUS, audioSession.defaultStatus)
     outState.putString(STATE_CAPTURE_STATUS, audioSession.captureStatus)
+    outState.putString(STATE_DEFAULT_DESTINATION, audioSession.defaultDestination?.toJson()?.toString())
+    outState.putString(STATE_SELECTED_DESTINATION, audioSession.selectedDestination?.toJson()?.toString())
     super.onSaveInstanceState(outState)
   }
 
@@ -264,11 +293,13 @@ class QuickCaptureActivity : AppCompatActivity() {
               }
             },
             publishAudio = { draft, typedTitle, typedNote, complete ->
+              val destination = retainedSession.resolveDestination(typedTitle)
               CAPTURE_IO.execute {
                 val saved = try {
+                  if (destination == null) throw IOException("Capture destination unavailable")
                   PendingCaptureWriter.publishAudio(captureFilesDir, draft, typedTitle, typedNote,
-                    retainedSession.defaultStatus, retainedSession.captureStatus)
-                  Log.i(TAG, "Native quick capture audio queued")
+                    retainedSession.defaultStatus, retainedSession.captureStatus, destination)
+                  Log.i(TAG, "Audio capture destination queued releaseCheck=v1.3.9/android-capture-destination")
                   true
                 } catch (_: Exception) {
                   Log.w(TAG, "Native quick capture audio queue write failed")
@@ -287,6 +318,9 @@ class QuickCaptureActivity : AppCompatActivity() {
               PendingCaptureWriter.creationStatus(widgetList) ?: "inbox"
             },
             initialCaptureStatus = savedInstanceState?.getString(STATE_CAPTURE_STATUS),
+            initialDestination = savedDestination(savedInstanceState, STATE_DEFAULT_DESTINATION),
+            initialSelectedDestination = savedDestination(savedInstanceState, STATE_SELECTED_DESTINATION),
+            initialCatalog = capturePayload.captureDestinations,
 
             initialTitle = if (savedInstanceState == null) widgetList?.let(WidgetListStore::captureText).orEmpty() else "",
           )
@@ -340,7 +374,6 @@ class QuickCaptureActivity : AppCompatActivity() {
     val editable = snapshot.state == QuickCaptureAudioSession.State.IDLE ||
       snapshot.state == QuickCaptureAudioSession.State.READY
     save.isEnabled = snapshot.canSaveText || snapshot.canSaveAudio
-    save.alpha = if (save.isEnabled) 1f else 0.5f
     cancel.isEnabled = snapshot.state != QuickCaptureAudioSession.State.SAVING &&
       snapshot.state != QuickCaptureAudioSession.State.SAVED &&
       snapshot.state != QuickCaptureAudioSession.State.CLOSED
@@ -352,6 +385,21 @@ class QuickCaptureActivity : AppCompatActivity() {
     description.isEnabled = input.isEnabled
     statusButton.isEnabled = input.isEnabled
     contextsButton.isEnabled = input.isEnabled
+    destinationButton.isEnabled = input.isEnabled
+    val catalog = audioSession.destinationCatalog
+    val destination = audioSession.resolveDestination()
+    val destinationLabels = catalog?.labels
+    val destinationName = destination?.projectToCreate ?: when (destination?.destination?.kind) {
+      "none" -> destinationLabels?.none ?: "None"
+      "area" -> catalog?.areas?.firstOrNull { it.id == destination.destination.id }?.name
+      "project" -> catalog?.projects?.firstOrNull { it.id == destination.destination.id }?.title
+      else -> null
+    }
+    val needsSelection = audioSession.selectedDestination == null && QuickCaptureDestination.requiresExplicitDestination(snapshot.title)
+    destinationButton.text = if (needsSelection) destinationLabels?.needsSelection ?: "Choose a destination to save."
+      else "${destinationLabels?.destination ?: "Destination"}: ${destinationName ?: destinationLabels?.unavailable ?: "Unavailable"}"
+    save.isEnabled = save.isEnabled && destination != null
+    save.alpha = if (save.isEnabled) 1f else 0.5f
     if (!input.isEnabled && contextPanel.visibility == View.VISIBLE) contextPanel.visibility = View.GONE
     val captureStatus = audioSession.captureStatus ?: audioSession.defaultStatus
     statusButton.text = "${labels.statusLabel}: ${labels.statusLabels.getValue(captureStatus)}"
@@ -382,9 +430,89 @@ class QuickCaptureActivity : AppCompatActivity() {
     audioStatus.setTextColor(palette.mutedText)
     statusButton.setTextColor(palette.accent)
     contextsButton.setTextColor(palette.accent)
+    destinationButton.setTextColor(palette.accent)
     contextFilter.setTextColor(palette.text)
     contextFilter.setHintTextColor(palette.mutedText)
     tint(contextFilter, palette.card)
+  }
+
+  private fun openDestinationPicker() {
+    val catalog = audioSession.destinationCatalog
+    val destinationLabels = catalog?.labels
+    val rows = mutableListOf((destinationLabels?.none ?: "None") to WidgetPayload.CaptureDestination("none"))
+    catalog?.areas?.forEach { rows.add("${destinationLabels?.areas}: ${it.name}" to WidgetPayload.CaptureDestination("area", it.id)) }
+    catalog?.projects?.forEach { rows.add("${destinationLabels?.projects}: ${it.title}" to WidgetPayload.CaptureDestination("project", it.id)) }
+    val container = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+    val filter = EditText(this).apply {
+      hint = destinationLabels?.search ?: capturePayload.listTitles["search"] ?: "Search"
+      isSingleLine = true
+    }
+    val list = android.widget.ListView(this).apply { id = R.id.mindwtr_capture_destination_choices }
+    container.addView(filter)
+    container.addView(list)
+    var matches = rows.toList()
+    fun updateRows(query: String) {
+      matches = rows.filter { it.second.kind == "none" || it.first.contains(query.trim(), ignoreCase = true) }
+      list.adapter = android.widget.ArrayAdapter(this, android.R.layout.simple_list_item_1, matches.map { it.first })
+    }
+    val dialog = AlertDialog.Builder(this).setTitle(destinationLabels?.destination ?: "Destination")
+      .setView(container).setNegativeButton(labels.cancel, null).create()
+    list.setOnItemClickListener { _, _, position, _ ->
+      audioSession.selectDestination(matches[position].second)
+      dialog.dismiss()
+    }
+    filter.doAfterTextChanged { updateRows(it?.toString().orEmpty()) }
+    updateRows("")
+    dialog.show()
+  }
+
+  private fun showAutocomplete() {
+    autocompleteMatches.removeAllViews()
+    autocompleteMatches.visibility = View.GONE
+    if (!input.hasFocus() || !input.isEnabled || contextPanel.visibility == View.VISIBLE ||
+      (input.text?.let(BaseInputConnection::getComposingSpanStart) ?: -1) >= 0 || input.selectionStart != input.selectionEnd) return
+    val text = input.text?.toString().orEmpty()
+    val token = QuickCaptureAutocomplete.tokenAt(text, input.selectionStart) ?: return
+    val choices = when (token.prefix) {
+      '@' -> capturePayload.contexts.mapNotNull { option ->
+        WidgetListStore.captureText(option.id).trimEnd().takeIf { it.isNotEmpty() }
+          ?.let { QuickCaptureAutocomplete.Choice(option.name, it) }
+      }
+      '#' -> capturePayload.tags.mapNotNull { option ->
+        WidgetListStore.captureText(option.id).trimEnd().takeIf { it.isNotEmpty() }
+          ?.let { QuickCaptureAutocomplete.Choice(option.name, it) }
+      }
+      '+' -> capturePayload.captureDestinations?.projects.orEmpty().map { project ->
+        val name = project.title.replace("\\", "\\\\").replace("\"", "\\\"")
+        QuickCaptureAutocomplete.Choice(project.title, "+\"$name\"", project.id)
+      }
+      else -> emptyList()
+    }
+    val matches = QuickCaptureAutocomplete.matches(token, choices)
+    if (matches.isEmpty()) return
+    autocompleteMatches.visibility = View.VISIBLE
+    for (choice in matches) {
+      autocompleteMatches.addView(TextView(this).apply {
+        setText(choice.label)
+        textSize = 15f
+        minHeight = (48 * resources.displayMetrics.density).toInt()
+        gravity = android.view.Gravity.CENTER_VERTICAL
+        setPadding((12 * resources.displayMetrics.density).toInt(), 0, (12 * resources.displayMetrics.density).toInt(), 0)
+        setTextColor(palette?.text ?: getColor(R.color.mindwtr_widget_text))
+        isClickable = true
+        isFocusable = true
+        setOnClickListener {
+          val current = input.text?.toString().orEmpty()
+          val active = QuickCaptureAutocomplete.tokenAt(current, input.selectionStart) ?: return@setOnClickListener
+          val (next, caret) = QuickCaptureAutocomplete.replace(current, active, choice)
+          choice.projectId?.let { audioSession.selectDestination(WidgetPayload.CaptureDestination("project", it)) }
+          input.setText(next)
+          input.setSelection(caret.coerceAtMost(next.length))
+          input.requestFocus()
+          autocompleteMatches.visibility = View.GONE
+        }
+      })
+    }
   }
 
   private fun currentContextChoices() =
@@ -393,6 +521,7 @@ class QuickCaptureActivity : AppCompatActivity() {
   private fun openContextPanel() {
     contextFilter.setText("")
     contextPanel.visibility = View.VISIBLE
+    autocompleteMatches.visibility = View.GONE
     showContextMatches()
 
     contextFilter.requestFocus()
@@ -452,9 +581,10 @@ class QuickCaptureActivity : AppCompatActivity() {
       else -> return
     }
     val title = input.text?.toString().orEmpty()
+    val destination = audioSession.resolveDestination(title) ?: return
     val written = try {
       PendingCaptureWriter.write(filesDir, title, note = description.text?.toString().orEmpty(),
-        defaultStatus = audioSession.defaultStatus, status = audioSession.captureStatus)
+        defaultStatus = audioSession.defaultStatus, status = audioSession.captureStatus, destination = destination)
     } catch (error: IOException) {
       Log.w(TAG, "quick capture write failed: ${error.message}")
       Toast.makeText(this, error.message ?: "Could not save", Toast.LENGTH_SHORT).show()
@@ -465,7 +595,7 @@ class QuickCaptureActivity : AppCompatActivity() {
       return
     }
     audioSession.completeTextCapture()
-    Log.i(TAG, "quick capture queued ${written.name}")
+    Log.i(TAG, "Text capture destination queued releaseCheck=v1.3.9/android-capture-destination")
     Toast.makeText(this, labels.queued, Toast.LENGTH_SHORT).show()
     CaptureSyncHeadlessService.start(this)
   }
@@ -507,6 +637,10 @@ class QuickCaptureActivity : AppCompatActivity() {
       val inserted = before + token + if (spaceFollows) "" else " "
       return text.substring(0, from) + inserted + text.substring(to) to from + inserted.length + if (spaceFollows) 1 else 0
     }
+    private fun savedDestination(state: Bundle?, name: String): WidgetPayload.CaptureDestination? =
+      state?.getString(name)?.let { raw -> runCatching { WidgetPayload.CaptureDestination.parse(JSONObject(raw)) }.getOrNull() }
+    private const val STATE_DEFAULT_DESTINATION = "captureDefaultDestination"
+    private const val STATE_SELECTED_DESTINATION = "captureSelectedDestination"
     private const val STATE_DEFAULT_STATUS = "captureDefaultStatus"
     private const val STATE_CAPTURE_STATUS = "captureStatus"
     private val CAPTURE_IO = Executors.newSingleThreadExecutor { work -> Thread(work, "MindwtrCaptureSave") }

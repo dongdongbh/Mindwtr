@@ -12,7 +12,6 @@ import {
     runStoreCommand,
     saveTaskDraftOntoLatest,
     isSandboxMode,
-    findSelectableProjectByTitleAndArea,
     getQuickAddProjectInitialProps,
     buildQuickAddParseOptions,
     buildQuickAddPreviewEntries,
@@ -22,6 +21,9 @@ import {
     normalizeFocusTaskLimit,
     getDefaultTaskAreaMode,
     resolveDefaultNewTaskAreaId,
+    resolveCaptureDestination,
+    isCaptureDestinationAvailable,
+    type CaptureDestination,
     AREA_FILTER_ALL,
     AREA_FILTER_NONE,
     areaFilterSelectionToValue,
@@ -69,7 +71,7 @@ import {
 import { QUICK_ADD_MAIN_WINDOW_LABEL, QUICK_ADD_SAVED_EVENT } from '../lib/quick-add-saved-event';
 import { consumeQuickAddPending, hideQuickAddWindow } from '../lib/quick-add-window';
 import { TaskInput } from './Task/TaskInput';
-import { AreaSelector } from './ui/AreaSelector';
+import { DestinationSelector } from './ui/DestinationSelector';
 import { QuickAddSyntaxHint } from './ui/QuickAddSyntaxHint';
 import { QuickAddPreview } from './QuickAddPreview';
 import { FocusStarIcon } from './FocusStarIcon';
@@ -143,13 +145,14 @@ const EMPTY_QUICK_ADD_DERIVED: Pick<DerivedState, 'allContexts' | 'allTags' | 'f
 export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) {
     const titleId = useId();
     const getDerivedState = useTaskStore((state) => state.getDerivedState);
-    const { addTask, addTasks, addProject, projects, areas, settings, setHighlightTask } = useTaskStore(
+    const { addTask, addTasks, addProject, projects, areas, sections, settings, setHighlightTask } = useTaskStore(
         (state) => ({
             addTask: state.addTask,
             addTasks: state.addTasks,
             addProject: state.addProject,
             projects: state.projects,
             areas: state.areas,
+            sections: state.sections,
             settings: state.settings,
             setHighlightTask: state.setHighlightTask,
         }),
@@ -173,6 +176,7 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
     const { t } = useLanguage();
     const [value, setValue] = useState('');
     const [selectedAreaId, setSelectedAreaId] = useState('');
+    const [destinationOverride, setDestinationOverride] = useState<CaptureDestination>();
     const [initialProps, setInitialProps] = useState<Partial<Task> | null>(null);
     const [focusNewTask, setFocusNewTask] = useState(false);
     const [forcedCaptureMode, setForcedCaptureMode] = useState<'text' | 'audio' | null>(null);
@@ -182,6 +186,7 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
     const [isRecording, setIsRecording] = useState(false);
     const [recordingBusy, setRecordingBusy] = useState(false);
     const [recordingError, setRecordingError] = useState<string | null>(null);
+    const [audioRecoveryPending, setAudioRecoveryPending] = useState(false);
     const [pastedImageAttachments, setPastedImageAttachments] = useState<PastedImageAttachment[]>([]);
 
     const [canPasteImages, setCanPasteImages] = useState(isTauriRuntime);
@@ -247,11 +252,15 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
     );
 
     const previewEntries = useMemo(
-        () => buildQuickAddPreviewEntries(parsedInput, { t, projects, areas, rawInput: value }),
+        () => buildQuickAddPreviewEntries(parsedInput, { t, projects, areas, rawInput: value })
+            .filter((entry) => entry.kind !== 'project' && entry.kind !== 'area'),
         [areas, parsedInput, projects, t, value],
     );
-    const hasProjectOverride = Boolean(initialProps?.projectId || parsedInput.props.projectId || parsedInput.projectTitle);
-    const showAreaSelector = !hasProjectOverride;
+    const resolvedDestination = resolveCaptureDestination({ parsed: parsedInput, projects, areas, sections,
+        initialProps: initialProps ?? undefined, selectedAreaId, destination: destinationOverride });
+    const effectiveDestination = resolvedDestination.destination;
+    const selectedSection = effectiveDestination.kind === 'project' && effectiveDestination.sectionId
+        ? sections.find((section) => section.id === effectiveDestination.sectionId && !section.deletedAt) : undefined;
     const isPastingImage = pastingImageCount > 0;
     const pastedAttachments = useMemo(
         () => pastedImageAttachments.map((item) => item.attachment),
@@ -336,6 +345,9 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
             setRecordingBusy(false);
             setIsRecording(false);
             setInitialProps(detail?.initialProps ?? null);
+            setSelectedAreaId(detail?.initialProps?.areaId ?? (detail?.initialProps?.projectId ? '' : defaultAreaId));
+            setDestinationOverride(undefined);
+            setAudioRecoveryPending(false);
             setFocusNewTask(Boolean(detail?.initialProps?.isFocusedToday));
             setValue(detail?.initialValue ?? '');
             setForcedCaptureMode(detail?.captureMode ?? null);
@@ -355,7 +367,7 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
             openRequestInFlightRef.current = false;
             throw error;
         }
-    }, [refreshStandaloneData]);
+    }, [defaultAreaId, refreshStandaloneData]);
 
     useEffect(() => {
         if (isSandboxMode() || !isTauriRuntime()) return;
@@ -409,20 +421,6 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
 
     useEffect(() => {
         if (!isOpen) return;
-        const nextArea = initialProps?.areaId ?? (initialProps?.projectId ? '' : defaultAreaId);
-        setSelectedAreaId(nextArea ?? '');
-    }, [defaultAreaId, initialProps?.areaId, initialProps?.projectId, isOpen]);
-
-    useEffect(() => {
-        if (!isOpen) return;
-        if (parsedInput.props.areaId) {
-            setSelectedAreaId(parsedInput.props.areaId);
-        }
-    }, [isOpen, parsedInput.props.areaId]);
-
-
-    useEffect(() => {
-        if (!isOpen) return;
         const nextMode = isSandboxMode() ? 'text' : forcedCaptureMode ?? (settings?.gtd?.defaultCaptureMethod === 'audio' ? 'audio' : 'text');
         setCaptureMode(nextMode);
         setRecordingError(null);
@@ -432,31 +430,16 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
     const applySpeechResult = useCallback(async (taskId: string, result: SpeechToTextResult): Promise<boolean> => {
         const {
             tasks: currentTasks,
-            projects: currentProjects,
-            addProject: addProjectNow,
             updateTask: updateTaskNow,
             settings: currentSettings,
         } = useTaskStore.getState();
         const existing = currentTasks.find((task) => task.id === taskId);
         if (!existing) return false;
 
-        const { updates, suggestedProjectTitle } = buildTaskUpdatesFromSpeechResult(existing, result, currentSettings);
-        if (suggestedProjectTitle && !existing.projectId) {
-            const targetAreaId = updates.areaId ?? existing.areaId;
-            const match = findSelectableProjectByTitleAndArea(currentProjects, suggestedProjectTitle, targetAreaId);
-            if (match) {
-                updates.projectId = match.id;
-            } else {
-                const created = await addProjectNow(
-                    suggestedProjectTitle,
-                    DEFAULT_PROJECT_COLOR,
-                    targetAreaId ? { areaId: targetAreaId } : undefined
-                );
-                if (!created) return false;
-                updates.projectId = created.id;
-            }
-        }
-
+        const { updates } = buildTaskUpdatesFromSpeechResult(existing, result, currentSettings);
+        delete updates.projectId;
+        delete updates.areaId;
+        delete updates.sectionId;
         if (!Object.keys(updates).length) return false;
         const applied = await updateTaskNow(taskId, updates);
         return applied?.success !== false;
@@ -493,6 +476,8 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
         setFocusNewTask(false);
         setValue('');
         setSelectedAreaId('');
+        setDestinationOverride(undefined);
+        setAudioRecoveryPending(false);
         setForcedCaptureMode(null);
         setBulkQuickAddLines(null);
         setBulkQuickAddError(null);
@@ -730,6 +715,12 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
     const stopRecording = useCallback(async ({ saveTask }: { saveTask: boolean }) => {
         if (recordingBusy) return;
         if (!isRecording) return;
+        if (saveTask && !resolvedDestination.available) {
+            setRecordingError(tFallback(t, 'quickAdd.destinationUnavailable', 'Destination unavailable. Choose another destination.'));
+            return;
+        }
+        const admittedDestination = effectiveDestination;
+        let recoveryDestination = resolvedDestination.projectToCreate ? destinationOverride : admittedDestination;
         const captureSurfaceSession = activeSubmissionSessionRef.current;
         const submissionSession = saveTask ? captureSurfaceSession : null;
         if (saveTask) {
@@ -741,6 +732,7 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
         );
         let stoppedCapturePath: string | null = null;
         let stoppedCaptureAdopted = false;
+        let retainAudioOnFailure: (() => void) | undefined;
         setRecordingBusy(true);
         setIsRecording(false);
         const audioSession = captureSessionRef.current;
@@ -762,10 +754,6 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
 
             const nowIso = now.toISOString();
             const displayTitle = `${t('quickAdd.audioNoteTitle')} ${safeFormatDate(now, 'Pp')}`;
-            const { ready: speechReady, config: speechConfig } = await resolveSpeechCapture(settings.ai);
-            if (!isSubmissionCurrent()) return;
-            const saveAudioAttachments = settings.gtd?.saveAudioAttachments !== false || !speechReady;
-
             const audioAttachment: Attachment = {
                 id: generateUUID(),
                 kind: 'file',
@@ -777,25 +765,46 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
                 updatedAt: nowIso,
             };
 
+            const retainAudio = () => {
+                stoppedCaptureAdopted = true;
+                setDestinationOverride(recoveryDestination);
+                setInitialProps((current) => ({ ...current, attachments: [...(current?.attachments ?? []), audioAttachment] }));
+                setValue((current) => current.trim() ? current : displayTitle);
+                setAudioRecoveryPending(true);
+                setCaptureMode('text');
+            };
+            retainAudioOnFailure = retainAudio;
+            const { ready: speechReady, config: speechConfig } = await resolveSpeechCapture(settings.ai);
+            if (!isSubmissionCurrent()) return;
+            const saveAudioAttachments = settings.gtd?.saveAudioAttachments !== false || !speechReady;
+
             const attachments = [...(initialProps?.attachments ?? [])];
             if (saveAudioAttachments) attachments.push(audioAttachment);
-            const props: Partial<Task> = {
-                status: 'inbox',
-                ...initialProps,
-                attachments,
-            };
-            if (!props.status) props.status = 'inbox';
-
             if (standaloneWindow) {
                 await refreshStandaloneData().catch((error) => reportError('Failed to refresh quick add data', error));
             }
             if (!isSubmissionCurrent()) return;
-            const addTaskResult = await addTask(displayTitle, props);
+            const current = useTaskStore.getState();
+            const prepared = await prepareCaptureTask({
+                parsed: { ...parsedInput, title: displayTitle }, rawInput: value, projects: current.projects,
+                areas: current.areas, sections: current.sections, initialProps: initialProps ?? undefined,
+                extraProps: { attachments }, selectedAreaId,
+                destination: resolvedDestination.projectToCreate && isCaptureDestinationAvailable(admittedDestination, current)
+                    ? undefined : admittedDestination,
+            }, { addProject });
+            if (!prepared.success) {
+                retainAudio();
+                showToast(tFallback(t, 'task.addFailed', 'Failed to add task'), 'error');
+                return;
+            }
+            recoveryDestination = prepared.props.projectId
+                ? { kind: 'project', id: prepared.props.projectId, ...(prepared.props.sectionId ? { sectionId: prepared.props.sectionId } : {}) }
+                : prepared.props.areaId ? { kind: 'area', id: prepared.props.areaId } : { kind: 'none' };
+            const addTaskResult = await addTask(prepared.title, prepared.props);
             if (addTaskResult.success && addTaskResult.id) stoppedCaptureAdopted = true;
             if (!isSubmissionCurrent()) return;
             if (!addTaskResult.success) {
-
-
+                retainAudio();
                 showToast(tFallback(t, 'task.addFailed', 'Failed to add task'), 'error');
                 return;
             }
@@ -881,6 +890,7 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
                 });
             }
         } catch (error) {
+            if (!stoppedCaptureAdopted && isSubmissionCurrent()) retainAudioOnFailure?.();
             if (!isSubmissionCurrent()) return;
             reportError('Failed to save recording', error);
             const message = error instanceof Error ? error.message : String(error);
@@ -905,8 +915,16 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
         }
     }, [
         addTask,
+        addProject,
+        parsedInput,
+        selectedAreaId,
+        resolvedDestination.projectToCreate,
+        destinationOverride,
+        value,
         applySpeechResult,
         close,
+        effectiveDestination,
+        resolvedDestination.available,
         initialProps,
         isRecording,
         recordingBusy,
@@ -962,6 +980,8 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
         input: string;
         parsed: QuickAddResult;
     }) => {
+        const destination = resolveCaptureDestination({ parsed, projects, areas, sections,
+            initialProps: initialProps ?? undefined, selectedAreaId, destination: destinationOverride });
         const mergedAttachments = mergeQuickAddAttachments(
             initialProps?.attachments,
             parsed.props.attachments,
@@ -972,12 +992,15 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
             rawInput: input,
             fallbackTitle: extraAttachments?.[0]?.title || tFallback(t, 'quickAdd.pastedImageTitle', 'Screenshot'),
             projects: currentProjects,
+            areas: useTaskStore.getState().areas,
+            sections: useTaskStore.getState().sections,
+            destination: destination.projectToCreate && destination.available ? undefined : destination.destination,
             initialProps: initialProps ?? undefined,
             extraProps: mergedAttachments ? { attachments: mergedAttachments } : undefined,
             selectedAreaId,
             starNewTask: focusNewTask && canFocusNewTask,
         };
-    }, [canFocusNewTask, focusNewTask, initialProps, selectedAreaId, t]);
+    }, [areas, canFocusNewTask, destinationOverride, focusNewTask, initialProps, projects, sections, selectedAreaId, t]);
 
     const createTaskFromParsedQuickAdd = useCallback(async ({
         currentAreas,
@@ -1295,6 +1318,18 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
                         Esc
                     </button>
                 </div>
+                <div className="px-4 pt-3 space-y-1">
+                    <span className="text-xs text-muted-foreground">{t('task.destination')}</span>
+                    <DestinationSelector projects={projects} areas={areas} value={effectiveDestination}
+                        onChange={setDestinationOverride} disabled={isSubmitting || recordingBusy}
+                        destinationLabel={t('task.destination')} projectsLabel={t('nav.projects')}
+                        areasLabel={t('taskEdit.areaLabel')} deferredLabel={t('projects.deferredSection')}
+                        noneLabel={t('common.none')} searchPlaceholder={t('common.search')}
+                        noMatchesLabel={t('common.noMatches')} createProjectLabel={t('projects.new')} createAreaLabel={t('areas.new')} />
+                    {resolvedDestination.projectToCreate ? <p className="text-xs">{t('projects.new')}: {resolvedDestination.projectToCreate.title}</p> : null}
+                    {selectedSection ? <p className="text-xs text-muted-foreground">{selectedSection.title}</p> : null}
+                    {!resolvedDestination.available ? <p role="alert" className="text-xs text-destructive">{tFallback(t, 'quickAdd.destinationUnavailable', 'Destination unavailable. Choose another destination.')}</p> : null}
+                </div>
                 <div className="px-4 pt-4">
                     <div className="inline-flex rounded-lg border border-border bg-muted/40 p-1">
                         <button
@@ -1339,9 +1374,21 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
                                     const created = await addProject(
                                         title,
                                         DEFAULT_PROJECT_COLOR,
-                                        getQuickAddProjectInitialProps({}, selectedAreaId)
+                                        getQuickAddProjectInitialProps({}, effectiveDestination.kind === 'area' ? effectiveDestination.id : undefined)
                                     );
                                     return created?.id ?? null;
+                                }}
+                                onAcceptSuggestion={(suggestion) => {
+                                    if (suggestion.kind === 'project' || suggestion.kind === 'createProject') {
+                                        if (!suggestion.projectId) return false;
+                                        setDestinationOverride({ kind: 'project', id: suggestion.projectId });
+                                        return true;
+                                    }
+                                    if (suggestion.kind === 'area') {
+                                        setDestinationOverride({ kind: 'area', id: suggestion.areaId });
+                                        return true;
+                                    }
+                                    return false;
                                 }}
                                 onChange={(next) => setValue(next)}
                                 onPaste={handleQuickAddPaste}
@@ -1394,6 +1441,9 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
                             </button>
                         </div>
                         <QuickAddPreview entries={previewEntries} />
+                        {audioRecoveryPending ? <p role="status" className="text-xs text-muted-foreground">
+                            {t('quickAdd.audioReady')}
+                        </p> : null}
                         {isPastingImage ? (
                             <p className="text-xs text-muted-foreground">
                                 {tFallback(t, 'quickAdd.pastedImageSaving', 'Attaching image...')}
@@ -1422,22 +1472,6 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
                         {bulkQuickAddError && !bulkQuickAddLines ? (
                             <p className="text-xs text-destructive">{bulkQuickAddError}</p>
                         ) : null}
-                        {showAreaSelector && (
-                            <div className="flex flex-col gap-1">
-                                <label className="text-xs text-muted-foreground font-medium">{t('taskEdit.areaLabel')}</label>
-                                <AreaSelector
-                                    areas={sortedAreas}
-                                    value={selectedAreaId}
-                                    onChange={setSelectedAreaId}
-                                    placeholder={t('taskEdit.noAreaOption')}
-                                    noAreaLabel={t('taskEdit.noAreaOption')}
-                                    searchPlaceholder={t('areas.search')}
-                                    noMatchesLabel={t('common.noMatches')}
-                                    createAreaLabel={t('areas.create')}
-                                    className="w-full"
-                                />
-                            </div>
-                        )}
                         <p className="text-xs text-muted-foreground">{t('quickAdd.example')}</p>
                         <details className="text-xs text-muted-foreground" onToggle={handleSyntaxHelpToggle}>
                             <summary className="w-fit cursor-pointer whitespace-nowrap rounded-sm font-medium text-foreground/80 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40">

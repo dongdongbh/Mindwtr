@@ -67,7 +67,8 @@ class QuickCaptureAudioTest {
     val draft = stageDraft(filesDir)
 
     val note = "  @home #literal\nKeep this note  "
-    val queued = PendingCaptureWriter.publishAudio(filesDir, draft, "  Call Alex  ", note, "waiting", "inbox")
+    val queued = PendingCaptureWriter.publishAudio(filesDir, draft, "  Call Alex  ", note, "waiting", "inbox",
+      QuickCaptureDestination(WidgetPayload.CaptureDestination("area", "personal")))
 
     val finalAudio = File(File(filesDir, PendingCaptureWriter.AUDIO_DIRECTORY), "${draft.id}.wav")
     assertTrue(finalAudio.isFile)
@@ -85,6 +86,8 @@ class QuickCaptureAudioTest {
     assertEquals(note, json.getString("note"))
     assertEquals("waiting", json.getString("defaultStatus"))
     assertEquals("inbox", json.getString("status"))
+    assertEquals("area", json.getJSONObject("destination").getString("kind"))
+    assertEquals("personal", json.getJSONObject("destination").getString("id"))
   }
 
   @Test

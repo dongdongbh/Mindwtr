@@ -356,7 +356,7 @@ export function useQuickCaptureAudio({
 
 
   const applySpeechResult = useCallback((taskId: string, result: SpeechToTextResult, titleAtSave?: string): Promise<SpeechApplyResult> => (
-    applySpeechResultInStore(taskId, result, useTaskStore, { titleAtSave })
+    applySpeechResultInStore(taskId, result, useTaskStore, { titleAtSave, preserveDestination: true })
   ), []);
 
   const discardEmptySpeechTask = useCallback((taskId: string, files: (File | null | undefined)[], reason = 'empty_transcript') => (

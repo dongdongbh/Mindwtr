@@ -302,6 +302,8 @@ export const daOverrides: Record<string, string> = {
     'quickAdd.syntaxHelp': 'Hurtig tilføjelse af syntakshjælp',
     'quickAdd.pasteImagesHint': 'Indsæt billeder eller skærmbilleder med {{shortcut}} for at vedhæfte dem.',
     'quickAdd.placeholder': 'Tilføj en opgave... brug @context +Project #tag',
+    'quickAdd.destinationUnavailable': "Destinationen er ikke tilgængelig. Vælg en anden destination.",
+        "quickAdd.destinationNeedsSelection": "Vælg en destination for at gemme.",
     'quickAdd.addAnother': 'Tilføj en anden',
     'quickAdd.inputLabel': 'Opgavetitel',
     'quickAdd.inputHint': 'Indtast en opgavetitel, og tryk derefter på tilføj eller returtasten.',

@@ -30,7 +30,7 @@
             android:layout_height="wrap_content"
             android:orientation="vertical">
 
-            <EditText
+            <tech.dongdongbh.mindwtr.androidwidget.QuickCaptureInput
                 android:id="@+id/mindwtr_quick_capture_input"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -42,11 +42,18 @@
                 android:inputType="textMultiLine|textCapSentences|textAutoCorrect"
                 android:maxLength="2000"
                 android:maxLines="6"
-                android:minLines="2"
+                android:minLines="1"
                 android:padding="12dp"
                 android:textColor="@color/mindwtr_widget_text"
                 android:textColorHint="@color/mindwtr_widget_muted_text"
                 android:textSize="16sp" />
+
+            <LinearLayout
+                android:id="@+id/mindwtr_quick_capture_autocomplete"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:visibility="gone" />
 
             <EditText
                 android:id="@+id/mindwtr_quick_capture_description"
@@ -64,17 +71,35 @@
                 android:textColorHint="@color/mindwtr_widget_muted_text"
                 android:textSize="14sp" />
 
-            <Button
-                android:id="@+id/mindwtr_quick_capture_status"
-                style="?attr/borderlessButtonStyle"
+            <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="8dp"
+                android:orientation="horizontal">
+            <Button
+                android:id="@+id/mindwtr_quick_capture_status"
+                style="?attr/borderlessButtonStyle"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
                 android:gravity="start|center_vertical"
                 android:minHeight="48dp"
                 android:textAllCaps="false"
                 android:textColor="@color/mindwtr_widget_accent" />
 
+
+            <Button
+                android:id="@+id/mindwtr_quick_capture_destination"
+                style="?attr/borderlessButtonStyle"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:gravity="start|center_vertical"
+                android:minHeight="48dp"
+                android:textAllCaps="false"
+                android:textColor="@color/mindwtr_widget_accent" />
+
+            </LinearLayout>
 
             <Button
                 android:id="@+id/mindwtr_quick_capture_contexts"

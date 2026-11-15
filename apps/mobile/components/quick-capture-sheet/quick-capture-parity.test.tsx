@@ -469,13 +469,13 @@ export const scenarios: QuickCaptureScenario[] = [
     actions: [['addAnother', true], ['type', 'Buy paint'], ['save'], ['type', 'Buy brushes'], ['save'], ['addAnother', false], ['type', 'Paint'], ['save']],
   },
   {
-    name: 'an archived preset project is dropped and the area is kept',
+    name: 'an unavailable archived contextual project is retained and capture cannot save',
     settings: 'base',
     initialProps: { projectId: 'p-old', areaId: 'a-home' },
     actions: [['type', 'Old thing'], ['save']],
   },
   {
-    name: 'a preset project deleted elsewhere is not saved; the task goes to the area the popup shows',
+    name: 'an unavailable deleted contextual project is retained and capture cannot save',
     settings: 'base',
     initialProps: { projectId: 'p-gone', areaId: 'a-work' },
     actions: [['type', 'Orphan'], ['save']],
@@ -730,8 +730,8 @@ async function runScenario(scenario: QuickCaptureScenario) {
           switch (action[0]) {
             case 'type': body.onValueChange(action[1]); break;
             case 'note': body.onNoteChange(action[1]); break;
-            case 'save': body.handleSave(); break;
-            case 'saveAndEdit': body.handleSaveAndEdit(); break;
+            case 'save': if (observe(root).saveEnabled) body.handleSave(); break;
+            case 'saveAndEdit': if (observe(root).saveAndEditEnabled) body.handleSaveAndEdit(); break;
             case 'addAnother': body.onToggleAddAnother(action[1]); break;
             case 'focus': body.onToggleFocusNewTask(); break;
             case 'more': body.onToggleOptions(); break;

@@ -10,6 +10,7 @@ import { createQuickCaptureOptions } from './quick-capture-model';
 import { getTranslator } from './i18n';
 import type { SqliteClient } from './sqlite-adapter';
 import type { AppData } from './types';
+import * as logger from './logger';
 const require = createRequire(import.meta.url);
 type Database = { exec: (sql: string) => void; prepare: (sql: string) => {
     run: (...params: unknown[]) => unknown; all: (...params: unknown[]) => unknown[]; get: (...params: unknown[]) => unknown }; close: () => void };
@@ -85,6 +86,25 @@ const settings = (db: Database) => db.prepare('SELECT data FROM settings WHERE i
 const receipts = (db: Database) => db.prepare('SELECT * FROM native_request_receipts').all();
 
 describe('native voice real SQLite metadata ownership', () => {
+    it('keeps a newly admitted audio destination when late speech suggests a project', async () => {
+        const logs = vi.spyOn(logger, 'logInfo');
+        const env = await open(newPath(), true);
+        const request = captureRequest();
+        request.options = { ...request.options, audioDestination: { destination: { kind: 'none' } } };
+        const audio = await preparedCapture(env, request);
+        expect(env.methods.validateCapture(JSON.parse(JSON.stringify(audio)))).toMatchObject({ ok: true });
+        command(await env.methods.commitCapture(audio));
+        const speech = await preparedResult(env, request, { transcript: 'Stay here', title: 'Stay here', projectTitle: 'Do not create', tags: ['voice'] });
+        expect(speech.prepared.project).toBeNull();
+        command(await env.methods.commitResult(speech));
+        const data = await env.adapter.getData({ rawTasks: true });
+        expect(data.projects).toEqual([]);
+        expect(data.tasks.find(task => task.id === ID)).toMatchObject({ title: 'Stay here', tags: ['#voice'] });
+        expect(data.tasks.find(task => task.id === ID)?.projectId).toBeUndefined();
+        expect(logs).toHaveBeenCalledWith('Native audio destination preserved', { scope: 'capture', force: true,
+            context: { releaseCheck: 'v1.3.9/native-capture-destination', kind: 'audio-transcript', outcome: 'preserved' } });
+    });
+
     it('saves one generated task/audio first, then atomically creates a suggested project and applies late shared metadata', async () => {
         const env = await open(newPath(), true), beforeRaw = rows(env.db), beforeSettings = settings(env.db);
         const audio = await preparedCapture(env);

@@ -3,7 +3,7 @@ import type { RefObject } from 'react';
 import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, Switch, TextInput, TouchableOpacity, View } from 'react-native';
 import type { StyleProp, ViewStyle } from 'react-native';
 import { AtSign, CalendarDays, ChevronDown, ChevronUp, Clock, FileText, Flag, Folder, Layers, Mic, SlidersHorizontal, Square, X } from 'lucide-react-native';
-import { getQuickCaptureFocusLabel, getQuickCaptureText, tFallback, type TaskPriority } from '@mindwtr/core';
+import { getQuickCaptureFocusLabel, getQuickCaptureText, tFallback, type TaskPriority, type Project } from '@mindwtr/core';
 import { usePriorityColors } from '@/hooks/use-priority-colors';
 import { useEinkSafeColor } from '@/hooks/use-eink-safe-color';
 import { ToastViewport } from '@/contexts/toast-context';
@@ -14,6 +14,7 @@ import { SandboxWorkspaceCue } from '@/components/sandbox-workspace-cue';
 import { AdaptiveModalSurface } from '@/components/adaptive-modal-surface';
 import { QuickDateChips } from '../QuickDateChips';
 import { FocusStarIcon, FOCUS_STAR_COLOR } from '../FocusStarIcon';
+import { QuickCaptureTitleInput } from './QuickCaptureTitleInput';
 import { styles } from './quick-capture-sheet.styles';
 
 
@@ -36,6 +37,13 @@ function QuickCaptureMetadataScrollArea({ children }: { children: React.ReactNod
 
 interface QuickCaptureSheetBodyProps {
   addAnother: boolean;
+  destinationLabel?: string;
+  destinationAvailable?: boolean;
+  onOpenDestinationPicker?: () => void;
+  autocompleteProjects?: Project[];
+  autocompleteContexts?: readonly string[];
+  autocompleteTags?: readonly string[];
+  onAutocompleteProject?: (id: string) => void;
   areaLabel: string;
   children?: React.ReactNode;
   contextLabel: string;
@@ -103,6 +111,13 @@ interface QuickCaptureSheetBodyProps {
 
 export function QuickCaptureSheetBody({
   addAnother,
+  destinationLabel,
+  destinationAvailable = true,
+  onOpenDestinationPicker,
+  autocompleteProjects = [],
+  autocompleteContexts = [],
+  autocompleteTags = [],
+  onAutocompleteProject,
   areaLabel,
   children,
   contextLabel,
@@ -289,8 +304,13 @@ export function QuickCaptureSheetBody({
             </View>
 
             <View style={styles.inputRow}>
-              <CompactTextInput
-                ref={inputRef}
+              <QuickCaptureTitleInput
+                inputRef={inputRef}
+                projects={autocompleteProjects}
+                contexts={autocompleteContexts}
+                tags={autocompleteTags}
+                onSelectProject={onAutocompleteProject}
+                tc={tc}
                 style={[styles.input, { backgroundColor: tc.inputBg, borderColor: tc.border, color: tc.text }]}
                 placeholder={t('quickAdd.inputLabel')}
                 placeholderTextColor={tc.secondaryText}
@@ -303,7 +323,7 @@ export function QuickCaptureSheetBody({
                 accessibilityLabel={t('quickAdd.inputLabel')}
                 accessibilityHint={t('quickAdd.inputHint')}
                 onSubmitEditing={() => {
-                  if (saving) return;
+                  if (saving || !destinationAvailable) return;
                   if (!addAnother) {
                     inputRef.current?.blur();
                   }
@@ -378,8 +398,22 @@ export function QuickCaptureSheetBody({
               </View>
             ) : null}
 
+            {destinationLabel !== undefined ? (
+              <TouchableOpacity onPress={onOpenDestinationPicker} disabled={saving}
+                accessibilityRole="button" accessibilityLabel={`${t('task.destination')}: ${destinationLabel}`}
+                style={[styles.optionChip, { backgroundColor: tc.filterBg, borderColor: tc.border, alignSelf: 'flex-start' }]}>
+                <Folder size={16} color={tc.text} />
+                <CompactText style={[styles.optionText, { color: destinationAvailable ? tc.text : tc.danger }]}>
+                  {t('task.destination')}: {destinationLabel}
+                </CompactText>
+              </TouchableOpacity>
+            ) : null}
+            {!destinationAvailable ? <CompactText accessibilityRole="alert" style={{ color: tc.danger }}>
+              {tFallback(t, 'quickAdd.destinationUnavailable', 'Destination unavailable. Choose another destination.')}
+            </CompactText> : null}
+
             <View style={styles.optionsHeaderRow}>
-              {!optionsExpanded && projectSelected ? (
+              {destinationLabel === undefined && !optionsExpanded && projectSelected ? (
                 <TouchableOpacity
                   style={[styles.collapsedProjectChip, { backgroundColor: tc.filterBg, borderColor: tc.border }]}
                   onPress={onOpenProjectPicker}
@@ -397,7 +431,7 @@ export function QuickCaptureSheetBody({
                   </CompactText>
                 </TouchableOpacity>
               ) : null}
-              {!optionsExpanded && !projectSelected ? (
+              {!optionsExpanded && (!projectSelected || destinationLabel !== undefined) ? (
                 <TouchableOpacity
                   style={[styles.collapsedContextChip, { backgroundColor: tc.filterBg, borderColor: tc.border }]}
                   onPress={onOpenContextPicker}
@@ -620,7 +654,7 @@ export function QuickCaptureSheetBody({
                       styles.saveAndEditButton,
                       { borderColor: tc.border, opacity: value.trim() && !saving ? 1 : 0.5 },
                     ]}
-                    disabled={saving || !value.trim()}
+                    disabled={saving || !destinationAvailable || !value.trim()}
                     accessibilityRole="button"
                     accessibilityLabel={t('quickAdd.saveAndEdit')}
                     accessibilityState={{ busy: saving, disabled: saving || !value.trim() }}
@@ -638,7 +672,7 @@ export function QuickCaptureSheetBody({
                 <TouchableOpacity
                   onPress={handleSave}
                   style={[styles.saveButton, { backgroundColor: saveButtonBackgroundColor ?? tc.tint, opacity: value.trim() && !saving ? 1 : 0.5 }]}
-                  disabled={saving || !value.trim()}
+                  disabled={saving || !destinationAvailable || !value.trim()}
                   accessibilityRole="button"
                   accessibilityLabel={t('common.save')}
                   accessibilityState={{ busy: saving, disabled: saving || !value.trim() }}

@@ -44,6 +44,28 @@ class WidgetPayloadTest {
   """.trimIndent()
 
   @Test
+  fun captureDestinationCatalogDistinguishesMissingFromNoneAndValidatesIdentity() {
+    assertNull(WidgetPayload.parse(sample)!!.captureDestinations)
+    val root = JSONObject(sample).put("captureDestinations", JSONObject("""{
+      "defaultDestination":{"kind":"area","id":"a"},
+      "areas":[{"id":"a","name":"Area"}],
+      "projects":[{"id":"p","title":"Project","areaId":"a"}],
+      "sections":[{"id":"s","title":"Section","projectId":"p"}],
+      "labels":{"destination":"Ziel"}
+    }"""))
+    val catalog = WidgetPayload.parse(root.toString())!!.captureDestinations!!
+    assertEquals(WidgetPayload.CaptureDestination("area", "a"), catalog.defaultDestination)
+    assertEquals("Ziel", catalog.labels.destination)
+    assertEquals("p", catalog.sections.single().projectId)
+    root.getJSONObject("captureDestinations").put("defaultDestination", JSONObject("""{"kind":"none"}"""))
+    assertEquals("none", WidgetPayload.parse(root.toString())!!.captureDestinations!!.defaultDestination.kind)
+    root.getJSONObject("captureDestinations").put("defaultDestination", JSONObject("""{"kind":"area","id":"missing"}"""))
+    assertNull(WidgetPayload.parse(root.toString())!!.captureDestinations)
+    assertNull(WidgetPayload.CaptureDestination.parse(JSONObject("""{"kind":"none","id":"a"}""")))
+    assertNull(WidgetPayload.CaptureDestination.parse(JSONObject("""{"kind":"project","id":"p","sectionId":4}""")))
+  }
+
+  @Test
   fun quickCaptureDescriptionUsesThePublishedTranslation() {
     val payload = WidgetPayload.parse("""{"quickCapture":{"descriptionPlaceholder":"Beschreibung"}}""")!!
     assertEquals("Beschreibung", payload.quickCapture.descriptionPlaceholder)

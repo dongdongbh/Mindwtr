@@ -9,6 +9,7 @@ import {
     getAudioMimeType,
     isQuickCaptureSpeechReady,
     isSandboxMode,
+    logInfo,
     REMOTE_SPEECH_TO_TEXT_FOSS_ERROR,
     resolveQuickCaptureAudioFormat,
     resolveSpeechToTextRuntimeSettings,
@@ -52,6 +53,7 @@ export type NativeVoiceBindings = {
     whisperModelReady: () => boolean;
 
     persistAttachment: (attachment: Attachment) => Promise<Attachment>;
+    admit: (text: string, options: QuickCaptureOptions) => QuickCaptureOptions;
 
     submit: (input: { text: string; options: QuickCaptureOptions; captureId: string; fallbackTitle: string; attachments: Attachment[];
         openAfterSave?: boolean }) =>
@@ -135,8 +137,17 @@ export function createNativeVoice(bindings: NativeVoiceBindings) {
 
         uncopied: Attachment[];
         title: string; provider: string;
+        options: QuickCaptureOptions;
     } | null = null;
     const heldFor = (session: number) => held !== null && held.session === session;
+    const admittedOptions = (session: number, text: string, options: QuickCaptureOptions) => {
+        const kept = held?.session === session ? held : null;
+        const snapshot = kept && JSON.stringify(kept.options.destination ?? null) === JSON.stringify(options.destination ?? null)
+            ? kept.options.audioDestination : undefined;
+        if (snapshot) logInfo('Native audio destination retained', { scope: 'capture', force: true,
+            context: { releaseCheck: 'v1.3.9/native-capture-destination', kind: 'audio-retry', outcome: 'retained' } });
+        return bindings.admit(text, snapshot ? { ...options, audioDestination: snapshot } : options);
+    };
 
 
     let submitting: number | null = null;
@@ -231,14 +242,16 @@ export function createNativeVoice(bindings: NativeVoiceBindings) {
     };
 
     const transcribe = (taskId: string, titleAtSave: string | undefined, recording: string, attachment: Attachment | null, cleanupSource: boolean,
-        runtime: ResolvedSpeechToTextRuntimeSettings, apiKey: string, settings: AppSettings, mimeType: string) => {
+        runtime: ResolvedSpeechToTextRuntimeSettings, apiKey: string, settings: AppSettings, mimeType: string, preserveDestination: boolean) => {
         const run = (async () => {
             const transcriptionUri = attachment?.uri ?? recording;
             try {
                 const ports = { ...createNativeSpeechPorts(bindings, transcriptionUri, mimeType, () => undefined),
                     ...(bindings.fetcher ? { fetcher: bindings.fetcher } : {}) };
                 const result = await dispatchSpeechCapture(speechConfigFor(runtime, apiKey, settings, now()), runtime.isFossBuild, ports);
-                const applied = await applySpeechResult(taskId, result, bindings.store, { titleAtSave });
+                const applied = await applySpeechResult(taskId, result, bindings.store, { titleAtSave, preserveDestination });
+                if (preserveDestination && applied === 'applied') logInfo('Native audio destination preserved', { scope: 'capture', force: true,
+                    context: { releaseCheck: 'v1.3.9/native-capture-destination', kind: 'audio-transcript', outcome: 'preserved' } });
                 if (applied === 'empty') {
                     await discardEmptySpeechTask(taskId, [{ uri: recording }, attachment ? { uri: attachment.uri } : null], 'speech_empty_transcript', {
                         store: bindings.store, deleteFile: (file) => deleteQuietly(file.uri), onWarn: () => undefined,
@@ -264,6 +277,7 @@ export function createNativeVoice(bindings: NativeVoiceBindings) {
         if (!current || stopping) return { status: 'idle' };
         if (current.session !== input.session) return { status: 'stale' };
         if (input.save && !input.options) throw new Error('A voice save needs the popup draft options');
+        const options = input.save ? admittedOptions(input.session, input.text ?? '', input.options!) : undefined;
         if (input.save && !coordinator.tryBeginSubmission(input.session)) return { status: 'busy' };
         active = null;
         stopping = true;
@@ -303,7 +317,7 @@ export function createNativeVoice(bindings: NativeVoiceBindings) {
             stage = 'save';
             const captureId = bindings.newId();
             const saved = await bindings.submit({
-                text: input.text ?? '', options: input.options!, captureId, fallbackTitle: title,
+                text: input.text ?? '', options: options!, captureId, fallbackTitle: title,
                 attachments: [...priorAttachments, ...(attachment ? [attachment] : [])],
             });
             if (saved.ok && saved.value.kind === 'refused') {
@@ -317,6 +331,7 @@ export function createNativeVoice(bindings: NativeVoiceBindings) {
                     recordings: [...(prior?.recordings ?? []), ...(kept && kept.uri !== stopped.uri ? [stopped.uri] : [])],
                     uncopied: kept ? [] : [recovery],
                     title, provider: runtime.provider,
+                    options: options!,
                 };
                 adopted = true;
                 bindings.log({ kind: 'capture', outcome: 'kept', provider: runtime.provider, copied: kept !== null });
@@ -343,7 +358,7 @@ export function createNativeVoice(bindings: NativeVoiceBindings) {
             const cleanupSource = !attachment || attachment.uri !== stopped.uri;
 
             const titleAtSave = bindings.store.getState().tasks.find((task) => task.id === taskId)?.title;
-            if (canTranscribe) transcribe(taskId, titleAtSave, stopped.uri, attachment, cleanupSource, runtime, apiKey, settings, mimeType);
+            if (canTranscribe) transcribe(taskId, titleAtSave, stopped.uri, attachment, cleanupSource, runtime, apiKey, settings, mimeType, Boolean(options?.audioDestination));
             else if (cleanupSource) deleteQuietly(stopped.uri);
             return { status: 'saved', taskId, ...nextOf(saved) };
         } catch {
@@ -366,6 +381,7 @@ export function createNativeVoice(bindings: NativeVoiceBindings) {
         const kept = held;
         if (!kept || kept.session !== input.session) return { status: 'idle' };
         if (!input.options) throw new Error('A voice save needs the popup draft options');
+        const options = admittedOptions(input.session, input.text, input.options);
         if (stopping || !coordinator.tryBeginSubmission(input.session)) return { status: 'busy' };
         stopping = true;
         submitting = input.session;
@@ -375,10 +391,11 @@ export function createNativeVoice(bindings: NativeVoiceBindings) {
             stage = 'save';
             const captureId = bindings.newId();
             const saved = await bindings.submit({
-                text: input.text, options: input.options, captureId, fallbackTitle: kept.title, attachments,
+                text: input.text, options, captureId, fallbackTitle: kept.title, attachments,
                 openAfterSave: input.openAfterSave === true,
             });
             if (saved.ok && saved.value.kind === 'refused') {
+                if (held === kept) held = { ...kept, options };
                 bindings.log({ kind: 'capture', outcome: 'kept', provider: kept.provider, copied: true });
                 return { status: 'refused', notice: saved.value.notice };
             }

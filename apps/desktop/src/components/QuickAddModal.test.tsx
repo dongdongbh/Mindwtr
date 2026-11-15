@@ -327,6 +327,58 @@ describe('QuickAddModal', () => {
         expect(addTask).toHaveBeenCalledWith('Fast capture', expect.objectContaining({ status: 'inbox' }));
     });
 
+    it('shows the opening default, freezes it through settings changes, and saves explicit None over inline syntax (#1559)', async () => {
+        const addTask = vi.fn(async () => ({ success: true, id: 'captured' }));
+        const addProject = vi.fn();
+        act(() => useTaskStore.setState((state) => ({ ...state, addTask, addProject,
+            _allAreas: [{ id: 'home', name: 'Home', order: 0, createdAt: '', updatedAt: '' },
+                { id: 'work', name: 'Work', order: 1, createdAt: '', updatedAt: '' }],
+            settings: { ...state.settings, gtd: { ...state.settings.gtd, defaultAreaMode: 'fixed', defaultAreaId: 'home' } },
+        })));
+        renderQuickAddModal();
+        await act(async () => window.dispatchEvent(new CustomEvent('mindwtr:quick-add', { detail: { initialValue: 'Task' } })));
+        expect(screen.getByRole('button', { name: 'Destination' })).toHaveTextContent('Home');
+        act(() => useTaskStore.setState((state) => ({ settings: { ...state.settings, gtd: { ...state.settings.gtd, defaultAreaId: 'work' } } })));
+        expect(screen.getByRole('button', { name: 'Destination' })).toHaveTextContent('Home');
+        fireEvent.click(screen.getByRole('button', { name: 'Destination' }));
+        fireEvent.click(screen.getByRole('option', { name: 'None' }));
+        fireEvent.change(screen.getByRole('combobox'), { target: { value: 'Task +Unknown !Work' } });
+        expect(screen.getByRole('button', { name: 'Destination' })).toHaveTextContent('None');
+        fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+        await waitFor(() => expect(addTask).toHaveBeenCalledWith('Task', { areaId: undefined, status: 'inbox' }));
+        expect(addProject).not.toHaveBeenCalled();
+    });
+
+    it('keeps a missing contextual destination visible and refuses save without losing the draft (#1559)', async () => {
+        const addTask = vi.fn();
+        act(() => useTaskStore.setState({ addTask }));
+        renderQuickAddModal();
+        await act(async () => window.dispatchEvent(new CustomEvent('mindwtr:quick-add', {
+            detail: { initialValue: 'Retain this task', initialProps: { projectId: 'missing' } },
+        })));
+        expect(screen.getByRole('alert')).toHaveTextContent('Destination unavailable');
+        fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+        await waitFor(() => expect(screen.getByRole('combobox')).toHaveValue('Retain this task'));
+        expect(addTask).not.toHaveBeenCalled();
+    });
+
+    it('refuses new inline projects when the frozen default area disappears (#1559)', async () => {
+        const addTask = vi.fn();
+        const addProject = vi.fn();
+        act(() => useTaskStore.setState((state) => ({ ...state, addTask, addProject,
+            _allAreas: [{ id: 'home', name: 'Home', order: 0, createdAt: '', updatedAt: '' }],
+            settings: { ...state.settings, gtd: { ...state.settings.gtd, defaultAreaMode: 'fixed', defaultAreaId: 'home' } },
+        })));
+        renderQuickAddModal();
+        await act(async () => window.dispatchEvent(new CustomEvent('mindwtr:quick-add', { detail: { initialValue: 'Task +Unknown' } })));
+        act(() => useTaskStore.setState({ _allAreas: [] }));
+        fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+        await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Destination unavailable'));
+        expect(addProject).not.toHaveBeenCalled();
+        expect(addTask).not.toHaveBeenCalled();
+        expect(screen.getByRole('combobox')).toHaveValue('Task +Unknown');
+    });
+
     it('uses the current area filter when default area mode is active', async () => {
         const addTask = vi.fn(async () => ({ success: true, id: 'task-id' }));
         act(() => {
@@ -490,6 +542,7 @@ describe('QuickAddModal', () => {
             useTaskStore.setState((state) => ({
                 ...state,
                 addTask,
+                _allProjects: [{ id: 'project-launch', title: 'Launch', status: 'active', color: '#123456', order: 0, tagIds: [], createdAt: '', updatedAt: '' }],
             }));
         });
         window.addEventListener('mindwtr:navigate', navigateListener);
@@ -526,7 +579,9 @@ describe('QuickAddModal', () => {
     it('flashes the created row on a plain save from a project-preset capture (#916)', async () => {
         const addTask = vi.fn(async () => ({ success: true, id: 'task-created' }));
         act(() => {
-            useTaskStore.setState((state) => ({ ...state, addTask }));
+            useTaskStore.setState((state) => ({ ...state, addTask,
+                _allProjects: [{ id: 'project-launch', title: 'Launch', status: 'active', color: '#123456', order: 0, tagIds: [], createdAt: '', updatedAt: '' }],
+            }));
         });
 
         renderQuickAddModal();
@@ -1028,6 +1083,7 @@ describe('QuickAddModal', () => {
             useTaskStore.setState((state) => ({
                 ...state,
                 addTask,
+                _allProjects: [{ id: 'project-id', title: 'Existing project', status: 'active', color: '#123456', order: 0, tagIds: [], createdAt: '', updatedAt: '' }],
             }));
         });
 
@@ -1470,6 +1526,38 @@ describe('QuickAddModal', () => {
         expect(timeoutSpy.mock.calls.some(([, delay]) => delay === MAX_AUDIO_RECORDING_SECONDS * 1000)).toBe(false);
         expect(screen.getByPlaceholderText('Add Task')).toHaveValue('Capture B');
         timeoutSpy.mockRestore();
+    });
+
+    it('retries failed audio task saves in the project already created from inline syntax (#1559)', async () => {
+        const addTask = vi.fn().mockResolvedValueOnce({ success: false }).mockResolvedValue({ success: true, id: 'saved-audio' });
+        const created = { id: 'created-project', title: 'New Project', status: 'active' as const, color: '#123456',
+            order: 0, tagIds: [], createdAt: '', updatedAt: '' };
+        const addProject = vi.fn(async () => {
+            useTaskStore.setState({ _allProjects: [created] });
+            return created;
+        });
+        (window as typeof window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {};
+        tauriMocks.invoke.mockImplementation(async (command?: string) => command === 'stop_audio_recording'
+            ? { path: '/data/retry-audio.wav', sampleRate: 16000, channels: 1, size: 128 } : false);
+        act(() => useTaskStore.setState((state) => ({ ...state, addTask, addProject,
+            settings: { ...state.settings, ai: { ...state.settings.ai,
+                speechToText: { enabled: true, provider: 'whisper', offlineModelPath: '/models/whisper.bin' } } },
+        })));
+        renderQuickAddModal();
+        await act(async () => window.dispatchEvent(new CustomEvent('mindwtr:quick-add', {
+            detail: { initialValue: 'Task +"New Project"', captureMode: 'audio' },
+        })));
+        await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Start recording' })); });
+        await waitFor(() => expect(screen.getByRole('button', { name: 'Stop recording' })).toBeEnabled());
+        await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Stop recording' })); });
+        await waitFor(() => expect(addTask).toHaveBeenCalledTimes(1));
+        await waitFor(() => expect(screen.getByRole('button', { name: 'Destination' })).toHaveTextContent('New Project'));
+        expect(fsMocks.remove).not.toHaveBeenCalledWith('/data/retry-audio.wav');
+        fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+        await waitFor(() => expect(addTask).toHaveBeenCalledTimes(2));
+        expect(addTask).toHaveBeenLastCalledWith('Task', expect.objectContaining({ projectId: created.id,
+            attachments: [expect.objectContaining({ uri: '/data/retry-audio.wav' })] }));
+        expect(addProject).toHaveBeenCalledOnce();
     });
 
     it('owns audio processing as a non-dismissible capture submission', async () => {

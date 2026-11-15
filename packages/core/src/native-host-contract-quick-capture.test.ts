@@ -63,6 +63,81 @@ describe('native host contract: the capture popup', () => {
         });
     });
 
+    it('returns caret-aware acceptance and explicit project identity without creating a project', async () => {
+        const { host, recorder } = await openHost();
+        const text = 'Before +La after';
+        const offered = value(host.getQuickCaptureAutocomplete({ text, caret: 10 }));
+        expect(offered.originalText).toBe(text);
+        expect(offered.items).toContainEqual({ label: 'Launch', text: 'Before after', caret: 7,
+            edit: { type: 'selectDestination', destination: { kind: 'project', id: 'p-launch' } } });
+        expect(value(host.getQuickCaptureAutocomplete({ text, caret: 10, selectionEnd: 12 })).items).toEqual([]);
+        expect(host.getQuickCaptureAutocomplete({ text, caret: text.length + 1 })).toMatchObject({ ok: false });
+        expect(recorder.log).toEqual([]);
+    });
+
+    it('keeps contextual sections without making them explicit inline overrides', async () => {
+        const { host } = await openHost();
+        const section = await useTaskStore.getState().addSection('p-home', 'Planning');
+        if (!section) throw new Error('Section was not created');
+        const options = value(host.openQuickCapture({ initialProps: { projectId: 'p-home', sectionId: section.id } })).options;
+        expect(options.destination).toBeUndefined();
+        expect(options.sectionId).toBe(section.id);
+        const shown = value(host.getQuickCaptureView({ text: 'Capture', options }));
+        expect(shown.destination.value).toEqual({ kind: 'project', id: 'p-home', sectionId: section.id });
+        expect(shown.destination.label).toContain('Planning');
+        const overridden = value(host.getQuickCaptureView({ text: 'Capture +Launch', options }));
+        expect(overridden.destination.value).toEqual({ kind: 'project', id: 'p-launch' });
+        expect(host.openQuickCapture({ initialProps: { projectId: 'missing' } })).toMatchObject({ ok: false });
+    });
+
+    it('retains an autocomplete project that disappears before selection and refuses a fallback save', async () => {
+        const { host } = await openHost();
+        const text = 'Call +La';
+        const offered = value(host.getQuickCaptureAutocomplete({ text, caret: text.length })).items.find(item => item.label === 'Launch');
+        if (!offered?.edit) throw new Error('Project suggestion missing');
+        const options = value(host.openQuickCapture()).options;
+        useTaskStore.setState(state => ({ _allProjects: state._allProjects.map(project => project.id === 'p-launch'
+            ? { ...project, deletedAt: fixture.now } : project) }));
+        const edited = value(host.editQuickCapture({ text: offered.text, options, edit: offered.edit })).view;
+        expect(edited.options.destination).toEqual({ kind: 'project', id: 'p-launch' });
+        expect(edited.destination.available).toBe(false);
+        expect(edited.canSave).toBe(false);
+        const captureId = generateUUID();
+        expect(await host.submitQuickCapture({ text: offered.text, options: edited.options, captureId })).toMatchObject({ ok: false });
+        expect(useTaskStore.getState()._allTasks.some(task => task.id === captureId)).toBe(false);
+    });
+
+    it('keeps explicit None over inline project syntax through view and durable submission', async () => {
+        const { host } = await openHost();
+        const options = value(host.editQuickCapture({ text: 'Capture +Unknown', options: value(host.openQuickCapture()).options,
+            edit: { type: 'selectDestination', destination: { kind: 'none' } } })).view.options;
+        const shown = value(host.getQuickCaptureView({ text: 'Capture +Unknown', options, picker: { kind: 'destination', query: '' } }));
+        expect(shown.destination.value).toEqual({ kind: 'none' });
+        expect(shown.preview.some(entry => entry.kind === 'project')).toBe(false);
+        const captureId = generateUUID();
+        value(await host.submitQuickCapture({ text: 'Capture +Unknown', options, captureId }));
+        expect(useTaskStore.getState()._allTasks.find(task => task.id === captureId)?.projectId).toBeUndefined();
+        expect(useTaskStore.getState().projects.some(project => project.title === 'Unknown')).toBe(false);
+    });
+
+    it('freezes audio destination IDs and pending creation before asynchronous work, then retains a removed target', async () => {
+        const { host } = await openHost();
+        const options = value(host.openQuickCapture()).options;
+        const admitted = value(host.admitQuickCaptureAudio({ text: 'Call +Launch', options })).options;
+        expect(admitted.audioDestination).toEqual({ destination: { kind: 'project', id: 'p-launch' } });
+        const pending = value(host.admitQuickCaptureAudio({ text: 'Call +NewProject', options })).options;
+        expect(pending.audioDestination?.projectToCreate).toEqual({ title: 'NewProject' });
+        useTaskStore.setState(state => ({ _allProjects: state._allProjects.map(project => project.id === 'p-launch'
+            ? { ...project, deletedAt: fixture.now } : project) }));
+        const captureId = generateUUID();
+        expect(value(host.admitQuickCaptureAudio({ text: 'Call +Launch', options: admitted })).options.audioDestination)
+            .toEqual(admitted.audioDestination);
+        expect(value(await host.submitQuickCaptureAudio({ text: 'Call +Launch', options: admitted, captureId,
+            fallbackTitle: 'Audio note', attachments: [] }))).toMatchObject({ kind: 'refused' });
+        expect(useTaskStore.getState()._allTasks.some(task => task.id === captureId)).toBe(false);
+        expect(admitted.audioDestination).toEqual({ destination: { kind: 'project', id: 'p-launch' } });
+    });
+
     it('does not read an opener preset: the capture saves as the tab-bar popup does', async () => {
         const { host } = await openHost();
         const preset = { projectId: 'p-home', status: 'next' } as const;
@@ -345,7 +420,7 @@ describe('native host contract: the capture popup', () => {
         expect(value(await host.submitQuickCaptureLines({ text: 'one\ntwo /due:whenever', options, captureIds: [generateUUID(), generateUUID()], snapshotFileName: null })))
             .toMatchObject({ kind: 'refused' });
         expect(value(await host.submitQuickCapturePickerQuery({ picker: 'project', query: 'launch', text: 'x', options, requestId: generateUUID() })))
-            .toEqual({ options: { ...options, projectId: 'p-launch', areaId: null }, created: false });
+            .toEqual({ options: { ...options, projectId: 'p-launch', areaId: null, destination: { kind: 'project', id: 'p-launch' } }, created: false });
 
         saveData.mockResolvedValue(undefined);
         expect(value(await host.submitQuickCapture({ text: 'Pay rent /due:tomorrow', options, captureId })))
@@ -489,12 +564,12 @@ describe('native host contract: the capture popup', () => {
         expect(writes(recorder.log)).toEqual(['addProject']);
         const project = useTaskStore.getState().projects.find((entry) => entry.title === 'Kitchen remodel')!;
         expect(project.areaId).toBe('a-work');
-        expect(created).toEqual({ options: { ...options, projectId: project.id, areaId: null }, created: true });
+        expect(created).toEqual({ options: { ...options, projectId: project.id, areaId: null, destination: { kind: 'project', id: project.id } }, created: true });
         expect(value(host.getQuickCaptureView({ text: 'Draft', options: created.options })).project.label).toBe('Kitchen remodel');
         expect(value(await host.submitQuickCapturePickerQuery(input))).toEqual(created);
 
         const existing = value(await host.submitQuickCapturePickerQuery({ ...input, query: 'launch', requestId: generateUUID() }));
-        expect(existing).toEqual({ options: { ...options, projectId: 'p-launch', areaId: null }, created: false });
+        expect(existing).toEqual({ options: { ...options, projectId: 'p-launch', areaId: null, destination: { kind: 'project', id: 'p-launch' } }, created: false });
         const area = value(await host.submitQuickCapturePickerQuery({ picker: 'area', query: 'Garden', text: 'Draft', options, requestId: generateUUID() }));
         expect(value(host.getQuickCaptureView({ text: 'Draft', options: area.options })).area.label).toBe('Garden');
         expect(writes(recorder.log)).toEqual(['addProject', 'addArea']);
@@ -508,15 +583,15 @@ describe('native host contract: the capture popup', () => {
         const area = { picker: 'area' as const, query: 'Garden', text: 'Draft', options, requestId: generateUUID() };
         const projectId = project.requestId.toLowerCase();
         const areaId = area.requestId.toLowerCase();
-        expect(value(await host.submitQuickCapturePickerQuery(project))).toEqual({ options: { ...options, projectId, areaId: null }, created: true });
-        expect(value(await host.submitQuickCapturePickerQuery(area))).toEqual({ options: { ...options, areaId }, created: true });
+        expect(value(await host.submitQuickCapturePickerQuery(project))).toEqual({ options: { ...options, projectId, areaId: null, destination: { kind: 'project', id: projectId } }, created: true });
+        expect(value(await host.submitQuickCapturePickerQuery(area))).toEqual({ options: { ...options, areaId, destination: { kind: 'area', id: areaId } }, created: true });
 
         await useTaskStore.getState().updateProject(projectId, { title: 'Kitchen' });
         await useTaskStore.getState().updateArea(areaId, { name: 'Yard' });
         const projectReplay = await replayAfterRestart((restarted) => restarted.submitQuickCapturePickerQuery(project));
-        expect(projectReplay).toEqual({ result: { ok: true, value: { options: { ...options, projectId, areaId: null }, created: false } }, wrote: false });
+        expect(projectReplay).toEqual({ result: { ok: true, value: { options: { ...options, projectId, areaId: null, destination: { kind: 'project', id: projectId } }, created: false } }, wrote: false });
         const areaReplay = await replayAfterRestart((restarted) => restarted.submitQuickCapturePickerQuery(area));
-        expect(areaReplay).toEqual({ result: { ok: true, value: { options: { ...options, areaId }, created: false } }, wrote: false });
+        expect(areaReplay).toEqual({ result: { ok: true, value: { options: { ...options, areaId, destination: { kind: 'area', id: areaId } }, created: false } }, wrote: false });
         expect(useTaskStore.getState()._allProjects.filter((entry) => entry.title === 'Kitchen remodel')).toEqual([]);
         expect(useTaskStore.getState()._allAreas.filter((entry) => entry.name === 'Garden')).toEqual([]);
 

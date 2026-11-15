@@ -551,3 +551,56 @@ describe('Android widget capture destination', () => {
         }));
     });
 });
+
+
+describe('admitted capture destinations', () => {
+    it.each(['text', 'audio'] as const)('keeps the admitted %s destination despite defaults and conflicting syntax', async kind => {
+        await openStore([]);
+        const area = await useTaskStore.getState().addArea('Original');
+        const other = await useTaskStore.getState().addArea('Later');
+        const project = await useTaskStore.getState().addProject('Conflicting');
+        await useTaskStore.getState().updateSettings({ gtd: { defaultAreaMode: 'fixed', defaultAreaId: other!.id } });
+        const queue = fakeQueue({ [`${AUDIO_ID}.json`]: { kind, id: AUDIO_ID, source: 'android-quick-capture',
+            title: 'Capture +Conflicting', destination: { kind: 'area', id: area!.id },
+            ...(kind === 'audio' ? { audioPath: `file:///owned/${AUDIO_ID}.wav` } : {}) } });
+        const audio = { resolvePath: (capture: { audioPath: string }) => capture.audioPath,
+            transcribe: vi.fn(async () => 'Transcript +Brand new'), delete: vi.fn(async () => undefined) };
+        expect(await drainPendingCaptureQueue(storeDeps(queue.port, { audio }))).toBe(1);
+        expect(saved().tasks[0]).toMatchObject({ areaId: area!.id, status: 'inbox' });
+        expect(saved().tasks[0].projectId).toBeUndefined();
+        expect(saved().projects.map(row => row.id)).toEqual([project!.id]);
+    });
+
+    it.each(['text', 'audio'] as const)('retains a %s capture with a deleted target and cleans already-created retries', async kind => {
+        await openStore([]);
+        const queue = fakeQueue({ [`${AUDIO_ID}.json`]: { kind, id: AUDIO_ID, source: 'android-quick-capture', title: 'Capture',
+            destination: { kind: 'project', id: 'deleted' }, ...(kind === 'audio' ? { audioPath: `file:///owned/${AUDIO_ID}.wav` } : {}) } });
+        const audio = { resolvePath: (capture: { audioPath: string }) => capture.audioPath,
+            transcribe: vi.fn(async () => 'Transcript'), delete: vi.fn(async () => undefined) };
+        const deps = storeDeps(queue.port, { audio });
+        expect(await drainPendingCaptureQueue(deps)).toBe(0);
+        expect(queue.stored.size).toBe(1);
+        expect(saved().tasks).toEqual([]);
+        expect(audio.transcribe).not.toHaveBeenCalled();
+        expect(audio.delete).not.toHaveBeenCalled();
+        expect(deps.log.warn).toHaveBeenCalledWith('Capture destination retained for review', expect.objectContaining({
+            extra: expect.objectContaining({ releaseCheck: 'v1.3.9/android-capture-destination', outcome: 'destination-unavailable' }) }));
+        await useTaskStore.getState().addTask('Already saved', {}, { captureId: AUDIO_ID });
+        expect(await drainPendingCaptureQueue(storeDeps(queue.port, { audio }))).toBe(1);
+        expect(queue.stored.size).toBe(0);
+        expect(saved().tasks).toHaveLength(1);
+    });
+
+    it('retains malformed snapshots and freezes the area for an explicit new-project intent', async () => {
+        await openStore([]);
+        const area = await useTaskStore.getState().addArea('Original');
+        const queue = fakeQueue({ [`${CAPTURE_ID}.json`]: { kind: 'text', id: CAPTURE_ID, title: 'Capture',
+            destination: { kind: 'none', id: 'invalid' } }, [`${AUDIO_ID}.json`]: { kind: 'text', id: AUDIO_ID, title: 'Capture +Ignored',
+            destination: { kind: 'area', id: area!.id }, projectToCreate: { title: 'Intended' } } });
+        expect(await drainPendingCaptureQueue(storeDeps(queue.port))).toBe(1);
+        expect(queue.stored.size).toBe(1);
+        expect(saved().projects).toHaveLength(1);
+        expect(saved().projects[0]).toMatchObject({ title: 'Intended', areaId: area!.id });
+        expect(saved().tasks[0].projectId).toBe(saved().projects[0].id);
+    });
+});

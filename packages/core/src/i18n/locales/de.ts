@@ -275,6 +275,8 @@ export const deOverrides: Record<string, string> = {
         'calendar.visibleCalendars': 'Sichtbare Kalender',
         'calendar.openDayView': 'Tagesansicht öffnen',
         'calendar.more': 'Mehr',
+        'quickAdd.destinationUnavailable': "Ziel nicht verfügbar. Wähle ein anderes Ziel.",
+        "quickAdd.destinationNeedsSelection": "Wähle zum Speichern ein Ziel.",
         'quickAdd.addAnother': 'Noch eine hinzufügen',
         'quickAdd.audioCaptureLabel': 'Schnelle Sprachaufnahme',
         'quickAdd.audioRecord': 'Aufnahme starten',

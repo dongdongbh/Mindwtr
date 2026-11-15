@@ -30,6 +30,7 @@ data class CaptureModal(
     val lineIds: List<String> = emptyList(),
     val pending: FailedAction? = null,
     val queuedSave: Boolean? = null,
+    val destinationQuery: String? = null,
 ) {
     val failed: Boolean get() = draft.optBoolean("failed")
 
@@ -39,6 +40,7 @@ data class CaptureModal(
     fun state(): JSONObject = JSONObject().put("session", session).put("params", params).put("draft", draft).put("view", view)
         .put("edits", JSONArray(edits)).put("captureId", captureId).put("confirm", confirm ?: JSONObject.NULL).put("lineIds", JSONArray(lineIds))
         .put("pending", pending?.let { JSONObject().put("kind", it.kind).put("id", it.id).put("request", it.patch["request"]) } ?: JSONObject.NULL)
+        .put("destinationQuery", destinationQuery ?: JSONObject.NULL)
 
     companion object {
         fun restore(saved: JSONObject): CaptureModal {
@@ -47,7 +49,8 @@ data class CaptureModal(
             return CaptureModal(saved.getString("session"), saved.getJSONObject("params"), saved.getJSONObject("draft"), saved.getJSONObject("view"),
                 List(edits.length()) { edits.getJSONObject(it) }, saved.getString("captureId"), saved.optJSONObject("confirm"),
                 List(ids.length()) { ids.getString(it) },
-                saved.optJSONObject("pending")?.let { FailedAction(it.getString("kind"), it.getString("id"), patch = mapOf("request" to it.getString("request"))) })
+                saved.optJSONObject("pending")?.let { FailedAction(it.getString("kind"), it.getString("id"), patch = mapOf("request" to it.getString("request"))) },
+                destinationQuery = if (saved.isNull("destinationQuery")) null else saved.optString("destinationQuery"))
         }
     }
 }
@@ -119,6 +122,14 @@ class CaptureModalModel(private val shell: InboxViewModel, private val saved: Sa
         pump()
     }
 
+    fun openDestination() { open?.let { keep(it.copy(destinationQuery = "", edits = it.edits + READ)); pump() } }
+
+    fun closeDestination() { open?.let { keep(it.copy(destinationQuery = null)) } }
+
+    fun searchDestination(query: String) { open?.let { keep(it.copy(destinationQuery = query, edits = it.edits + READ)); pump() } }
+
+    fun chooseDestination(choice: JSONObject) { closeDestination(); edit(choice) }
+
 
     fun pump() {
         val current = open ?: return
@@ -127,7 +138,10 @@ class CaptureModalModel(private val shell: InboxViewModel, private val saved: Sa
         if (next == null) { current.queuedSave?.let(::save); return }
         inFlight = next
         val read = next.optBoolean("read")
-        val request = JSONObject().put("params", current.params).put("draft", current.draft).apply { if (!read) put("edit", next) }
+        val request = JSONObject().put("params", current.params).put("draft", current.draft).apply {
+            if (!read) put("edit", next)
+            if (read && current.destinationQuery != null) put("destinationQuery", current.destinationQuery)
+        }
         shell.background(emptyList(), { runtime -> runCatching { runtime.menuRead(if (read) "captureModalView" else "captureModalEdit", request.toString()) } }) { reply, _ ->
             if (inFlight === next) inFlight = null
 

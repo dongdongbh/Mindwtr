@@ -229,6 +229,8 @@ export const hiOverrides: Record<string, string> = {
         'calendar.visibleCalendars': 'दिखने वाले कैलेंडर',
         'calendar.openDayView': 'दिन दृश्य खोलें',
         'calendar.more': 'अधिक',
+        'quickAdd.destinationUnavailable': "गंतव्य उपलब्ध नहीं है। कोई दूसरा गंतव्य चुनें।",
+        "quickAdd.destinationNeedsSelection": "सहेजने के लिए गंतव्य चुनें।",
         'quickAdd.addAnother': 'एक और जोड़ें',
         'quickAdd.audioCaptureLabel': 'त्वरित आवाज कैप्चर',
         'quickAdd.audioRecord': 'रिकॉर्डिंग प्रारंभ करें',

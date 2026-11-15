@@ -300,6 +300,8 @@ export const esOverrides: Record<string, string> = {
 'quickAdd.syntaxHelp': "Ayuda de sintaxis de captura rápida",
 'quickAdd.pasteImagesHint': 'Pega imágenes o capturas de pantalla con {{shortcut}} para adjuntarlas.',
 'quickAdd.placeholder': "Añade una tarea… usa @context +Project #tag",
+'quickAdd.destinationUnavailable': "Destino no disponible. Elige otro destino.",
+        "quickAdd.destinationNeedsSelection": "Elige un destino para guardar.",
 'quickAdd.addAnother': "Añadir otra",
 'quickAdd.inputLabel': "Título de la tarea",
 'quickAdd.inputHint': "Escribe una tarea y pulsa Intro para guardarla.",

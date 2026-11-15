@@ -63,6 +63,7 @@ import kotlinx.coroutines.delay
 import org.json.JSONObject
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.semantics.selected
 
 
 private fun JSONObject.text(name: String): String? = if (!has(name) || isNull(name)) null else getString(name)
@@ -82,6 +83,7 @@ fun CaptureModalScreen(model: InboxViewModel, modal: CaptureModal) = with(model.
     val locked = model.busy || owed
 
     val canSave = model.writable && !model.busy && (!owed || model.failedAction == modal.pending)
+        && modal.destinationQuery == null && view.optJSONObject("destination")?.optBoolean("available") != false
     val keyboard = LocalSoftwareKeyboardController.current
     val titleFocus = remember { FocusRequester() }
 
@@ -94,7 +96,7 @@ fun CaptureModalScreen(model: InboxViewModel, modal: CaptureModal) = with(model.
     LaunchedEffect(modal.session, copilotRequest?.toString()) { model.ai.captureCopilot(modal.session, copilotRequest) }
     BackHandler {
         if (model.busy) return@BackHandler
-        if (modal.confirm != null) cancelLines() else cancel(leave = false)
+        if (modal.confirm != null) cancelLines() else if (modal.destinationQuery != null) closeDestination() else cancel(leave = false)
     }
 
 
@@ -132,6 +134,18 @@ fun CaptureModalScreen(model: InboxViewModel, modal: CaptureModal) = with(model.
                             Modifier.focusRequester(titleFocus)) { type(it) }
                         val preview = view.items("preview")
                         if (preview.isNotEmpty()) PreviewStrip(preview, Modifier)
+
+                        view.optJSONObject("destination")?.let { destination ->
+                            val label = t("task.destination") + ": " + destination.getString("label")
+                            Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).rnBorder(1.dp, c.border, RoundedCornerShape(8.dp))
+                                .control(label, "capture-modal-destination", !locked) { openDestination() }.padding(horizontal = 12.dp, vertical = 10.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Lucide.Folder, null, tint = c.secondaryText, modifier = Modifier.size(16.dp))
+                                Text(label, style = rnText(14, 600), color = if (destination.getBoolean("available")) c.text else c.warning,
+                                    modifier = Modifier.weight(1f))
+                                Icon(Lucide.ChevronDown, null, tint = c.secondaryText, modifier = Modifier.size(16.dp))
+                            }
+                        }
 
                         view.optJSONObject("attachments")?.let { files ->
                             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -182,6 +196,24 @@ fun CaptureModalScreen(model: InboxViewModel, modal: CaptureModal) = with(model.
             }
         }
         ToastCard(model, Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 16.dp))
+
+        modal.destinationQuery?.let { query ->
+            val picker = view.optJSONObject("destinationPicker")
+            PickerCard(t("task.destination"), { if (!locked) closeDestination() }) {
+                ModalField(query, t("common.search"), "capture-modal-destination-query", !locked, 14, 44.dp, Modifier, ::searchDestination)
+                if (modal.edits.isEmpty() && picker != null) {
+                    Column(Modifier.fillMaxWidth().heightIn(max = 260.dp).verticalScroll(rememberScrollState())) {
+                        for (item in listOf(picker.getJSONObject("none")) + picker.items("items")) {
+                            val id = item.optString("id").ifEmpty { "none" }
+                            Text(item.getString("label"), style = rnText(14, 400), color = c.text,
+                                modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp)
+                                    .control(item.getString("label"), "capture-modal-destination-option-$id", !locked) { chooseDestination(item.getJSONObject("edit")) }
+                                    .semantics { selected = item.optBoolean("selected") }.padding(horizontal = 12.dp, vertical = 10.dp))
+                        }
+                    }
+                }
+            }
+        }
 
         modal.confirm?.let { confirm ->
             PickerCard(confirm.getString("title"), { if (!locked) cancelLines() }) {

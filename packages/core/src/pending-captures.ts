@@ -1,3 +1,4 @@
+import { isCaptureDestinationAvailable, readCaptureDestination, type CaptureDestination } from './capture-destination';
 
 
 
@@ -10,7 +11,7 @@ import { resolveCaptureStatusForStart } from './store-helpers';
 import { isSelectableProjectForTaskAssignment } from './project-utils';
 import { buildQuickAddParseOptions, parseQuickAdd } from './quick-add';
 import { resolveQuickCaptureDefaultAreaId } from './quick-capture-model';
-import type { AppData, Area, Person, Project, Task } from './types';
+import type { AppData, Area, Person, Project, Section, Task } from './types';
 import { generateDeterministicUUID } from './uuid';
 
 export const PENDING_CAPTURES_DIRECTORY = 'pending-captures';
@@ -21,10 +22,10 @@ type CaptureStatus = 'inbox' | 'next' | 'waiting' | 'someday';
 const captureStatus = (value: unknown): CaptureStatus | undefined => (
     value === 'inbox' || value === 'next' || value === 'waiting' || value === 'someday' ? value : undefined
 );
-type CaptureDestination = { defaultStatus?: CaptureStatus; status?: CaptureStatus };
+type CaptureMetadata = { defaultStatus?: CaptureStatus; status?: CaptureStatus; destination?: CaptureDestination; projectToCreate?: { title: string } };
 
 
-export type PendingCapture = CaptureDestination & {
+export type PendingCapture = CaptureMetadata & {
     kind?: 'capture' | 'text';
     id: string;
     title: string;
@@ -49,7 +50,7 @@ export type PendingCompletion = {
     source?: string;
 };
 
-export type PendingAudioCapture = CaptureDestination & {
+export type PendingAudioCapture = CaptureMetadata & {
     kind: 'audio';
     id: string;
     audioPath: string;
@@ -135,9 +136,22 @@ export function parsePendingCapture(raw: string): PendingQueueItem | null {
     const createdAt = trimOrUndefined(record.createdAt);
     const source = trimOrUndefined(record.source);
 
+    const snapshot = record.destination === undefined ? undefined : readCaptureDestination(record.destination);
+    if (snapshot === null) return null;
+    let projectToCreate: { title: string } | undefined;
+    if (record.projectToCreate !== undefined) {
+        if (!snapshot || snapshot.kind === 'project' || !record.projectToCreate || typeof record.projectToCreate !== 'object'
+            || Array.isArray(record.projectToCreate)) return null;
+        const intent = record.projectToCreate as Record<string, unknown>;
+        if (Object.keys(intent).length !== 1 || typeof intent.title !== 'string' || !intent.title.trim()
+            || intent.title !== intent.title.trim() || intent.title.length > 500) return null;
+        projectToCreate = { title: intent.title };
+    }
     const defaultStatus = captureStatus(record.defaultStatus);
     const status = captureStatus(record.status);
-    const destination: CaptureDestination = {
+    const destination: CaptureMetadata = {
+        ...(snapshot ? { destination: snapshot } : {}),
+        ...(projectToCreate ? { projectToCreate } : {}),
         ...(defaultStatus ? { defaultStatus } : {}),
         ...(status ? { status } : {}),
     };
@@ -270,6 +284,9 @@ export type PendingCaptureStoreDeps = {
     addProject: (title: string, color: string, initialProps?: Partial<Project>) => Promise<Project | null>;
     projects: Project[];
     areas: Area[];
+    sections?: Section[];
+    getAreas?: () => Area[];
+    getSections?: () => Section[];
 
 
     tasks: Task[];
@@ -356,6 +373,9 @@ function logWatchOutboxRetry(log: PendingCaptureLog, kind: 'text' | 'audio', cap
 }
 
 function logAndroidCaptureDestination(log: PendingCaptureLog, capture: PendingCapture | PendingAudioCapture, status: unknown, replayed: boolean, destination: Partial<Task>): void {
+    if (capture.destination) void log.info('Capture destination persisted', { scope: 'capture', force: true,
+        extra: { releaseCheck: 'v1.3.9/android-capture-destination', kind: capture.kind === 'audio' ? 'audio' : 'text',
+            destination: destination.projectId ? 'project' : destination.areaId ? 'area' : 'none', outcome: replayed ? 'already-created' : 'created' } });
     if (capture.source !== ANDROID_QUICK_CAPTURE_SOURCE) return;
     void log.info('Android quick capture area ingested', {
         scope: 'capture', force: true,
@@ -390,7 +410,7 @@ const resultId = (result: unknown): string | undefined => {
 
 async function assembleCaptureTask(
     capture: PendingCapture,
-    { addProject, projects, areas, tasks, people, settings }: Pick<PendingCaptureStoreDeps, 'addProject' | 'projects' | 'areas' | 'tasks' | 'people' | 'settings'>,
+    { addProject, projects, areas, sections, tasks, people, settings }: Pick<PendingCaptureStoreDeps, 'addProject' | 'projects' | 'areas' | 'sections' | 'tasks' | 'people' | 'settings'>,
     log: PendingCaptureLog,
 ): Promise<{ title: string; props: Partial<Task> } | null> {
     try {
@@ -401,12 +421,33 @@ async function assembleCaptureTask(
         const parsed = parseQuickAdd(capture.title, projects, now, areas,
             buildQuickAddParseOptions(settings, { tasks, people }));
 
+        let destination = capture.destination;
+        let projectToCreate = capture.projectToCreate;
+        if (destination && projectToCreate && UUID_PATTERN.test(capture.id)) {
+            const ownedId = generateDeterministicUUID(`${capture.id.toLowerCase()}:project:${projectToCreate.title.trim().toLowerCase()}`);
+            const ownedProject = projects.find(project => project.id === ownedId);
+            if (ownedProject) {
+                if (!isSelectableProjectForTaskAssignment(ownedProject)) return null;
+                destination = { kind: 'project', id: ownedId };
+                projectToCreate = undefined;
+            }
+        }
+        if (capture.destination) {
+            delete parsed.props.projectId;
+            delete parsed.props.sectionId;
+            delete parsed.props.areaId;
+            parsed.projectTitle = projectToCreate?.title;
+        }
         const input: CaptureAssemblyInput = {
             parsed,
             rawInput: capture.title,
             fallbackTitle: capture.title,
             projects,
-            selectedAreaId: resolveQuickCaptureDefaultAreaId(settings, areas),
+            selectedAreaId: capture.destination ? (capture.destination.kind === 'area' ? capture.destination.id : null)
+                : resolveQuickCaptureDefaultAreaId(settings, areas),
+            destination: projectToCreate ? undefined : destination,
+            areas,
+            sections,
             initialProps: {
                 status: capture.defaultStatus ?? 'inbox',
                 ...(capture.note ? { description: capture.note } : {}),
@@ -418,7 +459,7 @@ async function assembleCaptureTask(
         const prepared = await prepareCaptureTask(input, { addProject }, {
             transformProps: (props) => {
                 const taskProps = { ...props };
-                const structuredProjectId = resolveStructuredProjectId(capture, projects);
+                const structuredProjectId = capture.destination ? undefined : resolveStructuredProjectId(capture, projects);
                 if (structuredProjectId) {
                     taskProps.projectId = structuredProjectId;
                     taskProps.areaId = undefined;
@@ -533,6 +574,7 @@ export async function drainPendingCaptureQueue(deps: PendingCaptureDrainDeps): P
         addProject,
         projects,
         areas,
+        sections,
         tasks,
         people,
         settings,
@@ -569,10 +611,30 @@ export async function drainPendingCaptureQueue(deps: PendingCaptureDrainDeps): P
         return 0;
     }
 
-    const entries: { capture: PendingQueueItem | null; name: string }[] = [];
+    const captureDestinationReady = (capture: PendingCapture | PendingAudioCapture): boolean => {
+        if (!capture.destination || isCaptureDestinationAvailable(capture.destination, {
+            projects: getProjects?.() ?? projects, areas: deps.getAreas?.() ?? areas, sections: deps.getSections?.() ?? sections,
+        })) return true;
+        void log.warn('Capture destination retained for review', { scope: 'capture', force: true,
+            extra: { releaseCheck: 'v1.3.9/android-capture-destination', kind: capture.kind === 'audio' ? 'audio' : 'text', outcome: 'destination-unavailable' } });
+        onUnfinished?.('queued');
+        return false;
+    };
+
+    const entries: { capture: PendingQueueItem | null; name: string; invalidDestination?: boolean }[] = [];
     for (const name of names.filter((entry) => entry.endsWith('.json')).sort()) {
         try {
-            entries.push({ capture: parsePendingCapture(await queue.read(name)), name });
+            const raw = await queue.read(name);
+            const capture = parsePendingCapture(raw);
+            let invalidDestination = false;
+            if (!capture) {
+                try {
+                    const record = JSON.parse(raw);
+                    invalidDestination = record && typeof record === 'object'
+                        && ('destination' in record || 'projectToCreate' in record);
+                } catch { invalidDestination = false; }
+            }
+            entries.push({ capture, name, invalidDestination });
         } catch (error) {
             void log.error(error, { scope: 'shortcuts', extra: { message: 'Failed to read pending capture', name } });
             onUnfinished?.('queued');
@@ -653,10 +715,15 @@ export async function drainPendingCaptureQueue(deps: PendingCaptureDrainDeps): P
     };
 
     let ingested = 0;
-    for (const { capture, name } of orderedEntries) {
+    for (const { capture, name, invalidDestination } of orderedEntries) {
         if (audioOnly && capture?.kind !== 'audio') continue;
         if (!capture) {
-
+            if (invalidDestination) {
+                void log.warn('Capture destination retained for review', { scope: 'capture', force: true,
+                    extra: { releaseCheck: 'v1.3.9/android-capture-destination', outcome: 'invalid-destination' } });
+                onUnfinished?.('queued');
+                continue;
+            }
 
             void log.warn('Discarding malformed pending capture', { scope: 'shortcuts', extra: { name } });
             await queue.delete(name).catch(() => undefined);
@@ -893,6 +960,8 @@ export async function drainPendingCaptureQueue(deps: PendingCaptureDrainDeps): P
                 continue;
             }
 
+            if (!captureDestinationReady(capture)) continue;
+
             if (isAndroidQuickCapture) {
                 void log.info('Android quick capture audio ready for transcription', {
                     scope: 'capture',
@@ -946,9 +1015,12 @@ export async function drainPendingCaptureQueue(deps: PendingCaptureDrainDeps): P
                 source: capture.source,
                 ...(capture.defaultStatus ? { defaultStatus: capture.defaultStatus } : {}),
                 ...(capture.status ? { status: capture.status } : {}),
+                ...(capture.destination ? { destination: capture.destination } : {}),
+                ...(capture.projectToCreate ? { projectToCreate: capture.projectToCreate } : {}),
             };
             const activeTasks = currentTasks.filter((task) => !task.deletedAt && !task.purgedAt);
-            const assembled = await assembleCaptureTask(textCapture, { addProject: captureAddProject(captureId), projects, areas, tasks: activeTasks, people, settings }, log);
+            const assembled = await assembleCaptureTask(textCapture, { addProject: captureAddProject(captureId), projects: capture.destination ? getProjects?.() ?? projects : projects, areas: deps.getAreas?.() ?? areas, sections: deps.getSections?.() ?? sections, tasks: activeTasks, people, settings }, log);
+            if (!assembled && capture.destination) { onUnfinished?.('queued'); continue; }
             const title = assembled?.title ?? textCapture.title;
             const props = assembled?.props ?? buildPendingCaptureTaskProps(textCapture, projects);
             let result: unknown;
@@ -1018,7 +1090,9 @@ export async function drainPendingCaptureQueue(deps: PendingCaptureDrainDeps): P
         const stored = storedTask !== undefined;
         let destinationProps: Partial<Task> = storedTask ?? {};
         if (!stored) {
-            const assembled = await assembleCaptureTask(capture, { addProject: captureAddProject(captureId), projects, areas, tasks, people, settings }, log);
+            if (!captureDestinationReady(capture)) continue;
+            const assembled = await assembleCaptureTask(capture, { addProject: captureAddProject(captureId), projects: capture.destination ? getProjects?.() ?? projects : projects, areas: deps.getAreas?.() ?? areas, sections: deps.getSections?.() ?? sections, tasks, people, settings }, log);
+            if (!assembled && capture.destination) { onUnfinished?.('queued'); continue; }
             destinationProps = assembled?.props ?? buildPendingCaptureTaskProps(capture, projects);
             const captureOptions: [{ captureId: string }?] = captureId ? [{ captureId }] : [];
             const result = assembled

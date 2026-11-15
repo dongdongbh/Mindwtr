@@ -103,6 +103,12 @@ export function planNativeVoiceSpeechResult(request: NativeVoiceResultRequest, i
     if (initial.taskId !== request.capture.requestId || taskBefore.id !== initial.taskId || taskBefore.deletedAt || taskBefore.purgedAt
         || taskBefore.status === 'reference' || isStatusListTaskReadOnly(taskBefore, basis.projects)) return { outcome: 'skipped' };
     const plan = buildTaskUpdatesFromSpeechResult(taskBefore, request.result, basis.settings);
+    if (request.capture.options.audioDestination) {
+        delete plan.updates.projectId;
+        delete plan.updates.areaId;
+        delete plan.updates.sectionId;
+        plan.suggestedProjectTitle = undefined;
+    }
     if (taskBefore.title !== initial.titleAtSave) delete plan.updates.title;
     if (!Object.keys(plan.updates).length && !plan.suggestedProjectTitle) {
         if (!initial.generated || !safeGenerated(request.capture) || !sameTaskSqliteRow(taskBefore, initial.taskAtSave)) return { outcome: 'empty' };

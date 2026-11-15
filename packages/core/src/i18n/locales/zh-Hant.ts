@@ -368,6 +368,8 @@ export const zhHant: Record<string, string> = {
         'quickAdd.syntaxHelp': '快速添加語法幫助',
         'quickAdd.pasteImagesHint': '使用 {{shortcut}} 貼上圖片或截圖即可加入為附件。',
         'quickAdd.placeholder': '添加任務… 支持 @情境 +專案 #標籤',
+        'quickAdd.destinationUnavailable': "目標位置無法使用，請選擇其他位置。",
+        "quickAdd.destinationNeedsSelection": "請選擇目標位置後儲存。",
         'quickAdd.addAnother': '連續添加',
         'quickAdd.audioCaptureLabel': '語音快速記錄',
         'quickAdd.audioRecord': '開始錄音',

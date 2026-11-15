@@ -178,6 +178,16 @@ describe('quick-capture audio rules', () => {
         expect(state.updateTask).toHaveBeenCalledWith('t1', expect.objectContaining({ title: 'Buy milk', projectId: 'p-home' }));
     });
 
+    it('keeps an admitted audio destination when speech suggests a project', async () => {
+        const { state, store } = fakeStore([task({ areaId: 'admitted-area' })]);
+        await expect(applySpeechResult('t1', { transcript: 'Paint', title: 'Paint', projectTitle: 'Garage' }, store,
+            { preserveDestination: true })).resolves.toBe('applied');
+        expect(state.addProject).not.toHaveBeenCalled();
+        expect(state.tasks[0]?.areaId).toBe('admitted-area');
+        expect(state.tasks[0]?.projectId).toBeUndefined();
+        expect(state.tasks[0]?.title).toBe('Paint');
+    });
+
     it('makes the suggested project when none matches, skips a task that is gone, and reports an empty result', async () => {
         const { state, store } = fakeStore([task()]);
         await expect(applySpeechResult('t1', { transcript: 'Paint', title: 'Paint', projectTitle: 'Garage' }, store)).resolves.toBe('applied');

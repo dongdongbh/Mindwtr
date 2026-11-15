@@ -333,6 +333,8 @@ export const koOverrides: Record<string, string> = {
         'quickAdd.syntaxHelp': '빠른 추가 문법 도움말',
         'quickAdd.pasteImagesHint': '{{shortcut}}로 이미지나 스크린샷을 붙여 넣으면 첨부됩니다.',
         'quickAdd.placeholder': '할 일 추가… @context +Project #tag',
+        'quickAdd.destinationUnavailable': "저장 위치를 사용할 수 없습니다. 다른 위치를 선택하세요.",
+        "quickAdd.destinationNeedsSelection": "저장할 위치를 선택하세요.",
         'quickAdd.addAnother': '하나 더 추가',
         'quickAdd.inputLabel': '할 일 제목',
         'quickAdd.inputHint': '할 일을 입력한 뒤 입력 키를 눌러 저장하세요.',

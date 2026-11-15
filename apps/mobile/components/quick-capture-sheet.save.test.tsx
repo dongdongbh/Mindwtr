@@ -7,6 +7,7 @@ import {
   QuickCaptureSheet,
   subscribeQuickCaptureSubmissionFailure,
 } from './quick-capture-sheet';
+import { TaskEditDestinationPicker } from './task-edit/TaskEditDestinationPicker';
 import { ANDROID_ACTIVITY_SESSION_TTL_MS } from '@/lib/android-activity-session';
 import * as appLog from '@/lib/app-log';
 
@@ -99,6 +100,7 @@ vi.mock('@mindwtr/core', async () => {
     '../../../packages/core/src/capture-session'
   );
   return {
+  ...actual,
   CaptureSessionCoordinator: sessionActual.CaptureSessionCoordinator,
 
 
@@ -335,6 +337,68 @@ const contextScans = () => quickCaptureSpies.getQuickCaptureContextChoices.mock.
   .filter(([tasks]) => tasks === selectStore.getState().tasks).length;
 
 describe('QuickCaptureSheet save handling', () => {
+  it('shows and freezes the default, then saves explicit None over conflicting inline destination (#1559)', async () => {
+    addTask.mockResolvedValue({ success: true, id: 'captured' });
+    const state = selectStore.getState();
+    state.areas = [{ id: 'home', name: 'Home', order: 0, createdAt: '', updatedAt: '' },
+      { id: 'work', name: 'Work', order: 1, createdAt: '', updatedAt: '' }];
+    state.settings = { gtd: { defaultAreaMode: 'fixed', defaultAreaId: 'home' } };
+    const props = { visible: true, openRequestId: 1, initialValue: 'Task', onClose: vi.fn() };
+    let tree!: ReturnType<typeof create>;
+    await act(async () => { tree = create(<QuickCaptureSheet {...props} />); });
+    const body = () => tree.root.findByType('QuickCaptureSheetBody' as any);
+    expect(body().props.destinationLabel).toBe('Home');
+    state.settings = { gtd: { defaultAreaMode: 'fixed', defaultAreaId: 'work' } };
+    await act(async () => tree.update(<QuickCaptureSheet {...props} />));
+    expect(body().props.destinationLabel).toBe('Home');
+    act(() => body().props.onOpenDestinationPicker());
+    act(() => tree.root.findByType(TaskEditDestinationPicker).props.onSelect({ kind: 'none' }));
+    act(() => body().props.onValueChange('Task +Unknown !Work'));
+    expect(body().props.destinationLabel).toBe('common.none');
+    await act(async () => { await body().props.handleSave(); });
+    expect(addTask).toHaveBeenCalledWith('Task', expect.objectContaining({ areaId: undefined, status: 'inbox' }));
+    expect(addProject).not.toHaveBeenCalled();
+    expect(addTask).not.toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ projectId: expect.any(String) }));
+  });
+
+  it('shows and saves a contextual project section, and keeps a lost selection unavailable (#1559)', async () => {
+    addTask.mockResolvedValue({ success: true, id: 'captured' });
+    const state = selectStore.getState();
+    state.projects = [{ id: 'project', title: 'Launch', status: 'active', order: 0, color: '#123456', tagIds: [], createdAt: '', updatedAt: '' }];
+    state.setHighlightTask = vi.fn();
+    state.sections = [{ id: 'section', projectId: 'project', title: 'Planning', order: 0, createdAt: '', updatedAt: '' }];
+    const props = { visible: true, openRequestId: 1, initialValue: 'Task', initialProps: { projectId: 'project', sectionId: 'section' }, onClose: vi.fn() };
+    let tree!: ReturnType<typeof create>;
+    await act(async () => { tree = create(<QuickCaptureSheet {...props} />); });
+    const body = () => tree.root.findByType('QuickCaptureSheetBody' as any);
+    expect(body().props.destinationLabel).toBe('Launch / Planning');
+    await act(async () => { await body().props.handleSave(); });
+    expect(addTask).toHaveBeenCalledWith('Task', expect.objectContaining({ projectId: 'project', sectionId: 'section' }));
+    addTask.mockClear();
+    await act(async () => tree.update(<QuickCaptureSheet {...props} openRequestId={2} />));
+    state.projects = [];
+    await act(async () => tree.update(<QuickCaptureSheet {...props} openRequestId={2} />));
+    expect(body().props.destinationAvailable).toBe(false);
+    expect(body().props.value).toBe('Task');
+    await act(async () => { await body().props.handleSave(); });
+    expect(addTask).not.toHaveBeenCalled();
+  });
+
+  it('rejects a lost default while preparing audio with an unknown project instead of creating it elsewhere (#1559)', async () => {
+    const state = selectStore.getState();
+    state.areas = [{ id: 'home', name: 'Home', order: 0, createdAt: '', updatedAt: '' }];
+    state.settings = { gtd: { defaultAreaMode: 'fixed', defaultAreaId: 'home' } };
+    await act(async () => { create(<QuickCaptureSheet visible openRequestId={1} initialValue="Task +Unknown" onClose={vi.fn()} />); });
+    const audio = audioHookMock.params;
+    if (!audio) throw new Error('No audio capture owner');
+    state.areas = [];
+    const result = await audio.buildTaskProps('Audio note');
+    expect(result.title).toBe('');
+    expect(addProject).not.toHaveBeenCalled();
+    expect(addTask).not.toHaveBeenCalled();
+    expect(showToast).toHaveBeenCalledWith(expect.objectContaining({ tone: 'error' }));
+  });
+
   it('previews and saves typed existing reminder leads (#1545)', async () => {
     addTask.mockResolvedValue({ success: true, id: 'task-1' });
     let tree!: ReturnType<typeof create>;
@@ -373,6 +437,7 @@ describe('QuickCaptureSheet save handling', () => {
     showToast.mockReset();
     selectStore.getState().areas = [];
     selectStore.getState().projects = [];
+    selectStore.getState().sections = [];
     selectStore.getState().tasks = [];
     selectStore.getState()._allTasks = selectStore.getState().tasks;
     selectStore.getState().settings = {};

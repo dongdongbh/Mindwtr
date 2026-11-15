@@ -16,6 +16,7 @@ import { nativeVoiceBasis, nativeVoiceCaptureResult, readNativeVoiceCaptureResul
     type NativeVoiceResult } from './native-voice-prepared';
 import type { PreparedAreaAuthority } from './store-types';
 import type { AppData } from './types';
+import { logInfo } from './logger';
 export * from './native-voice-settings';
 export * from './native-voice-prepared';
 
@@ -186,6 +187,10 @@ export function createNativeVoiceMethods(deps: QuickCaptureDeps) {
                     return { ok: true, value: config.result(prepared) };
                 });
                 if (result.ok || result.error.code === 'STALE_REVISION') authorizations.delete(request.requestId);
+                if (result.ok && prepared.kind === 'result' && prepared.request.capture.options.audioDestination) {
+                    logInfo('Native audio destination preserved', { scope: 'capture', force: true,
+                        context: { releaseCheck: 'v1.3.9/native-capture-destination', kind: 'audio-transcript', outcome: 'preserved' } });
+                }
                 return result;
             },
         };

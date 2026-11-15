@@ -19,6 +19,7 @@ import { sanitizeAttachmentUriForSyncMerge } from './sync-normalization';
 import { getSavedTaxonomyTokens } from './taxonomy-catalog';
 import { getUsedTaskTokens } from './task-token-usage';
 import type { AppSettings, Area, Attachment, Project, Task, TimeEstimate } from './types';
+import { readCaptureDestination, type CaptureDestination } from './capture-destination';
 
 export type CaptureModalParam = string | string[] | undefined;
 
@@ -76,6 +77,14 @@ const parseInitialPropsJson = (value: CaptureModalParam): Record<string, unknown
         return {};
     }
 };
+
+export function readCaptureModalInitialDestination(value: CaptureModalParam): CaptureDestination | null | undefined {
+    const props = parseInitialPropsJson(value);
+    if (props.projectId !== undefined) return readCaptureDestination({ kind: 'project', id: props.projectId,
+        ...(props.sectionId !== undefined ? { sectionId: props.sectionId } : {}) });
+    if (props.areaId !== undefined) return readCaptureDestination({ kind: 'area', id: props.areaId });
+    return undefined;
+}
 
 const normalizeInitialTokenList = (value: unknown, prefix?: '@' | '#'): string[] | undefined => {
     if (!Array.isArray(value)) return undefined;
