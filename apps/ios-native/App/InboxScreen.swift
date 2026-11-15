@@ -646,9 +646,6 @@ private struct KeptTabSurfaces: View {
                 UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
             }
             if surface == .inbox { Task { await model.recordInboxViewBoundaryRendered() } }
-            if previous != surface, Self.kept.contains(surface) {
-                DispatchQueue.main.async { UIAccessibility.post(notification: .screenChanged, argument: nil) }
-            }
             if KeptTabAccessibilityProbe.enabled {
                 Task {
                     for delay: UInt64 in [1_000_000_000, 2_000_000_000] {
