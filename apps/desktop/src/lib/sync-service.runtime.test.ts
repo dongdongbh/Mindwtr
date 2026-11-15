@@ -1630,6 +1630,72 @@ describe('desktop sync-service runtime', () => {
         expect(fsMocks.readFile).not.toHaveBeenCalled();
     });
 
+    it('keeps an edit made after the unchanged WebDAV check read local data pending for auto sync', async () => {
+        const syncServiceModule = await syncServiceModulePromise;
+        const syncedData: AppData = { tasks: [], projects: [], sections: [], areas: [], people: [], settings: {} };
+        const remoteFingerprint = 'webdav:v1:etag="fast"';
+        const scope = computeStableValueFingerprint({
+            backend: 'webdav',
+            url: 'https://sync.example.com/data.json',
+            username: 'user',
+        });
+        const headFetchMock = vi.fn(async () => buildResponse(200, '', { etag: '"fast"', 'content-length': '2' }));
+        storeStateRef.current = {
+            ...storeStateRef.current,
+            _allTasks: syncedData.tasks,
+            _allProjects: [],
+            _allSections: [],
+            _allAreas: [],
+            settings: {},
+            lastDataChangeAt: 1_000,
+        };
+        getInMemoryAppDataSnapshotMock.mockReturnValue(syncedData);
+        localStorage.setItem('mindwtr-fast-sync-state-v1', JSON.stringify({
+            scope,
+            localFingerprint: computeSyncPayloadFingerprint(syncedData),
+            remoteFingerprint,
+            checkedAt: '2026-05-07T00:00:00.000Z',
+        }));
+        invokeMock.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
+            if (command === 'get_sync_backend') return 'webdav';
+            if (command === 'create_data_snapshot') return undefined;
+            if (command === 'get_webdav_config') {
+                return {
+                    url: 'https://sync.example.com/data.json',
+                    username: 'user',
+                    password: 'pass',
+                    hasPassword: true,
+                    allowInsecureHttp: false,
+                };
+            }
+            if (command === 'get_data') return structuredClone(syncedData);
+            if (command === 'save_data') return undefined;
+            throw new Error(`Unexpected command: ${command} ${JSON.stringify(args)}`);
+        });
+        rememberWebdavCapabilityProof({
+            url: 'https://sync.example.com/data.json',
+            username: 'user',
+            allowInsecureHttp: false,
+        });
+        syncServiceModule.__syncServiceTestUtils.setDependenciesForTests({
+            getTauriFetch: async () => headFetchMock as unknown as typeof fetch,
+        });
+        const setItem = localStorage.setItem.bind(localStorage);
+        const setItemSpy = vi.spyOn(localStorage, 'setItem').mockImplementation((name: string, value: string) => {
+            if (name === 'mindwtr-fast-sync-state-v1') storeStateRef.current.lastDataChangeAt = 2_000;
+            setItem(name, value);
+        });
+
+        try {
+            await expect(syncServiceModule.SyncService.performSync()).resolves.toEqual({ success: true, skipped: 'unchanged' });
+        } finally {
+            setItemSpy.mockRestore();
+        }
+
+        expect(storeStateRef.current.lastDataChangeAt).toBe(2_000);
+        expect(syncServiceModule.SyncService.hasPendingLocalChangesForAutoSync()).toBe(true);
+    });
+
     it('reuses the fast-check local snapshot when falling back to a full WebDAV sync', async () => {
         const syncServiceModule = await syncServiceModulePromise;
         const syncedData: AppData = {

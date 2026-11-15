@@ -8,6 +8,7 @@ import {
     mergeAppData,
     SyncFileLockBusyError,
     SyncRemoteWriteConflict,
+    useTaskStore,
     type AppData,
     type Attachment,
 } from '@mindwtr/core';
@@ -371,6 +372,36 @@ describe('sync-service test utils', () => {
             'resolution:persist',
             'ordinary:write',
         ]);
+    });
+
+    it('keeps an edit made while the external file sync status is saved pending for auto sync', async () => {
+        const invoke = vi.fn(async (command: string) => {
+            if (command === 'get_sync_backend') return 'file';
+            if (command === 'acquire_file_sync_lease') return 'external-resolution-lease';
+            if (command === 'get_data' || command === 'read_sync_file' || command === 'save_data') return emptyAppData();
+            if (command === 'release_file_sync_lease') return undefined;
+            throw new Error(`unexpected command: ${command}`);
+        });
+        const storeState = { fetchData: vi.fn(async () => undefined), lastDataChangeAt: 1_000, settings: {} };
+        __syncServiceTestUtils.setDependenciesForTests({
+            flushPendingSave: vi.fn(async () => undefined),
+            getStoreState: () => storeState as any,
+            invoke: invoke as unknown as <T>(command: string, args?: Record<string, unknown>) => Promise<T>,
+            isTauriRuntime: () => true,
+            markLocalSqliteWrite: vi.fn(),
+            markLocalWrite: vi.fn(),
+        });
+        setPendingExternalSyncChangeForTests();
+        const unsubscribe = useTaskStore.subscribe((state, previous) => {
+            if (state.settings?.lastSyncAt !== previous.settings?.lastSyncAt) storeState.lastDataChangeAt = 2_000;
+        });
+        try {
+            await expect(SyncService.resolveExternalSyncChange('use-external')).resolves.toEqual({ success: true });
+        } finally {
+            unsubscribe();
+        }
+        expect(storeState.lastDataChangeAt).toBe(2_000);
+        expect(SyncService.hasPendingLocalChangesForAutoSync()).toBe(true);
     });
 
     it('replaces local data with the external file only if local data is still what it read first', async () => {

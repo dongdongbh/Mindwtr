@@ -2347,6 +2347,7 @@ export class SyncService {
         now: string,
         lastSyncHistory?: ReturnType<typeof appendSyncHistory>
     ): Promise<boolean> {
+        const syncedChangeAt = getStoreState().lastDataChangeAt;
         try {
             await persistSyncSettings({
                 lastSyncAt: now,
@@ -2354,7 +2355,14 @@ export class SyncService {
                 lastSyncError: undefined,
                 ...(lastSyncHistory ? { lastSyncHistory } : {}),
             });
-            SyncService.lastSuccessfulSyncLocalChangeAt = getStoreState().lastDataChangeAt;
+            SyncService.lastSuccessfulSyncLocalChangeAt = syncedChangeAt;
+            if (getStoreState().lastDataChangeAt !== syncedChangeAt) {
+                void syncServiceDependencies.logInfo('Sync kept an edit made while the sync status was saved pending', {
+                    scope: 'sync',
+                    force: true,
+                    extra: { releaseCheck: 'v1.3.9/sync-uploaded-mark', outcome: 'kept-pending' },
+                });
+            }
             return true;
         } catch (error) {
             logSyncWarning('Failed to persist sync status', error);
@@ -3581,8 +3589,15 @@ export class SyncService {
                         getStoreState().setError(null);
                         SyncService.clearCoveredQueuedSyncRun(info.getLocalSnapshotChangeAt(), options);
                     },
-                    onUnchangedSkip: () => {
-                        SyncService.lastSuccessfulSyncLocalChangeAt = getStoreState().lastDataChangeAt;
+                    onUnchangedSkip: (localSnapshotChangeAt) => {
+                        SyncService.lastSuccessfulSyncLocalChangeAt = localSnapshotChangeAt;
+                        if (getStoreState().lastDataChangeAt !== localSnapshotChangeAt) {
+                            void syncServiceDependencies.logInfo('Sync kept an edit made during an unchanged sync pending', {
+                                scope: 'sync',
+                                force: true,
+                                extra: { releaseCheck: 'v1.3.9/sync-uploaded-mark', outcome: 'kept-pending' },
+                            });
+                        }
                         SyncService.setPendingExternalSyncChange(null);
                     },
                 },
