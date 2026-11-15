@@ -262,8 +262,8 @@ export function buildFocusTaskSections(
     }
     sections.push(
         { key: 'schedule', title: translate('focus.schedule') ?? 'Today', items: lists.schedule },
-        { key: 'next', title: translate('focus.nextActions') ?? translate('list.next') ?? 'Next actions', items: lists.nextActions },
         { key: 'reviewDue', title: translate('agenda.reviewDue') ?? 'Review Due', items: lists.reviewDue },
+        { key: 'next', title: translate('focus.nextActions') ?? translate('list.next') ?? 'Next actions', items: lists.nextActions },
     );
     if (lists.upcoming.length > 0) {
         sections.push({ key: 'upcoming', title: translate('agenda.upcoming') ?? 'Upcoming', items: lists.upcoming });

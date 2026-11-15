@@ -884,8 +884,8 @@ export function AgendaView() {
     ), [resolveText, sections.projectDeadlineBoosts]);
     const visibleOtherSectionKeys: FocusSectionKey[] = [];
     if (sections.schedule.length > 0) visibleOtherSectionKeys.push('schedule');
-    if (sections.nextActions.length > 0) visibleOtherSectionKeys.push('nextActions');
     if (sections.reviewDue.length > 0) visibleOtherSectionKeys.push('reviewDue');
+    if (sections.nextActions.length > 0) visibleOtherSectionKeys.push('nextActions');
     if (sections.upcoming.length > 0) visibleOtherSectionKeys.push('upcoming');
     if (reviewDueProjects.length > 0) visibleOtherSectionKeys.push('reviewProjects');
     const canToggleOtherSections = visibleOtherSectionKeys.length > 0;
@@ -896,8 +896,8 @@ export function AgendaView() {
     const visibleTasks = useMemo(() => {
         const visible = expandedSections.focus ? [...focusedTasks] : [];
         if (expandedSections.schedule) visible.push(...orderedTodayTasks);
-        if (expandedSections.nextActions) visible.push(...visibleNextActions);
         if (expandedSections.reviewDue) visible.push(...sections.reviewDue);
+        if (expandedSections.nextActions) visible.push(...visibleNextActions);
         if (expandedSections.upcoming) visible.push(...sections.upcoming);
         return Array.from(new Map(visible
             .filter((task) => tasksById.has(task.id))
@@ -1363,6 +1363,28 @@ export function AgendaView() {
                     </AgendaCollapsibleSection>
                 )}
 
+                {sections.reviewDue.length > 0 && (
+                    <AgendaCollapsibleSection
+                        title={tFallback(t, 'agenda.reviewDue', 'Review Due')}
+                        icon={Clock}
+                        color="text-status-someday"
+                        count={sections.reviewDue.length}
+                        expanded={expandedSections.reviewDue}
+                        onToggle={() => toggleSection('reviewDue')}
+                        controlsId="agenda-section-reviewDue"
+                    >
+                        <AgendaTaskList
+                            tasks={sections.reviewDue}
+                            buildFocusToggle={buildFocusToggle}
+                            showListDetails={showListDetails}
+                            highlightTaskId={highlightTaskId}
+                            selectionMode={selectionMode}
+                            multiSelectedIds={multiSelectedIds}
+                            onToggleSelect={toggleMultiSelect}
+                        />
+                    </AgendaCollapsibleSection>
+                )}
+
                 {effectiveNextGroupBy === 'none' ? (
                     sections.nextActions.length > 0 && (
                         <AgendaCollapsibleSection
@@ -1429,28 +1451,6 @@ export function AgendaView() {
                             </div>
                         </AgendaCollapsibleSection>
                     )
-                )}
-
-                {sections.reviewDue.length > 0 && (
-                    <AgendaCollapsibleSection
-                        title={tFallback(t, 'agenda.reviewDue', 'Review Due')}
-                        icon={Clock}
-                        color="text-status-someday"
-                        count={sections.reviewDue.length}
-                        expanded={expandedSections.reviewDue}
-                        onToggle={() => toggleSection('reviewDue')}
-                        controlsId="agenda-section-reviewDue"
-                    >
-                        <AgendaTaskList
-                            tasks={sections.reviewDue}
-                            buildFocusToggle={buildFocusToggle}
-                            showListDetails={showListDetails}
-                            highlightTaskId={highlightTaskId}
-                            selectionMode={selectionMode}
-                            multiSelectedIds={multiSelectedIds}
-                            onToggleSelect={toggleMultiSelect}
-                        />
-                    </AgendaCollapsibleSection>
                 )}
 
                 {sections.upcoming.length > 0 && (

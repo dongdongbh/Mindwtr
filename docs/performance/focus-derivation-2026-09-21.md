@@ -185,6 +185,15 @@ offers, with the priorities feature on and off. 192 cases.
 We checked the test can fail: deliberately dropping the priority tie-break from
 the new code made 20 of its cases fail.
 
+## Section contract correction (2026-11-14)
+
+The prepared change for #1557 and #1092 restores Review Due between Today
+(schedule) and Next Actions, keeping Today's Focus first. This intentionally
+supersedes the later #1281 decision to put Next Actions before review reminders.
+The frozen section builder has the same explicit order amendment; its task derivation and the strict parity comparison
+remain unchanged. Core, desktop, RN, and native-host tests pin the corrected
+section order independently.
+
 ## Budget
 
 The budget suite already had a "Focus derivation" row, but it measured only the

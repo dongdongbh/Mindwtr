@@ -1245,10 +1245,11 @@ describe('AgendaView', () => {
         expect(getAllByText('Waiting review task')).toHaveLength(1);
     });
 
-    it('renders Next Actions between Schedule and Review Due', () => {
+    it('keeps Today’s Focus first and renders Review Due between Schedule and Next Actions', () => {
         vi.useFakeTimers();
         vi.setSystemTime(new Date(nowIso));
         const tasks = [
+            focusedTask,
             makeAgendaTask('schedule-task', 'Schedule task', { dueDate: '2026-02-28' }),
             makeAgendaTask('review-task', 'Review task', {
                 status: 'waiting',
@@ -1260,14 +1261,17 @@ describe('AgendaView', () => {
 
         renderAgenda();
 
+        const focusSection = document.getElementById('agenda-section-focus');
         const scheduleSection = document.getElementById('agenda-section-schedule');
         const reviewSection = document.getElementById('agenda-section-reviewDue');
         const nextSection = document.getElementById('agenda-section-nextActions');
+        expect(focusSection).not.toBeNull();
         expect(scheduleSection).not.toBeNull();
         expect(reviewSection).not.toBeNull();
         expect(nextSection).not.toBeNull();
-        expect(scheduleSection!.compareDocumentPosition(nextSection!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-        expect(nextSection!.compareDocumentPosition(reviewSection!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+        expect(focusSection!.compareDocumentPosition(scheduleSection!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+        expect(scheduleSection!.compareDocumentPosition(reviewSection!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+        expect(reviewSection!.compareDocumentPosition(nextSection!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     });
 
     it('walks visible Focus tasks in rendered section order', () => {
@@ -1290,9 +1294,9 @@ describe('AgendaView', () => {
             ?.dataset.taskId;
 
         fireEvent.keyDown(window, { key: 'j' });
-        expect(focusedTaskId()).toBe('next-task');
-        fireEvent.keyDown(window, { key: 'j' });
         expect(focusedTaskId()).toBe('review-task');
+        fireEvent.keyDown(window, { key: 'j' });
+        expect(focusedTaskId()).toBe('next-task');
         fireEvent.keyDown(window, { key: 'j' });
         expect(focusedTaskId()).toBe('upcoming-task');
     });
@@ -1331,10 +1335,10 @@ describe('AgendaView', () => {
 
         fireEvent.keyDown(window, { key: 'j' });
         expect(document.activeElement?.closest<HTMLElement>('[data-task-id]')?.dataset.taskId)
-            .toBe('review-next');
+            .toBe('plain-next');
         fireEvent.keyDown(window, { key: 'k' });
         expect(document.activeElement?.closest<HTMLElement>('[data-task-id]')?.dataset.taskId)
-            .toBe('plain-next');
+            .toBe('review-next');
     });
 
     it('keeps a review-due Next task due today only in Schedule', () => {

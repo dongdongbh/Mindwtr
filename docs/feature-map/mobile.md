@@ -28,7 +28,7 @@ Source: `apps/mobile`. Routes live in `apps/mobile/app` (expo-router). Labels be
 
 ## Focus
 
-- Reach: Focus tab. Sections include Today's Focus, schedule, next actions, upcoming, and review-due projects.
+- Reach: Focus tab. Sections appear in this order: Today's Focus, Today (schedule), Review Due, Next Actions, Upcoming, then Projects to review.
 - Shortcuts: Swipe a row right for Done or Focus. Long press a review-due task to mark it reviewed. Long press a focused or next task to defer its start date. Reorder › long press and drag a row. Long press a saved filter chip to delete it.
 - Selectors: `focus-reorder-toggle`, `focus-reorder-list`, `focus-reorder-row-` (+ task id), `focus-reorder-handle-` (+ task id), `focus-reorder-done`, `focus-view-options-content`, `focus-hidden-by-area`
 - Code: `apps/mobile/app/(drawer)/(tabs)/focus.tsx`, `apps/mobile/components/focus/focus-list-layout.ts`
