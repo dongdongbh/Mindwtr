@@ -189,6 +189,7 @@ export function QuickCaptureSheetBody({
 
   const text = getQuickCaptureText(t, { priorities: prioritiesEnabled, timeEstimates: timeEstimatesEnabled });
   const optionsToggleLabel = optionsExpanded ? text.hideOptions : text.more;
+  const canSave = Boolean(value.trim()) && destinationAvailable && !saving;
   const defaultProjectLabel = tFallback(t, 'taskEdit.projectLabel', 'Project');
   const focusLabel = getQuickCaptureFocusLabel(t, {
     on: focusNewTask,
@@ -652,12 +653,12 @@ export function QuickCaptureSheetBody({
                     style={[
                       styles.saveButton,
                       styles.saveAndEditButton,
-                      { borderColor: tc.border, opacity: value.trim() && !saving ? 1 : 0.5 },
+                      { borderColor: tc.border, opacity: canSave ? 1 : 0.5 },
                     ]}
-                    disabled={saving || !destinationAvailable || !value.trim()}
+                    disabled={!canSave}
                     accessibilityRole="button"
                     accessibilityLabel={t('quickAdd.saveAndEdit')}
-                    accessibilityState={{ busy: saving, disabled: saving || !value.trim() }}
+                    accessibilityState={{ busy: saving, disabled: !canSave }}
                   >
                     <CompactText
                       style={[styles.saveAndEditText, { color: tc.text }]}
@@ -671,11 +672,11 @@ export function QuickCaptureSheetBody({
                 ) : null}
                 <TouchableOpacity
                   onPress={handleSave}
-                  style={[styles.saveButton, { backgroundColor: saveButtonBackgroundColor ?? tc.tint, opacity: value.trim() && !saving ? 1 : 0.5 }]}
-                  disabled={saving || !destinationAvailable || !value.trim()}
+                  style={[styles.saveButton, { backgroundColor: saveButtonBackgroundColor ?? tc.tint, opacity: canSave ? 1 : 0.5 }]}
+                  disabled={!canSave}
                   accessibilityRole="button"
                   accessibilityLabel={t('common.save')}
-                  accessibilityState={{ busy: saving, disabled: saving || !value.trim() }}
+                  accessibilityState={{ busy: saving, disabled: !canSave }}
                 >
                   <CompactText
                     style={[styles.saveText, saveButtonTextColor ? { color: saveButtonTextColor } : null]}

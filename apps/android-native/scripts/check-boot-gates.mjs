@@ -4035,8 +4035,10 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
 
 {
     const rnSheet = readFileSync(resolve(app, '../../apps/mobile/components/quick-capture-sheet/QuickCaptureSheetBody.tsx'), 'utf8');
-    assert.equal(rnSheet.match(/opacity: value\.trim\(\) && !saving \? 1 : 0\.5/g)?.length, 2);
-    assert.equal(rnSheet.match(/disabled=\{saving \|\| !destinationAvailable \|\| !value\.trim\(\)\}/g)?.length, 2);
+    assert.match(rnSheet, /const canSave = Boolean\(value\.trim\(\)\) && destinationAvailable && !saving;/);
+    assert.equal(rnSheet.match(/opacity: canSave \? 1 : 0\.5/g)?.length, 2);
+    assert.equal(rnSheet.match(/disabled=\{!canSave\}/g)?.length, 2);
+    assert.equal(rnSheet.match(/accessibilityState=\{\{ busy: saving, disabled: !canSave \}\}/g)?.length, 2);
     const buttons = code(captureUi).match(/Box\(Modifier\.fade\(if \(canSave\) 1f else 0\.5f\)\.widthIn\(min = 1(12|04)\.dp\)[^\n]*/g) ?? [];
     assert.equal(buttons.length, 2, 'Save and edit and Save fade as a whole');
     assert.doesNotMatch(code(captureUi), /\.clickable\(enabled = canSave[^\n]*\n[^\n]*\.fade\(/, 'no fade after a pill\'s background');
