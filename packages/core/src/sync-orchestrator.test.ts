@@ -23,10 +23,197 @@ describe('sync orchestrator', () => {
 
         const [firstResult, secondResult] = await Promise.all([first, second]);
         expect(firstResult).toBe(1);
-        expect(secondResult).toBe(1);
-
-        await new Promise((resolve) => setTimeout(resolve, 20));
+        expect(secondResult).toBe(2);
         expect(calls).toHaveLength(2);
+    });
+
+    it('answers every request made during a cycle with the one follow-up cycle that carries it', async () => {
+        vi.useFakeTimers();
+        try {
+            const outcomes = [{ success: false, error: 'WebDAV PUT failed (500)' }, { success: true }];
+            let cycles = 0;
+            const queuedResults: unknown[] = [];
+            const orchestrator = createSyncOrchestrator<string, { success: boolean; error?: string }>({
+                runCycle: async () => {
+                    cycles += 1;
+                    await new Promise((resolve) => setTimeout(resolve, 1_000));
+                    return outcomes.shift() ?? { success: true };
+                },
+                onQueuedRunComplete: (result) => queuedResults.push(result),
+            });
+
+            const first = orchestrator.run('a');
+            const coalesced = [orchestrator.run('b'), orchestrator.run('c'), orchestrator.run('d')];
+            await vi.advanceTimersByTimeAsync(5_000);
+
+            await expect(first).resolves.toEqual({ success: false, error: 'WebDAV PUT failed (500)' });
+            for (const request of coalesced) await expect(request).resolves.toEqual({ success: true });
+            expect(cycles).toBe(2);
+            expect(queuedResults).toEqual([{ success: true }]);
+            expect(orchestrator.getState()).toEqual({ inFlight: false, queued: false });
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it('answers a request made during the follow-up with the cycle after it', async () => {
+        vi.useFakeTimers();
+        try {
+            let cycles = 0;
+            const orchestrator = createSyncOrchestrator<string, number>({
+                runCycle: async () => {
+                    cycles += 1;
+                    const cycle = cycles;
+                    await new Promise((resolve) => setTimeout(resolve, 1_000));
+                    return cycle;
+                },
+            });
+
+            const first = orchestrator.run('a');
+            const duringFirst = orchestrator.run('b');
+            await vi.advanceTimersByTimeAsync(1_500);
+            const duringFollowUp = orchestrator.run('c');
+            await vi.advanceTimersByTimeAsync(5_000);
+
+            await expect(first).resolves.toBe(1);
+            await expect(duringFirst).resolves.toBe(2);
+            await expect(duringFollowUp).resolves.toBe(3);
+            expect(cycles).toBe(3);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it('answers a coalesced request with the follow-up even when a direct run starts it early', async () => {
+        vi.useFakeTimers();
+        try {
+            const args: string[] = [];
+            const orchestrator = createSyncOrchestrator<string, string>({
+                getFollowUpDelayMs: () => 5_000,
+                runCycle: async (arg) => {
+                    args.push(arg);
+                    await new Promise((resolve) => setTimeout(resolve, 1_000));
+                    return arg;
+                },
+            });
+
+            const first = orchestrator.run('first');
+            const coalesced = orchestrator.run('coalesced');
+            await vi.advanceTimersByTimeAsync(1_500);
+            const direct = orchestrator.run('direct');
+            await vi.advanceTimersByTimeAsync(10_000);
+
+            await expect(first).resolves.toBe('first');
+            await expect(coalesced).resolves.toBe('direct');
+            await expect(direct).resolves.toBe('direct');
+            expect(args).toEqual(['first', 'direct']);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it('answers a coalesced request with the follow-up rejection when the follow-up cycle throws', async () => {
+        let calls = 0;
+        const orchestrator = createSyncOrchestrator<string, number>({
+            runCycle: async () => {
+                calls += 1;
+                if (calls === 1) {
+                    await new Promise((resolve) => setTimeout(resolve, 10));
+                    return 1;
+                }
+                throw new Error('follow-up failed');
+            },
+            onQueuedRunError: () => {},
+        });
+
+        const first = orchestrator.run('first');
+        const coalesced = orchestrator.run('second');
+        await expect(first).resolves.toBe(1);
+        await expect(coalesced).rejects.toThrow('follow-up failed');
+    });
+
+    it('answers coalesced requests with the finished cycle when its follow-up is cleared while waiting', async () => {
+        vi.useFakeTimers();
+        try {
+            let cycles = 0;
+            const orchestrator = createSyncOrchestrator<string, number>({
+                getFollowUpDelayMs: () => 5_000,
+                runCycle: async () => {
+                    cycles += 1;
+                    const cycle = cycles;
+                    await new Promise((resolve) => setTimeout(resolve, 1_000));
+                    return cycle;
+                },
+            });
+
+            const first = orchestrator.run('first');
+            const coalesced = orchestrator.run('second');
+            await vi.advanceTimersByTimeAsync(1_500);
+            expect(orchestrator.getState()).toEqual({ inFlight: false, queued: true });
+            orchestrator.clearFollowUp();
+            await vi.advanceTimersByTimeAsync(10_000);
+
+            await expect(first).resolves.toBe(1);
+            await expect(coalesced).resolves.toBe(1);
+            expect(cycles).toBe(1);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it('starts the follow-up and answers its waiters when the queue-state listener throws', async () => {
+        vi.useFakeTimers();
+        try {
+            let cycles = 0;
+            const orchestrator = createSyncOrchestrator<string, number>({
+                onQueueStateChange: (queued) => {
+                    if (!queued) throw new Error('status listener failed');
+                },
+                runCycle: async () => {
+                    cycles += 1;
+                    const cycle = cycles;
+                    await new Promise((resolve) => setTimeout(resolve, 1_000));
+                    return cycle;
+                },
+            });
+
+            const first = orchestrator.run('first');
+            const coalesced = orchestrator.run('second');
+            await vi.advanceTimersByTimeAsync(5_000);
+
+            await expect(first).resolves.toBe(1);
+            await expect(coalesced).resolves.toBe(2);
+            expect(cycles).toBe(2);
+            expect(orchestrator.getState()).toEqual({ inFlight: false, queued: false });
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it('answers coalesced requests with the in-flight cycle when the orchestrator is reset', async () => {
+        vi.useFakeTimers();
+        try {
+            let cycles = 0;
+            const orchestrator = createSyncOrchestrator<string, number>({
+                runCycle: async () => {
+                    cycles += 1;
+                    const cycle = cycles;
+                    await new Promise((resolve) => setTimeout(resolve, 1_000));
+                    return cycle;
+                },
+            });
+
+            const first = orchestrator.run('first');
+            const coalesced = orchestrator.run('second');
+            orchestrator.reset();
+            await vi.advanceTimersByTimeAsync(5_000);
+
+            await expect(first).resolves.toBe(1);
+            await expect(coalesced).resolves.toBe(1);
+            expect(cycles).toBe(1);
+        } finally {
+            vi.useRealTimers();
+        }
     });
 
     it('uses the latest queued argument for follow-up runs', async () => {
@@ -275,10 +462,9 @@ describe('sync orchestrator', () => {
         });
 
         const first = orchestrator.run('first');
-        orchestrator.run('second');
+        const second = orchestrator.run('second');
         await expect(first).resolves.toBe(1);
-
-        await new Promise((resolve) => setTimeout(resolve, 20));
+        await expect(second).rejects.toThrow('queued cycle failed');
         expect(queuedErrors).toHaveLength(1);
         expect((queuedErrors[0] as Error).message).toBe('queued cycle failed');
     });

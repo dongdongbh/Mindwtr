@@ -285,6 +285,7 @@ dependencies {
     implementation("com.google.guava:guava:33.3.1-android")
 
     implementation(project(":widget"))
+    implementation(project(":whisper"))
 
     implementation("org.bouncycastle:bcprov-jdk18on:1.86")
 

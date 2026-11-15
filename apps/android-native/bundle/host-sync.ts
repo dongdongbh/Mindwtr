@@ -816,7 +816,7 @@ export const createNativeSync = (bindings: NativeSyncBindings, fileEncryptionSta
         log: { info: (message, context) => logLine('info', message, context), warn: (message, context) => logLine('warn', message, context) },
         sync: {
             getConfigurationStatus: () => service.getMobileSyncConfigurationStatus(),
-            performSync: () => performSync(undefined, {}),
+            performSync: () => performSync(undefined, { background: true }),
 
             abort: () => service.abortMobileSync('deadline'),
             setRequestDeadline: syncFetch.setDeadline,

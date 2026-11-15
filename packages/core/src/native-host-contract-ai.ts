@@ -632,8 +632,8 @@ export function createAIMethods(deps: AIDeps) {
                         status: `${whisperReady ? t('settings.speechOfflineReady') : t('settings.speechOfflineNotDownloaded')}${
                             whisperReady && whisperFile && whisperFile.size > 0 ? ` - ${(whisperFile.size / (1024 * 1024)).toFixed(1)} MB` : ''}`,
                         action: whisperReady
-                            ? { label: t('settings.speechOfflineDelete'), kind: 'delete', enabled: false }
-                            : { label: t('settings.speechOfflineDownload'), kind: 'download', enabled: false },
+                            ? { label: t('settings.speechOfflineDelete'), kind: 'delete', enabled: Boolean(host.whisper) }
+                            : { label: t('settings.speechOfflineDownload'), kind: 'download', enabled: Boolean(host.whisper) },
                     }
                     : null,
                 apiKey: state.speechProvider === 'whisper'

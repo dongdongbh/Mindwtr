@@ -205,6 +205,7 @@ export type SyncSettingsTransportHost = {
         acceptMissingAttachmentIds?: readonly string[];
         ignorePendingRemoteWriteBackoff?: boolean;
         configOverride?: MobileSyncConfigOverride;
+        background?: boolean;
     }): Promise<SyncSettingsSyncResult>;
     clearSyncConfigCache(): void;
     reconcileBackgroundSync(): Promise<unknown>;

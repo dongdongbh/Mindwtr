@@ -278,6 +278,8 @@ const RELEASE_CHECK_FIELD_NAMES = [
     'overWork',
     'published', 'downloaded',
     'dueLeadMinutes', 'startLeadMinutes',
+
+    'repaired', 'ms',
 ];
 
 describe('release diagnostics field names', () => {

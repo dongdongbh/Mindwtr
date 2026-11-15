@@ -15,7 +15,7 @@ type Secrets = {
 };
 
 
-export const createNativeAI = (keyValue: KeyValue, secrets: () => Secrets, isFossBuild: boolean): NativeAIHost => ({
+export const createNativeAI = (keyValue: KeyValue, secrets: () => Secrets, isFossBuild: boolean, whisper?: NativeAIHost['whisper']): NativeAIHost => ({
 
     platform: { isFossBuild },
     storage: {
@@ -28,6 +28,7 @@ export const createNativeAI = (keyValue: KeyValue, secrets: () => Secrets, isFos
         set: (key, value) => secrets().setSecret(key, value),
         delete: (key) => secrets().deleteSecret(key),
     },
+    ...(whisper ? { whisper } : {}),
     log: {
         warn: (message) => { try { logWarn(message, { scope: 'ai' }); } catch {                                                    } },
         info: (message, context) => { try { logInfo(message, { scope: context.scope, context: context.extra }); } catch {                } },

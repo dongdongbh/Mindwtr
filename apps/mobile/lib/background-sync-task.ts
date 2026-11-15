@@ -133,7 +133,7 @@ const backgroundSyncRunner = (): MobileBackgroundSyncRunner => {
     sync: {
       getConfigurationStatus: () => getMobileSyncConfigurationStatus(),
       performSync: async () => {
-        const result = await performMobileSync();
+        const result = await performMobileSync(undefined, { background: true });
         if (result.success) {
 
 

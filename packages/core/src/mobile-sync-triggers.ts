@@ -69,7 +69,7 @@ export type MobileSyncTriggerPorts = {
   reportError(error: unknown): void;
   logWarn(message: string, context: { scope: string; extra: Record<string, string> }): unknown;
 
-  logInfo?(message: string, context: { scope: string; extra: Record<string, string> }): unknown;
+  logInfo?(message: string, context: { scope: string; force?: boolean; extra: Record<string, string> }): unknown;
 
   onLocalChangePendingChange?(pending: boolean): void;
 
@@ -300,8 +300,8 @@ export const createMobileSyncTriggers = (ports: MobileSyncTriggerPorts) => {
       },
       reportError: (_label, error) => reportError(error),
 
-      logInfo: (message, extra) => {
-        if (isActive && extra?.releaseCheck) void ports.logInfo?.(message, { scope: 'sync', extra });
+      logInfo: (message, extra, force) => {
+        if (isActive && extra?.releaseCheck) void ports.logInfo?.(message, force ? { scope: 'sync', force, extra } : { scope: 'sync', extra });
       },
       hasPendingLocalChanges: hasPendingLocalChange,
       isRuntimeActive: () => isActive,

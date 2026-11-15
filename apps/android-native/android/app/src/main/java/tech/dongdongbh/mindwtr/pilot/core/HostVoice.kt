@@ -13,6 +13,7 @@ class HostVoice(
     private val granted: () -> Boolean,
     private val recorder: () -> VoiceRecorder,
     private val prompt: PermissionPrompt = MicrophonePermissionPrompt,
+    private val whisper: (JSONObject, (Result<Any?>) -> Unit) -> Unit = { _, reply -> reply(Result.failure(IOException("E_VOICE_UNKNOWN"))) },
 ) {
     fun call(json: String, reply: (Result<Any?>) -> Unit) {
         val request = JSONObject(json)
@@ -29,7 +30,7 @@ class HostVoice(
                 recorder().cancel(request.getString("id"))
                 reply(Result.success(null))
             }
-            else -> reply(Result.failure(IOException("E_VOICE_UNKNOWN")))
+            else -> whisper(request, reply)
         }
     }
 
@@ -56,6 +57,7 @@ class HostVoice(
             return HostVoice(
                 granted = { ContextCompat.checkSelfPermission(app, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED },
                 recorder = { VoiceCapture.recorderFor(app) },
+                whisper = HostWhisper.forApp(app)::call,
             )
         }
     }

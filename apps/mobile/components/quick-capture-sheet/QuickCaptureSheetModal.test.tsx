@@ -136,6 +136,74 @@ describe('Quick capture modal composition', () => {
     expect(tree.root.findAllByType(Text).some((node) => node.props.children === 'Processing audio capture...')).toBe(true);
   });
 
+  it('fades Save and Save and edit and reports them disabled while the destination is unavailable', () => {
+    let tree!: ReturnType<typeof create>;
+    const t = (key: string) => ({ 'common.save': 'Save', 'quickAdd.saveAndEdit': 'Save and edit' }[key] ?? key);
+    act(() => {
+      tree = create(
+        <QuickCaptureSheetBody
+          addAnother={false}
+          selectedPriority={null}
+          areaLabel="No Area"
+          contextLabel="Contexts"
+          destinationAvailable={false}
+          destinationLabel="Destination unavailable. Choose another destination."
+          dueDate={null}
+          dueLabel="Due Date"
+          dueTimeLabel="Change time"
+          handleClose={vi.fn()}
+          handleSave={vi.fn()}
+          handleSaveAndEdit={vi.fn()}
+          insetsBottom={0}
+          inputRef={{ current: null }}
+          noteValue=""
+          onNoteChange={vi.fn()}
+          onOpenAreaPicker={vi.fn()}
+          onOpenContextPicker={vi.fn()}
+          onOpenDestinationPicker={vi.fn()}
+          onOpenDueDatePicker={vi.fn()}
+          onOpenDueTimePicker={vi.fn()}
+          onOpenPriorityPicker={vi.fn()}
+          onOpenProjectPicker={vi.fn()}
+          onQuickDueDateSelect={vi.fn()}
+          onResetArea={vi.fn()}
+          onResetContexts={vi.fn()}
+          onResetDueDate={vi.fn()}
+          onResetDueTime={vi.fn()}
+          onResetPriority={vi.fn()}
+          onResetProject={vi.fn()}
+          onToggleOptions={vi.fn()}
+          onToggleAddAnother={vi.fn()}
+          onToggleRecording={vi.fn()}
+          onValueChange={vi.fn()}
+          optionsExpanded={false}
+          prioritiesEnabled
+          timeEstimatesEnabled
+          priorityLabel="Priority"
+          projectLabel="Project"
+          recording={false}
+          recordingBusy={false}
+          recordingReady
+          saving={false}
+          sheetMaxHeight={500}
+          showDueTime={false}
+          t={t}
+          tc={tc}
+          value="Capture me"
+          visible
+        />
+      );
+    });
+
+    const controls = tree.root.findAllByType(TouchableOpacity);
+    for (const label of ['Save', 'Save and edit']) {
+      const control = controls.find((node) => node.props.accessibilityLabel === label);
+      expect(control?.props.disabled).toBe(true);
+      expect(control?.props.accessibilityState).toEqual({ busy: false, disabled: true });
+      expect(flattenStyle(control?.props.style).opacity).toBe(0.5);
+    }
+  });
+
   it('does not mount picker modals while every picker is closed', () => {
     let tree!: ReturnType<typeof create>;
 

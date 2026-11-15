@@ -1561,7 +1561,8 @@ assert.equal(coreHost.match(/debugFault\("language"\)/g).length, 2);
         assert.match(coreHost, /if \(debugFault\("ai_consent_reset"\) == "1"\) keyValue\.remove\("mindwtr-ai-provider-consent-v1"\)/);
     }
 
-    assert.match(hostEntry, /const nativeAI = nativeSync \? createNativeAI\(keyValue, \(\) => globalThis\.__mindwtrSecrets as HostSecrets, isFossBuild\) : null;/);
+    assert.match(hostEntry, /const nativeAI = nativeSync \? createNativeAI\(keyValue, \(\) => globalThis\.__mindwtrSecrets as HostSecrets, isFossBuild, nativeWhisper \?\? undefined\) : null;/);
+    assert.match(hostEntry, /const channels = nativeSync && call \? nativeFileChannels\(\) : null;\s*return channels && call \? createNativeWhisper\(\{ call, documentDirectory: channels\.directories\.document, log: whisperLine, rememberPath \}\) : null;/);
     assert.match(hostEntry, /const localAttachments = nativeSync \? null : createNativeLocalAttachmentsForHost\(\);/);
     assert.match(hostEntry, /const attachmentsHost = nativeSync\?\.attachmentsHost \?\? localAttachments\?\.contractHost;/);
     assert.match(hostEntry, /createNativeHostContract\(\{\s*\.\.\.\(globalThis\.__mindwtrHostPlatform === 'ios' \? \{\s*registerSyncSettingsRetirementStatus: \(read: \(\) => \{ pending: boolean; uncertain: boolean \}\) => \{ readSyncSettingsRetirementStatus = read; \},\s*\} : \{\}\), reminderPlatform: globalThis\.__mindwtrHostPlatform === 'ios' \? 'ios' : 'android', get syncSettings\(\) \{ return nativeSync\?\.settingsHost \?\? iosManualSync\?\.settingsHost; \}, get ai\(\) \{ return nativeAI \?\? iosTaskAI\?\.host \?\? iosInboxAI\?\.host \?\? iosReviewAI\?\.host \?\? iosCaptureAIHost \?\? iosConfigurationAIHost \?\? undefined; \},\s*calendar: iosCalendar \?\? nativeCalendar \?\? undefined,\s*get attachments\(\) \{\s*const selected = iosProjectAttachmentDownload \? iosSelfHostedProjectAttachments\?\.contractHost \?\? iosManualSync\?\.attachmentsHost : attachmentsHost;\s*if \(!iosRelocatedProjectAvailability \|\| !selected\) return selected \?\? undefined;/);
@@ -4034,8 +4035,10 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
 
 {
     const rnSheet = readFileSync(resolve(app, '../../apps/mobile/components/quick-capture-sheet/QuickCaptureSheetBody.tsx'), 'utf8');
-    assert.equal(rnSheet.match(/opacity: value\.trim\(\) && !saving \? 1 : 0\.5/g)?.length, 2);
-    assert.equal(rnSheet.match(/disabled=\{saving \|\| !destinationAvailable \|\| !value\.trim\(\)\}/g)?.length, 2);
+    assert.match(rnSheet, /const canSave = Boolean\(value\.trim\(\)\) && destinationAvailable && !saving;/);
+    assert.equal(rnSheet.match(/opacity: canSave \? 1 : 0\.5/g)?.length, 2);
+    assert.equal(rnSheet.match(/disabled=\{!canSave\}/g)?.length, 2);
+    assert.equal(rnSheet.match(/accessibilityState=\{\{ busy: saving, disabled: !canSave \}\}/g)?.length, 2);
     const buttons = code(captureUi).match(/Box\(Modifier\.fade\(if \(canSave\) 1f else 0\.5f\)\.widthIn\(min = 1(12|04)\.dp\)[^\n]*/g) ?? [];
     assert.equal(buttons.length, 2, 'Save and edit and Save fade as a whole');
     assert.doesNotMatch(code(captureUi), /\.clickable\(enabled = canSave[^\n]*\n[^\n]*\.fade\(/, 'no fade after a pill\'s background');
@@ -10571,7 +10574,8 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     assert.doesNotMatch(processHost, /AUDIO_DIRECTORY/, 'the WAV folder never starts a drain');
 
     assert.match(audioTs, /const runtime = resolveSpeechToTextRuntimeSettings\(settings\.ai\?\.speechToText, \{ isFossBuild: bindings\.isFossBuild \}\);/);
-    assert.match(audioTs, /if \(runtime\.provider === 'whisper'\) \{ bindings\.logWaiting\('provider-unsupported'\); return null; \}/);
+    assert.match(audioTs, /if \(runtime\.provider === 'whisper'\) \{\s*if \(!whisper\) \{ bindings\.logWaiting\('provider-unsupported'\); return null; \}\s*if \(!await whisper\.ready\(runtime\)\) \{ bindings\.logWaiting\('not-configured'\); return null; \}\s*\}/);
+    assert.match(audioTs, /\.\.\.\(whisper \? \{ transcribeLocal: \(\) => whisper\.transcribe\(audioPath, runtime\) \} : \{\}\),/);
     assert.doesNotMatch(audioTs, /speech\?\.provider \?\? 'gemini'|provider !== 'parakeet'/, 'no inline provider resolution');
     assert.doesNotMatch(audioTs.replace(/\/\*\*[\s\S]*?\*\/|\/\/[^\n]*/g, ''), /logWaiting\([^)]*transcript/, 'no transcript text in a log line');
     const audioTested = spawnSync('bun', ['test', 'apps/android-native/bundle/host-widget-audio.test.ts'], { cwd: resolve(app, '../..'), encoding: 'utf8' });
@@ -10587,7 +10591,18 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     assert.match(coreHost, /fun voiceRequest\(name: String, json: String\): JSONObject = callLong\("voiceRequest", name, json\)/);
     assert.match(source('ProcessCoreHost.kt'), /voice = HostVoice\.forApp\(app\)::call\)/);
     assert.match(hostEntrySource, /voiceRequest\(name: string, json: string\): string \{\s*return submit\(async \(\) => \{\s*if \(!nativeVoice\) throw new Error\('Voice capture is not available on this host'\);\s*return nativeVoice\.request\(name, JSON\.parse\(json\) as Record<string, unknown>\);/);
-    assert.match(hostEntrySource, /whisperModelReady: \(\) => false,/);
+    assert.match(hostEntrySource, /whisperModelReady: \(runtime\) => \(nativeWhisper \? nativeWhisper\.ready\(runtime\) : Promise\.resolve\(false\)\),/);
+    assert.match(hostEntrySource, /transcribeLocal: \(uri, runtime\) => \(nativeWhisper \? nativeWhisper\.transcribe\(uri, runtime\) : Promise\.reject\(new Error\('E_WHISPER_UNAVAILABLE'\)\)\),/);
+    assert.match(voiceTs, /const canTranscribe = ready && \(runtime\.provider !== 'whisper' \|\| current\.format === 'wav'\);/, 'only a WAV recording reaches local Whisper');
+    assert.match(voiceTs, /transcribeLocal: \(\) => bindings\.transcribeLocal\(transcriptionUri, runtime\),/);
+    const whisperHost = source('core/HostWhisper.kt');
+    assert.match(source('core/HostVoice.kt'), /whisper = HostWhisper\.forApp\(app\)::call,/);
+    assert.match(whisperHost, /private val transcriber: Executor = Executors\.newSingleThreadExecutor \{ task -> Thread\(task, "mindwtr-whisper"\)\.apply \{ isDaemon = true \} \},/, 'one native Whisper job at a time');
+    assert.match(whisperHost, /val audio = store\.owned\(request\.getString\("uri"\)\)\?\.takeIf\(QuickCaptureWave::isValid\) \?: throw IOException\("E_WHISPER_AUDIO_UNSUPPORTED"\)/, 'only a 16 kHz mono PCM WAV reaches the engine');
+    assert.doesNotMatch(source('core/HostWhisper.kt'), /Log\.\w\(/, 'the Whisper host logs nothing itself; the bundle writes the fixed-field line');
+    const whisperLineBlock = hostEntrySource.slice(hostEntrySource.indexOf('const whisperLine = '), hostEntrySource.indexOf('const nativeWhisper = '));
+    assert.deepEqual([...new Set([...whisperLineBlock.matchAll(/\b(\w+): line\.\w+/g)].map((m) => m[1]))].sort(), ['ms', 'outcome', 'reason', 'stage'], 'a Whisper line holds fixed fields only');
+    assert(whisperLineBlock.includes("releaseCheck: 'v1.3.9/native-whisper-local'"), 'the Whisper line carries its release check');
     assert.match(hostEntrySource, /submit: \(input\) => contract\.submitQuickCaptureAudio\(input\),/);
 
 
@@ -10602,7 +10617,7 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     assert.doesNotMatch(voiceTs, /whisperModelPath/, 'no stored Whisper model path counts as ready');
     const voiceLine = hostEntrySource.slice(hostEntrySource.indexOf('const voiceLine = '), hostEntrySource.indexOf('return createNativeVoice({'));
     assert.deepEqual([...new Set([...voiceLine.matchAll(/\b(\w+): line\.\w+/g)].map((m) => m[1]))].sort(), ['copied', 'durationMs', 'errorKind', 'outcome', 'provider'], 'a voice line holds fixed fields only');
-    const voiceTested = spawnSync('bun', ['test', 'apps/android-native/bundle/host-voice.test.ts', 'apps/android-native/bundle/host-multipart.test.ts'], { cwd: resolve(app, '../..'), encoding: 'utf8' });
+    const voiceTested = spawnSync('bun', ['test', 'apps/android-native/bundle/host-voice.test.ts', 'apps/android-native/bundle/host-multipart.test.ts', 'apps/android-native/bundle/host-whisper.test.ts'], { cwd: resolve(app, '../..'), encoding: 'utf8' });
     assert.equal(voiceTested.status, 0, `bundle/host-voice.test.ts: ${voiceTested.stderr.slice(-1500)}`);
 }
 

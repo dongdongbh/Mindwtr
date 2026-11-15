@@ -32,12 +32,13 @@ const STATUS_MENU_ONLY = process.env.PARITY_ONLY === 'status-menu';
 const OWED_ONLY = process.env.PARITY_ONLY === 'owed';
 const EINK_ONLY = process.env.PARITY_ONLY === 'eink';
 const DAILY_EMPTY_ONLY = process.env.PARITY_ONLY === 'daily-empty';
+const WHISPER_ONLY = process.env.PARITY_ONLY === 'whisper';
 let apks;
 try {
     const built = JSON.parse(readFileSync(resolve(harness, 'apks/manifest.json'), 'utf8'));
 
     const rnSide = built.rnParity ?? (A13_ONLY ? built.rn155 : built.rn154);
-    apks = { rn: rnSide.path, native: built.native153.path };
+    apks = { rn: rnSide.path, native: WHISPER_ONLY ? resolve(import.meta.dirname, '../android/app/build/outputs/apk/play/upgradetest/app-play-upgradetest.apk') : built.native153.path };
     console.log(`RN side: ${built.rnParity ? `rnParity from ${built.rnParitySource}` : A13_ONLY ? 'rn155' : `rn154 from ${built.recoverySource}`}`);
 } catch {
     console.error(`REFUSED: no ${harness}/apks/manifest.json; run build-upgrade-harness.mjs first`);
@@ -177,7 +178,7 @@ const buildFixture = () => execFileSync('bun', ['-e', `
 
 
 const device = connect({ serial, pkg: PKG, uiFile: '/data/local/tmp/mindwtr-parity-ui.xml' });
-const { adbRaw, sh, home, front, requireAppFront, pid, screen, waitFor, tap } = device;
+const { adbRaw, sh, home, front, requireAppFront, pid, screen, waitFor, tap, tapExpecting } = device;
 const runAs = (command) => sh(`run-as ${PKG} ${command}`);
 const installed = () => sh(`pm list packages ${PKG}`).split('\n').some((line) => line.trim() === `package:${PKG}`);
 const originalNight = /Night mode: (\w+)/.exec(sh('cmd uimode night'))?.[1] ?? 'auto';
@@ -585,6 +586,28 @@ const shootAI = async (prefix, suffix, rn) => {
         sh('input keyevent KEYCODE_BACK');
         await sleep(1000);
     }
+};
+
+
+const shootWhisper = async (prefix, rn) => {
+    const menu = await waitFor('the Menu tab', (current) => Boolean(rn ? current.find((node) => node['content-desc'] === 'Menu') : tab(current, 'Menu')), 30_000);
+    await tap(rn ? menu.find((node) => node['content-desc'] === 'Menu') : tab(menu, 'Menu'));
+    await tap(withDescription(await waitFor('the Settings tile', (current) => Boolean(withDescription(current, en['nav.settings'])), 15_000), en['nav.settings']));
+    const advanced = `${en['settings.advanced']}. ${en['settings.menuDesc.advanced']}`;
+    await tap(withDescription(await waitFor('the Advanced row', (current) => Boolean(withDescription(current, advanced)), 30_000), advanced));
+    const ai = `${en['settings.ai']}. ${en['settings.menuDesc.ai']}`;
+    await tap(withDescription(await waitFor('the AI row', (current) => Boolean(withDescription(current, ai)), 30_000), ai));
+    const heading = (current) => (rn ? current.find((node) => node.text === en['settings.speechDesc']) : withDescription(current, `${en['settings.speechTitle']}, ${en['settings.speechDesc']}`));
+    const open = (current) => hasText(current, en['settings.speechEnable']);
+    await sleep(1500);
+    await tapExpecting(heading(await waitFor('the Speech card', (current) => Boolean(heading(current)), 30_000)), open, 'the Speech card open');
+    const chip = (current) => (rn ? current.find((node) => node.text === en['settings.speechProviderOffline']) : tagged(current, 'ai-speech-provider-whisper'));
+    const row = (current) => (rn ? current.find((node) => node.text === en['settings.speechOfflineDownload']) : tagged(current, 'ai-whisper-action'));
+    await tapExpecting(chip(await waitFor('the Whisper chip', (current) => Boolean(chip(current)), 15_000)), (current) => Boolean(row(current))
+        || hasText(current, en['settings.speechOfflineModel']), 'the Whisper model row');
+    await sleep(1500);
+    await device.revealNode(row, 'the offline model row', false);
+    await shoot(`${prefix}-settings-ai-whisper-light`, (current) => Boolean(row(current)) && hasText(current, en['settings.speechOfflineNotDownloaded']));
 };
 
 
@@ -1328,6 +1351,7 @@ try {
             await stopApp();
             device.launch(RN_ACTIVITY);
         }
+        if (WHISPER_ONLY) { if (mode === 'no') await shootWhisper('rn', true); continue; }
         if (OWED_ONLY) { await shootOwed('rn', mode === 'yes' ? 'dark' : 'light', true, RN_ACTIVITY); continue; }
         if (EINK_ONLY) { if (mode === 'no') await shootEink('rn', true, RN_ACTIVITY); continue; }
         if (DAILY_EMPTY_ONLY) { await shootDailyEmpty('rn', mode === 'yes' ? 'dark' : 'light', true, RN_ACTIVITY); continue; }
@@ -1368,6 +1392,7 @@ try {
     await stopApp();
 
 
+    if (WHISPER_ONLY) sh(`pm uninstall ${PKG}`);
     adbRaw('install', '-r', '-d', '-g', apks.native);
     await setNight('no');
     device.launch(NATIVE_ACTIVITY);
@@ -1379,6 +1404,7 @@ try {
     }
     for (const mode of c3FixesOnly ? [] : ['no', 'yes']) {
         if (mode === 'yes') await setNight('yes');
+        if (WHISPER_ONLY) { if (mode === 'no') await shootWhisper('native', false); continue; }
         if (OWED_ONLY) { await shootOwed('native', mode === 'yes' ? 'dark' : 'light', false, NATIVE_ACTIVITY); continue; }
         if (EINK_ONLY) { if (mode === 'no') await shootEink('native', false, NATIVE_ACTIVITY); continue; }
         if (DAILY_EMPTY_ONLY) { await shootDailyEmpty('native', mode === 'yes' ? 'dark' : 'light', false, NATIVE_ACTIVITY); continue; }
