@@ -76,7 +76,7 @@ const prepare=async(f:ReturnType<typeof fixture>,ids:{id:string;targetId:string;
     const input={id:ids.id,taskRevision:source.value.taskRevision,query:'',offset:0,limit:100};
     const options=await f.call('rowTaskDestinationOptions',input);expect(options).toMatchObject({ok:true,value:{version:1,id:ids.id,total:4}});
     expect(Object.keys(options.value).sort()).toEqual(['version','id','taskRevision','query','offset','limit','total','hasMore','nextOffset','choices','labels'].sort());
-    expect(options.value.choices.map((row:{id:string})=>row.id)).toEqual(['',ids.targetId,ids.otherId,'area']);
+    expect(options.value.choices.map((row:{id:string})=>row.id)).toEqual(['','area',ids.targetId,ids.otherId]);
     const query='界'.repeat(2000),longQuery=await f.call('rowTaskDestinationOptions',{...input,query});expect(longQuery).toMatchObject({ok:true,value:{total:1,query}});
     const request={requestId:WRITE,id:ids.id,taskRevision:source.value.taskRevision,source:'row',destination:{kind:'project',id:ids.targetId}};
     const plan=await f.call('rowTaskDestinationPrepare',request);expect(plan).toMatchObject({ok:true,value:{kind:'prepared',prepared:{version:2,kind:'rowDestination',result:{id:ids.id}}}});

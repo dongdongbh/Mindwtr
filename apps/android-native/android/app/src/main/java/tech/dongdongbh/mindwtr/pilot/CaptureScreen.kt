@@ -430,10 +430,7 @@ private fun InboxViewModel.TitleField(value: String, label: String, enabled: Boo
     LaunchedEffect(field.text, field.selection, field.composition, enabled, focused) {
         suggestions = null
         if (!enabled || !focused || field.composition != null || !field.selection.collapsed) return@LaunchedEffect
-        val runtime = coreHost() ?: return@LaunchedEffect
-        val input = JSONObject().put("text", field.text).put("caret", field.selection.start).put("selectionEnd", field.selection.end).toString()
-        delay(120)
-        suggestions = runCatching { withContext(Dispatchers.IO) { runtime.quickCaptureAutocomplete(input) } }.getOrNull()
+        suggestions = captureAutocomplete(field.text, field.selection.start, field.selection.end)
     }
     val shape = RoundedCornerShape(12.dp)
     Column(modifier) {

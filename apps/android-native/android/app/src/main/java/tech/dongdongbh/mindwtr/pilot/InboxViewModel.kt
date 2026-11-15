@@ -16,9 +16,12 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.dropWhile
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONArray
 import org.json.JSONObject
@@ -343,6 +346,13 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
 
 
     internal fun coreHost(): CoreHost? = host
+
+    internal suspend fun captureAutocomplete(text: String, caret: Int, selectionEnd: Int): JSONObject? {
+        val runtime = host ?: return null
+        val input = JSONObject().put("text", text).put("caret", caret).put("selectionEnd", selectionEnd).toString()
+        delay(120)
+        return runCatching { withContext(Dispatchers.IO) { runtime.quickCaptureAutocomplete(input) } }.getOrNull()
+    }
 
 
     data class SyncBadge(val state: String, val color: String?)
