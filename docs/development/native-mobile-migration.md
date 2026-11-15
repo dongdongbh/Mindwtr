@@ -137,6 +137,30 @@ Native Android first ships as release candidates, starting with `1.4.0-rc.1`. Un
 
 **Before `1.4.0-rc.1` goes to the open-testing track,** announce the change to the existing RN beta users (see "Play permits one open-testing track" above). The announcement includes backup instructions and the list of capabilities native does not have yet.
 
+### iOS: native ships on TestFlight first, RN stable continues (maintainer decision, 2026-11-15)
+
+Native iOS first ships as TestFlight release candidates, starting with `1.4.0-rc.1`. The plan has three steps:
+
+1. **Finish building and testing native iOS.** The upgrade, recovery and parity checks in this document come first.
+2. **Release native iOS RCs on TestFlight.** Each RC goes to the external Native Beta TestFlight group (see the Apple column in the table above).
+3. **Release native iOS stable when the TestFlight builds are stable.** The App Store switches to native only then.
+
+Until native iOS becomes stable, two release lines run in parallel:
+
+- **Stable releases stay on React Native.** After `1.4.0-rc.1` ships, the stable workflow can still build `apps/mobile` and release RN iOS to the App Store.
+- **Release candidates are native only.** An iOS RC is a TestFlight build of `apps/ios-native` under the existing app identity, `tech.dongdongbh.mindwtr`. There is no React Native iOS RC.
+- **A bug found in an RC is fixed in native** and ships as a new native RC, not as an RN release.
+- **When native is stable,** the stable workflow switches to native, and the RN iOS release line ends.
+
+**Version numbers keep the two lines apart.** The App Store version string allows only numbers and dots. So a TestFlight build of `1.4.0-rc.1` shows as version `1.4.0` with its own build number, and the `rc.1` name lives in the release tag and notes. RN stable releases keep `1.3.x` versions, below the native `1.4.0` line.
+
+**Open work before `1.4.0-rc.1`:**
+
+- `release-ios-appstore.yml` builds `apps/mobile` only, and reads its version from `apps/mobile/app.json`. It needs a native path that archives `apps/ios-native` for an RC tag and uploads it to TestFlight only.
+- The Native Beta TestFlight group must not pick up RN stable builds, and the normal RN beta audience must not get native builds without notice.
+- Prove one install of the RC build over the App Store RN app on a real iPhone. The check covers data, settings and Shortcuts saved under RN. The native Shortcuts actions keep RN's internal names, but only a build under `tech.dongdongbh.mindwtr` can prove saved Shortcuts still work.
+- Check what a TestFlight tester gets when an RN stable release ships after the native RC. Then write the answer in the tester announcement.
+
 Proposed observation policy: two weekly-review cycles in opt-in beta, then at least seven days on an RC with no unresolved release blocker. These intervals do not replace coverage. Material fixes repeat affected checks and the affected RC observation period; sparse observations remain explicitly uncertain.
 
 ## 5. Upgrade compatibility and recovery
