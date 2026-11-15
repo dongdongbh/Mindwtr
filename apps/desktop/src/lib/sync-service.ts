@@ -3365,7 +3365,7 @@ export class SyncService {
         if (wasInFlight && options.configOverride) {
 
 
-            void result.catch((error) => logSyncWarning('Active sync failed while a settings proof was queued', error));
+            void result.catch((error) => logSyncWarning('Queued settings proof sync failed', error));
             return { success: true, skipped: 'requeued' };
         }
         return result;

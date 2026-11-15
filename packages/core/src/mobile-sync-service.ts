@@ -2492,21 +2492,26 @@ export const createMobileSyncService = <Lease>(host: MobileSyncServiceHost<Lease
     quietMeasuredFrom = lastEditAt;
     return Math.min(FOLLOW_UP_QUIET_MS, Math.max(0, FOLLOW_UP_QUIET_MS - (Date.now() - lastEditAt)));
   };
+  let waitingCallerJoinedFollowUp = false;
   const mobileSyncOrchestrator = createSyncOrchestrator<MobileSyncRequest | undefined, MobileSyncResult>({
     getFollowUpWaitMs: quietWaitMs,
     getFollowUpDelayMs: (lastCycleDurationMs, minimumDelayMs) => {
+      const waitingCaller = waitingCallerJoinedFollowUp;
+      waitingCallerJoinedFollowUp = false;
       const pacedDelayMs = Math.min(Math.max(lastCycleDurationMs, MIN_FOLLOW_UP_DELAY_MS), MAX_FOLLOW_UP_DELAY_MS);
 
 
-      const delayMs = Math.max(pacedDelayMs, minimumDelayMs, quietWaitMs());
+      const delayMs = waitingCaller ? MIN_FOLLOW_UP_DELAY_MS : Math.max(pacedDelayMs, minimumDelayMs, quietWaitMs());
       logSyncInfo('Sync follow-up scheduled', {
         delayMs: String(delayMs),
         lastCycleDurationMs: String(lastCycleDurationMs),
         minimumDelayMs: String(minimumDelayMs),
+        waitingCaller: String(waitingCaller),
       });
       return delayMs;
     },
     runCycle: async (request, { requestFollowUp, requestFollowUpAfter }) => {
+      waitingCallerJoinedFollowUp = false;
       if (fatalCleanupError) throw fatalCleanupError;
       const rawBackend = request?.configOverride?.backend
         ?? (await getCachedConfigValue(SYNC_BACKEND_KEY))?.trim()
@@ -2561,6 +2566,7 @@ export const createMobileSyncService = <Lease>(host: MobileSyncServiceHost<Lease
       acceptMissingAttachmentIds?: readonly string[];
       ignorePendingRemoteWriteBackoff?: boolean;
       configOverride?: MobileSyncConfigOverride;
+      background?: boolean;
     }
   ): Promise<MobileSyncResult> {
     if (fatalCleanupError) throw fatalCleanupError;
@@ -2577,6 +2583,8 @@ export const createMobileSyncService = <Lease>(host: MobileSyncServiceHost<Lease
 
       return { success: true, skipped: 'requeued' };
     }
+    const requestClass = options?.manual ? 'manual' : options?.background ? 'background' : 'auto';
+    if (wasInFlight && requestClass !== 'auto' && !options?.configOverride) waitingCallerJoinedFollowUp = true;
     const result = mobileSyncOrchestrator.run({
       syncPathOverride,
       manual: options?.manual,
@@ -2590,13 +2598,12 @@ export const createMobileSyncService = <Lease>(host: MobileSyncServiceHost<Lease
 
       void result.catch((error) => {
         if (!(error instanceof NativeAttachmentCleanupUnconfirmedError)) {
-          logSyncWarning('Active sync failed while a settings proof was queued', error);
+          logSyncWarning('Queued settings proof sync failed', error);
         }
       });
       return { success: true, skipped: 'requeued' };
     }
     if (wasInFlight) {
-      const requestClass = options?.manual ? 'manual' : 'auto';
       void result.then((answer) => log.info('Sync request answered by its follow-up cycle', {
         scope: 'sync', force: true,
         extra: { releaseCheck: 'v1.3.9/sync-queued-result', requestClass, outcome: answer.success ? 'success' : 'failed' },
@@ -2631,6 +2638,7 @@ export const createMobileSyncService = <Lease>(host: MobileSyncServiceHost<Lease
       fatalCleanupError = null;
       followUpReceipts.clear();
       followUpIdleLogged = false;
+      waitingCallerJoinedFollowUp = false;
       previousCycleRequestedContribution = false;
       contributionComparisonCaptured = false;
       activeFollowUpContext = null;

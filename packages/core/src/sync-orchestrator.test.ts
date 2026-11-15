@@ -161,6 +161,35 @@ describe('sync orchestrator', () => {
         }
     });
 
+    it('starts the follow-up and answers its waiters when the queue-state listener throws', async () => {
+        vi.useFakeTimers();
+        try {
+            let cycles = 0;
+            const orchestrator = createSyncOrchestrator<string, number>({
+                onQueueStateChange: (queued) => {
+                    if (!queued) throw new Error('status listener failed');
+                },
+                runCycle: async () => {
+                    cycles += 1;
+                    const cycle = cycles;
+                    await new Promise((resolve) => setTimeout(resolve, 1_000));
+                    return cycle;
+                },
+            });
+
+            const first = orchestrator.run('first');
+            const coalesced = orchestrator.run('second');
+            await vi.advanceTimersByTimeAsync(5_000);
+
+            await expect(first).resolves.toBe(1);
+            await expect(coalesced).resolves.toBe(2);
+            expect(cycles).toBe(2);
+            expect(orchestrator.getState()).toEqual({ inFlight: false, queued: false });
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
     it('answers coalesced requests with the in-flight cycle when the orchestrator is reset', async () => {
         vi.useFakeTimers();
         try {

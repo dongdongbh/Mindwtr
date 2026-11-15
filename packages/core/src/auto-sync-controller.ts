@@ -38,7 +38,7 @@ export type AutoSyncControllerOptions = {
 
 
     hasPendingLocalChanges?: () => boolean;
-    logInfo?: (message: string, extra?: Record<string, string>) => void;
+    logInfo?: (message: string, extra?: Record<string, string>, force?: boolean) => void;
     now?: () => number;
     setTimer?: typeof setTimeout;
     clearTimer?: typeof clearTimeout;
@@ -153,8 +153,9 @@ export const createAutoSyncController = (
     let requestedWhileSuspended = false;
     let disposed = false;
 
-    const trace = (message: string, extra?: Record<string, string>) => {
-        options.logInfo?.(message, extra);
+    const trace = (message: string, extra?: Record<string, string>, force?: boolean) => {
+        if (force) options.logInfo?.(message, extra, force);
+        else options.logInfo?.(message, extra);
     };
 
     const clearSyncDebounce = () => {
@@ -499,7 +500,7 @@ export const createAutoSyncController = (
             trace('Auto sync kept a pending local change owed after another cycle succeeded', {
                 releaseCheck: 'v1.3.9/sync-queued-result',
                 outcome: 'requested',
-            });
+            }, true);
             void requestAutoSync(undefined, 'external-success').catch((error) => options.reportError('Sync failed', error));
         },
         takePendingSuspendedRequest: () => {

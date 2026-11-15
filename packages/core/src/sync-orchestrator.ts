@@ -148,21 +148,23 @@ export const createSyncOrchestrator = <Arg, Result>(
                     return;
                 }
                 const nextArg = queuedArg ?? cycleArg;
-                setQueued(false);
                 queuedArg = undefined;
-                void run(nextArg)
-                    .then((result) => {
-                        onQueuedRunComplete?.(result);
-                    })
-                    .catch((error) => {
-                        onQueuedRunError?.(error);
-                    });
+                try {
+                    setQueued(false);
+                } finally {
+                    void run(nextArg)
+                        .then((result) => {
+                            onQueuedRunComplete?.(result);
+                        })
+                        .catch((error) => {
+                            onQueuedRunError?.(error);
+                        });
+                }
             };
 
-            const delayMs = Math.max(
-                getFollowUpDelayMs?.(Date.now() - cycleStartedAt, minimumFollowUpDelayMs) ?? 0,
-                minimumFollowUpDelayMs,
-            );
+            const delayMs = getFollowUpDelayMs
+                ? getFollowUpDelayMs(Date.now() - cycleStartedAt, minimumFollowUpDelayMs)
+                : minimumFollowUpDelayMs;
             minimumFollowUpDelayMs = 0;
             if (delayMs > 0) {
                 followUpTimer = setTimeout(startQueuedRun, delayMs);

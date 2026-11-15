@@ -870,7 +870,7 @@ describe('mobile sync triggers over a shared sync orchestrator', () => {
     expect(harness.service.getState()).toEqual({ inFlight: false, queued: false });
     expect(harness.ports.logInfo).toHaveBeenCalledWith(
       'Auto sync kept a pending local change owed after another cycle succeeded',
-      { scope: 'sync', extra: { releaseCheck: 'v1.3.9/sync-queued-result', outcome: 'requested' } },
+      { scope: 'sync', force: true, extra: { releaseCheck: 'v1.3.9/sync-queued-result', outcome: 'requested' } },
     );
     harness.triggers.dispose();
   });

@@ -557,6 +557,53 @@ describe('mobile sync service behind fake ports', () => {
     await service.waitForMobileSyncIdle();
   });
 
+  it.each([
+    ['manual', { manual: true }, 'manual'],
+    ['background', { background: true }, 'background'],
+    ['automatic', {}, 'auto'],
+  ] as const)('answers a %s request that joins a 30 s cycle on the follow-up delay its caller needs', async (_label, options, requestClass) => {
+    const fake = createFakeHost({ values: WEBDAV_VALUES });
+    vi.useFakeTimers();
+    try {
+      const performSyncCycle = vi.mocked(fake.host.core!.performSyncCycle!);
+      const original = performSyncCycle.getMockImplementation()!;
+      performSyncCycle.mockImplementationOnce(async (io) => {
+        await new Promise((resolve) => setTimeout(resolve, 30_000));
+        return original(io);
+      });
+      const service = createMobileSyncService(fake.host);
+
+      const active = service.performMobileSync();
+      for (let step = 0; step < 50 && performSyncCycle.mock.calls.length === 0; step += 1) {
+        await vi.advanceTimersByTimeAsync(1);
+      }
+      expect(performSyncCycle).toHaveBeenCalledTimes(1);
+      const joinedAt = Date.now();
+      let answeredAfterMs: number | null = null;
+      const joined = service.performMobileSync(undefined, options).then((answer) => {
+        answeredAfterMs = Date.now() - joinedAt;
+        return answer;
+      });
+
+      await vi.advanceTimersByTimeAsync(32_000);
+      await expect(active).resolves.toMatchObject({ success: true });
+      if (requestClass === 'auto') {
+        expect(answeredAfterMs).toBeNull();
+        await vi.advanceTimersByTimeAsync(30_000);
+        expect(answeredAfterMs).toBeGreaterThanOrEqual(59_000);
+      } else {
+        expect(answeredAfterMs).toBeGreaterThanOrEqual(30_000);
+        expect(answeredAfterMs).toBeLessThanOrEqual(32_000);
+      }
+      await expect(joined).resolves.toMatchObject({ success: true });
+      expect(fake.logs).toContainEqual(expect.objectContaining({ force: true,
+        extra: { releaseCheck: 'v1.3.9/sync-queued-result', requestClass, outcome: 'success' },
+      }));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('a slicing host saves on the token of its own read, carried across the local status merge (D9b W3)', async () => {
     const fake = createFakeHost({ values: { ...WEBDAV_VALUES, '@mindwtr_local_sync_status_v1': JSON.stringify({ lastSyncStatus: 'success' }) } });
     fake.host.sliceYield = async () => undefined;
