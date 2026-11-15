@@ -49036,7 +49036,8 @@ extension CoreModel {
     }
 
     private func drainShortcutCapturesIfCurrent(_ owner: SearchLifecycleOwner) async {
-        guard shortcutIntakeCurrent(owner), !busy, let queue = NativeShortcutCaptureQueue.live() else { return }
+        guard shortcutIntakeCurrent(owner), !busy, let queue = NativeShortcutCaptureQueue.live(),
+              let batch = try? NativeShortcutCaptureBatch.next(queue.pending()) else { return }
         let lease = NativeTaskAIEditorLease(); shortcutCaptureLease = lease
         busy = true
         defer {
@@ -49046,8 +49047,7 @@ extension CoreModel {
         }
         var dispatched = false
         do {
-            guard let batch = try NativeShortcutCaptureBatch.next(try queue.pending()),
-                  shortcutIntakeCurrent(owner), lease.isCurrent else { return }
+            guard shortcutIntakeCurrent(owner), lease.isCurrent else { return }
             dispatched = true
             let completed = try await owner.host.ingestShortcutCaptures(batch, lease: lease, readmit: { [weak self] in
                 guard let self else { return false }
