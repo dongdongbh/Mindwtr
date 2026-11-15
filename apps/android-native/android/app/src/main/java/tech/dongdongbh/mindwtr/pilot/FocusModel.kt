@@ -41,6 +41,16 @@ class FocusModel(private val menu: MenuModel, private val saved: SavedStateHandl
     }
 
 
+    fun resetForWidgetSavedFilter() {
+        typed += 1
+        searched += 1
+        keepState(JSONObject())
+        keepDialog(null)
+        keepReordering(false)
+        lists = null
+        pickerFound = null
+    }
+
     fun edit(edit: JSONObject) = menu.whenIdle { shell.editFocusControls(edit) }
 
     private var typed = 0

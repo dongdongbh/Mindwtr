@@ -690,6 +690,30 @@ describe('TaskEditModal', () => {
     expect(taskEditStore.current!.unlockEditing).toHaveBeenCalledTimes(1);
   });
 
+  it('edits and saves Reference contexts without changing its status', async () => {
+    const task: Task = {
+      id: 'reference-context', title: 'Reference', status: 'reference', contexts: ['@home'], tags: [],
+      createdAt: '2026-09-27T00:00:00.000Z', updatedAt: '2026-09-27T00:00:00.000Z',
+    };
+    const onSave = vi.fn();
+    const onClose = vi.fn();
+    let tree!: renderer.ReactTestRenderer;
+    await act(async () => { tree = renderer.create(<TaskEditModal visible task={task} onClose={onClose} onSave={onSave} />); });
+    const form = () => tree.root.findByType('TaskEditFormTab' as any);
+    expect(form().props.basicFields).toContain('contexts');
+    expect(form().props.renderField('contexts').props.contextInputDraft).toBe('@home');
+    await act(async () => { form().props.renderField('contexts').props.updateContextInput('@work'); });
+    expect(form().props.draft.status).toBe('reference');
+    const preview = tree.root.findByType('TaskEditViewTab' as any);
+    expect(preview.props.mergedTask).toMatchObject({ status: 'reference', contexts: ['@work'] });
+    const header = tree.root.find((node) => typeof node.props.onDone === 'function' && typeof node.props.onDelete === 'function');
+    await act(async () => { await header.props.onDone(); });
+    expect(onSave).toHaveBeenCalledWith(task.id, expect.objectContaining({ contexts: ['@work'] }));
+    expect(onSave.mock.calls[0]?.[1].status ?? task.status).toBe('reference');
+    expect(onClose).toHaveBeenCalledTimes(1);
+    await act(async () => tree.unmount());
+  });
+
   it('finds an archived context while editing without adding it to quick chips', async () => {
     const timestamp = '2026-09-27T00:00:00.000Z';
     const task = (id: string, status: Task['status'], contexts: string[], deletedAt?: string): Task => ({

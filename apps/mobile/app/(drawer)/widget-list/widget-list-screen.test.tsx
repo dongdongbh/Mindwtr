@@ -38,6 +38,7 @@ vi.mock('@/hooks/use-local-day-key', () => ({ useLocalDayKey: () => state.dayKey
 vi.mock('@/lib/task-meta-navigation', () => ({ openProjectScreen: vi.fn(), openContextsScreen: vi.fn() }));
 vi.mock('@/components/swipeable-task-item', () => ({ SwipeableTaskItem: (props: object) => React.createElement('TaskRow', props) }));
 vi.mock('@/components/task-edit-modal', () => ({ TaskEditModal: (props: object) => React.createElement('TaskModal', props) }));
+vi.mock('../(tabs)/focus', () => ({ default: (props: object) => React.createElement('FocusScreen', props) }));
 vi.mock('@/components/views/contexts-view', () => ({ ContextsView: (props: object) => React.createElement('ContextsView', props) }));
 vi.mock('react-native', async (original) => ({
   ...await original<typeof import('react-native')>(),
@@ -57,6 +58,36 @@ describe('WidgetListScreen', () => {
     vi.clearAllMocks();
   });
   afterEach(() => vi.useRealTimers());
+  it('opens full Focus controls only for a live saved Focus filter after cold settings load', async () => {
+    state.id = 'filter:desk';
+    let tree!: ReactTestRenderer;
+    await act(async () => { tree = create(<WidgetListScreen />); });
+    expect(tree.root.findAllByType('FocusScreen' as never)).toHaveLength(0);
+    state.data.settings = { savedFilters: [{ id: 'desk', name: 'Desk', view: 'focus', criteria: { contexts: ['@desk'] }, createdAt: '2026-01-01', updatedAt: '2026-01-01' }] };
+    await act(async () => { tree.update(<WidgetListScreen />); });
+    expect(tree.root.findByType('FocusScreen' as never).props.initialSavedFilterId).toBe('desk');
+    expect(tree.root.findAllByType('TaskRows' as never)).toHaveLength(0);
+    state.data.settings = { savedFilters: [{ ...state.data.settings.savedFilters![0], deletedAt: '2026-01-02' }] };
+    await act(async () => { tree.update(<WidgetListScreen />); });
+    expect(tree.root.findAllByType('FocusScreen' as never)).toHaveLength(0);
+    expect(tree.root.findByType('TaskRows' as never).props.data).toEqual([]);
+    await act(async () => { tree.unmount(); });
+  });
+  it('keeps built-in Today and other saved views out of the saved Focus screen', async () => {
+    let tree!: ReactTestRenderer;
+    for (const view of ['all', 'next', 'someday'] as const) {
+      state.id = 'filter:desk';
+      state.data.settings = { savedFilters: [{ id: 'desk', name: 'Desk', view, criteria: {}, createdAt: '2026-01-01', updatedAt: '2026-01-01' }] };
+      await act(async () => { tree = create(<WidgetListScreen />); });
+      expect(tree.root.findAllByType('FocusScreen' as never)).toHaveLength(0);
+      expect(tree.root.findAllByType('TaskRows' as never)).toHaveLength(1);
+      await act(async () => { tree.unmount(); });
+    }
+    state.id = 'focus';
+    await act(async () => { tree = create(<WidgetListScreen />); });
+    expect(tree.root.findAllByType('FocusScreen' as never)).toHaveLength(0);
+    await act(async () => { tree.unmount(); });
+  });
   it('opens editable Contexts for a saved Contexts widget filter after cold data loads', async () => {
     state.id = 'filter:desk';
     let tree!: ReactTestRenderer;

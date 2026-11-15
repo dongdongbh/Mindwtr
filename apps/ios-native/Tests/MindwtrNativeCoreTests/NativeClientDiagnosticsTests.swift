@@ -62,6 +62,7 @@ final class NativeClientDiagnosticsTests: XCTestCase {
         for outcome in ["opened", "skipped", "unavailable"] {
             result.append(("Native iOS shortcut capture opened", ["releaseCheck": "v1.3.9/ios-shortcut-capture", "outcome": outcome]))
         }
+        result.append(("Native iOS widget Focus filter selected", ["releaseCheck": "v1.3.9/widget-focus-filter", "outcome": "selected"]))
         for destination in ["focus", "widgetList", "waiting", "someday", "projects", "review", "calendar", "contexts", "capture"] {
             result.append(("Native iOS widget route opened", ["releaseCheck": "v1.3.9/ios-widget-routes", "destination": destination, "outcome": "opened"]))
         }
@@ -201,6 +202,12 @@ final class NativeClientDiagnosticsTests: XCTestCase {
             ["releaseCheck": "v1.3.8/unreviewed", "outcome": "confirmed"],
         ] {
             refused.append(try json(["Native iOS Weekly Review project completion confirmed", json(context)]))
+        }
+        for context in [
+            ["releaseCheck": "v1.3.9/widget-focus-filter", "outcome": "pending"],
+            ["releaseCheck": "v1.3.9/widget-focus-filter", "outcome": "selected", "savedFilterId": "private"],
+        ] {
+            refused.append(try json(["Native iOS widget Focus filter selected", json(context)]))
         }
         for context in [
             ["releaseCheck": "v1.3.9/ios-widget-routes", "destination": "inbox", "outcome": "opened"],

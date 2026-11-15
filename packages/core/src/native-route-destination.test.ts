@@ -12,8 +12,11 @@ const savedFilters = [
     filter('calls', 'contexts'),
     filter('id:with/slash 漢', 'contexts'),
     filter('focus-only', 'focus'),
+    filter('f'.repeat(200), 'focus'),
+    filter('f'.repeat(201), 'focus'),
     filter('next-only', 'next'),
     filter('deleted', 'contexts', { deletedAt: at }),
+    filter('deleted-focus', 'focus', { deletedAt: at }),
     filter('x'.repeat(501), 'contexts'),
 ];
 
@@ -47,7 +50,12 @@ describe('native route destinations for widget and system links', () => {
         ['encoded saved filter ID', `mindwtr:///widget-list/${encodeURIComponent('filter:id:with/slash 漢')}`,
             { type: 'contexts', savedFilterId: 'id:with/slash 漢' }],
         ['developer scheme', 'mindwtr-native-dev:///waiting', { type: 'waiting' }],
-        ['Focus saved filter', 'mindwtr:///widget-list/filter%3Afocus-only?source=shortcut', { type: 'widgetList', listId: 'filter:focus-only' }],
+        ['missing saved filter', 'mindwtr:///widget-list/filter%3Amissing', { type: 'widgetList', listId: 'filter:missing' }],
+        ['deleted saved filter', 'mindwtr:///widget-list/filter%3Adeleted', { type: 'widgetList', listId: 'filter:deleted' }],
+        ['deleted Focus filter', 'mindwtr:///widget-list/filter%3Adeleted-focus', { type: 'widgetList', listId: 'filter:deleted-focus' }],
+        ['Focus filter ID at control bound', `mindwtr:///widget-list/filter%3A${'f'.repeat(200)}`, { type: 'focusFilter', savedFilterId: 'f'.repeat(200) }],
+        ['Focus filter ID above control bound', `mindwtr:///widget-list/filter%3A${'f'.repeat(201)}`, { type: 'widgetList', listId: `filter:${'f'.repeat(201)}` }],
+        ['Focus saved filter', 'mindwtr:///widget-list/filter%3Afocus-only?source=shortcut', { type: 'focusFilter', savedFilterId: 'focus-only' }],
         ['prefilled shortcut capture', 'mindwtr:///capture?title=Buy%20milk&requestId=x', { type: 'shortcutCapture' }],
         ['developer prefilled capture', 'mindwtr-native-dev:///capture?title=Buy', { type: 'shortcutCapture' }],
         ['missing task link notice', 'mindwtr://open?task=missing', { type: 'notice', title: '',
@@ -68,8 +76,6 @@ describe('native route destinations for widget and system links', () => {
     });
 
     it.each([
-        ['deleted saved filter', 'mindwtr:///widget-list/filter%3Adeleted'],
-        ['missing saved filter', 'mindwtr:///widget-list/filter%3Amissing'],
         ['oversize saved filter ID', `mindwtr:///widget-list/filter%3A${'x'.repeat(501)}`],
         ['blank saved filter', 'mindwtr:///widget-list/filter%3A%20'],
         ['project list', 'mindwtr:///widget-list/project%3Ap1'],

@@ -1801,7 +1801,7 @@ describe('TaskItemDisplay', () => {
         expect(queryByText('#vendor')).not.toBeInTheDocument();
         expect(container.querySelector('[data-priority-strip]')).toBeNull();
         expect(queryByRole('combobox', { name: 'task.aria.status' })).not.toBeInTheDocument();
-        expect(queryByText('@phone')).not.toBeInTheDocument();
+        expect(getByText('@phone')).toBeInTheDocument();
         expect(queryByText('Office')).not.toBeInTheDocument();
         expect(queryByText('Urgent')).not.toBeInTheDocument();
         expect(queryByText('High energy')).not.toBeInTheDocument();

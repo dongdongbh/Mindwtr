@@ -147,7 +147,7 @@ export function buildTaskViewModel(input: TaskViewModelInput): TaskViewRow[] {
         field('reviewAt', t('taskEdit.reviewDateLabel'), task.reviewAt ? input.formatDate(task.reviewAt) : undefined);
         if (input.timeEstimatesEnabled) field('timeEstimate', t('taskEdit.timeEstimateLabel'), timeEstimateLabel);
     }
-    if (!isReference && task.contexts?.length) {
+    if (task.contexts?.length) {
         rows.push({ type: 'tokens', field: 'contexts', label: t('taskEdit.contextsLabel'), items: task.contexts.map((value) => ({ value, accessibilityLabel: `Open context ${value}` })) });
     }
     if (task.tags?.length) {

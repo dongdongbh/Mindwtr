@@ -85,6 +85,8 @@ private val ROUTES = mapOf("/waiting" to (MenuScreen.Waiting to null), "/someday
     "/reference" to (MenuScreen.Reference to null), "/done" to (MenuScreen.History to "done"), "/archived" to (MenuScreen.History to "archived"))
 fun isMenuRoute(route: String?) = route in ROUTES
 
+internal fun widgetFocusFilterId(view: JSONObject): String? = view.optString("focusFilterId").takeUnless { view.isNull("focusFilterId") || it.isEmpty() }
+
 internal fun widgetContextsFilterId(view: JSONObject): String? = view.optString("contextsFilterId").takeUnless { view.isNull("contextsFilterId") || it.isEmpty() }
 
 internal fun contextsSortOverride(view: JSONObject?, value: String): String? = value.takeIf { view?.isNull("savedFilterId") == false }
@@ -583,6 +585,7 @@ class MenuModel(internal val shell: InboxViewModel, private val saved: SavedStat
         if (list != this.list) return
         shell.readSucceeded()
         if (list == "widgetList") widgetContextsFilterId(next.view)?.let { return openWidgetContextsFilter(it) }
+        if (list == "widgetList") widgetFocusFilterId(next.view)?.let { return openWidgetFocusFilter(it) }
 
         loaded = if (list in BULK_LISTS && own(list).optJSONObject("bulk") == null) next.withBulk(null) else next
         editOwn(list) {
@@ -746,6 +749,15 @@ class MenuModel(internal val shell: InboxViewModel, private val saved: SavedStat
     }
 
     private fun keepContextsSavedFilter(id: String?) = keepOwn("contexts", contextsWithSavedFilter(own("contexts"), id))
+
+    private fun openWidgetFocusFilter(id: String) {
+        focusControls.resetForWidgetSavedFilter()
+        toTabs()
+        shell.show(Screen.Focus)
+        shell.editFocusControls(JSONObject().put("type", "applySavedFilter").put("id", id))
+        shell.anyTime({ it.logLine("Native Android widget Focus filter selected releaseCheck=v1.3.9/widget-focus-filter",
+            JSONObject().put("releaseCheck", "v1.3.9/widget-focus-filter").put("outcome", "selected")) }, {})
+    }
 
     private fun openWidgetContextsFilter(id: String) {
         keepContextsSavedFilter(id)

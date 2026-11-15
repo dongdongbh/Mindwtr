@@ -4,7 +4,7 @@ import type { Project, Task, TaskEditorFieldId } from './types';
 
 export const REFERENCE_HIDDEN_TASK_FIELDS = [
     'startTime', 'dueDate', 'reviewAt', 'recurrence', 'priority',
-    'energyLevel', 'timeEstimate', 'contexts', 'location',
+    'energyLevel', 'timeEstimate', 'location',
 ] as const satisfies readonly TaskEditorFieldId[];
 
 const normalizeReferenceText = (value: string): string => value.normalize('NFKC').toLowerCase();

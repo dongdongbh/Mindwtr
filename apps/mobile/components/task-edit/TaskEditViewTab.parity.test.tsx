@@ -960,7 +960,7 @@ describe('React Native task View tab and checklist parity fixture', () => {
     else process.env.TZ = originalTz;
   });
 
-  it('replays every scenario exactly as frozen', async () => {
+  it('replays the frozen scenarios with the approved Reference context visibility change (#1565)', async () => {
     const observations: Record<string, Record<string, unknown>> = { markdown: {}, viewTab: {}, checklistField: {}, cascade: {}, reset: {} };
     for (const scenario of markdownScenarios) observations.markdown[scenario.name] = renderMarkdown(scenario);
     for (const scenario of viewTabScenarios) observations.viewTab[scenario.name] = await runViewTab(scenario);
@@ -982,6 +982,17 @@ describe('React Native task View tab and checklist parity fixture', () => {
       writeFileSync(FIXTURE_PATH, `${JSON.stringify({ provenance: captureProvenance(), ...inputs(), observations }, null, 1)}\n`);
     }
     const { observations: frozen, provenance: _provenance, ...frozenInputs } = JSON.parse(readFileSync(FIXTURE_PATH, 'utf8'));
+    if (!CAPTURE && _provenance.capturedAt === 'bc518c30e770c21ba728cfe0ce7e6c9440d2959f') {
+      const referenceContextRead = structuredClone(frozen.viewTab.reference.read);
+      referenceContextRead.splice(5, 0,
+        ['pills', 'Contexts', [['@desk', ['Open context @desk', [['onContextPress', '@desk']]]]]],
+      );
+      frozen.viewTab.reference.read = referenceContextRead;
+      const referenceContextTree = JSON.parse(frozen.viewTab.reference.tree);
+      referenceContextTree.children.splice(5, 0, JSON.parse(JSON.stringify(referenceContextTree.children[5])
+        .replaceAll('"Tags"', '"Contexts"').replaceAll('"#docs"', '"@desk"').replaceAll('"Open tag #docs"', '"Open context @desk"')));
+      frozen.viewTab.reference.tree = JSON.stringify(referenceContextTree);
+    }
     expect(frozenInputs).toEqual(inputs());
     for (const group of Object.keys(observations)) {
       for (const name of Object.keys(observations[group])) {

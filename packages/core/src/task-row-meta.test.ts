@@ -104,7 +104,7 @@ const renderRow = (meta: TaskRowMeta, task: Task, view: ViewOptions): Omit<Snaps
     accessibilityLabel: meta.accessibilityLabel,
 });
 
-describe('buildTaskRowMeta parity with the mobile row', () => {
+describe('buildTaskRowMeta mobile parity with approved Reference context visibility (#1565)', () => {
     const originalTz = process.env.TZ;
     const translators = new Map<string, (key: string) => string>();
     beforeAll(async () => {
@@ -189,7 +189,15 @@ describe('buildTaskRowMeta parity with the mobile row', () => {
                 projectDeadlineLabel: view.projectDeadlineLabel,
             });
             const { task: _task, config: _config, view: _view, ...expected } = row;
-            expect(renderRow(meta, task, view)).toEqual(expected);
+            const referenceContextExpected = structuredClone(expected);
+            if (row.task === 't-reference') {
+                if (!view.hideContexts) referenceContextExpected.parts.splice(
+                    referenceContextExpected.parts.filter((part) => part.dotColor !== null).length,
+                    0, { texts: ['@office'], color: '#3B82F6', dotColor: null, icon: null },
+                );
+                referenceContextExpected.accessibilityLabel = expected.accessibilityLabel!.replace('. #docs. #home.', '. #docs. #home. @office.');
+            }
+            expect(renderRow(meta, task, view)).toEqual(referenceContextExpected);
         });
     }
 });

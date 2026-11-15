@@ -245,7 +245,7 @@ const serializeFocusViewState = (expandedSections: FocusExpandedSections, showDe
   },
 });
 
-export default function FocusScreen() {
+export default function FocusScreen({ initialSavedFilterId }: { initialSavedFilterId?: string } = {}) {
   const onStartupLayout = useStartupScreenReady('focus');
   const { taskId, openToken, taskTab } = useLocalSearchParams<{ taskId?: string; openToken?: string; taskTab?: string }>();
   const linkedTask = useTaskStore((state) => typeof taskId === 'string' ? state._tasksById.get(taskId) : undefined);
@@ -276,6 +276,7 @@ export default function FocusScreen() {
   const [taskModalDefaultTab, setTaskModalDefaultTab] = useState<TaskEditTab>('view');
   const [taskModalOpenKey, setTaskModalOpenKey] = useState('manual');
   const [filtersVisible, setFiltersVisible] = useState(false);
+  const [appliedInitialFilter, setAppliedInitialFilter] = useState<string | undefined>(undefined);
   const [viewOptionsVisible, setViewOptionsVisible] = useState(false);
   const [deferPickerTask, setDeferPickerTask] = useState<Task | null>(null);
   const [deferPickerDate, setDeferPickerDate] = useState<Date>(() => getStartDateOffset(1));
@@ -622,6 +623,17 @@ export default function FocusScreen() {
     setFocusSortBy(filter.sortBy ?? DEFAULT_FOCUS_SORT_BY);
     setFiltersVisible(false);
   }, [applySavedSelections]);
+  useEffect(() => {
+    if (!initialSavedFilterId || appliedInitialFilter === initialSavedFilterId) return;
+    const filter = savedFocusFilters.find((item) => item.id === initialSavedFilterId && item.view === 'focus');
+    if (!filter) return;
+    setAppliedInitialFilter(initialSavedFilterId);
+    applySavedFocusFilter(filter);
+    void logAppInfo('Widget Focus filter selected', {
+      scope: 'navigation',
+      extra: { releaseCheck: 'v1.3.9/widget-focus-filter', outcome: 'selected' },
+    });
+  }, [initialSavedFilterId, appliedInitialFilter, savedFocusFilters, applySavedFocusFilter]);
   const saveCurrentFilter = useCallback(() => {
     const plan = planFocusFilterSave({
       name: saveFilterName,
@@ -1402,6 +1414,8 @@ export default function FocusScreen() {
     tc,
   ]);
   const listBottomPadding = FOCUS_LIST_BOTTOM_CLEARANCE + Math.max(0, insets.bottom);
+
+  if (initialSavedFilterId && appliedInitialFilter !== initialSavedFilterId) return null;
 
   return (
     <View onLayout={onStartupLayout} style={[styles.container, { backgroundColor: tc.bg }]}>

@@ -26910,6 +26910,8 @@ private final class Engine: @unchecked Sendable {
             valid = Set(context.keys) == Set(["releaseCheck", "outcome"])
                 && context["releaseCheck"] as? String == "v1.3.9/ios-context-automation"
                 && ["notified", "quiet", "failed"].contains(context["outcome"] as? String ?? "")
+        case "Native iOS widget Focus filter selected":
+            valid = Self.equalJSON(context, ["releaseCheck": "v1.3.9/widget-focus-filter", "outcome": "selected"])
         case "Native iOS widget route opened":
             valid = Set(context.keys) == Set(["releaseCheck", "destination", "outcome"])
                 && context["releaseCheck"] as? String == "v1.3.9/ios-widget-routes"

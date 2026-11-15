@@ -158,6 +158,18 @@ const encodePatch = (patch: Partial<Task> | null) => patch === null
     ? null
     : Object.entries(patch).map(([key, value]) => [key, value === undefined ? '<undefined>' : value]);
 
+const referenceContextLayout = (key: string, frozen: [string, number[], boolean]): [string, number[], boolean] => {
+    const [taskId, settingsName, editName] = key.split('|');
+    const state = applyEdit(tasksById.get(taskId)!, fixture.edits[editName]);
+    if (state.draft.status !== 'reference') return frozen;
+    const anchor = settingsName === 'customOrder' ? 'project' : 'area';
+    return [
+        frozen[0].replace(anchor, `${anchor},contexts`),
+        frozen[1].map((count, index) => count + (index === 0 && state.contextInputDraft.trim() ? 1 : 0)),
+        frozen[2],
+    ];
+};
+
 describe('task editor model parity with the mobile editor', () => {
     const originalTz = process.env.TZ;
     let t: (key: string) => string = (key) => key;
@@ -189,7 +201,10 @@ describe('task editor model parity with the mobile editor', () => {
         ]))).toEqual(snapshot.sectionOpen);
     });
 
-    it('builds the same layout and filled counts for every captured state', () => {
+    it('preserves frozen layouts with the approved Reference context visibility change (#1565)', () => {
+        const referenceContextLayouts = Object.fromEntries(Object.entries(snapshot.layouts).map(([key, frozen]) => [
+            key, referenceContextLayout(key, frozen),
+        ]));
         const layouts = Object.fromEntries(Object.keys(snapshot.layouts).map((key) => {
             const [taskId, settingsName, editName] = key.split('|');
             const task = tasksById.get(taskId)!;
@@ -216,7 +231,7 @@ describe('task editor model parity with the mobile editor', () => {
                 layout.showStatusField,
             ]];
         }));
-        expect(layouts).toEqual(snapshot.layouts);
+        expect(layouts).toEqual(referenceContextLayouts);
     });
 
     it('offers the same projects, sections, estimates and recurrence state', () => {
@@ -254,12 +269,12 @@ describe('task editor model parity with the mobile editor', () => {
         expect(JSON.stringify(patches)).toBe(expected);
     });
 
-    it('builds the host model from the same layout and options', () => {
+    it('preserves frozen host layouts with the approved Reference context visibility change (#1565)', () => {
         for (const key of Object.keys(snapshot.layouts).filter((entry) => entry.endsWith('|none'))) {
             const [taskId, settingsName] = key.split('|');
             const task = tasksById.get(taskId)!;
             const draft = createTaskDraft(task);
-            const [fields, filled, showStatusField] = snapshot.layouts[key];
+            const [fields, filled, showStatusField] = referenceContextLayout(key, snapshot.layouts[key]);
             const option = snapshot.options[`${taskId}|none`];
             const open = snapshot.sectionOpen[settingsName] as Record<string, boolean>;
             const model = buildTaskEditorModel({
@@ -424,11 +439,11 @@ describe('task editor model rules', () => {
     it('keeps Reference status and an empty checklist editable while hiding action metadata', () => {
         const reference = { status: 'reference' as const, dueDate: '2026-10-01', priority: 'high' as const, contexts: ['@a'] };
         const plain = layoutOf({ taskPatch: reference });
-        for (const field of ['dueDate', 'startTime', 'priority', 'contexts'] as const) {
+        for (const field of ['dueDate', 'startTime', 'priority'] as const) {
             expect(plain.all).not.toContain(field);
         }
         expect(plain.showStatusField).toBe(true);
-        expect(plain.all).toEqual(expect.arrayContaining(['status', 'checklist']));
+        expect(plain.all).toEqual(expect.arrayContaining(['status', 'contexts', 'checklist']));
         const hidden = layoutOf({ taskPatch: reference, taskEditor: { hidden: ['status', 'checklist'] } });
         expect(hidden.all).not.toContain('status');
         expect(hidden.all).not.toContain('checklist');

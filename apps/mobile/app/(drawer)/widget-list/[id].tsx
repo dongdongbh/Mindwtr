@@ -11,6 +11,7 @@ import { useThemeColors } from '@/hooks/use-theme-colors';
 import { useLocalDayKey } from '@/hooks/use-local-day-key';
 import { normalizeWidgetListDestinationId, resolveWidgetListDestination } from '@/lib/widget-list-destination';
 import { ContextsView } from '@/components/views/contexts-view';
+import FocusScreen from '../(tabs)/focus';
 import { logInfo } from '@/lib/app-log';
 import { openContextsScreen, openProjectScreen } from '@/lib/task-meta-navigation';
 import { WidgetLaunchDestination } from '@/hooks/use-widget-launch';
@@ -37,9 +38,9 @@ export default function WidgetListScreen() {
   const title = list?.title ?? t('search.noResults');
   const available = Boolean(list);
   const destinationId = normalizeWidgetListDestinationId(id);
-  const contextFilter = useMemo(() => destinationId?.startsWith('filter:')
+  const savedFilter = useMemo(() => destinationId?.startsWith('filter:')
     ? normalizeSavedFilters(data.settings.savedFilters).find((filter) =>
-      filter.id === destinationId.slice('filter:'.length) && filter.view === 'contexts' && !filter.deletedAt)
+      filter.id === destinationId.slice('filter:'.length) && !filter.deletedAt)
     : undefined, [data.settings.savedFilters, destinationId]);
   useEffect(() => {
     if (source !== 'shortcut') return;
@@ -81,7 +82,8 @@ export default function WidgetListScreen() {
     <View style={{ flex: 1, backgroundColor: tc.bg }}>
       <WidgetLaunchDestination path={`/widget-list/${typeof id === 'string' ? id : ''}`} />
       <Stack.Screen options={{ title }} />
-      {contextFilter ? <ContextsView key={contextFilter.id} initialSavedFilterId={contextFilter.id} /> : <>
+      {savedFilter?.view === 'contexts' ? <ContextsView key={savedFilter.id} initialSavedFilterId={savedFilter.id} />
+        : savedFilter?.view === 'focus' ? <FocusScreen key={savedFilter.id} initialSavedFilterId={savedFilter.id} /> : <>
       {
                                                                                     }
       <FlatList

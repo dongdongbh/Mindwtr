@@ -8,7 +8,7 @@ import { normalizeWidgetListDestinationId } from './widget-list-destination';
 export type NativeRouteDestination =
     | { type: 'none' | 'focus' | 'inbox' | 'waiting' | 'someday' | 'projects' | 'review' | 'calendar' | 'capture'
         | 'shortcutCapture' | 'contextAutomation' }
-    | { type: 'contexts'; savedFilterId: string }
+    | { type: 'contexts' | 'focusFilter'; savedFilterId: string }
     | { type: 'widgetList'; listId: string }
     | { type: 'notice'; title: string; message: string };
 
@@ -55,8 +55,10 @@ function widgetListDestination(route: string, savedFilters: unknown): NativeRout
     if (savedFilterId.length > SAVED_FILTER_ID_LIMIT) return NONE;
     const filter = normalizeSavedFilters(savedFilters)
         .find((candidate) => candidate.id === savedFilterId && !candidate.deletedAt);
-    if (!filter) return NONE;
-    return filter.view === 'contexts' ? { type: 'contexts', savedFilterId } : { type: 'widgetList', listId };
+    if (!filter) return { type: 'widgetList', listId };
+    if (filter.view === 'contexts') return { type: 'contexts', savedFilterId };
+    if (filter.view === 'focus' && savedFilterId.length <= 200) return { type: 'focusFilter', savedFilterId };
+    return { type: 'widgetList', listId };
 }
 
 export function resolveNativeRouteDestination(target: NativeEntryPoint, savedFilters: unknown): NativeRouteDestination {

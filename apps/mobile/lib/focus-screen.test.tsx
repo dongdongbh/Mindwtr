@@ -2196,6 +2196,29 @@ describe('FocusScreen', () => {
     appStateSpy.mockRestore();
   });
 
+  it('selects the widget Focus filter once after settings hydrate and keeps controls editable', () => {
+    storeState.tasks = [makeTask('desk', { contexts: ['@desk'] }), makeTask('phone', { contexts: ['@phone'] })];
+    let tree!: ReturnType<typeof create>;
+    act(() => { tree = create(<FocusScreen initialSavedFilterId="desk-filter" />); });
+    expect(tree.root.findAllByType(SwipeableTaskItem)).toHaveLength(0);
+    const saved = {
+      id: 'desk-filter', name: 'Desk', view: 'focus' as const, criteria: { contexts: ['@desk'] },
+      createdAt: '2026-04-01T00:00:00.000Z', updatedAt: '2026-04-01T00:00:00.000Z',
+    };
+    storeState.settings = { ...storeState.settings, savedFilters: [saved] };
+    act(() => { tree.update(<FocusScreen initialSavedFilterId="desk-filter" />); });
+    expect(tree.root.findAllByType(SwipeableTaskItem).map((node) => node.props.task.id)).toEqual(['desk']);
+    expect(findButtonByText(tree, 'Desk').props.accessibilityState.selected).toBe(true);
+    expect(() => findButtonByLabel(tree, 'Filters')).not.toThrow();
+    act(() => { findButtonByText(tree, 'All').props.onPress(); });
+    storeState.settings = { ...storeState.settings, savedFilters: [{ ...saved, name: 'Renamed' }] };
+    act(() => { tree.update(<FocusScreen initialSavedFilterId="desk-filter" />); });
+    expect(tree.root.findAllByType(SwipeableTaskItem).map((node) => node.props.task.id)).toEqual(['desk', 'phone']);
+    expect(findButtonByText(tree, 'All').props.accessibilityState.selected).toBe(true);
+    expect(storeState.updateSettings).not.toHaveBeenCalled();
+    act(() => { tree.unmount(); });
+  });
+
   it('applies, toggles, switches, and clears saved Focus filters from the chip row', () => {
     const alertSpy = vi.spyOn(Alert, 'alert');
     storeState.settings = {

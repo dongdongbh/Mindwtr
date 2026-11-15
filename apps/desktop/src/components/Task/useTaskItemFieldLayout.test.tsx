@@ -224,7 +224,7 @@ describe('useTaskItemFieldLayout', () => {
         expect(result.current.basicFields).toContain('status');
         expect(result.current.basicFields).not.toContain('dueDate');
         expect(result.current.schedulingFields).toEqual([]);
-        expect(result.current.basicFields).not.toContain('contexts');
+        expect(result.current.basicFields).toContain('contexts');
         expect(result.current.organizationFields).toContain('tags');
         expect(result.current.organizationFields).not.toContain('priority');
         expect(result.current.organizationFields).not.toContain('timeEstimate');

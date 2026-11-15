@@ -25,6 +25,7 @@ import type { Area, ChecklistItem, Project, Section, Task } from './types';
 
 type Handlers = { project: boolean; context: boolean; tag: boolean; status: boolean };
 type Fixture = {
+    provenance: { capturedAt: string };
     now: string;
     store: { tasks: Task[]; projects: Project[]; sections: Section[]; areas: Area[] };
     markdownScenarios: Array<{ name: string; markdown: string; inline?: object }>;
@@ -177,7 +178,11 @@ describe('task view parity with the frozen React Native editor', () => {
             now: new Date(fixture.now),
         });
         const frozen = fixture.observations.viewTab[name];
-        expect(json(readViewTab(rows, scenario.handlers))).toEqual(frozen.read);
+        const referenceContextRead = structuredClone(frozen.read);
+        if (fixture.provenance.capturedAt === 'bc518c30e770c21ba728cfe0ce7e6c9440d2959f' && name === 'reference') referenceContextRead.splice(5, 0,
+            ['pills', 'Contexts', [['@desk', ['Open context @desk', [['onContextPress', '@desk']]]]]],
+        );
+        expect(json(readViewTab(rows, scenario.handlers))).toEqual(referenceContextRead);
 
         const checklist = rows.find((row) => row.type === 'checklist');
         const actions = scenario.actions.map((action) => {

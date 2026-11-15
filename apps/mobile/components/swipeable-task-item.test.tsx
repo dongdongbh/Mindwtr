@@ -2686,7 +2686,7 @@ it('can keep the focus star without adding a redundant focus outline', () => {
 
     expect(tree.root.findAllByProps({ testID: 'task-priority-strip' })).toHaveLength(0);
     expect(tree.root.findAll((node) => String(node.props.accessibilityLabel ?? '').startsWith('Change status.'))).toHaveLength(0);
-    expect(hasText(tree, '@hidden-context')).toBe(false);
+    expect(hasText(tree, '@hidden-context')).toBe(true);
     expect(tree.root.findAll((node) => node.props.markdown === 'Visible reference item')).toHaveLength(0);
     expect(hasText(tree, 'Daily')).toBe(false);
     expect(hasText(tree, '1h')).toBe(false);
@@ -2699,6 +2699,7 @@ it('can keep the focus star without adding a redundant focus outline', () => {
     expect(row.props.accessibilityLabel).toContain('Project: Finished launch');
     expect(row.props.accessibilityLabel).toContain('Area: Work');
     expect(row.props.accessibilityLabel).toContain('Assigned To: Alex');
+    expect(row.props.accessibilityLabel).toContain('@hidden-context');
     expect(row.props.accessibilityLabel).not.toContain('Status:');
     expect(row.props.accessibilityLabel).not.toContain('Priority:');
   });

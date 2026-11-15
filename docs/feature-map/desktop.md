@@ -235,6 +235,7 @@ Source: `apps/desktop/src` (Tauri + React). Labels come from `packages/core/src/
 
 ## Task editor
 
+- Reference contexts: More › Reference › double-click an item › Contexts. Edit or clear its contexts and Save without changing Reference status. Existing contexts also appear on the row; an empty Contexts field follows the task editor layout. Checks: `apps/desktop/src/components/Task/useTaskItemFieldLayout.test.tsx`, `apps/desktop/src/components/Task/TaskItemDisplay.test.tsx`.
 - Reach: Double-click a task row. Sections: Details, Scheduling, Organization. Fields include Description, checklist, attachments, and recurrence. Settings › GTD › Task editor layout › Editor opening picks In-row or Pop-up.
 - Shortcuts: `e` (Vim), `Shift+Enter` (Standard), `Ctrl+E` (Emacs). `Ctrl+Enter` (`Cmd+Enter`) saves. `Esc` cancels.
 - Code: `apps/desktop/src/components/TaskItem.tsx`, `apps/desktop/src/components/Task/TaskItemEditor.tsx`, `apps/desktop/src/components/Task/TaskItemEditorSurface.tsx`, `apps/desktop/src/components/Task/TaskEditorSection.tsx`, `apps/desktop/src/components/Task/TaskItemFieldRenderer.tsx`, `apps/desktop/src/components/Task/fields/TaskMetadataFields.tsx`, `apps/desktop/src/components/Task/fields/DescriptionField.tsx`, `apps/desktop/src/components/Task/fields/RecurrenceField.tsx`, `apps/desktop/src/components/Task/TaskForm/ChecklistField.tsx`, `apps/desktop/src/components/Task/TaskForm/AttachmentsField.tsx`, `apps/desktop/src/components/Task/TaskItemRecurrenceModal.tsx`

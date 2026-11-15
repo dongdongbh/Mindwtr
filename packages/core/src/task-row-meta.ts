@@ -225,7 +225,7 @@ export function buildTaskRowMeta(input: TaskRowMetaInput): TaskRowMeta {
     if (!isReference && input.projectDeadlineLabel) {
         add({ kind: 'projectDeadline', text: input.projectDeadlineLabel });
     }
-    if (!isReference && !input.hideContexts && task.contexts?.length) {
+    if (!input.hideContexts && task.contexts?.length) {
         add({ kind: 'context', text: task.contexts[0], overflowCount: task.contexts.length - 1 });
     }
     if ((isReference || task.status === 'waiting') && task.assignedTo?.trim()) {
@@ -329,6 +329,7 @@ function referenceAccessibilityLabel({ task, lookup, t }: TaskRowMetaInput, visi
         area ? `${tFallback(t, 'taskEdit.areaLabel', 'Area')}: ${area.name}` : null,
         task.assignedTo ? `${tFallback(t, 'taskEdit.assignedTo', 'Assigned To')}: ${task.assignedTo}` : null,
         ...(task.tags ?? []),
+        ...(task.contexts ?? []),
         visibleAttachmentCount > 0 ? `${tFallback(t, 'attachments.title', 'Attachments')}: ${visibleAttachmentCount}` : null,
     ].filter(Boolean).join('. ');
 }

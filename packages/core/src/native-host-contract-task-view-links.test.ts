@@ -97,7 +97,7 @@ describe('Task View reference target', () => {
         changeTask('source', { status: 'reference', projectId: 'target', contexts: ['hidden'], tags: ['visible'] });
         view = { ...view, draft: createTaskDraft(saved()) };
         refresh();
-        expect(read(tokenInput('contexts', 0))).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+        expect(read(tokenInput('contexts', 0))).toEqual({ ok: true, value: { kind: 'context', id: '@hidden' } });
         expect(read(tokenInput('tags', 0))).toEqual({ ok: true, value: { kind: 'tag', id: '#visible' } });
         expect(read(projectInput())).toEqual({ ok: true, value: { kind: 'project', id: 'target' } });
         changeTask('source', { status: 'archived', projectId: 'archived-project' });

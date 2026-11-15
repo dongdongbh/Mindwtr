@@ -816,7 +816,7 @@ describe('TaskEditViewTab', () => {
       );
     });
 
-    ['Launch research', 'Assigned To', 'Alex', 'Finished launch', 'Sources', 'Area', 'Work', 'Tags', '#research', 'Description', 'List', 'Attachments', 'Source link']
+    ['Launch research', 'Assigned To', 'Alex', 'Finished launch', 'Sources', 'Area', 'Work', 'Contexts', '@private', 'Tags', '#research', 'Description', 'List', 'Attachments', 'Source link']
       .forEach((text) => expect(tree.root.findAllByProps({ children: text }).length).toBeGreaterThan(0));
     expect(tree.root.find((node) => node.props.markdown === 'Reference body')).toBeTruthy();
     expect(tree.root.findAll((node) => String(node.type) === 'MarkdownInlineText').map((node) => node.props.markdown)).toEqual([
@@ -833,7 +833,7 @@ describe('TaskEditViewTab', () => {
       { id: 'step-1', title: 'Completed **source**', isCompleted: true },
       { id: 'step-2', title: '[Pending link](https://example.com)\nwrapped detail', isCompleted: true },
     ]);
-    ['Status', 'Priority', 'Energy', 'Start', 'Due', 'Review', 'Estimate', 'Contexts', '@private', 'Location', 'Archive room', 'Recurrence', 'Checklist']
+    ['Status', 'Priority', 'Energy', 'Start', 'Due', 'Review', 'Estimate', 'Location', 'Archive room', 'Recurrence', 'Checklist']
       .forEach((text) => expect(tree.root.findAllByProps({ children: text })).toHaveLength(0));
     expect(tree.root.findAllByType(MockTaskStatusBadge)).toHaveLength(0);
   });

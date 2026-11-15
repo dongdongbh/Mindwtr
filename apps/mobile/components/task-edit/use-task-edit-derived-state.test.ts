@@ -437,7 +437,7 @@ describe('useTaskEditDerivedState', () => {
             ...(derived?.detailsFields ?? []),
         ];
         expect(visibleFields).toEqual(expect.arrayContaining([
-            'description', 'project', 'area', 'assignedTo', 'tags', 'attachments', 'checklist',
+            'description', 'project', 'area', 'assignedTo', 'contexts', 'tags', 'attachments', 'checklist',
         ]));
         REFERENCE_HIDDEN_TASK_FIELDS.forEach((fieldId) => {
             expect(visibleFields).not.toContain(fieldId);

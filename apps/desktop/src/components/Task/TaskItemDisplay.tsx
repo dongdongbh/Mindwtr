@@ -596,7 +596,7 @@ export const TaskItemDisplay = memo(function TaskItemDisplay({
                 />
             )}
             {(expanded || waitingAssignee) && renderAssignedToBadge()}
-            {!isReference && task.contexts?.length > 0 && (
+            {task.contexts?.length > 0 && (
                 <div className="flex flex-wrap items-center gap-2 min-w-0 max-w-full">
                     {(expanded ? task.contexts : task.contexts.slice(0, 3)).map((ctx) => renderContextBadge(ctx))}
                     {!expanded && task.contexts.length > 3 && (

@@ -354,6 +354,21 @@ describe('native host contract: checklist edits', () => {
         expect(reset.checklist.every((entry) => !entry.isCompleted)).toBe(true);
     });
 
+    it('shows, edits and saves Reference contexts through the native editor contract', async () => {
+        const host = await openHost();
+        expect(await useTaskStore.getState().updateTask('t-list', { status: 'reference' })).toMatchObject({ success: true });
+        const opened = value(host.getTaskEditorModel({ id: 't-list' }));
+        expect(opened.layout.sections.flatMap((section) => section.fields)).toContain('contexts');
+        const edited = value(host.editTaskDraft({ id: 't-list', draft: opened.draft, edit: { type: 'fields', patch: { contexts: '@home' } } }));
+        expect(edited.draft.status).toBe('reference');
+        expect(await host.saveTaskDraft({
+            id: 't-list', requestId: generateUUID(), base: { contexts: opened.draft.contexts }, patch: { contexts: edited.draft.contexts },
+        })).toMatchObject({ ok: true });
+        expect(stored('t-list')).toMatchObject({ status: 'reference', contexts: ['@home'] });
+        expect(value(host.getTaskView({ id: 't-list' })).rows.find((row) => row.type === 'tokens' && row.field === 'contexts'))
+            .toMatchObject({ items: [{ value: '@home', accessibilityLabel: 'Open context @home' }] });
+    });
+
     it('ticks a Reference list without moving the reference: no Done, no completedAt, no Focus (#1416)', async () => {
         freezeClock();
         const host = await openHost();

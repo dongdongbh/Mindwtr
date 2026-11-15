@@ -8813,7 +8813,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         return "iosProductionWidgetTaskOpen"
     }
 
-    private static let routeDestinations = ["focus", "widgetList", "waiting", "someday", "projects", "review", "calendar", "contexts", "capture"]
+    private static let routeDestinations = ["focus", "focusFilter", "widgetList", "waiting", "someday", "projects", "review", "calendar", "contexts", "capture"]
     private static let silentRouteDestinations = ["shortcutCapture", "contextAutomation", "notice"]
     private static let routeSurfaces: [String: Surface] = ["inbox": .inbox, "focus": .focus, "waiting": .waiting, "someday": .someday,
                                                            "projects": .projects, "review": .review, "calendar": .calendar, "notice": .inbox]
@@ -8824,11 +8824,25 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
             return allowed.contains(type) && Set(route.keys) == ["type", "title", "message"] && route.values.allSatisfy({ $0 is String })
                 && !route.text("message").isEmpty && route.text("message").utf16.count <= 4_000 && route.text("title").utf16.count <= 4_000
         }
-        let identifier: String? = ["task": "taskId", "project": "projectId", "contexts": "savedFilterId", "widgetList": "listId"][type]
+        let identifier: String? = ["task": "taskId", "project": "projectId", "contexts": "savedFilterId", "focusFilter": "savedFilterId", "widgetList": "listId"][type]
         let limit = type == "widgetList" ? 1_024 : 500
         let fields: Set<String> = identifier.map({ Set(["type", $0]) }) ?? ["type"]
         return allowed.contains(type) && Set(route.keys) == fields && route.values.allSatisfy({ $0 is String })
             && (identifier.map({ !route.text($0).isEmpty && route.text($0).utf16.count <= limit }) ?? true)
+    }
+
+    private func openFocusSavedFilter(_ id: String) async {
+        guard ready, !busy, !retryNeeded, !taskPresented, !capturePresented, !areaPickerPresented else { return }
+        focusGeneration += 1
+        focusState = [:]
+        focusEdits = []
+        enqueueFocusEdit(["edit": ["type": "applySavedFilter", "id": id]])
+        focusLoadedDepth = [:]
+        focusCurrent = false
+        focusPanel = ""
+        closeFocusPicker()
+        if selectedSurface == .focus { await refresh(keepsPreferences: true) }
+        else { await selectSurface(.focus) }
     }
 
     private func openContextsSavedFilter(_ id: String) async {
@@ -9749,6 +9763,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
                 case "review": await self.openReview()
                 case "calendar": await self.openCalendar()
                 case "contexts": await self.openContextsSavedFilter(route.text("savedFilterId"))
+                case "focusFilter": await self.openFocusSavedFilter(route.text("savedFilterId"))
                 case "widgetList": await self.openWidgetList(route.text("listId"))
                 case "notice":
                     await self.selectSurface(.inbox)
@@ -9774,6 +9789,8 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
                     && self.projectHeader.text("id") == route.text("projectId") && self.projectError == nil
                 case "contexts": acknowledged = self.selectedSurface == .contexts && self.contextsCurrent && self.contextsIntents.isEmpty
                     && self.contextsSelection.text("savedFilterId") == route.text("savedFilterId") && self.contextsError == nil
+                case "focusFilter": acknowledged = self.selectedSurface == .focus && self.focusCurrent && self.focusEdits.isEmpty
+                    && self.focusState.text("savedFilterId") == route.text("savedFilterId") && self.focusError == nil
                 case "capture": acknowledged = self.capturePresented
                 case "contextAutomation": acknowledged = contextAutomationHandled
                 case "shortcutCapture": acknowledged = shortcutCaptureHandled
@@ -9811,6 +9828,13 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         #endif
         guard entityLinkCurrent(owner) else { return }
         if CoreModel.silentRouteDestinations.contains(kind) { return }
+        if kind == "focusFilter", outcome == "opened" {
+            _ = try? await owner.host.call("logLine", argumentsJSON: json([
+                "Native iOS widget Focus filter selected",
+                #"{"releaseCheck":"v1.3.9/widget-focus-filter","outcome":"selected"}"#,
+            ]))
+            return
+        }
         if CoreModel.routeDestinations.contains(kind), outcome == "opened" {
             _ = try? await owner.host.call("logLine", argumentsJSON: json([
                 "Native iOS widget route opened",

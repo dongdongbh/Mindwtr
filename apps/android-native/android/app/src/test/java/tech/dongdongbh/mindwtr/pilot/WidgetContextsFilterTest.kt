@@ -12,6 +12,12 @@ import org.junit.Test
 class WidgetContextsFilterTest {
     @Test fun aSavedContextsFilterLinkOpensContexts() = assertEquals("desk", widgetContextsFilterId(JSONObject().put("contextsFilterId", "desk")))
 
+    @Test fun aSavedFocusFilterNamesTheFullFocusDestination() {
+        assertEquals("desk", widgetFocusFilterId(JSONObject().put("focusFilterId", "desk")))
+        assertNull(widgetFocusFilterId(JSONObject().put("focusFilterId", JSONObject.NULL)))
+        assertNull(widgetFocusFilterId(JSONObject().put("contextsFilterId", "desk")))
+    }
+
     @Test fun otherWidgetListsStayLists() {
         assertNull(widgetContextsFilterId(JSONObject().put("contextsFilterId", JSONObject.NULL)))
         assertNull(widgetContextsFilterId(JSONObject().put("contextsFilterId", "")))

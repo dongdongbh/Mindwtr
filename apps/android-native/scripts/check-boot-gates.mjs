@@ -2795,10 +2795,12 @@ assert.match(model, /AfterCommandReads\.Read\.Menu -> menu\.refresh\(done\)/, 't
 
     const bulkSource = readFileSync(resolve(app, '../../packages/core/src/native-host-contract-bulk-actions.ts'), 'utf8');
     const unionOf = (text, type) => [...(new RegExp(`export type ${type} =([\\s\\S]*?);\\n`).exec(text)?.[1] ?? '').matchAll(/type: '(\w+)'/g)].map(([, name]) => name);
-    const allowed = new Set([...unionOf(contractSource, 'NativeArchiveAction'), ...unionOf(bulkSource, 'NativeBulkAction'), 'setSearch', 'setText', 'type']);
-    assert(allowed.has('setCompletedAt') && allowed.has('organize') && allowed.has('restoreTasks'), 'core\'s action unions were read');
+    const focusSource = readFileSync(resolve(app, '../../packages/core/src/focus-controls.ts'), 'utf8');
+    const allowed = new Set([...unionOf(contractSource, 'NativeArchiveAction'), ...unionOf(bulkSource, 'NativeBulkAction'),
+        ...unionOf(focusSource, 'FocusControlEdit'), 'setSearch', 'setText', 'type']);
+    assert(allowed.has('setCompletedAt') && allowed.has('organize') && allowed.has('restoreTasks') && allowed.has('applySavedFilter'), 'core\'s action unions were read');
     const used = new Set([...code(menuModel + menuUi + archiveUi + bulkUi).matchAll(/put\("type", "?(\w+)/g)].map(([, type]) => type));
-    for (const type of used) assert(allowed.has(type), `${type} is one of core's Archive or bulk actions, or typed text's edit`);
+    for (const type of used) assert(allowed.has(type), `${type} is one of core's Archive, bulk or Focus actions, or typed text's edit`);
     assert(['setCompletedAt', 'moveTasks', 'editTaskTokens', 'organize', 'trashTasks'].every((type) => used.has(type)));
 }
 assert.match(menuModel, /reload\(JSONObject\(\)\.put\("type", type\)\.put\("value", text\)\)/);

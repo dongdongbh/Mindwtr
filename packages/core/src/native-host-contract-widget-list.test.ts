@@ -3,6 +3,7 @@ import { createNativeHostContract } from './native-host-contract';
 import { flushPendingSave, resetForTests, setStorageAdapter, useTaskStore } from './store';
 import type { AppData, Project, Task } from './types';
 import { resolveWidgetListDestination } from './widget-list-destination';
+import { applyFocusSavedFilter, DEFAULT_FOCUS_CONTROL_STATE } from './focus-controls';
 
 
 const now = new Date().toISOString();
@@ -105,6 +106,31 @@ describe('native host contract: widget list screen', () => {
         expect(value(host.getWidgetListView({ id: 'filter:desk' }))).toMatchObject({
             found: false, title: 'No results found', total: 0, rows: [], empty: { message: 'No results found' },
         });
+    });
+
+    it('hydrates editable Focus selections from the widget destination and retains them when sorting', async () => {
+        const saved = { id: 'desk', name: 'Desk', view: 'focus' as const, criteria: { contexts: ['@desk'] }, createdAt: now, updatedAt: now };
+        const host = await open({ tasks: [task('desk', { contexts: ['@desk'] }), task('phone', { contexts: ['@phone'] })], settings: { savedFilters: [saved] } });
+        const id = value(host.getWidgetListView({ id: 'filter:desk' })).focusFilterId;
+        if (!id) throw new Error('Expected a saved Focus destination');
+        const selected = value(host.getFocus({ limit: 100, controls: {}, controlEdit: { type: 'applySavedFilter', id } }));
+        expect(selected.controls.state).toEqual(applyFocusSavedFilter(DEFAULT_FOCUS_CONTROL_STATE, saved));
+        expect(selected.controls.state.filters.tokens).toEqual(['@desk']);
+        const changed = value(host.getFocus({ limit: 100, controls: copy(selected.controls.state), controlEdit: { type: 'filter', edit: { type: 'toggleToken', value: '@phone' } } }));
+        expect(changed.controls.widgetFilter.criteria.contexts).toEqual(['@desk', '@phone']);
+        const sorted = value(host.getFocus({ limit: 100, controls: copy(selected.controls.state), controlEdit: { type: 'sort', sortBy: 'due' } }));
+        expect(sorted.controls.state.savedFilterId).toBeNull();
+        expect(sorted.controls.widgetFilter.criteria.contexts).toEqual(['@desk']);
+        expect(sorted.sections.flatMap((section) => section.rows.map((row) => row.id))).toEqual(['desk']);
+    });
+
+    it('names only live saved Focus filters for full Focus routing', async () => {
+        const filter = (id: string, view: 'focus' | 'all', fields = {}) => ({ id, name: id, view, criteria: {}, createdAt: now, updatedAt: now, ...fields });
+        const host = await open({ settings: { savedFilters: [filter('desk', 'focus'), filter('other', 'all'), filter('gone', 'focus', { deletedAt: now })] } });
+        expect(value(host.getWidgetListView({ id: 'filter:desk' })).focusFilterId).toBe('desk');
+        for (const id of ['filter:other', 'filter:gone', 'filter:missing', 'focus', 'next']) {
+            expect(value(host.getWidgetListView({ id })).focusFilterId).toBeNull();
+        }
     });
 
     it('names a live saved Contexts filter so the link opens the Contexts screen, and only that kind (#1485)', async () => {
