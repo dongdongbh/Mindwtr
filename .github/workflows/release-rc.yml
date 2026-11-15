@@ -80,6 +80,7 @@ jobs:
       tag: ${{ steps.version.outputs.tag }}
       version: ${{ steps.version.outputs.version }}
       base_version: ${{ steps.base.outputs.base_version }}
+      rn_ios: ${{ steps.base.outputs.rn_ios }}
       existing_release: ${{ steps.existing_release.outputs.exists }}
     steps:
       - name: Checkout code
@@ -108,6 +109,7 @@ jobs:
           fi
           BASE_VERSION="${VERSION%%-*}"
           echo "base_version=$BASE_VERSION" >> "$GITHUB_OUTPUT"
+          echo "rn_ios=$(bash scripts/ci/rn-ios-release-allowed.sh "$BASE_VERSION")" >> "$GITHUB_OUTPUT"
 
       - name: Require Android signing secrets
         env:
@@ -321,7 +323,7 @@ jobs:
     secrets: inherit
 
   ios-appstore:
-    if: ${{ needs.validate.outputs.existing_release != 'true' && (github.event_name != 'workflow_dispatch' || inputs.run_ios_testflight) }}
+    if: ${{ needs.validate.outputs.existing_release != 'true' && needs.validate.outputs.rn_ios == 'true' && (github.event_name != 'workflow_dispatch' || inputs.run_ios_testflight) }}
     needs: validate
     uses: ./.github/workflows/release-ios-appstore.yml
     with:
