@@ -4371,7 +4371,7 @@ describe('SyncService orchestration', () => {
         expect(backendCalls).toBe(1);
     });
 
-    it('runs a queued follow-up sync after an in-flight failure', async () => {
+    it('runs a queued follow-up sync after an in-flight failure and answers the queued request with it', async () => {
         const firstRun = createDeferred();
         const backendSpy = vi.spyOn(SyncService as any, 'getSyncBackend');
         let backendCalls = 0;
@@ -4402,7 +4402,7 @@ describe('SyncService orchestration', () => {
         const [firstResult, secondResult] = await Promise.all([first, second]);
 
         expect(firstResult.success).toBe(false);
-        expect(secondResult.success).toBe(false);
+        expect(secondResult.success).toBe(true);
 
         await waitForAssertion(() => {
             expect(SyncService.getSyncStatus()).toMatchObject({

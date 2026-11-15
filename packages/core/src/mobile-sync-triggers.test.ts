@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { NativeAttachmentCleanupUnconfirmedError } from './native-attachment-cleanup';
+import { createSyncOrchestrator } from './sync-orchestrator';
 import * as autoSyncController from './auto-sync-controller';
 
 import {
@@ -753,5 +754,124 @@ describe('mobile sync triggers background hold', () => {
     await flush();
     expect(ports.holdBackgroundExecution).not.toHaveBeenCalled();
     triggers.dispose();
+  });
+});
+
+describe('mobile sync triggers over a shared sync orchestrator', () => {
+  type CycleResult = { success: boolean; error?: string };
+  const createSyncServiceHarness = (outcomes: CycleResult[], cycleMs = 1_000) => {
+    let triggers: ReturnType<typeof createMobileSyncTriggers> | null = null;
+    let lastSyncAt = 0;
+    let lastDataChangeAt = 1;
+    let fingerprint = 'sync-change:1';
+    const cycleStarts: number[] = [];
+    const snapshot = (status: string) => ({ lastDataChangeAt, settings: { lastSyncStatus: status, lastSyncAt: String(lastSyncAt) } });
+    const service = createSyncOrchestrator<undefined, CycleResult>({
+      runCycle: async () => {
+        cycleStarts.push(Date.now());
+        await new Promise((resolve) => setTimeout(resolve, cycleMs));
+        const outcome = outcomes.shift() ?? { success: true };
+        const before = snapshot('idle');
+        lastSyncAt += 1;
+        triggers?.handleStoreChange(snapshot(outcome.success ? 'success' : 'error'), before);
+        return outcome;
+      },
+    });
+    const { ports } = createPorts({
+      performSync: vi.fn(() => service.run(undefined)),
+      getSyncChangeFingerprint: () => fingerprint,
+      logInfo: vi.fn(),
+    });
+    triggers = createMobileSyncTriggers(ports);
+    const editTask = () => {
+      const before = snapshot('idle');
+      lastDataChangeAt += 1;
+      fingerprint = `sync-change:${lastDataChangeAt}`;
+      triggers?.handleStoreChange(snapshot('idle'), before);
+    };
+    return { triggers, ports, service, cycleStarts, editTask };
+  };
+
+  it('clears the pending change when the follow-up cycle that carries it succeeds after the running cycle failed', async () => {
+    const harness = createSyncServiceHarness([{ success: false, error: 'WebDAV PUT failed (500): write failed' }, { success: true }], 10_000);
+    harness.triggers.start();
+    await flush();
+
+    void harness.service.run(undefined);
+    await vi.advanceTimersByTimeAsync(1_000);
+    harness.editTask();
+    expect(harness.triggers.hasPendingLocalChange()).toBe(true);
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+
+    expect(harness.triggers.hasPendingLocalChange()).toBe(false);
+    expect(harness.cycleStarts).toHaveLength(2);
+    expect(harness.service.getState()).toEqual({ inFlight: false, queued: false });
+    expect(harness.ports.showSyncIssue).not.toHaveBeenCalled();
+    harness.triggers.dispose();
+  });
+
+  it('keeps the pending change and retries after the failure cooldown when the follow-up cycle also fails', async () => {
+    const failure = { success: false, error: 'WebDAV PUT failed (500): write failed' };
+    const harness = createSyncServiceHarness([failure, failure, { success: true }], 10_000);
+    harness.triggers.start();
+    await flush();
+
+    void harness.service.run(undefined);
+    await vi.advanceTimersByTimeAsync(1_000);
+    harness.editTask();
+    await vi.advanceTimersByTimeAsync(25_000);
+
+    expect(harness.cycleStarts).toHaveLength(2);
+    expect(harness.triggers.hasPendingLocalChange()).toBe(true);
+    expect(harness.ports.showSyncIssue).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(harness.cycleStarts).toHaveLength(3);
+    expect(harness.triggers.hasPendingLocalChange()).toBe(false);
+    harness.triggers.dispose();
+  });
+
+  it('leaves no pending change or owed cycle when the app leaves the foreground while its request waits for the follow-up cycle', async () => {
+    const harness = createSyncServiceHarness([{ success: false, error: 'WebDAV PUT failed (500): write failed' }, { success: true }], 10_000);
+    harness.triggers.start();
+    await flush();
+
+    void harness.service.run(undefined);
+    await vi.advanceTimersByTimeAsync(1_000);
+    harness.editTask();
+    await vi.advanceTimersByTimeAsync(3_000);
+    harness.triggers.handleAppStateChange('background');
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+
+    expect(harness.ports.abortSync).toHaveBeenCalledTimes(1);
+    expect(harness.triggers.hasPendingLocalChange()).toBe(false);
+    expect(harness.service.getState()).toEqual({ inFlight: false, queued: false });
+    harness.triggers.dispose();
+  });
+
+  it('still syncs a throttled change when another cycle succeeds before the throttle fires', async () => {
+    const harness = createSyncServiceHarness([], 1_000);
+    harness.triggers.start();
+    await flush();
+
+    harness.triggers.requestSync(0);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(harness.cycleStarts).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(500);
+    harness.editTask();
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(harness.cycleStarts).toHaveLength(1);
+
+    void harness.service.run(undefined);
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+
+    expect(harness.triggers.hasPendingLocalChange()).toBe(false);
+    expect(harness.cycleStarts).toHaveLength(3);
+    expect(harness.service.getState()).toEqual({ inFlight: false, queued: false });
+    expect(harness.ports.logInfo).toHaveBeenCalledWith(
+      'Auto sync kept a pending local change owed after another cycle succeeded',
+      { scope: 'sync', extra: { releaseCheck: 'v1.3.9/sync-queued-result', outcome: 'requested' } },
+    );
+    harness.triggers.dispose();
   });
 });

@@ -530,6 +530,33 @@ describe('mobile sync service behind fake ports', () => {
     }
   });
 
+  it('answers a request made during a failing cycle with the follow-up cycle that carries it', async () => {
+    const fake = createFakeHost({ values: WEBDAV_VALUES });
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const performSyncCycle = vi.mocked(fake.host.core!.performSyncCycle!);
+    const original = performSyncCycle.getMockImplementation()!;
+    performSyncCycle.mockImplementationOnce(async () => {
+      await gate;
+      throw new Error('WebDAV PUT failed (500): write failed');
+    });
+    performSyncCycle.mockImplementation(original);
+    const service = createMobileSyncService(fake.host);
+
+    const active = service.performMobileSync();
+    await vi.waitFor(() => expect(performSyncCycle).toHaveBeenCalled());
+    const coalesced = service.performMobileSync();
+    release();
+
+    await expect(active).resolves.toMatchObject({ success: false, error: expect.stringContaining('500') });
+    await expect(coalesced).resolves.toMatchObject({ success: true });
+    expect(performSyncCycle).toHaveBeenCalledTimes(2);
+    await vi.waitFor(() => expect(fake.logs).toContainEqual(expect.objectContaining({ force: true,
+      extra: { releaseCheck: 'v1.3.9/sync-queued-result', requestClass: 'auto', outcome: 'success' },
+    })));
+    await service.waitForMobileSyncIdle();
+  });
+
   it('a slicing host saves on the token of its own read, carried across the local status merge (D9b W3)', async () => {
     const fake = createFakeHost({ values: { ...WEBDAV_VALUES, '@mindwtr_local_sync_status_v1': JSON.stringify({ lastSyncStatus: 'success' }) } });
     fake.host.sliceYield = async () => undefined;
@@ -1055,14 +1082,13 @@ describe('mobile sync service behind fake ports', () => {
     service.subscribeMobileSyncActivityState((value) => activity.push(value));
     const active = service.performMobileSync(undefined, { manual: true });
     await paused;
-    const queued = service.performMobileSync(undefined, { manual: true });
+    const queued = service.performMobileSync(undefined, { manual: true }).then(() => 'answered', (error: unknown) => error);
     const idleResult = service.waitForMobileSyncIdle().then(() => 'idle', (error: unknown) => error);
     vi.useFakeTimers();
     try {
       release();
       await vi.advanceTimersByTimeAsync(20);
       await expect(active).resolves.toMatchObject({ success: true });
-      await expect(queued).resolves.toMatchObject({ success: true });
 
 
       fake.remote.data = { ...fake.remote.data!, tasks: [{
@@ -1072,6 +1098,7 @@ describe('mobile sync service behind fake ports', () => {
       fake.remote.etag += 1;
       await vi.advanceTimersByTimeAsync(1_100);
       expect(await idleResult).toBe(fatal);
+      expect(await queued).toBe(fatal);
       expect(fake.host.attachments.runCleanup).toHaveBeenCalledTimes(2);
       expect(fake.host.core!.performSyncCycle).toHaveBeenCalledTimes(2);
       expect(remove).toHaveBeenCalledTimes(2);

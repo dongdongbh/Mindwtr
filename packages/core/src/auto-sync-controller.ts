@@ -489,9 +489,18 @@ export const createAutoSyncController = (
             if (autoSyncRetryAfter === 0) clearSyncThrottle();
         },
         notifyExternalSyncSuccess: () => {
+            const owedLocalChangeCycle = !!syncThrottleTimer
+                && !autoSyncOrchestrator.getState().inFlight
+                && (options.hasPendingLocalChanges?.() ?? false);
             autoSyncRetryAfter = 0;
             consecutiveAutoSyncFailures = 0;
             clearSyncThrottle();
+            if (!owedLocalChangeCycle || disposed || !options.isRuntimeActive()) return;
+            trace('Auto sync kept a pending local change owed after another cycle succeeded', {
+                releaseCheck: 'v1.3.9/sync-queued-result',
+                outcome: 'requested',
+            });
+            void requestAutoSync(undefined, 'external-success').catch((error) => options.reportError('Sync failed', error));
         },
         takePendingSuspendedRequest: () => {
             const pending = requestedWhileSuspended;

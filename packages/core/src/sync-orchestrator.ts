@@ -34,6 +34,28 @@ export const createSyncOrchestrator = <Arg, Result>(
     let queuedArg: Arg | undefined;
     let followUpTimer: ReturnType<typeof setTimeout> | null = null;
     let minimumFollowUpDelayMs = 0;
+    let lastCycle: Promise<Result> | null = null;
+    let followUpAnswer: { promise: Promise<Result>; resolve: (value: Result) => void; reject: (error: unknown) => void } | null = null;
+
+    const awaitFollowUp = (): Promise<Result> => {
+        if (!followUpAnswer) {
+            let resolve!: (value: Result) => void;
+            let reject!: (error: unknown) => void;
+            const promise = new Promise<Result>((resolvePromise, rejectPromise) => {
+                resolve = resolvePromise;
+                reject = rejectPromise;
+            });
+            followUpAnswer = { promise, resolve, reject };
+        }
+        return followUpAnswer.promise;
+    };
+
+    const answerFollowUpWith = (cycle: Promise<Result> | null) => {
+        const answer = followUpAnswer;
+        if (!answer || !cycle) return;
+        followUpAnswer = null;
+        cycle.then(answer.resolve, answer.reject);
+    };
 
     const cancelFollowUpTimer = () => {
         if (followUpTimer) {
@@ -64,12 +86,13 @@ export const createSyncOrchestrator = <Arg, Result>(
         queuedArg = undefined;
         minimumFollowUpDelayMs = 0;
         setQueued(false);
+        if (!inFlight) answerFollowUpWith(lastCycle);
     };
 
     const run = (arg: Arg): Promise<Result> => {
         if (inFlight) {
             requestFollowUp(arg);
-            return inFlight;
+            return awaitFollowUp();
         }
 
         cancelFollowUpTimer();
@@ -87,6 +110,8 @@ export const createSyncOrchestrator = <Arg, Result>(
             rejectDeferred = reject;
         });
         inFlight = current;
+        lastCycle = current;
+        answerFollowUpWith(current);
         try {
             void runCycle(cycleArg, {
                 requestFollowUp: (nextArg?: Arg) => requestFollowUp(nextArg ?? cycleArg),
@@ -108,6 +133,7 @@ export const createSyncOrchestrator = <Arg, Result>(
             inFlight = null;
 
             if (!queued) {
+                answerFollowUpWith(current);
                 onDrained?.();
                 return;
             }
@@ -154,6 +180,7 @@ export const createSyncOrchestrator = <Arg, Result>(
         requestFollowUpAfter,
         clearFollowUp,
         reset: () => {
+            answerFollowUpWith(inFlight ?? lastCycle);
             cancelFollowUpTimer();
             inFlight = null;
             queuedArg = undefined;

@@ -2595,6 +2595,13 @@ export const createMobileSyncService = <Lease>(host: MobileSyncServiceHost<Lease
       });
       return { success: true, skipped: 'requeued' };
     }
+    if (wasInFlight) {
+      const requestClass = options?.manual ? 'manual' : 'auto';
+      void result.then((answer) => log.info('Sync request answered by its follow-up cycle', {
+        scope: 'sync', force: true,
+        extra: { releaseCheck: 'v1.3.9/sync-queued-result', requestClass, outcome: answer.success ? 'success' : 'failed' },
+      })).catch(() => {});
+    }
     return result;
   }
 
