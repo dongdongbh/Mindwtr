@@ -1544,10 +1544,11 @@ describe('FocusScreen', () => {
     expect(() => tree.root.findByProps({ children: 'All clear' })).toThrow();
   });
 
-  it('orders mobile Focus sections as Schedule, Next Actions, Review Due, Upcoming, then Projects to review', () => {
+  it('keeps Today’s Focus first, then Schedule, Review Due, Next Actions, Upcoming, and Projects to review', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-04-05T12:00:00.000Z'));
     storeState.tasks = [
+      makeTask('starred-task', { isFocusedToday: true }),
       makeTask('schedule-task', { dueDate: '2026-04-05' }),
       makeTask('review-task', {
         status: 'waiting',
@@ -1564,15 +1565,16 @@ describe('FocusScreen', () => {
 
     const sections = tree.root.findByType(SectionList).props.sections as { title: string }[];
     expect(sections.map((section) => section.title)).toEqual([
+      "Today's Focus",
       'Today',
-      'Next Actions',
       'Review Due',
+      'Next Actions',
       'Upcoming',
       'Projects to review',
     ]);
   });
 
-  it('keeps mobile Focus tasks exclusive with Schedule ahead of Next Actions ahead of Review Due', () => {
+  it('keeps mobile Focus tasks exclusive with Schedule ahead of Review Due ahead of Next Actions', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-04-05T12:00:00.000Z'));
     storeState.tasks = [
@@ -1603,7 +1605,7 @@ describe('FocusScreen', () => {
     expect(idsIn('Today')).toEqual(['scheduled-review-next']);
     expect(idsIn('Review Due')).toEqual(['review-next']);
     expect(idsIn('Next Actions')).toEqual(['plain-next']);
-    expect(allTaskIds).toEqual(['scheduled-review-next', 'plain-next', 'review-next']);
+    expect(allTaskIds).toEqual(['scheduled-review-next', 'review-next', 'plain-next']);
   });
 
   it('shows a next task with a timed start later today in Today, not Next Actions or Upcoming', () => {

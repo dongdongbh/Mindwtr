@@ -43,7 +43,7 @@ describe('saved Focus widget scope', () => {
         const payload = buildWidgetPayload(data(), 'en', { maxItems: 50, listIds: ['filter:without-person'],
             focusFilter: { criteria: { contexts: ['@person'] }, sortBy: 'default' } });
         expect(payload.lists['filter:without-person'].items.map(({ id }) => id))
-            .toEqual(['today', 'due', 'available', 'review', 'upcoming']);
+            .toEqual(['today', 'due', 'review', 'available', 'upcoming']);
         expect(payload.lists['filter:without-person'].totalCount).toBe(5);
     });
 

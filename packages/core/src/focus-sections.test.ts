@@ -245,11 +245,11 @@ describe('buildFocusTaskSections', () => {
             focusedTasks: [task('f')], schedule: [task('s')], reviewDue: [], nextActions: [task('n')], upcoming: [task('u')],
         }, translate);
         expect(full.map((section) => [section.key, section.title, section.items.length])).toEqual([
-            ['focus', 'Starred', 1], ['schedule', 'Today', 1], ['next', 'Next', 1], ['reviewDue', 'Review', 0], ['upcoming', 'Soon', 1],
+            ['focus', 'Starred', 1], ['schedule', 'Today', 1], ['reviewDue', 'Review', 0], ['next', 'Next', 1], ['upcoming', 'Soon', 1],
         ]);
 
         const sparse = buildFocusTaskSections({ focusedTasks: [], schedule: [], reviewDue: [], nextActions: [], upcoming: [] }, () => undefined);
-        expect(sparse.map((section) => section.key)).toEqual(['schedule', 'next', 'reviewDue']);
-        expect(sparse.map((section) => section.title)).toEqual(['Today', 'Next actions', 'Review Due']);
+        expect(sparse.map((section) => section.key)).toEqual(['schedule', 'reviewDue', 'next']);
+        expect(sparse.map((section) => section.title)).toEqual(['Today', 'Review Due', 'Next actions']);
     });
 });

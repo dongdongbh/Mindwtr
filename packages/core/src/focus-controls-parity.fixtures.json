@@ -8,7 +8,8 @@
   "clockRecapture": "2026-09-28: recaptured via MINDWTR_CAPTURE_FOCUS_CONTROLS=1 on 8d0a3267ae002400f992186f2ad1ef7aeadb3b28 after the shared saved-filter store adopted monotonic update clocks. Only one repeated-edit write timestamp advances from .000Z to .001Z; all inputs and other observations are unchanged.",
   "areaSelectionRecapture": " 2026-10-20 (#1421): real RN Focus harness recaptured with the area-selection fix; only Today’s Focus sections/counts and the occupied empty state changed in 47 observations. Empty sibling sections are retained with that occupied header. Occupied slots are global before criteria; no inputs, writes, nonempty sibling sections, or other behavior changed.",
   "projectColorRecapture": "2026-10-20: real RN Focus harness recaptured on 3d10ce6154d1a485e860a30945fec9040b54faf0 with MINDWTR_CAPTURE_FOCUS_CONTROLS=1 after Project color inheritance changed. Exactly four Alpha project headers now omit the implicit default-gray accent; every input and all other observations are unchanged.",
-  "noColorDotRecapture": "2026-10-24 (#1422 follow-up): real RN Focus harness recaptured with MINDWTR_CAPTURE_FOCUS_CONTROLS=1 after a Project with no Area and no own color got the grey default dot back, as Area buckets have. Exactly the four Alpha project headers changed (empty color to #94a3b8); every input and all other observations are unchanged."
+  "noColorDotRecapture": "2026-10-24 (#1422 follow-up): real RN Focus harness recaptured with MINDWTR_CAPTURE_FOCUS_CONTROLS=1 after a Project with no Area and no own color got the grey default dot back, as Area buckets have. Exactly the four Alpha project headers changed (empty color to #94a3b8); every input and all other observations are unchanged.",
+  "reviewOrderRecapture": "2026-11-14 (#1557 / #1092): recaptured from the real RN Focus harness with MINDWTR_CAPTURE_FOCUS_CONTROLS=1 while preparing the requested restoration of Review Due between Today and Next Actions, superseding the #1281 ordering decision. Exactly 91 observations change section positions only; every input, section content, task order, control and write remains identical."
  },
  "timeZone": "America/New_York",
  "now": "2026-09-23T14:00:00.000Z",
@@ -942,6 +943,14 @@
       ]
      },
      {
+      "type": "reviewDue",
+      "title": "Review Due",
+      "total": 1,
+      "items": [
+       "r1"
+      ]
+     },
+     {
       "type": "next",
       "title": "Next Actions",
       "total": 5,
@@ -951,14 +960,6 @@
        "n1",
        "n3",
        "n4"
-      ]
-     },
-     {
-      "type": "reviewDue",
-      "title": "Review Due",
-      "total": 1,
-      "items": [
-       "r1"
       ]
      },
      {
@@ -1213,6 +1214,14 @@
       ]
      },
      {
+      "type": "reviewDue",
+      "title": "Review Due",
+      "total": 1,
+      "items": [
+       "r1"
+      ]
+     },
+     {
       "type": "next",
       "title": "Next Actions",
       "total": 5,
@@ -1222,14 +1231,6 @@
        "n1",
        "n3",
        "n4"
-      ]
-     },
-     {
-      "type": "reviewDue",
-      "title": "Review Due",
-      "total": 1,
-      "items": [
-       "r1"
       ]
      },
      {
@@ -1476,18 +1477,18 @@
       "items": []
      },
      {
+      "type": "reviewDue",
+      "title": "Review Due",
+      "total": 0,
+      "items": []
+     },
+     {
       "type": "next",
       "title": "Next Actions",
       "total": 1,
       "items": [
        "n2"
       ]
-     },
-     {
-      "type": "reviewDue",
-      "title": "Review Due",
-      "total": 0,
-      "items": []
      },
      {
       "type": "reviewProjects",
@@ -1751,18 +1752,18 @@
       "items": []
      },
      {
+      "type": "reviewDue",
+      "title": "Review Due",
+      "total": 0,
+      "items": []
+     },
+     {
       "type": "next",
       "title": "Next Actions",
       "total": 1,
       "items": [
        "n2"
       ]
-     },
-     {
-      "type": "reviewDue",
-      "title": "Review Due",
-      "total": 0,
-      "items": []
      },
      {
       "type": "reviewProjects",
@@ -2045,6 +2046,12 @@
       "items": []
      },
      {
+      "type": "reviewDue",
+      "title": "Review Due",
+      "total": 0,
+      "items": []
+     },
+     {
       "type": "next",
       "title": "Next Actions",
       "total": 2,
@@ -2052,12 +2059,6 @@
        "n2",
        "n5"
       ]
-     },
-     {
-      "type": "reviewDue",
-      "title": "Review Due",
-      "total": 0,
-      "items": []
      },
      {
       "type": "reviewProjects",
@@ -2339,14 +2340,14 @@
       "items": []
      },
      {
-      "type": "next",
-      "title": "Next Actions",
+      "type": "reviewDue",
+      "title": "Review Due",
       "total": 0,
       "items": []
      },
      {
-      "type": "reviewDue",
-      "title": "Review Due",
+      "type": "next",
+      "title": "Next Actions",
       "total": 0,
       "items": []
      },
@@ -2647,14 +2648,14 @@
       "items": []
      },
      {
-      "type": "next",
-      "title": "Next Actions",
+      "type": "reviewDue",
+      "title": "Review Due",
       "total": 0,
       "items": []
      },
      {
-      "type": "reviewDue",
-      "title": "Review Due",
+      "type": "next",
+      "title": "Next Actions",
       "total": 0,
       "items": []
      },
@@ -2973,14 +2974,14 @@
       "items": []
      },
      {
-      "type": "next",
-      "title": "Next Actions",
+      "type": "reviewDue",
+      "title": "Review Due",
       "total": 0,
       "items": []
      },
      {
-      "type": "reviewDue",
-      "title": "Review Due",
+      "type": "next",
+      "title": "Next Actions",
       "total": 0,
       "items": []
      },
@@ -3297,14 +3298,14 @@
       "items": []
      },
      {
-      "type": "next",
-      "title": "Next Actions",
+      "type": "reviewDue",
+      "title": "Review Due",
       "total": 0,
       "items": []
      },
      {
-      "type": "reviewDue",
-      "title": "Review Due",
+      "type": "next",
+      "title": "Next Actions",
       "total": 0,
       "items": []
      },
@@ -3625,14 +3626,14 @@
       "items": []
      },
      {
-      "type": "next",
-      "title": "Next Actions",
+      "type": "reviewDue",
+      "title": "Review Due",
       "total": 0,
       "items": []
      },
      {
-      "type": "reviewDue",
-      "title": "Review Due",
+      "type": "next",
+      "title": "Next Actions",
       "total": 0,
       "items": []
      },
@@ -3973,14 +3974,14 @@
       "items": []
      },
      {
-      "type": "next",
-      "title": "Next Actions",
+      "type": "reviewDue",
+      "title": "Review Due",
       "total": 0,
       "items": []
      },
      {
-      "type": "reviewDue",
-      "title": "Review Due",
+      "type": "next",
+      "title": "Next Actions",
       "total": 0,
       "items": []
      },
@@ -4334,14 +4335,14 @@
       "items": []
      },
      {
-      "type": "next",
-      "title": "Next Actions",
+      "type": "reviewDue",
+      "title": "Review Due",
       "total": 0,
       "items": []
      },
      {
-      "type": "reviewDue",
-      "title": "Review Due",
+      "type": "next",
+      "title": "Next Actions",
       "total": 0,
       "items": []
      },
@@ -4715,14 +4716,14 @@
       "items": []
      },
      {
-      "type": "next",
-      "title": "Next Actions",
+      "type": "reviewDue",
+      "title": "Review Due",
       "total": 0,
       "items": []
      },
      {
-      "type": "reviewDue",
-      "title": "Review Due",
+      "type": "next",
+      "title": "Next Actions",
       "total": 0,
       "items": []
      },
@@ -5116,14 +5117,14 @@
       "items": []
      },
      {
-      "type": "next",
-      "title": "Next Actions",
+      "type": "reviewDue",
+      "title": "Review Due",
       "total": 0,
       "items": []
      },
      {
-      "type": "reviewDue",
-      "title": "Review Due",
+      "type": "next",
+      "title": "Next Actions",
       "total": 0,
       "items": []
      },
@@ -5537,14 +5538,14 @@
       "items": []
      },
      {
-      "type": "next",
-      "title": "Next Actions",
+      "type": "reviewDue",
+      "title": "Review Due",
       "total": 0,
       "items": []
      },
      {
-      "type": "reviewDue",
-      "title": "Review Due",
+      "type": "next",
+      "title": "Next Actions",
       "total": 0,
       "items": []
      },
@@ -5976,14 +5977,14 @@
       "items": []
      },
      {
-      "type": "next",
-      "title": "Next Actions",
+      "type": "reviewDue",
+      "title": "Review Due",
       "total": 0,
       "items": []
      },
      {
-      "type": "reviewDue",
-      "title": "Review Due",
+      "type": "next",
+      "title": "Next Actions",
       "total": 0,
       "items": []
      },
@@ -6395,14 +6396,14 @@
       "items": []
      },
      {
-      "type": "next",
-      "title": "Next Actions",
+      "type": "reviewDue",
+      "title": "Review Due",
       "total": 0,
       "items": []
      },
      {
-      "type": "reviewDue",
-      "title": "Review Due",
+      "type": "next",
+      "title": "Next Actions",
       "total": 0,
       "items": []
      },
@@ -6794,14 +6795,14 @@
       "items": []
      },
      {
-      "type": "next",
-      "title": "Next Actions",
+      "type": "reviewDue",
+      "title": "Review Due",
       "total": 0,
       "items": []
      },
      {
-      "type": "reviewDue",
-      "title": "Review Due",
+      "type": "next",
+      "title": "Next Actions",
       "total": 0,
       "items": []
      },
@@ -7175,14 +7176,14 @@
       "items": []
      },
      {
-      "type": "next",
-      "title": "Next Actions",
+      "type": "reviewDue",
+      "title": "Review Due",
       "total": 0,
       "items": []
      },
      {
-      "type": "reviewDue",
-      "title": "Review Due",
+      "type": "next",
+      "title": "Next Actions",
       "total": 0,
       "items": []
      },
@@ -7551,6 +7552,14 @@
       ]
      },
      {
+      "type": "reviewDue",
+      "title": "Review Due",
+      "total": 1,
+      "items": [
+       "r1"
+      ]
+     },
+     {
       "type": "next",
       "title": "Next Actions",
       "total": 5,
@@ -7560,14 +7569,6 @@
        "n1",
        "n3",
        "n4"
-      ]
-     },
-     {
-      "type": "reviewDue",
-      "title": "Review Due",
-      "total": 1,
-      "items": [
-       "r1"
       ]
      },
      {
@@ -7822,6 +7823,14 @@
       ]
      },
      {
+      "type": "reviewDue",
+      "title": "Review Due",
+      "total": 1,
+      "items": [
+       "r1"
+      ]
+     },
+     {
       "type": "next",
       "title": "Next Actions",
       "total": 5,
@@ -7831,14 +7840,6 @@
        "n1",
        "n3",
        "n4"
-      ]
-     },
-     {
-      "type": "reviewDue",
-      "title": "Review Due",
-      "total": 1,
-      "items": [
-       "r1"
       ]
      },
      {
@@ -8083,18 +8084,18 @@
       "items": []
      },
      {
+      "type": "reviewDue",
+      "title": "Review Due",
+      "total": 0,
+      "items": []
+     },
+     {
       "type": "next",
       "title": "Next Actions",
       "total": 1,
       "items": [
        "n1"
       ]
-     },
-     {
-      "type": "reviewDue",
-      "title": "Review Due",
-      "total": 0,
-      "items": []
      },
      {
       "type": "reviewProjects",
@@ -8358,14 +8359,14 @@
       "items": []
      },
      {
-      "type": "next",
-      "title": "Next Actions",
+      "type": "reviewDue",
+      "title": "Review Due",
       "total": 0,
       "items": []
      },
      {
-      "type": "reviewDue",
-      "title": "Review Due",
+      "type": "next",
+      "title": "Next Actions",
       "total": 0,
       "items": []
      },
@@ -8661,6 +8662,14 @@
       ]
      },
      {
+      "type": "reviewDue",
+      "title": "Review Due",
+      "total": 1,
+      "items": [
+       "r1"
+      ]
+     },
+     {
       "type": "next",
       "title": "Next Actions",
       "total": 5,
@@ -8670,14 +8679,6 @@
        "n1",
        "n3",
        "n4"
-      ]
-     },
-     {
-      "type": "reviewDue",
-      "title": "Review Due",
-      "total": 1,
-      "items": [
-       "r1"
       ]
      },
      {
@@ -8930,6 +8931,14 @@
       ]
      },
      {
+      "type": "reviewDue",
+      "title": "Review Due",
+      "total": 1,
+      "items": [
+       "r1"
+      ]
+     },
+     {
       "type": "next",
       "title": "Next Actions",
       "total": 5,
@@ -8939,14 +8948,6 @@
        "n1",
        "n4",
        "n5"
-      ]
-     },
-     {
-      "type": "reviewDue",
-      "title": "Review Due",
-      "total": 1,
-      "items": [
-       "r1"
       ]
      },
      {
@@ -9199,6 +9200,14 @@
       ]
      },
      {
+      "type": "reviewDue",
+      "title": "Review Due",
+      "total": 1,
+      "items": [
+       "r1"
+      ]
+     },
+     {
       "type": "next",
       "title": "Next Actions",
       "total": 5,
@@ -9208,14 +9217,6 @@
        "n1",
        "n3",
        "n4"
-      ]
-     },
-     {
-      "type": "reviewDue",
-      "title": "Review Due",
-      "total": 1,
-      "items": [
-       "r1"
       ]
      },
      {
@@ -9468,6 +9469,14 @@
       ]
      },
      {
+      "type": "reviewDue",
+      "title": "Review Due",
+      "total": 1,
+      "items": [
+       "r1"
+      ]
+     },
+     {
       "type": "next",
       "title": "Next Actions",
       "total": 5,
@@ -9477,14 +9486,6 @@
        "n1",
        "n3",
        "n4"
-      ]
-     },
-     {
-      "type": "reviewDue",
-      "title": "Review Due",
-      "total": 1,
-      "items": [
-       "r1"
       ]
      },
      {
@@ -9737,6 +9738,14 @@
       ]
      },
      {
+      "type": "reviewDue",
+      "title": "Review Due",
+      "total": 1,
+      "items": [
+       "r1"
+      ]
+     },
+     {
       "type": "next",
       "title": "Next Actions",
       "total": 5,
@@ -9746,14 +9755,6 @@
        "n2",
        "n4",
        "n5"
-      ]
-     },
-     {
-      "type": "reviewDue",
-      "title": "Review Due",
-      "total": 1,
-      "items": [
-       "r1"
       ]
      },
      {
@@ -10006,6 +10007,14 @@
       ]
      },
      {
+      "type": "reviewDue",
+      "title": "Review Due",
+      "total": 1,
+      "items": [
+       "r1"
+      ]
+     },
+     {
       "type": "next",
       "title": "Next Actions",
       "total": 5,
@@ -10015,14 +10024,6 @@
        "n2",
        "n1",
        "n3"
-      ]
-     },
-     {
-      "type": "reviewDue",
-      "title": "Review Due",
-      "total": 1,
-      "items": [
-       "r1"
       ]
      },
      {
@@ -10275,6 +10276,14 @@
       ]
      },
      {
+      "type": "reviewDue",
+      "title": "Review Due",
+      "total": 1,
+      "items": [
+       "r1"
+      ]
+     },
+     {
       "type": "next",
       "title": "Next Actions",
       "total": 5,
@@ -10284,14 +10293,6 @@
        "n1",
        "n3",
        "n4"
-      ]
-     },
-     {
-      "type": "reviewDue",
-      "title": "Review Due",
-      "total": 1,
-      "items": [
-       "r1"
       ]
      },
      {
@@ -10544,6 +10545,14 @@
       ]
      },
      {
+      "type": "reviewDue",
+      "title": "Review Due",
+      "total": 1,
+      "items": [
+       "r1"
+      ]
+     },
+     {
       "type": "next",
       "title": "Next Actions",
       "total": 5,
@@ -10558,14 +10567,6 @@
        "n5~",
        "#context:@phone|@phone|1|0|#15803d",
        "n2~"
-      ]
-     },
-     {
-      "type": "reviewDue",
-      "title": "Review Due",
-      "total": 1,
-      "items": [
-       "r1"
       ]
      },
      {
@@ -10839,6 +10840,14 @@
       ]
      },
      {
+      "type": "reviewDue",
+      "title": "Review Due",
+      "total": 1,
+      "items": [
+       "r1"
+      ]
+     },
+     {
       "type": "next",
       "title": "Next Actions",
       "total": 5,
@@ -10852,14 +10861,6 @@
        "n4~",
        "#project:p-garden|Garden|1|0|#16a34a",
        "n1~"
-      ]
-     },
-     {
-      "type": "reviewDue",
-      "title": "Review Due",
-      "total": 1,
-      "items": [
-       "r1"
       ]
      },
      {
@@ -11153,6 +11154,14 @@
       ]
      },
      {
+      "type": "reviewDue",
+      "title": "Review Due",
+      "total": 1,
+      "items": [
+       "r1"
+      ]
+     },
+     {
       "type": "next",
       "title": "Next Actions",
       "total": 5,
@@ -11165,14 +11174,6 @@
        "n5~",
        "#area:a-home|Home|1|0|#16a34a",
        "n1~"
-      ]
-     },
-     {
-      "type": "reviewDue",
-      "title": "Review Due",
-      "total": 1,
-      "items": [
-       "r1"
       ]
      },
      {
@@ -11486,6 +11487,14 @@
       ]
      },
      {
+      "type": "reviewDue",
+      "title": "Review Due",
+      "total": 1,
+      "items": [
+       "r1"
+      ]
+     },
+     {
       "type": "next",
       "title": "Next Actions",
       "total": 5,
@@ -11498,14 +11507,6 @@
        "n2~",
        "n3~",
        "n4~"
-      ]
-     },
-     {
-      "type": "reviewDue",
-      "title": "Review Due",
-      "total": 1,
-      "items": [
-       "r1"
       ]
      },
      {
@@ -11839,6 +11840,14 @@
       ]
      },
      {
+      "type": "reviewDue",
+      "title": "Review Due",
+      "total": 1,
+      "items": [
+       "r1"
+      ]
+     },
+     {
       "type": "next",
       "title": "Next Actions",
       "total": 5,
@@ -11852,14 +11861,6 @@
        "#priority:none|No priority|2|1|",
        "n3~",
        "n4~"
-      ]
-     },
-     {
-      "type": "reviewDue",
-      "title": "Review Due",
-      "total": 1,
-      "items": [
-       "r1"
       ]
      },
      {
@@ -12213,6 +12214,14 @@
       ]
      },
      {
+      "type": "reviewDue",
+      "title": "Review Due",
+      "total": 1,
+      "items": [
+       "r1"
+      ]
+     },
+     {
       "type": "next",
       "title": "Next Actions",
       "total": 5,
@@ -12225,14 +12234,6 @@
        "n5~",
        "n1~",
        "n3~"
-      ]
-     },
-     {
-      "type": "reviewDue",
-      "title": "Review Due",
-      "total": 1,
-      "items": [
-       "r1"
       ]
      },
      {
@@ -12606,6 +12607,14 @@
       ]
      },
      {
+      "type": "reviewDue",
+      "title": "Review Due",
+      "total": 1,
+      "items": [
+       "r1"
+      ]
+     },
+     {
       "type": "next",
       "title": "Next Actions",
       "total": 5,
@@ -12618,14 +12627,6 @@
        "n1~",
        "#tag:#home|#home|1|0|#2563eb",
        "n3~"
-      ]
-     },
-     {
-      "type": "reviewDue",
-      "title": "Review Due",
-      "total": 1,
-      "items": [
-       "r1"
       ]
      },
      {
@@ -13019,6 +13020,14 @@
       ]
      },
      {
+      "type": "reviewDue",
+      "title": "Review Due",
+      "total": 1,
+      "items": [
+       "r1"
+      ]
+     },
+     {
       "type": "next",
       "title": "Next Actions",
       "total": 5,
@@ -13028,14 +13037,6 @@
        "n1",
        "n3",
        "n4"
-      ]
-     },
-     {
-      "type": "reviewDue",
-      "title": "Review Due",
-      "total": 1,
-      "items": [
-       "r1"
       ]
      },
      {
@@ -13451,6 +13452,14 @@
       ]
      },
      {
+      "type": "reviewDue",
+      "title": "Review Due",
+      "total": 1,
+      "items": [
+       "r1"
+      ]
+     },
+     {
       "type": "next",
       "title": "Next Actions",
       "total": 5,
@@ -13464,14 +13473,6 @@
        "n4~",
        "#project:p-garden|Garden|1|0|#16a34a",
        "n1~"
-      ]
-     },
-     {
-      "type": "reviewDue",
-      "title": "Review Due",
-      "total": 1,
-      "items": [
-       "r1"
       ]
      },
      {
@@ -13702,6 +13703,14 @@
       ]
      },
      {
+      "type": "reviewDue",
+      "title": "Review Due",
+      "total": 1,
+      "items": [
+       "r1"
+      ]
+     },
+     {
       "type": "next",
       "title": "Next Actions",
       "total": 5,
@@ -13715,14 +13724,6 @@
        "n4~",
        "#project:p-garden|Garden|1|0|#16a34a",
        "n1~"
-      ]
-     },
-     {
-      "type": "reviewDue",
-      "title": "Review Due",
-      "total": 1,
-      "items": [
-       "r1"
       ]
      },
      {
@@ -13953,6 +13954,14 @@
       ]
      },
      {
+      "type": "reviewDue",
+      "title": "Review Due",
+      "total": 1,
+      "items": [
+       "r1"
+      ]
+     },
+     {
       "type": "next",
       "title": "Next Actions",
       "total": 5,
@@ -13966,14 +13975,6 @@
        "n4~",
        "#project:p-garden|Garden|1|0|#16a34a",
        "n1~"
-      ]
-     },
-     {
-      "type": "reviewDue",
-      "title": "Review Due",
-      "total": 1,
-      "items": [
-       "r1"
       ]
      },
      {
@@ -14206,6 +14207,14 @@
       ]
      },
      {
+      "type": "reviewDue",
+      "title": "Review Due",
+      "total": 1,
+      "items": [
+       "r1"
+      ]
+     },
+     {
       "type": "next",
       "title": "Next Actions",
       "total": 5,
@@ -14215,14 +14224,6 @@
        "n1",
        "n4",
        "n5"
-      ]
-     },
-     {
-      "type": "reviewDue",
-      "title": "Review Due",
-      "total": 1,
-      "items": [
-       "r1"
       ]
      },
      {
@@ -14464,14 +14465,14 @@
       ]
      },
      {
-      "type": "next",
-      "title": "Next Actions",
+      "type": "reviewDue",
+      "title": "Review Due",
       "total": 0,
       "items": []
      },
      {
-      "type": "reviewDue",
-      "title": "Review Due",
+      "type": "next",
+      "title": "Next Actions",
       "total": 0,
       "items": []
      },
@@ -14738,6 +14739,14 @@
       ]
      },
      {
+      "type": "reviewDue",
+      "title": "Review Due",
+      "total": 1,
+      "items": [
+       "r1"
+      ]
+     },
+     {
       "type": "next",
       "title": "Next Actions",
       "total": 5,
@@ -14747,14 +14756,6 @@
        "n1",
        "n4",
        "n5"
-      ]
-     },
-     {
-      "type": "reviewDue",
-      "title": "Review Due",
-      "total": 1,
-      "items": [
-       "r1"
       ]
      },
      {
@@ -15003,6 +15004,14 @@
       ]
      },
      {
+      "type": "reviewDue",
+      "title": "Review Due",
+      "total": 1,
+      "items": [
+       "r1"
+      ]
+     },
+     {
       "type": "next",
       "title": "Next Actions",
       "total": 5,
@@ -15017,14 +15026,6 @@
        "n5~",
        "#context:@phone|@phone|1|0|#15803d",
        "n2~"
-      ]
-     },
-     {
-      "type": "reviewDue",
-      "title": "Review Due",
-      "total": 1,
-      "items": [
-       "r1"
       ]
      },
      {
@@ -15288,6 +15289,12 @@
       "items": []
      },
      {
+      "type": "reviewDue",
+      "title": "Review Due",
+      "total": 0,
+      "items": []
+     },
+     {
       "type": "next",
       "title": "Next Actions",
       "total": 1,
@@ -15297,12 +15304,6 @@
        "#context:@phone|@phone|1|0|#15803d",
        "n2~"
       ]
-     },
-     {
-      "type": "reviewDue",
-      "title": "Review Due",
-      "total": 0,
-      "items": []
      },
      {
       "type": "reviewProjects",
@@ -15581,6 +15582,14 @@
       ]
      },
      {
+      "type": "reviewDue",
+      "title": "Review Due",
+      "total": 1,
+      "items": [
+       "r1"
+      ]
+     },
+     {
       "type": "next",
       "title": "Next Actions",
       "total": 5,
@@ -15595,14 +15604,6 @@
        "n5~",
        "#context:@phone|@phone|1|0|#15803d",
        "n2~"
-      ]
-     },
-     {
-      "type": "reviewDue",
-      "title": "Review Due",
-      "total": 1,
-      "items": [
-       "r1"
       ]
      },
      {
@@ -15874,6 +15875,14 @@
       ]
      },
      {
+      "type": "reviewDue",
+      "title": "Review Due",
+      "total": 1,
+      "items": [
+       "r1"
+      ]
+     },
+     {
       "type": "next",
       "title": "Next Actions",
       "total": 5,
@@ -15883,14 +15892,6 @@
        "n1",
        "n3",
        "n4"
-      ]
-     },
-     {
-      "type": "reviewDue",
-      "title": "Review Due",
-      "total": 1,
-      "items": [
-       "r1"
       ]
      },
      {
@@ -16114,6 +16115,12 @@
       "items": []
      },
      {
+      "type": "reviewDue",
+      "title": "Review Due",
+      "total": 0,
+      "items": []
+     },
+     {
       "type": "next",
       "title": "Next Actions",
       "total": 2,
@@ -16121,12 +16128,6 @@
        "n2",
        "n5"
       ]
-     },
-     {
-      "type": "reviewDue",
-      "title": "Review Due",
-      "total": 0,
-      "items": []
      },
      {
       "type": "reviewProjects",
@@ -16378,6 +16379,14 @@
       ]
      },
      {
+      "type": "reviewDue",
+      "title": "Review Due",
+      "total": 1,
+      "items": [
+       "r1"
+      ]
+     },
+     {
       "type": "next",
       "title": "Next Actions",
       "total": 5,
@@ -16387,14 +16396,6 @@
        "n1",
        "n3",
        "n4"
-      ]
-     },
-     {
-      "type": "reviewDue",
-      "title": "Review Due",
-      "total": 1,
-      "items": [
-       "r1"
       ]
      },
      {
@@ -16641,6 +16642,12 @@
       "items": []
      },
      {
+      "type": "reviewDue",
+      "title": "Review Due",
+      "total": 0,
+      "items": []
+     },
+     {
       "type": "next",
       "title": "Next Actions",
       "total": 1,
@@ -16650,12 +16657,6 @@
        "#context:@phone|@phone|1|0|#15803d",
        "n2~"
       ]
-     },
-     {
-      "type": "reviewDue",
-      "title": "Review Due",
-      "total": 0,
-      "items": []
      },
      {
       "type": "reviewProjects",
@@ -16911,14 +16912,14 @@
       "items": []
      },
      {
-      "type": "next",
-      "title": "Next Actions",
+      "type": "reviewDue",
+      "title": "Review Due",
       "total": 0,
       "items": []
      },
      {
-      "type": "reviewDue",
-      "title": "Review Due",
+      "type": "next",
+      "title": "Next Actions",
       "total": 0,
       "items": []
      },
@@ -17218,6 +17219,14 @@
       ]
      },
      {
+      "type": "reviewDue",
+      "title": "Review Due",
+      "total": 1,
+      "items": [
+       "r1"
+      ]
+     },
+     {
       "type": "next",
       "title": "Next Actions",
       "total": 5,
@@ -17227,14 +17236,6 @@
        "n1",
        "n3",
        "n4"
-      ]
-     },
-     {
-      "type": "reviewDue",
-      "title": "Review Due",
-      "total": 1,
-      "items": [
-       "r1"
       ]
      },
      {
@@ -17479,18 +17480,18 @@
       "items": []
      },
      {
+      "type": "reviewDue",
+      "title": "Review Due",
+      "total": 0,
+      "items": []
+     },
+     {
       "type": "next",
       "title": "Next Actions",
       "total": 1,
       "items": [
        "n3"
       ]
-     },
-     {
-      "type": "reviewDue",
-      "title": "Review Due",
-      "total": 0,
-      "items": []
      },
      {
       "type": "reviewProjects",
@@ -17759,6 +17760,14 @@
       ]
      },
      {
+      "type": "reviewDue",
+      "title": "Review Due",
+      "total": 1,
+      "items": [
+       "r1"
+      ]
+     },
+     {
       "type": "next",
       "title": "Next Actions",
       "total": 5,
@@ -17768,14 +17777,6 @@
        "n1",
        "n3",
        "n4"
-      ]
-     },
-     {
-      "type": "reviewDue",
-      "title": "Review Due",
-      "total": 1,
-      "items": [
-       "r1"
       ]
      },
      {
@@ -18030,6 +18031,14 @@
       ]
      },
      {
+      "type": "reviewDue",
+      "title": "Review Due",
+      "total": 1,
+      "items": [
+       "r1"
+      ]
+     },
+     {
       "type": "next",
       "title": "Next Actions",
       "total": 5,
@@ -18039,14 +18048,6 @@
        "n1",
        "n3",
        "n4"
-      ]
-     },
-     {
-      "type": "reviewDue",
-      "title": "Review Due",
-      "total": 1,
-      "items": [
-       "r1"
       ]
      },
      {
@@ -18293,6 +18294,12 @@
       "items": []
      },
      {
+      "type": "reviewDue",
+      "title": "Review Due",
+      "total": 0,
+      "items": []
+     },
+     {
       "type": "next",
       "title": "Next Actions",
       "total": 1,
@@ -18302,12 +18309,6 @@
        "#context:@phone|@phone|1|0|#15803d",
        "n2~"
       ]
-     },
-     {
-      "type": "reviewDue",
-      "title": "Review Due",
-      "total": 0,
-      "items": []
      },
      {
       "type": "reviewProjects",
@@ -18563,18 +18564,18 @@
       "items": []
      },
      {
+      "type": "reviewDue",
+      "title": "Review Due",
+      "total": 0,
+      "items": []
+     },
+     {
       "type": "next",
       "title": "Next Actions",
       "total": 1,
       "items": [
        "n2"
       ]
-     },
-     {
-      "type": "reviewDue",
-      "title": "Review Due",
-      "total": 0,
-      "items": []
      },
      {
       "type": "reviewProjects",
@@ -18856,6 +18857,12 @@
       "items": []
      },
      {
+      "type": "reviewDue",
+      "title": "Review Due",
+      "total": 0,
+      "items": []
+     },
+     {
       "type": "next",
       "title": "Next Actions",
       "total": 1,
@@ -18865,12 +18872,6 @@
        "#context:@phone|@phone|1|0|#15803d",
        "n2~"
       ]
-     },
-     {
-      "type": "reviewDue",
-      "title": "Review Due",
-      "total": 0,
-      "items": []
      },
      {
       "type": "reviewProjects",
@@ -19128,18 +19129,18 @@
       "items": []
      },
      {
+      "type": "reviewDue",
+      "title": "Review Due",
+      "total": 0,
+      "items": []
+     },
+     {
       "type": "next",
       "title": "Next Actions",
       "total": 1,
       "items": [
        "n2"
       ]
-     },
-     {
-      "type": "reviewDue",
-      "title": "Review Due",
-      "total": 0,
-      "items": []
      },
      {
       "type": "reviewProjects",
@@ -19405,6 +19406,12 @@
       "items": []
      },
      {
+      "type": "reviewDue",
+      "title": "Review Due",
+      "total": 0,
+      "items": []
+     },
+     {
       "type": "next",
       "title": "Next Actions",
       "total": 1,
@@ -19414,12 +19421,6 @@
        "#context:@phone|@phone|1|0|#15803d",
        "n2~"
       ]
-     },
-     {
-      "type": "reviewDue",
-      "title": "Review Due",
-      "total": 0,
-      "items": []
      },
      {
       "type": "reviewProjects",
@@ -19677,6 +19678,12 @@
       "items": []
      },
      {
+      "type": "reviewDue",
+      "title": "Review Due",
+      "total": 0,
+      "items": []
+     },
+     {
       "type": "next",
       "title": "Next Actions",
       "total": 1,
@@ -19686,12 +19693,6 @@
        "#context:@phone|@phone|1|0|#15803d",
        "n2~"
       ]
-     },
-     {
-      "type": "reviewDue",
-      "title": "Review Due",
-      "total": 0,
-      "items": []
      },
      {
       "type": "reviewProjects",
@@ -19986,6 +19987,14 @@
       ]
      },
      {
+      "type": "reviewDue",
+      "title": "Review Due",
+      "total": 1,
+      "items": [
+       "r1"
+      ]
+     },
+     {
       "type": "next",
       "title": "Next Actions",
       "total": 5,
@@ -19995,14 +20004,6 @@
        "n1",
        "n3",
        "n4"
-      ]
-     },
-     {
-      "type": "reviewDue",
-      "title": "Review Due",
-      "total": 1,
-      "items": [
-       "r1"
       ]
      },
      {
@@ -20249,18 +20250,18 @@
       "items": []
      },
      {
+      "type": "reviewDue",
+      "title": "Review Due",
+      "total": 0,
+      "items": []
+     },
+     {
       "type": "next",
       "title": "Next Actions",
       "total": 1,
       "items": [
        "n2"
       ]
-     },
-     {
-      "type": "reviewDue",
-      "title": "Review Due",
-      "total": 0,
-      "items": []
      },
      {
       "type": "reviewProjects",
@@ -20524,18 +20525,18 @@
       "items": []
      },
      {
+      "type": "reviewDue",
+      "title": "Review Due",
+      "total": 0,
+      "items": []
+     },
+     {
       "type": "next",
       "title": "Next Actions",
       "total": 1,
       "items": [
        "n2"
       ]
-     },
-     {
-      "type": "reviewDue",
-      "title": "Review Due",
-      "total": 0,
-      "items": []
      },
      {
       "type": "reviewProjects",
@@ -20819,14 +20820,14 @@
       "items": []
      },
      {
-      "type": "next",
-      "title": "Next Actions",
+      "type": "reviewDue",
+      "title": "Review Due",
       "total": 0,
       "items": []
      },
      {
-      "type": "reviewDue",
-      "title": "Review Due",
+      "type": "next",
+      "title": "Next Actions",
       "total": 0,
       "items": []
      },
@@ -21131,18 +21132,18 @@
       "items": []
      },
      {
+      "type": "reviewDue",
+      "title": "Review Due",
+      "total": 0,
+      "items": []
+     },
+     {
       "type": "next",
       "title": "Next Actions",
       "total": 1,
       "items": [
        "n2"
       ]
-     },
-     {
-      "type": "reviewDue",
-      "title": "Review Due",
-      "total": 0,
-      "items": []
      },
      {
       "type": "reviewProjects",
@@ -21446,18 +21447,18 @@
       "items": []
      },
      {
+      "type": "reviewDue",
+      "title": "Review Due",
+      "total": 0,
+      "items": []
+     },
+     {
       "type": "next",
       "title": "Next Actions",
       "total": 1,
       "items": [
        "n2"
       ]
-     },
-     {
-      "type": "reviewDue",
-      "title": "Review Due",
-      "total": 0,
-      "items": []
      },
      {
       "type": "reviewProjects",
@@ -21761,18 +21762,18 @@
       "items": []
      },
      {
+      "type": "reviewDue",
+      "title": "Review Due",
+      "total": 0,
+      "items": []
+     },
+     {
       "type": "next",
       "title": "Next Actions",
       "total": 1,
       "items": [
        "n2"
       ]
-     },
-     {
-      "type": "reviewDue",
-      "title": "Review Due",
-      "total": 0,
-      "items": []
      },
      {
       "type": "reviewProjects",
@@ -22051,18 +22052,18 @@
       "items": []
      },
      {
+      "type": "reviewDue",
+      "title": "Review Due",
+      "total": 0,
+      "items": []
+     },
+     {
       "type": "next",
       "title": "Next Actions",
       "total": 1,
       "items": [
        "n2"
       ]
-     },
-     {
-      "type": "reviewDue",
-      "title": "Review Due",
-      "total": 0,
-      "items": []
      },
      {
       "type": "reviewProjects",
@@ -22341,18 +22342,18 @@
       "items": []
      },
      {
+      "type": "reviewDue",
+      "title": "Review Due",
+      "total": 0,
+      "items": []
+     },
+     {
       "type": "next",
       "title": "Next Actions",
       "total": 1,
       "items": [
        "n2"
       ]
-     },
-     {
-      "type": "reviewDue",
-      "title": "Review Due",
-      "total": 0,
-      "items": []
      },
      {
       "type": "reviewProjects",
@@ -22755,6 +22756,14 @@
       ]
      },
      {
+      "type": "reviewDue",
+      "title": "Review Due",
+      "total": 1,
+      "items": [
+       "r1"
+      ]
+     },
+     {
       "type": "next",
       "title": "Next Actions",
       "total": 5,
@@ -22764,14 +22773,6 @@
        "n1",
        "n3",
        "n4"
-      ]
-     },
-     {
-      "type": "reviewDue",
-      "title": "Review Due",
-      "total": 1,
-      "items": [
-       "r1"
       ]
      },
      {
@@ -23133,6 +23134,14 @@
       ]
      },
      {
+      "type": "reviewDue",
+      "title": "Review Due",
+      "total": 1,
+      "items": [
+       "r1"
+      ]
+     },
+     {
       "type": "next",
       "title": "Next Actions",
       "total": 5,
@@ -23142,14 +23151,6 @@
        "n1",
        "n3",
        "n4"
-      ]
-     },
-     {
-      "type": "reviewDue",
-      "title": "Review Due",
-      "total": 1,
-      "items": [
-       "r1"
       ]
      },
      {
@@ -23402,6 +23403,14 @@
       ]
      },
      {
+      "type": "reviewDue",
+      "title": "Review Due",
+      "total": 1,
+      "items": [
+       "r1"
+      ]
+     },
+     {
       "type": "next",
       "title": "Next Actions",
       "total": 5,
@@ -23411,14 +23420,6 @@
        "n2",
        "n1",
        "n3"
-      ]
-     },
-     {
-      "type": "reviewDue",
-      "title": "Review Due",
-      "total": 1,
-      "items": [
-       "r1"
       ]
      },
      {
@@ -23671,6 +23672,14 @@
       ]
      },
      {
+      "type": "reviewDue",
+      "title": "Review Due",
+      "total": 1,
+      "items": [
+       "r1"
+      ]
+     },
+     {
       "type": "next",
       "title": "Next Actions",
       "total": 5,
@@ -23680,14 +23689,6 @@
        "n2",
        "n1",
        "n3"
-      ]
-     },
-     {
-      "type": "reviewDue",
-      "title": "Review Due",
-      "total": 1,
-      "items": [
-       "r1"
       ]
      },
      {
@@ -23915,6 +23916,14 @@
       ]
      },
      {
+      "type": "reviewDue",
+      "title": "Review Due",
+      "total": 1,
+      "items": [
+       "r1"
+      ]
+     },
+     {
       "type": "next",
       "title": "Next Actions",
       "total": 5,
@@ -23924,14 +23933,6 @@
        "n2",
        "n1",
        "n3"
-      ]
-     },
-     {
-      "type": "reviewDue",
-      "title": "Review Due",
-      "total": 1,
-      "items": [
-       "r1"
       ]
      },
      {
@@ -24283,6 +24284,14 @@
       ]
      },
      {
+      "type": "reviewDue",
+      "title": "Review Due",
+      "total": 1,
+      "items": [
+       "r1"
+      ]
+     },
+     {
       "type": "next",
       "title": "Next Actions",
       "total": 5,
@@ -24292,14 +24301,6 @@
        "n1",
        "n3",
        "n4"
-      ]
-     },
-     {
-      "type": "reviewDue",
-      "title": "Review Due",
-      "total": 1,
-      "items": [
-       "r1"
       ]
      },
      {
@@ -24544,14 +24545,14 @@
       "items": []
      },
      {
-      "type": "next",
-      "title": "Next Actions",
+      "type": "reviewDue",
+      "title": "Review Due",
       "total": 0,
       "items": []
      },
      {
-      "type": "reviewDue",
-      "title": "Review Due",
+      "type": "next",
+      "title": "Next Actions",
       "total": 0,
       "items": []
      },
@@ -24843,14 +24844,14 @@
       "items": []
      },
      {
-      "type": "next",
-      "title": "Next Actions",
+      "type": "reviewDue",
+      "title": "Review Due",
       "total": 0,
       "items": []
      },
      {
-      "type": "reviewDue",
-      "title": "Review Due",
+      "type": "next",
+      "title": "Next Actions",
       "total": 0,
       "items": []
      },
@@ -25213,6 +25214,12 @@
       "items": []
      },
      {
+      "type": "reviewDue",
+      "title": "Review Due",
+      "total": 0,
+      "items": []
+     },
+     {
       "type": "next",
       "title": "Next Actions",
       "total": 2,
@@ -25220,12 +25227,6 @@
        "n5",
        "n2"
       ]
-     },
-     {
-      "type": "reviewDue",
-      "title": "Review Due",
-      "total": 0,
-      "items": []
      },
      {
       "type": "reviewProjects",
@@ -25645,18 +25646,18 @@
       "items": []
      },
      {
+      "type": "reviewDue",
+      "title": "Review Due",
+      "total": 0,
+      "items": []
+     },
+     {
       "type": "next",
       "title": "Next Actions",
       "total": 1,
       "items": [
        "n3"
       ]
-     },
-     {
-      "type": "reviewDue",
-      "title": "Review Due",
-      "total": 0,
-      "items": []
      },
      {
       "type": "reviewProjects",
@@ -26080,6 +26081,14 @@
       ]
      },
      {
+      "type": "reviewDue",
+      "title": "Review Due",
+      "total": 1,
+      "items": [
+       "r1"
+      ]
+     },
+     {
       "type": "next",
       "title": "Next Actions",
       "total": 5,
@@ -26089,14 +26098,6 @@
        "n1",
        "n3",
        "n4"
-      ]
-     },
-     {
-      "type": "reviewDue",
-      "title": "Review Due",
-      "total": 1,
-      "items": [
-       "r1"
       ]
      },
      {
@@ -26592,6 +26593,14 @@
       ]
      },
      {
+      "type": "reviewDue",
+      "title": "Review Due",
+      "total": 1,
+      "items": [
+       "r1"
+      ]
+     },
+     {
       "type": "next",
       "title": "Next Actions",
       "total": 5,
@@ -26601,14 +26610,6 @@
        "n1",
        "n3",
        "n4"
-      ]
-     },
-     {
-      "type": "reviewDue",
-      "title": "Review Due",
-      "total": 1,
-      "items": [
-       "r1"
       ]
      },
      {
@@ -26855,6 +26856,12 @@
       "items": []
      },
      {
+      "type": "reviewDue",
+      "title": "Review Due",
+      "total": 0,
+      "items": []
+     },
+     {
       "type": "next",
       "title": "Next Actions",
       "total": 1,
@@ -26864,12 +26871,6 @@
        "#context:@phone|@phone|1|0|#15803d",
        "n2~"
       ]
-     },
-     {
-      "type": "reviewDue",
-      "title": "Review Due",
-      "total": 0,
-      "items": []
      },
      {
       "type": "reviewProjects",
@@ -27127,18 +27128,18 @@
       "items": []
      },
      {
+      "type": "reviewDue",
+      "title": "Review Due",
+      "total": 0,
+      "items": []
+     },
+     {
       "type": "next",
       "title": "Next Actions",
       "total": 1,
       "items": [
        "n2"
       ]
-     },
-     {
-      "type": "reviewDue",
-      "title": "Review Due",
-      "total": 0,
-      "items": []
      },
      {
       "type": "reviewProjects",
@@ -27483,18 +27484,18 @@
       "items": []
      },
      {
+      "type": "reviewDue",
+      "title": "Review Due",
+      "total": 0,
+      "items": []
+     },
+     {
       "type": "next",
       "title": "Next Actions",
       "total": 1,
       "items": [
        "n2"
       ]
-     },
-     {
-      "type": "reviewDue",
-      "title": "Review Due",
-      "total": 0,
-      "items": []
      },
      {
       "type": "reviewProjects",
@@ -27926,6 +27927,14 @@
       ]
      },
      {
+      "type": "reviewDue",
+      "title": "Review Due",
+      "total": 1,
+      "items": [
+       "r1"
+      ]
+     },
+     {
       "type": "next",
       "title": "Next Actions",
       "total": 5,
@@ -27935,14 +27944,6 @@
        "n1",
        "n3",
        "n4"
-      ]
-     },
-     {
-      "type": "reviewDue",
-      "title": "Review Due",
-      "total": 1,
-      "items": [
-       "r1"
       ]
      },
      {
@@ -29198,6 +29199,14 @@
       ]
      },
      {
+      "type": "reviewDue",
+      "title": "Review Due",
+      "total": 1,
+      "items": [
+       "r1"
+      ]
+     },
+     {
       "type": "next",
       "title": "Next Actions",
       "total": 5,
@@ -29207,14 +29216,6 @@
        "n1",
        "n3",
        "n4"
-      ]
-     },
-     {
-      "type": "reviewDue",
-      "title": "Review Due",
-      "total": 1,
-      "items": [
-       "r1"
       ]
      },
      {
@@ -29486,6 +29487,12 @@
       "items": []
      },
      {
+      "type": "reviewDue",
+      "title": "Review Due",
+      "total": 0,
+      "items": []
+     },
+     {
       "type": "next",
       "title": "Next Actions",
       "total": 2,
@@ -29493,12 +29500,6 @@
        "n2",
        "n5"
       ]
-     },
-     {
-      "type": "reviewDue",
-      "title": "Review Due",
-      "total": 0,
-      "items": []
      },
      {
       "type": "reviewProjects",
@@ -29795,6 +29796,14 @@
       ]
      },
      {
+      "type": "reviewDue",
+      "title": "Review Due",
+      "total": 1,
+      "items": [
+       "r1"
+      ]
+     },
+     {
       "type": "next",
       "title": "Next Actions",
       "total": 5,
@@ -29804,14 +29813,6 @@
        "n1",
        "n3",
        "n4"
-      ]
-     },
-     {
-      "type": "reviewDue",
-      "title": "Review Due",
-      "total": 1,
-      "items": [
-       "r1"
       ]
      },
      {
@@ -30089,6 +30090,14 @@
       ]
      },
      {
+      "type": "reviewDue",
+      "title": "Review Due",
+      "total": 1,
+      "items": [
+       "r1"
+      ]
+     },
+     {
       "type": "next",
       "title": "Next Actions",
       "total": 5,
@@ -30098,14 +30107,6 @@
        "n1",
        "n3",
        "n4"
-      ]
-     },
-     {
-      "type": "reviewDue",
-      "title": "Review Due",
-      "total": 1,
-      "items": [
-       "r1"
       ]
      },
      {

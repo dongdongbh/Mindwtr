@@ -28,7 +28,7 @@ Source: `apps/mobile`. Routes live in `apps/mobile/app` (expo-router). Labels be
 
 ## Focus
 
-- Reach: Focus tab. Sections include Today's Focus, schedule, next actions, upcoming, and review-due projects.
+- Reach: Focus tab. Sections appear in this order: Today's Focus, Today (schedule), Review Due, Next Actions, Upcoming, then Projects to review.
 - Shortcuts: Swipe a row right for Done or Focus. Long press a review-due task to mark it reviewed. Long press a focused or next task to defer its start date. Reorder › long press and drag a row. Long press a saved filter chip to delete it.
 - Selectors: `focus-reorder-toggle`, `focus-reorder-list`, `focus-reorder-row-` (+ task id), `focus-reorder-handle-` (+ task id), `focus-reorder-done`, `focus-view-options-content`, `focus-hidden-by-area`
 - Code: `apps/mobile/app/(drawer)/(tabs)/focus.tsx`, `apps/mobile/components/focus/focus-list-layout.ts`
@@ -104,7 +104,7 @@ Source: `apps/mobile`. Routes live in `apps/mobile/app` (expo-router). Labels be
 - Selectors: `task-preview-mark-done`, `task-edit-adaptive-surface`, `task-edit-preview-page`, `task-edit-read-only-hint`, `task-edit-focus-star`, `project-create-error`, `area-create-error`, `destination-create-error`
 - Code: `apps/mobile/components/task-edit-modal.tsx`, `apps/mobile/components/task-edit/TaskEditHeader.tsx`, `apps/mobile/components/task-edit/TaskEditFormTab.tsx`, `apps/mobile/components/task-edit/TaskEditViewTab.tsx`
 - Checks: `apps/mobile/components/task-edit-modal.test.tsx`, `apps/mobile/components/task-edit/TaskEditFormTab.test.tsx`, `apps/mobile/components/task-edit/TaskEditViewTab.test.tsx`, `apps/mobile/components/task-edit/use-task-edit-actions.save-result.test.tsx`, `apps/mobile/components/task-edit/use-task-edit-preview-completion.test.tsx`
-- Notes: Edits stay in the Task draft until Save. Sending a draft back to Inbox drops its Focus star. Field order and visibility come from Settings › GTD › Task editor layout.
+- Notes: Destination lists None, Areas, active Projects, then Someday / Waiting projects, preserving order within each group and direct project selection. Edits stay in the Task draft until Save. Sending a draft back to Inbox drops its Focus star. Field order and visibility come from Settings › GTD › Task editor layout.
 
 - Preview completion: Mark Done appears inside the visible Status card for editable active tasks. It saves the complete current draft, including pending checklist input, through one normal completion write. Repeated taps and competing Save/Close are blocked until persistence finishes; a failed barrier keeps the Done draft/files with inline error and Retry in Preview/header. Retry actively persists the applied state without creating another recurring successor. iOS sheet swipe attempts run the same Save/Discard/Cancel decision as Close before the sheet can disappear; Cancel and failed saves keep the draft visible. Close is blocked while submitting or retrying. Reference, terminal, Trash, projected and archived-project previews have no action.
 

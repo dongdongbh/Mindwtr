@@ -694,6 +694,11 @@ export function buildTaskDraftDestinationPicker(input: {
     const groups: TaskDraftDestinationPicker['destination']['groups'] = [
         { kind: 'none', label: null, choices: [choice({ kind: 'none' }, t('common.none'))] },
     ];
+    if (destinationFields.includes('area')) {
+        const areas = input.areas.filter((area) => !area.deletedAt && (!normalizedQuery || area.name.toLowerCase().includes(normalizedQuery)))
+            .sort(compareAreasByOrder);
+        groups.push({ kind: 'area', label: t('taskEdit.areaLabel'), choices: areas.map((area) => choice({ kind: 'area', id: area.id }, area.name)) });
+    }
     if (destinationFields.includes('project')) {
         const { filteredProjects } = getProjectChoiceState(filterProjectsBySelectedArea(input.projects, draft.areaId), query, input.projects);
         const projectChoices = (projects: readonly Project[]) => projects.map((project) => choice({ kind: 'project', id: project.id }, project.title));
@@ -704,11 +709,6 @@ export function buildTaskDraftDestinationPicker(input: {
         } else {
             groups.push({ kind: 'project', label: t('nav.projects'), choices: projectChoices(filteredProjects) });
         }
-    }
-    if (destinationFields.includes('area')) {
-        const areas = input.areas.filter((area) => !area.deletedAt && (!normalizedQuery || area.name.toLowerCase().includes(normalizedQuery)))
-            .sort(compareAreasByOrder);
-        groups.push({ kind: 'area', label: t('taskEdit.areaLabel'), choices: areas.map((area) => choice({ kind: 'area', id: area.id }, area.name)) });
     }
     const sections = getTaskEditorProjectSections(input.sections, draft.projectId);
     const filteredSections = sections.filter((section) => !normalizedQuery || section.title.toLowerCase().includes(normalizedQuery));

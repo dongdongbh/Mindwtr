@@ -215,8 +215,8 @@ export function DestinationSelector({
         const firstArea = filteredAreas[0];
         if (firstProject || firstArea) {
             event.preventDefault();
-            if (firstProject) choose({ kind: 'project', id: firstProject.id });
-            else if (firstArea) choose({ kind: 'area', id: firstArea.id });
+            if (firstArea) choose({ kind: 'area', id: firstArea.id });
+            else if (firstProject) choose({ kind: 'project', id: firstProject.id });
             return;
         }
         if (canCreateProject === canCreateArea) return;
@@ -228,10 +228,10 @@ export function DestinationSelector({
     const searching = Boolean(normalizedQuery);
     const enterTargetKey = !searching
         ? undefined
-        : filteredProjects[0]
-            ? `project-${filteredProjects[0].id}`
-            : filteredAreas[0]
-                ? `area-${filteredAreas[0].id}`
+        : filteredAreas[0]
+            ? `area-${filteredAreas[0].id}`
+            : filteredProjects[0]
+                ? `project-${filteredProjects[0].id}`
                 : canCreateProject !== canCreateArea
                     ? (canCreateProject ? 'create-project' : 'create-area')
                     : undefined;
@@ -357,6 +357,19 @@ export function DestinationSelector({
                         <div role="listbox" aria-label={destinationLabel}>
                             <div className="overflow-y-auto" style={{ maxHeight: listMaxHeight }}>
                                 {!searching && noneOption}
+                                {filteredAreas.length > 0 && (
+                                    <div role="group" aria-label={areasLabel}>
+                                        <div className="px-2 pb-0.5 pt-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                            {areasLabel}
+                                        </div>
+                                        {filteredAreas.map((area) => renderOption(
+                                            `area-${area.id}`,
+                                            area.name,
+                                            { kind: 'area', id: area.id },
+                                            MapPin,
+                                        ))}
+                                    </div>
+                                )}
                                 {([[projectsLabel, projectGroups.active], [deferredLabel, projectGroups.deferred]] as const).map(([label, group]) => (
                                     group.length > 0 && (
                                         <div key={label} role="group" aria-label={label}>
@@ -372,19 +385,6 @@ export function DestinationSelector({
                                         </div>
                                     )
                                 ))}
-                                {filteredAreas.length > 0 && (
-                                    <div role="group" aria-label={areasLabel}>
-                                        <div className="px-2 pb-0.5 pt-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                                            {areasLabel}
-                                        </div>
-                                        {filteredAreas.map((area) => renderOption(
-                                            `area-${area.id}`,
-                                            area.name,
-                                            { kind: 'area', id: area.id },
-                                            MapPin,
-                                        ))}
-                                    </div>
-                                )}
                                 {!hasMatches && (
                                     <div className="px-2 py-2 text-muted-foreground">{noMatchesLabel}</div>
                                 )}

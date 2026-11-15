@@ -1420,7 +1420,7 @@ final class CoreHostTests: XCTestCase {
         XCTAssertEqual(destination["value"] as? String, "Alpha project")
         XCTAssertNotNil(destination["fieldId"] as? String)
         XCTAssertFalse(try XCTUnwrap(destination["label"] as? String).isEmpty)
-        XCTAssertEqual(try groups(model).compactMap { $0["kind"] as? String }, ["none", "project", "area"])
+        XCTAssertEqual(try groups(model).compactMap { $0["kind"] as? String }, ["none", "area", "project"])
         let projects = try choices(model, kind: "project")
         XCTAssertEqual(Set(projects.compactMap { $0["id"] as? String }), Set(["destination-project-a", "destination-project-b"]))
         let current = try XCTUnwrap(projects.first { $0["id"] as? String == "destination-project-a" })
@@ -1484,7 +1484,7 @@ final class CoreHostTests: XCTestCase {
         let draft = try XCTUnwrap(editor["draft"] as? [String: Any])
         let model = try object(await core.call("destinationPicker", argumentsJSON: json([json(["id": id, "draft": draft, "query": ""])])))
         let groups = try XCTUnwrap((model["destination"] as? [String: Any])?["groups"] as? [[String: Any]])
-        XCTAssertEqual(groups.compactMap { $0["kind"] as? String }, ["none", "project", "project", "area"])
+        XCTAssertEqual(groups.compactMap { $0["kind"] as? String }, ["none", "area", "project", "project"])
         let projectGroups = groups.filter { $0["kind"] as? String == "project" }
         XCTAssertEqual(projectGroups.map { (($0["choices"] as? [[String: Any]]) ?? []).compactMap { $0["id"] as? String } },
                        [["destination-project-b"], ["destination-project-a"]])
