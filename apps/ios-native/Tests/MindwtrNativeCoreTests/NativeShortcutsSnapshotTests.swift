@@ -43,10 +43,24 @@ final class NativeShortcutsSnapshotTests: XCTestCase {
         let snapshot = try XCTUnwrap(file.read())
         XCTAssertEqual(snapshot.items(forList: "next").map(\.id), ["b", "c"])
         XCTAssertEqual(snapshot.items(forList: "next").first?.dueDate, "2026-11-20")
-        try file.withdraw()
+        XCTAssertFalse(file.withdrawnForAppLock)
+        try file.withdrawForAppLock()
         XCTAssertNil(file.read())
         XCTAssertFalse(FileManager.default.fileExists(atPath: file.url.path))
-        try file.withdraw()
+        XCTAssertTrue(file.withdrawnForAppLock)
+        try file.withdrawForAppLock()
+        XCTAssertTrue(file.withdrawnForAppLock)
+        try file.clearAppLock()
+        XCTAssertFalse(file.withdrawnForAppLock)
+        try file.clearAppLock()
+    }
+
+    func testPublishAfterAppLockClearsTheLockMarker() throws {
+        try file.withdrawForAppLock()
+        XCTAssertTrue(file.withdrawnForAppLock)
+        try file.publish(snapshotJSON())
+        XCTAssertFalse(file.withdrawnForAppLock)
+        XCTAssertNotNil(file.read())
     }
 
     func testPublishRefusesSomethingThatIsNotASnapshot() throws {

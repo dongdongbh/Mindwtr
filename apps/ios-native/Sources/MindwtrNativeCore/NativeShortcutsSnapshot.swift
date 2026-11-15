@@ -102,11 +102,25 @@ public struct NativeShortcutsSnapshotFile: Sendable {
         #else
         try Data(json.utf8).write(to: url, options: [.atomic])
         #endif
+        try clearAppLock()
     }
 
-    public func withdraw() throws {
+    var appLockMarkerURL: URL { url.deletingLastPathComponent().appendingPathComponent("app-lock-on") }
+
+    public var withdrawnForAppLock: Bool { FileManager.default.fileExists(atPath: appLockMarkerURL.path) }
+
+    public func withdrawForAppLock() throws {
+        if !withdrawnForAppLock {
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data().write(to: appLockMarkerURL, options: [.atomic])
+        }
         guard FileManager.default.fileExists(atPath: url.path) else { return }
         try FileManager.default.removeItem(at: url)
+    }
+
+    public func clearAppLock() throws {
+        guard withdrawnForAppLock else { return }
+        try FileManager.default.removeItem(at: appLockMarkerURL)
     }
 
     public func read() -> NativeShortcutsSnapshot? {

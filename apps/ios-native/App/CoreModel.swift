@@ -48985,6 +48985,7 @@ extension CoreModel {
         }
         guard let selection = shortcutIntakeSelection, let file = NativeShortcutsSnapshotFile.live(selection: selection) else { return }
         guard appLock.enabled == false, !appLockActive, !appLockRecoveryPending else { withdrawShortcutsSnapshot(); return }
+        try? file.clearAppLock()
         guard workspaceAdmissionsOpen, host?.workspaceMode == .personal, searchOwnerCurrent(owner), !busy else { return }
         do {
             let observation = try await owner.host.searchObservation()
@@ -49003,6 +49004,6 @@ extension CoreModel {
     private func withdrawShortcutsSnapshot() {
         shortcutsSnapshotLastObservation = nil
         guard let selection = shortcutIntakeSelection, let file = NativeShortcutsSnapshotFile.live(selection: selection) else { return }
-        try? file.withdraw()
+        try? file.withdrawForAppLock()
     }
 }

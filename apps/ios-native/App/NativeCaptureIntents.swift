@@ -332,10 +332,19 @@ private enum MindwtrTaskDueDateDisplay {
 }
 
 private enum NativeShortcutsSnapshotLoader {
-    static func load() -> NativeShortcutsSnapshot? {
-        guard let selection = try? NativeAppLaunch.selection.get(),
-              let file = NativeShortcutsSnapshotFile.live(selection: selection) else { return nil }
-        return file.read()
+    static var file: NativeShortcutsSnapshotFile? {
+        guard let selection = try? NativeAppLaunch.selection.get() else { return nil }
+        return NativeShortcutsSnapshotFile.live(selection: selection)
+    }
+
+    static func load() -> NativeShortcutsSnapshot? { file?.read() }
+}
+
+enum MindwtrGetTasksError: Error, CustomLocalizedStringResourceConvertible {
+    case appLocked
+
+    var localizedStringResource: LocalizedStringResource {
+        "Mindwtr is locked. Open Mindwtr and unlock it, then run this shortcut again."
     }
 }
 
@@ -411,6 +420,7 @@ struct MindwtrGetTasksIntent: AppIntent {
     }
 
     func perform() async throws -> some IntentResult & ReturnsValue<[MindwtrTaskEntity]> & ProvidesDialog {
+        if NativeShortcutsSnapshotLoader.file?.withdrawnForAppLock == true { throw MindwtrGetTasksError.appLocked }
         let snapshot = NativeShortcutsSnapshotLoader.load()
         let items: [NativeShortcutsSnapshotItem]
         let omittedCount: Int?
