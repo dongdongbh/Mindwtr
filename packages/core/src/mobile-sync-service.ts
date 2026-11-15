@@ -1983,15 +1983,23 @@ export const createMobileSyncService = <Lease>(host: MobileSyncServiceHost<Lease
               loadLeavesStorePass(mergedData, { tasks: shown._allTasks, projects: shown._allProjects }),
               createSlicer(() => host.sliceYield!())) && storeShowsPublish();
           }
-          if (refreshCovered) {
+          const keptLaterEdit = !info.localWriteSkipped && !refreshCovered
+            && core.useTaskStore.getState().lastDataChangeAt > uploadedChangeAt;
+          if (keptLaterEdit) {
+            void log.info('Sync store refresh kept an edit made after the last snapshot check', {
+              scope: 'sync', force: true,
+              extra: { releaseCheck: 'v1.3.9/sync-finalize-revert', backend: this.backend, outcome: 'kept-edit' },
+            });
+          }
+          if (refreshCovered || keptLaterEdit) {
 
             core.useTaskStore.setState((state) => (state.error === null ? state : { error: null }));
           } else if (!info.localWriteSkipped) {
             await traceSectionAsync('sync:storeApply', () => core.useTaskStore.getState().fetchData({
               silent: true,
               preloadedData: mergedData,
-              onDataChangeAdvanced: (previousChangeAt, nextChangeAt) => {
-                if (previousChangeAt <= uploadedChangeAt) uploadedChangeAt = nextChangeAt;
+              onDataChangeAdvanced: (_previousChangeAt, nextChangeAt) => {
+                uploadedChangeAt = nextChangeAt;
               },
             }));
           }

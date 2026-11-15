@@ -3582,9 +3582,17 @@ export class SyncService {
                         });
                     },
                     finalizeSuccess: (mergedData, info) => {
-                        syncServiceDependencies.applySyncedDataToStore(mergedData);
                         info.acceptCoveredSnapshot(mergedData);
-                        SyncService.lastSuccessfulSyncLocalChangeAt = getStoreState().lastDataChangeAt;
+                        if (getStoreState().lastDataChangeAt > info.getLocalSnapshotChangeAt()) {
+                            void syncServiceDependencies.logInfo('Sync store refresh kept an edit made after the last snapshot check', {
+                                scope: 'sync',
+                                force: true,
+                                extra: { releaseCheck: 'v1.3.9/sync-finalize-revert', backend: context.backend, outcome: 'kept-edit' },
+                            });
+                        } else {
+                            syncServiceDependencies.applySyncedDataToStore(mergedData);
+                        }
+                        SyncService.lastSuccessfulSyncLocalChangeAt = info.getLocalSnapshotChangeAt();
                         SyncService.setPendingExternalSyncChange(null);
                         getStoreState().setError(null);
                         SyncService.clearCoveredQueuedSyncRun(info.getLocalSnapshotChangeAt(), options);

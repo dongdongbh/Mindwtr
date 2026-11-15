@@ -4557,6 +4557,79 @@ describe('SyncService orchestration', () => {
         }
     });
 
+    it('keeps an edit made after the refresh step\'s last snapshot check in the store and pending for auto sync', async () => {
+        const task = (title: string, rev: number) => ({
+            id: 'task-1', title, status: 'next' as const, tags: [], contexts: [], rev, revBy: 'device',
+            createdAt: '2026-04-01T00:00:00.000Z', updatedAt: `2026-04-01T00:0${rev}:00.000Z`,
+        });
+        const remoteProject = {
+            id: 'project-1', title: 'From the other device', status: 'active' as const, color: '#94a3b8', order: 0, tagIds: [],
+            createdAt: '2026-04-01T00:00:00.000Z', updatedAt: '2026-04-01T00:02:00.000Z', rev: 1, revBy: 'other-device',
+        };
+        const local: AppData = { tasks: [task('Local', 1)], projects: [], sections: [], areas: [], people: [], settings: {} };
+        const merged: AppData = { ...local, tasks: [task('Merged', 2)], projects: [remoteProject] };
+        const storeState = {
+            lastDataChangeAt: 1_000,
+            settings: {},
+            fetchData: vi.fn(async () => undefined),
+            updateSettings: vi.fn(async () => undefined),
+            setError: vi.fn(),
+        };
+        let shown = local;
+        let cycleReturned = false;
+        let edited = false;
+        const editInTheGap = async () => {
+            if (!cycleReturned || edited) return;
+            edited = true;
+            shown = { ...shown, tasks: [task('Edited', 3)] };
+            storeState.lastDataChangeAt = 2_000;
+        };
+        const applySyncedDataToStore = vi.fn((data: AppData) => { shown = data; });
+        const logInfo = vi.fn(async () => undefined);
+        const setupSpy = vi.spyOn(SyncService as any, 'setupDesktopCycle').mockImplementation(async () => ({
+            kind: 'ready',
+            backend: 'webdav',
+            cloudProvider: 'selfhosted',
+            fastSyncScope: null,
+            io: {
+                readRemote: vi.fn(async () => merged),
+                writeRemote: vi.fn(async () => undefined),
+                acquireRemoteMutationFence: async () => ({
+                    assertHeld: editInTheGap, renew: async () => undefined, release: async () => undefined,
+                    retryAfterMs: () => 0,
+                }),
+            },
+        }));
+        try {
+            __syncServiceTestUtils.setDependenciesForTests({
+                flushPendingSave: vi.fn(async () => undefined),
+                invoke: vi.fn(async () => undefined) as any,
+                getStoreState: () => storeState as any,
+                getInMemoryAppDataSnapshot: () => shown,
+                applySyncedDataToStore,
+                logInfo: logInfo as any,
+                performSyncCycle: vi.fn(async (io) => {
+                    await io.writeLocal(merged);
+                    await io.writeRemote(merged);
+                    cycleReturned = true;
+                    return { data: merged, status: 'success' as const, stats: { tasks: {}, projects: {}, sections: {}, areas: {} } as any };
+                }),
+            });
+
+            expect((await SyncService.performSync()).success).toBe(true);
+
+            expect(shown.tasks[0]?.title).toBe('Edited');
+            expect(shown.projects).toEqual([expect.objectContaining({ id: 'project-1', title: 'From the other device' })]);
+            expect(applySyncedDataToStore).toHaveBeenCalledTimes(1);
+            expect(SyncService.hasPendingLocalChangesForAutoSync()).toBe(true);
+            expect(logInfo).toHaveBeenCalledWith('Sync store refresh kept an edit made after the last snapshot check', expect.objectContaining({
+                force: true, extra: expect.objectContaining({ releaseCheck: 'v1.3.9/sync-finalize-revert', outcome: 'kept-edit' }),
+            }));
+        } finally {
+            setupSpy.mockRestore();
+        }
+    });
+
     it('does not record fast-sync state after post-remote attachment phases change the sync payload', async () => {
         const syncedData: AppData = {
             tasks: [{

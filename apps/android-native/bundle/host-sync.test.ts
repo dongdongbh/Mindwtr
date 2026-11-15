@@ -788,7 +788,7 @@ describe('event-owned iOS stored/resume pacing', () => {
         expect(fixture.sync.syncChangeObservation()).toEqual({ pending: true });
     });
 
-    it('ends back-to-back cycles with no edit at no pending change, though each cycle moves its own change time', async () => {
+    it('ends back-to-back cycles with no edit at no pending change, though each cycle\'s store refresh applies load migrations and moves its own change time', async () => {
         resetForTests();
         let now = 100_000;
         spyOn(Date, 'now').mockImplementation(() => now);
@@ -798,6 +798,14 @@ describe('event-owned iOS stored/resume pacing', () => {
         })) as typeof fetch;
         const fixture = configured();
         const changeTimes = [core.useTaskStore.getState().lastDataChangeAt];
+        const advanced: number[][] = [];
+        const fetchData = core.useTaskStore.getState().fetchData;
+        core.useTaskStore.setState({ fetchData: (options?: Parameters<typeof fetchData>[0]) => fetchData(options?.preloadedData
+            ? { ...options, onDataChangeAdvanced: (previousChangeAt: number, nextChangeAt: number) => {
+                advanced.push([previousChangeAt, nextChangeAt]);
+                options.onDataChangeAdvanced?.(previousChangeAt, nextChangeAt);
+            } }
+            : options) } as never);
         for (const reason of ['startup', 'resume', 'resume'] as const) {
             now += 10 * 60_000;
             const at = new Date(now).toISOString();
@@ -808,11 +816,13 @@ describe('event-owned iOS stored/resume pacing', () => {
             expect(fixture.sync.syncChangeObservation()).toEqual({ pending: false });
             expect(fixture.sync.syncChangeSchedule(true)).toEqual({ delayMs: null });
         }
+        core.useTaskStore.setState({ fetchData } as never);
         expect(fixture.sync.state().cycles).toBe(3);
         expect(new Set(changeTimes).size).toBe(changeTimes.length);
+        expect(advanced).toEqual(changeTimes.slice(1).map((next, index) => [changeTimes[index], next]));
     });
 
-    it('keeps an edit to an existing task pending when it lands just before the store refresh that applies load migrations', async () => {
+    it('keeps an edit to an existing task on screen and pending when it lands in the lock check before the store refresh, which then skips the refresh', async () => {
         resetForTests();
         let now = 100_000;
         spyOn(Date, 'now').mockImplementation(() => now);
@@ -825,6 +835,20 @@ describe('event-owned iOS stored/resume pacing', () => {
         globalThis.fetch = (async () => new Response(JSON.stringify({ ...data(), tasks: remoteTasks }), {
             status: 200, headers: { ETag: `"remote-${remoteTasks.length}"` },
         })) as typeof fetch;
+        let inLockCheck: (() => Promise<void>) | null = null;
+        const create = core.createMobileSyncService;
+        spyOn(core, 'createMobileSyncService').mockImplementation((options) => create({
+            ...options,
+            ensureWebdavCapabilityProof: async () => 'strong-etag' as never,
+            core: {
+                ...options.core,
+                createWebdavSyncRemoteMutationFencePort: () => ({}) as never,
+                acquireSyncRemoteMutationFence: async () => ({
+                    assertHeld: async () => { await inLockCheck?.(); },
+                    renew: async () => undefined, release: async () => undefined,
+                }) as never,
+            },
+        }));
         const fixture = configured();
         addRemoteTask();
         expect(await fixture.sync.performStoredAutomaticSync('startup')).toEqual({ success: true, skipped: false });
@@ -832,19 +856,18 @@ describe('event-owned iOS stored/resume pacing', () => {
         expect(core.useTaskStore.getState()._allTasks.some((task) => task.id === existingId)).toBe(true);
         now += 10 * 60_000;
         addRemoteTask();
-        const advanced: number[][] = [];
         let editedAt: number | null = null;
-        const fetchData = core.useTaskStore.getState().fetchData;
-        core.useTaskStore.setState({ fetchData: async (options?: Parameters<typeof fetchData>[0]) => {
-            if (!options?.preloadedData || editedAt !== null) return fetchData(options);
+        inLockCheck = async () => {
+            if (editedAt !== null || fixture.entries.filter((entry) => entry.message === 'Sync step').at(-1)?.context?.step !== 'refresh') return;
             now += 1;
             await core.useTaskStore.getState().updateTask(existingId, { title: 'Edited before the refresh' });
             editedAt = core.useTaskStore.getState().lastDataChangeAt;
-            const onDataChangeAdvanced = options.onDataChangeAdvanced;
-            return fetchData({ ...options, onDataChangeAdvanced: (previousChangeAt, nextChangeAt) => {
-                advanced.push([previousChangeAt, nextChangeAt]);
-                onDataChangeAdvanced?.(previousChangeAt, nextChangeAt);
-            } });
+        };
+        const refreshes: unknown[] = [];
+        const fetchData = core.useTaskStore.getState().fetchData;
+        core.useTaskStore.setState({ fetchData: (options?: Parameters<typeof fetchData>[0]) => {
+            if (options?.preloadedData) refreshes.push(options);
+            return fetchData(options);
         } } as never);
         try {
             expect(await fixture.sync.performStoredAutomaticSync('resume')).toEqual({ success: true, skipped: false });
@@ -852,7 +875,12 @@ describe('event-owned iOS stored/resume pacing', () => {
             core.useTaskStore.setState({ fetchData } as never);
         }
         expect(editedAt).not.toBeNull();
-        expect(advanced).toEqual([[editedAt!, core.useTaskStore.getState().lastDataChangeAt]]);
+        expect(refreshes).toEqual([]);
+        expect(core.useTaskStore.getState().lastDataChangeAt).toBe(editedAt);
+        expect(core.useTaskStore.getState()._tasksById.get(existingId)?.title).toBe('Edited before the refresh');
+        expect(core.useTaskStore.getState()._allTasks.some((task) => task.id === remoteTasks[1].id)).toBe(true);
+        expect(fixture.entries.find((entry) => entry.message === 'Sync store refresh kept an edit made after the last snapshot check')?.context)
+            .toMatchObject({ releaseCheck: 'v1.3.9/sync-finalize-revert', outcome: 'kept-edit' });
         expect(fixture.sync.syncChangeObservation()).toEqual({ pending: true });
     });
 

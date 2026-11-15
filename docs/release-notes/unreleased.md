@@ -2,6 +2,7 @@
 
 Changes collected since the latest stable release.
 
+- Sync: on desktop and mobile, an edit you make just as a WebDAV or Dropbox sync finishes no longer flips back to the old value on screen. Since v1.2.5, a second edit to the same task could then overwrite the first edit on every device.
 - Sync: on mobile, when you edited once or more while a sync failed and the next sync carried your edits, the sync badge no longer stays on syncing until your next edit. On desktop, React Native mobile and native Android, a sync you start while another is running now reports the result of the sync that carries your change. On mobile, when you pull to refresh during a sync, your sync starts about 1 s after the running one ends.
 - Sync: on desktop, an edit you make while a sync finishes no longer counts as synced. This applies after you choose to use the external sync file, and after a sync that finds nothing to change. Mindwtr now syncs that edit when you leave the window. When the sync file then changes on another device, Mindwtr shows "External sync change detected" and asks how to continue, instead of taking in the file.
 - Sync: changing a setting in Appearance, Language or another settings group whose sync is not switched on no longer makes Self-hosted sync run over and over. A group's change time now travels only with its values, and the Self-hosted server ignores groups that are not synced when it decides whether a device should sync again. (feedback d4644bd4)

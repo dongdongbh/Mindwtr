@@ -4,6 +4,7 @@ import { createRequire } from 'node:module';
 import { createMobileSyncService, type MobileSyncServiceHost } from './mobile-sync-service';
 import { flushPendingSave, resetForTests, setStorageAdapter, STORE_NON_COMMAND_KEYS, useTaskStore } from './store';
 import { getInMemoryAppDataSnapshot } from './sync-client-helpers';
+import { syncResultUploadedChangeAt } from './mobile-sync-triggers';
 import { SqliteAdapter, type SqliteClient } from './sqlite-adapter';
 import { performSyncCycle } from './sync';
 import { createNativeHostContract, NATIVE_CONTRACT_NETWORK_READS, NATIVE_CONTRACT_SYNC_SCREEN_METHODS, NATIVE_CONTRACT_UNGATED_METHODS } from './native-host-contract';
@@ -13,7 +14,7 @@ import { createDeviceCalendarSettingsMethods } from './native-host-contract-devi
 import { createPreparedProjectAvailabilityMethods, createProjectAvailabilityMethods } from './native-host-contract-project-availability';
 import { isStoreCommand } from './store-write-gate';
 import { NativeReceiptSqliteAdapter, resetNativeRequestReceipts, revisionOf } from './native-request-receipts';
-import { CLOUD_PROVIDER_KEY, CLOUD_TOKEN_KEY, CLOUD_URL_KEY, SYNC_BACKEND_KEY } from './sync-storage-keys';
+import { CLOUD_PROVIDER_KEY, CLOUD_TOKEN_KEY, CLOUD_URL_KEY, SYNC_BACKEND_KEY, WEBDAV_URL_KEY } from './sync-storage-keys';
 import { createSyncEncryptionStateStore } from './sync-encryption-local-state';
 import type { AppData, Project, Task } from './types';
 
@@ -679,6 +680,111 @@ describe('a sliced cycle\'s prepared rows, prepared swap and refresh drop', () =
             }
         } finally {
             vi.useRealTimers();
+        }
+    });
+});
+
+describe.each([
+    ['WebDAV, unsliced (RN and native iOS)', false, false],
+    ['WebDAV, guarded unsliced', true, false],
+    ['self-hosted, sliced (native Android)', true, true],
+])('an edit made after the last snapshot check of the refresh step: %s', (_shape, guarded, sliced) => {
+    let now: { mockRestore: () => void } | null = null;
+    beforeEach(() => {
+        vi.useRealTimers();
+        let clock = 0;
+        now = vi.spyOn(performance, 'now').mockImplementation(() => (clock += 10));
+    });
+    afterEach(async () => {
+        now?.mockRestore();
+        await flushPendingSave(); resetForTests();
+        for (const db of databases.splice(0)) db.close();
+    });
+
+    const archivedOnLoad = () => ({
+        ...task({ id: 'done-old', title: 'Done long ago', rev: 1, revBy: 'other-device' }),
+        status: 'done', completedAt: new Date(Date.now() - 40 * 24 * 60 * 60 * 1000).toISOString(), pushCount: undefined,
+    } as Task);
+
+    const useWebdav = (fake: ReturnType<typeof createHost>, initial: AppData) => {
+        const remote = { data: initial, etag: 1 };
+        const uploads: AppData[] = [];
+        const values = new Map<string, string>([[SYNC_BACKEND_KEY, 'webdav'], [WEBDAV_URL_KEY, 'https://dav.example.test/Mindwtr']]);
+        fake.host.storage.getItem = async (key: string) => values.get(key) ?? null;
+        fake.host.storage.setItem = async (key: string, value: string) => { values.set(key, value); };
+        fake.host.ensureWebdavCapabilityProof = async () => 'strong-etag' as never;
+        Object.assign(fake.host.core!, {
+            probeWebdavSyncCompatibility: async () => 'strong-etag',
+            webdavGetSyncDocument: async () => ({ state: 'data', data: JSON.parse(JSON.stringify(remote.data)), exists: true, strongEtag: `"${remote.etag}"` }),
+            webdavPutSyncDocument: async (_url: string, data: AppData) => {
+                uploads.push(JSON.parse(JSON.stringify(data)));
+                remote.data = JSON.parse(JSON.stringify(data));
+                remote.etag += 1;
+                return { etag: `"${remote.etag}"` };
+            },
+            webdavHeadFile: async () => ({ exists: true, fingerprint: `webdav:v1:etag="${remote.etag}"`, etag: `"${remote.etag}"` }),
+            createWebdavSyncRemoteMutationFencePort: () => ({}),
+        });
+        return uploads;
+    };
+
+    it.each([
+        ['no load migration', () => winner(), undefined],
+        ['a load migration', () => ({ ...winner(), tasks: [...winner().tasks, archivedOnLoad()] }), 'archived'],
+    ])('keeps the edit and the remote changes in the store, on disk, through a second edit and in the next upload: %s', async (_name, remote, statusAtNextLoad) => {
+        const adapter = await openStore(guarded);
+        const fake = createHost(adapter, remote(), sliced);
+        fake.put.mockImplementation(async () => ({ fingerprint: 'remote-after-put' }));
+        const uploads = sliced ? null : useWebdav(fake, remote());
+        let refreshing = false;
+        let edit: Promise<unknown> | null = null;
+        const editInTheGap = async () => {
+            if (refreshing && !edit) edit = useTaskStore.getState().updateTask('shared', { title: 'edited' });
+            await edit;
+        };
+        const forced: Array<Record<string, string> | undefined> = [];
+        const info = fake.host.log.info;
+        fake.host.log.info = (message, context) => {
+            if (message === 'Sync step') refreshing = context?.extra?.step === 'refresh';
+            if ((context as { force?: boolean } | undefined)?.force) forced.push(context?.extra);
+            return info(message, context);
+        };
+        if (sliced) {
+            fake.host.sliceYield = editInTheGap;
+        } else {
+            fake.host.core!.acquireSyncRemoteMutationFence = vi.fn(async () => ({
+                assertHeld: editInTheGap, renew: async () => undefined, release: async () => undefined,
+            })) as never;
+        }
+        const service = createMobileSyncService(fake.host);
+        const shared = async () => ({
+            store: useTaskStore.getState()._tasksById.get('shared')?.title,
+            disk: (await adapter.getData()).tasks.find((row) => row.id === 'shared'),
+        });
+        try {
+            const first = await runCycle(service);
+            expect(first.success).toBe(true);
+            expect(edit).not.toBeNull();
+            const afterCycle = await shared();
+            expect(afterCycle.store).toBe('edited');
+            expect(afterCycle.disk?.title).toBe('edited');
+            expect(useTaskStore.getState()._projectsById.get('starred')?.isFocused).toBe(true);
+            expect(syncResultUploadedChangeAt.get(first)).toBeLessThan(useTaskStore.getState().lastDataChangeAt);
+            expect(forced).toContainEqual(expect.objectContaining({ releaseCheck: 'v1.3.9/sync-finalize-revert', outcome: 'kept-edit' }));
+
+            await useTaskStore.getState().updateTask('shared', { status: 'waiting' });
+            await flushPendingSave();
+            expect((await shared()).disk).toMatchObject({ title: 'edited', status: 'waiting' });
+
+            refreshing = false;
+            expect((await runCycle(service)).success).toBe(true);
+            const lastUpload = sliced ? (fake.put.mock.calls.at(-1) as unknown as [unknown, AppData] | undefined)?.[1] : uploads!.at(-1);
+            expect(lastUpload?.tasks.find((row) => row.id === 'shared')).toMatchObject({ title: 'edited', status: 'waiting' });
+            expect(await shared()).toMatchObject({ store: 'edited', disk: { title: 'edited', status: 'waiting' } });
+            await useTaskStore.getState().fetchData({ silent: true });
+            expect(useTaskStore.getState()._tasksById.get('done-old')?.status).toBe(statusAtNextLoad);
+        } finally {
+            service.__mobileSyncTestUtils.reset();
         }
     });
 });
