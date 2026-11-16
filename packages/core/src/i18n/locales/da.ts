@@ -3381,4 +3381,9 @@ export const daOverrides: Record<string, string> = {
         "taskEdit.dateOnlyStartReminder": "Startpåmindelse: {time} · standardtidspunkt for datoer uden klokkeslæt",
         "taskEdit.dateOnlyDueReminder": "Forfaldspåmindelse: {time} · standardtidspunkt for datoer uden klokkeslæt",
         "taskEdit.advanceReminderNeedsReminderTime": "Tilføj et forfaldstidspunkt, eller vælg et påmindelsestidspunkt for datoer uden klokkeslæt i notifikationsindstillingerne.",
+        "taskEdit.keepForLater": "Gem til senere",
+        "taskEdit.finishDraft": "Afslut denne kladde?",
+        "taskEdit.finishDraftSaveDesc": "Gem kladden, kassér den, eller behold den på denne enhed til senere.",
+        "taskEdit.finishDraftDesc": "Kassér kladden, eller behold den på denne enhed til senere. Gendannelsen skal være færdig, før du kan redigere videre.",
+        "taskEdit.resumeDraft": "Genoptag kladde",
 };

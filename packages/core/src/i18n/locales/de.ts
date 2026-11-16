@@ -2935,4 +2935,9 @@ export const deOverrides: Record<string, string> = {
         "taskEdit.dateOnlyStartReminder": "Starterinnerung: {time} · Standard für reine Datumsangaben",
         "taskEdit.dateOnlyDueReminder": "Fälligkeitserinnerung: {time} · Standard für reine Datumsangaben",
         "taskEdit.advanceReminderNeedsReminderTime": "Füge eine Fälligkeitszeit hinzu oder wähle unter Benachrichtigungen eine Erinnerungszeit für Fälligkeiten ohne Uhrzeit.",
+        "taskEdit.keepForLater": "Für später behalten",
+        "taskEdit.finishDraft": "Diesen Entwurf abschließen?",
+        "taskEdit.finishDraftSaveDesc": "Speichere diesen Entwurf, verwirf ihn oder behalte ihn für später auf diesem Gerät.",
+        "taskEdit.finishDraftDesc": "Verwirf diesen Entwurf oder behalte ihn für später auf diesem Gerät. Die Wiederherstellung muss abgeschlossen sein, bevor du weiter bearbeiten kannst.",
+        "taskEdit.resumeDraft": "Entwurf fortsetzen",
 };

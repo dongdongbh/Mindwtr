@@ -961,4 +961,9 @@ export const nlOverrides: Record<string, string> = {
         "taskEdit.dateOnlyStartReminder": "Startherinnering: {time} · standaardtijd voor datums zonder tijd",
         "taskEdit.dateOnlyDueReminder": "Deadlineherinnering: {time} · standaardtijd voor datums zonder tijd",
         "taskEdit.advanceReminderNeedsReminderTime": "Voeg een deadlinetijd toe of kies in de meldingsinstellingen een herinneringstijd voor deadlines zonder tijd.",
+        "taskEdit.keepForLater": "Bewaren voor later",
+        "taskEdit.finishDraft": "Dit concept afronden?",
+        "taskEdit.finishDraftSaveDesc": "Sla dit concept op, verwijder het of bewaar het op dit apparaat voor later.",
+        "taskEdit.finishDraftDesc": "Verwijder dit concept of bewaar het op dit apparaat voor later. Het herstel moet klaar zijn voordat je verder kunt bewerken.",
+        "taskEdit.resumeDraft": "Concept hervatten",
 };

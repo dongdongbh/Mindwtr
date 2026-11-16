@@ -1818,4 +1818,9 @@ export const hiOverrides: Record<string, string> = {
         "taskEdit.dateOnlyStartReminder": "आरंभ अनुस्मारक: {time} · बिना समय वाली तारीखों का तय समय",
         "taskEdit.dateOnlyDueReminder": "नियत अनुस्मारक: {time} · बिना समय वाली तारीखों का तय समय",
         "taskEdit.advanceReminderNeedsReminderTime": "नियत समय जोड़ें या सूचना सेटिंग में बिना समय वाली नियत तारीखों के अनुस्मारक का समय चुनें।",
+        "taskEdit.keepForLater": "बाद के लिए रखें",
+        "taskEdit.finishDraft": "यह ड्राफ़्ट पूरा करें?",
+        "taskEdit.finishDraftSaveDesc": "इस ड्राफ़्ट को सहेजें, छोड़ें, या बाद के लिए इसी डिवाइस पर रखें।",
+        "taskEdit.finishDraftDesc": "इस ड्राफ़्ट को छोड़ें या बाद के लिए इसी डिवाइस पर रखें। संपादन जारी रखने से पहले पुनर्प्राप्ति पूरी होनी चाहिए।",
+        "taskEdit.resumeDraft": "ड्राफ़्ट फिर से खोलें",
 };

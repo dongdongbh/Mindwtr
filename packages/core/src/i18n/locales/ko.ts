@@ -2817,4 +2817,9 @@ export const koOverrides: Record<string, string> = {
         "taskEdit.dateOnlyStartReminder": "시작 알림: {time} · 날짜 전용 기본값",
         "taskEdit.dateOnlyDueReminder": "마감 알림: {time} · 날짜 전용 기본값",
         "taskEdit.advanceReminderNeedsReminderTime": "마감 시간을 추가하거나 알림 설정에서 날짜 전용 마감 알림 시간을 선택하세요.",
+        "taskEdit.keepForLater": "나중을 위해 보관",
+        "taskEdit.finishDraft": "이 초안을 마무리할까요?",
+        "taskEdit.finishDraftSaveDesc": "이 초안을 저장하거나, 삭제하거나, 나중을 위해 이 기기에 보관하세요.",
+        "taskEdit.finishDraftDesc": "이 초안을 삭제하거나 나중을 위해 이 기기에 보관하세요. 편집을 계속하려면 먼저 복구가 끝나야 합니다.",
+        "taskEdit.resumeDraft": "초안 이어서 작성",
 };

@@ -1818,4 +1818,9 @@ export const ruOverrides: Record<string, string> = {
         "taskEdit.dateOnlyStartReminder": "Напоминание о начале: {time} · по умолчанию для дат без времени",
         "taskEdit.dateOnlyDueReminder": "Напоминание о сроке: {time} · по умолчанию для дат без времени",
         "taskEdit.advanceReminderNeedsReminderTime": "Добавьте время срока или выберите время напоминания для сроков без времени в настройках уведомлений.",
+        "taskEdit.keepForLater": "Оставить на потом",
+        "taskEdit.finishDraft": "Завершить этот черновик?",
+        "taskEdit.finishDraftSaveDesc": "Сохраните черновик, удалите его или оставьте на этом устройстве на потом.",
+        "taskEdit.finishDraftDesc": "Удалите черновик или оставьте его на этом устройстве на потом. Восстановление должно завершиться, прежде чем можно будет продолжить редактирование.",
+        "taskEdit.resumeDraft": "Продолжить черновик",
 };

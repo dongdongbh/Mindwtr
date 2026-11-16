@@ -1843,4 +1843,9 @@ export const plOverrides: Record<string, string> = {
         "taskEdit.dateOnlyStartReminder": "Przypomnienie o rozpoczęciu: {time} · domyślna godzina dla samych dat",
         "taskEdit.dateOnlyDueReminder": "Przypomnienie o terminie: {time} · domyślna godzina dla samych dat",
         "taskEdit.advanceReminderNeedsReminderTime": "Dodaj godzinę terminu lub wybierz godzinę przypomnienia dla terminów bez godziny w ustawieniach powiadomień.",
+        "taskEdit.keepForLater": "Zachowaj na później",
+        "taskEdit.finishDraft": "Dokończyć ten szkic?",
+        "taskEdit.finishDraftSaveDesc": "Zapisz ten szkic, odrzuć go lub zachowaj na tym urządzeniu na później.",
+        "taskEdit.finishDraftDesc": "Odrzuć ten szkic lub zachowaj go na tym urządzeniu na później. Przywracanie musi się zakończyć przed dalszą edycją.",
+        "taskEdit.resumeDraft": "Wznów szkic",
 };

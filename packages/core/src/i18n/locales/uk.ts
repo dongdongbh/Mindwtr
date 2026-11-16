@@ -3064,4 +3064,9 @@ export const ukOverrides: Record<string, string> = {
         "taskEdit.dateOnlyStartReminder": "Нагадування про початок: {time} · типове для дат без часу",
         "taskEdit.dateOnlyDueReminder": "Нагадування про термін: {time} · типове для дат без часу",
         "taskEdit.advanceReminderNeedsReminderTime": "Додайте час терміну або виберіть час нагадування для термінів без часу в налаштуваннях сповіщень.",
+        "taskEdit.keepForLater": "Залишити на потім",
+        "taskEdit.finishDraft": "Завершити цю чернетку?",
+        "taskEdit.finishDraftSaveDesc": "Збережіть чернетку, відкиньте її або залиште на цьому пристрої на потім.",
+        "taskEdit.finishDraftDesc": "Відкиньте чернетку або залиште її на цьому пристрої на потім. Відновлення має завершитися, перш ніж можна буде продовжити редагування.",
+        "taskEdit.resumeDraft": "Продовжити чернетку",
 };

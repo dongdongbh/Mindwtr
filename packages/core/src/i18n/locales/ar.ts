@@ -1849,4 +1849,9 @@ export const arOverrides: Record<string, string> = {
         "taskEdit.dateOnlyStartReminder": "تذكير البدء: {time} · الافتراضي للتواريخ بلا وقت",
         "taskEdit.dateOnlyDueReminder": "تذكير الاستحقاق: {time} · الافتراضي للتواريخ بلا وقت",
         "taskEdit.advanceReminderNeedsReminderTime": "أضف وقت استحقاق أو اختر وقت تذكير للتواريخ المستحقة بلا وقت في إعدادات الإشعارات.",
+        "taskEdit.keepForLater": "الاحتفاظ لوقت لاحق",
+        "taskEdit.finishDraft": "هل تريد إنهاء هذه المسودة؟",
+        "taskEdit.finishDraftSaveDesc": "احفظ هذه المسودة أو تجاهلها أو احتفظ بها على هذا الجهاز لوقت لاحق.",
+        "taskEdit.finishDraftDesc": "تجاهل هذه المسودة أو احتفظ بها على هذا الجهاز لوقت لاحق. يجب أن تنتهي الاستعادة قبل متابعة التحرير.",
+        "taskEdit.resumeDraft": "استئناف المسودة",
 };

@@ -3104,4 +3104,9 @@ export const svOverrides: Record<string, string> = {
         "taskEdit.dateOnlyStartReminder": "Startpåminnelse: {time} · standardtid för datum utan klockslag",
         "taskEdit.dateOnlyDueReminder": "Förfallopåminnelse: {time} · standardtid för datum utan klockslag",
         "taskEdit.advanceReminderNeedsReminderTime": "Lägg till ett förfalloklockslag eller välj en påminnelsetid för datum utan klockslag i aviseringsinställningarna.",
+        "taskEdit.keepForLater": "Spara till senare",
+        "taskEdit.finishDraft": "Slutföra det här utkastet?",
+        "taskEdit.finishDraftSaveDesc": "Spara utkastet, släng det eller behåll det på den här enheten till senare.",
+        "taskEdit.finishDraftDesc": "Släng utkastet eller behåll det på den här enheten till senare. Återställningen måste bli klar innan du kan fortsätta redigera.",
+        "taskEdit.resumeDraft": "Återuppta utkast",
 };

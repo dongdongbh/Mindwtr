@@ -3146,4 +3146,9 @@ export const en: Record<string, string> = {
         "taskEdit.dateOnlyStartReminder": "Start reminder: {time} · date-only default",
         "taskEdit.dateOnlyDueReminder": "Due reminder: {time} · date-only default",
         "taskEdit.advanceReminderNeedsReminderTime": "Add a due time or choose a date-only due reminder time in Notifications settings.",
+        "taskEdit.keepForLater": "Keep for later",
+        "taskEdit.finishDraft": "Finish this draft?",
+        "taskEdit.finishDraftSaveDesc": "Save this draft, discard it, or keep it on this device for later.",
+        "taskEdit.finishDraftDesc": "Discard this draft or keep it on this device for later. Recovery must finish before editing can continue.",
+        "taskEdit.resumeDraft": "Resume draft",
 };

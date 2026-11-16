@@ -1913,4 +1913,9 @@ export const ptOverrides: Record<string, string> = {
         "taskEdit.dateOnlyStartReminder": "Lembrete de início: {time} · hora padrão para datas sem hora",
         "taskEdit.dateOnlyDueReminder": "Lembrete de prazo: {time} · hora padrão para datas sem hora",
         "taskEdit.advanceReminderNeedsReminderTime": "Adicione uma hora ao prazo ou escolha uma hora de lembrete para prazos sem hora nas configurações de notificações.",
+        "taskEdit.keepForLater": "Guardar para depois",
+        "taskEdit.finishDraft": "Concluir este rascunho?",
+        "taskEdit.finishDraftSaveDesc": "Salve este rascunho, descarte-o ou guarde-o neste dispositivo para depois.",
+        "taskEdit.finishDraftDesc": "Descarte este rascunho ou guarde-o neste dispositivo para depois. A recuperação precisa terminar antes de continuar a edição.",
+        "taskEdit.resumeDraft": "Retomar rascunho",
 };

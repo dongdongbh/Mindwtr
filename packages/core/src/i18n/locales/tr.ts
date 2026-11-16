@@ -1864,4 +1864,9 @@ export const trOverrides: Record<string, string> = {
         "taskEdit.dateOnlyStartReminder": "Başlangıç hatırlatıcısı: {time} · saati olmayan tarih varsayılanı",
         "taskEdit.dateOnlyDueReminder": "Son tarih hatırlatıcısı: {time} · saati olmayan tarih varsayılanı",
         "taskEdit.advanceReminderNeedsReminderTime": "Bir son saat ekleyin veya Bildirim ayarlarında saati olmayan son tarihler için hatırlatma saati seçin.",
+        "taskEdit.keepForLater": "Sonraya sakla",
+        "taskEdit.finishDraft": "Bu taslak tamamlansın mı?",
+        "taskEdit.finishDraftSaveDesc": "Bu taslağı kaydedin, silin veya daha sonra için bu cihazda saklayın.",
+        "taskEdit.finishDraftDesc": "Bu taslağı silin veya daha sonra için bu cihazda saklayın. Düzenlemeye devam etmeden önce kurtarmanın bitmesi gerekir.",
+        "taskEdit.resumeDraft": "Taslağa devam et",
 };

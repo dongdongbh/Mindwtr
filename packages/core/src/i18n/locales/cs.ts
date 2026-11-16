@@ -2629,4 +2629,9 @@ export const csOverrides: Record<string, string> = {
         "taskEdit.dateOnlyStartReminder": "Připomínka začátku: {time} · výchozí čas pro samotná data",
         "taskEdit.dateOnlyDueReminder": "Připomínka termínu: {time} · výchozí čas pro samotná data",
         "taskEdit.advanceReminderNeedsReminderTime": "Přidejte čas termínu nebo vyberte čas připomínky pro termíny bez času v nastavení oznámení.",
+        "taskEdit.keepForLater": "Ponechat na později",
+        "taskEdit.finishDraft": "Dokončit tento koncept?",
+        "taskEdit.finishDraftSaveDesc": "Uložte tento koncept, zahoďte ho, nebo ho ponechte na tomto zařízení na později.",
+        "taskEdit.finishDraftDesc": "Zahoďte tento koncept, nebo ho ponechte na tomto zařízení na později. Před pokračováním v úpravách musí obnovení skončit.",
+        "taskEdit.resumeDraft": "Pokračovat v konceptu",
 };

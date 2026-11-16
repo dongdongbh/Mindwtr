@@ -1337,7 +1337,7 @@ private struct AppLockRoot: View {
                             if model.taskRecoveryAvailable {
                                 Button(model.taskAttachmentState == .savedCleanup
                                     || (model.taskAttachmentState == .discardedCleanup && !model.taskAttachmentHasIndependentDraft)
-                                    ? "File cleanup" : "Resume draft") { model.showTaskRecovery() }
+                                    ? "File cleanup" : model.label("taskEdit.resumeDraft")) { model.showTaskRecovery() }
                                     .buttonStyle(.borderedProminent)
                                     .padding(16)
                                     .accessibilityIdentifier("task-recovery-open")
@@ -1786,7 +1786,7 @@ private struct TaskRecoveryGate: View {
                             .accessibilityIdentifier("task-recovery-resume")
                     }
                     if !retainedCleanup {
-                        Button("Keep for later") { Task { await model.keepTaskRecoveryForLater() } }
+                        Button(model.label("taskEdit.keepForLater")) { Task { await model.keepTaskRecoveryForLater() } }
                             .frame(maxWidth: .infinity, minHeight: 44)
                             .disabled(model.busy || model.taskRecoveryCheckpointError != nil)
                             .accessibilityIdentifier("task-recovery-keep")

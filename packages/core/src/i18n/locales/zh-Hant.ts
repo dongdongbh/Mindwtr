@@ -3074,4 +3074,9 @@ export const zhHant: Record<string, string> = {
         "taskEdit.dateOnlyStartReminder": "開始提醒：{time} · 僅日期預設時間",
         "taskEdit.dateOnlyDueReminder": "截止提醒：{time} · 僅日期預設時間",
         "taskEdit.advanceReminderNeedsReminderTime": "請新增截止時間，或在通知設定中選擇僅日期截止提醒時間。",
+        "taskEdit.keepForLater": "留待以後",
+        "taskEdit.finishDraft": "要完成這份草稿嗎？",
+        "taskEdit.finishDraftSaveDesc": "儲存這份草稿、放棄它，或將它留在這部裝置上以後再處理。",
+        "taskEdit.finishDraftDesc": "放棄這份草稿，或將它留在這部裝置上以後再處理。恢復完成後才能繼續編輯。",
+        "taskEdit.resumeDraft": "繼續草稿",
 };

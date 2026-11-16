@@ -3138,4 +3138,9 @@ export const jaOverrides: Record<string, string> = {
         "taskEdit.dateOnlyStartReminder": "開始通知：{time} · 日付のみの既定時刻",
         "taskEdit.dateOnlyDueReminder": "期限通知：{time} · 日付のみの既定時刻",
         "taskEdit.advanceReminderNeedsReminderTime": "期限の時刻を追加するか、通知設定で日付のみの期限リマインダーの時刻を選択してください。",
+        "taskEdit.keepForLater": "後で続ける",
+        "taskEdit.finishDraft": "この下書きを仕上げますか？",
+        "taskEdit.finishDraftSaveDesc": "この下書きを保存するか、破棄するか、後で続けられるようにこのデバイスに残してください。",
+        "taskEdit.finishDraftDesc": "この下書きを破棄するか、後で続けられるようにこのデバイスに残してください。編集を続ける前に復元を完了する必要があります。",
+        "taskEdit.resumeDraft": "下書きを再開",
 };

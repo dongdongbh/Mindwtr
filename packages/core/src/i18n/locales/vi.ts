@@ -2695,4 +2695,9 @@ export const viOverrides: Record<string, string> = {
         "taskEdit.dateOnlyStartReminder": "Nhắc bắt đầu: {time} · mặc định cho ngày không có giờ",
         "taskEdit.dateOnlyDueReminder": "Nhắc đến hạn: {time} · mặc định cho ngày không có giờ",
         "taskEdit.advanceReminderNeedsReminderTime": "Thêm giờ đến hạn hoặc chọn giờ nhắc cho ngày đến hạn không có giờ trong cài đặt thông báo.",
+        "taskEdit.keepForLater": "Giữ lại để làm sau",
+        "taskEdit.finishDraft": "Hoàn tất bản nháp này?",
+        "taskEdit.finishDraftSaveDesc": "Lưu bản nháp này, hủy bỏ hoặc giữ lại trên thiết bị này để làm sau.",
+        "taskEdit.finishDraftDesc": "Hủy bỏ bản nháp này hoặc giữ lại trên thiết bị này để làm sau. Quá trình khôi phục phải hoàn tất trước khi tiếp tục chỉnh sửa.",
+        "taskEdit.resumeDraft": "Tiếp tục bản nháp",
 };

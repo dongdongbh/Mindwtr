@@ -3068,4 +3068,9 @@ export const esOverrides: Record<string, string> = {
         "taskEdit.dateOnlyStartReminder": "Recordatorio de inicio: {time} · hora predeterminada para fechas sin hora",
         "taskEdit.dateOnlyDueReminder": "Recordatorio de vencimiento: {time} · hora predeterminada para fechas sin hora",
         "taskEdit.advanceReminderNeedsReminderTime": "Añade una hora de vencimiento o elige una hora de recordatorio para fechas sin hora en los ajustes de notificaciones.",
+        "taskEdit.keepForLater": "Guardar para después",
+        "taskEdit.finishDraft": "¿Terminar este borrador?",
+        "taskEdit.finishDraftSaveDesc": "Guarda este borrador, descártalo o consérvalo en este dispositivo para después.",
+        "taskEdit.finishDraftDesc": "Descarta este borrador o consérvalo en este dispositivo para después. La recuperación debe terminar antes de seguir editando.",
+        "taskEdit.resumeDraft": "Reanudar borrador",
 };

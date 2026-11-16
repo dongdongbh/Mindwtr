@@ -3068,4 +3068,9 @@ export const huOverrides: Record<string, string> = {
         "taskEdit.dateOnlyStartReminder": "Kezdési emlékeztető: {time} · alapértelmezés időpont nélküli dátumhoz",
         "taskEdit.dateOnlyDueReminder": "Határidő-emlékeztető: {time} · alapértelmezés időpont nélküli dátumhoz",
         "taskEdit.advanceReminderNeedsReminderTime": "Adjon meg határidő-időpontot, vagy válasszon emlékeztetési időt az időpont nélküli határidőkhöz az értesítési beállításokban.",
+        "taskEdit.keepForLater": "Megtartás későbbre",
+        "taskEdit.finishDraft": "Befejezi ezt a piszkozatot?",
+        "taskEdit.finishDraftSaveDesc": "Mentse a piszkozatot, vesse el, vagy tartsa meg ezen az eszközön későbbre.",
+        "taskEdit.finishDraftDesc": "Vesse el a piszkozatot, vagy tartsa meg ezen az eszközön későbbre. A helyreállításnak be kell fejeződnie, mielőtt folytatja a szerkesztést.",
+        "taskEdit.resumeDraft": "Piszkozat folytatása",
 };

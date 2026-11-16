@@ -3105,4 +3105,9 @@ export const faOverrides: Record<string, string> = {
         "taskEdit.dateOnlyStartReminder": "یادآور شروع: {time} · پیش‌فرض تاریخ بدون ساعت",
         "taskEdit.dateOnlyDueReminder": "یادآور سررسید: {time} · پیش‌فرض تاریخ بدون ساعت",
         "taskEdit.advanceReminderNeedsReminderTime": "ساعت سررسید اضافه کنید یا در تنظیمات اعلان‌ها ساعت یادآور سررسید بدون ساعت را انتخاب کنید.",
+        "taskEdit.keepForLater": "نگه داشتن برای بعد",
+        "taskEdit.finishDraft": "این پیش‌نویس را تمام می‌کنید؟",
+        "taskEdit.finishDraftSaveDesc": "این پیش‌نویس را ذخیره کنید، دور بیندازید یا برای بعد روی این دستگاه نگه دارید.",
+        "taskEdit.finishDraftDesc": "این پیش‌نویس را دور بیندازید یا برای بعد روی این دستگاه نگه دارید. پیش از ادامهٔ ویرایش، بازیابی باید تمام شود.",
+        "taskEdit.resumeDraft": "ادامهٔ پیش‌نویس",
 };

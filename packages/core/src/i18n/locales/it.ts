@@ -2024,4 +2024,9 @@ export const itOverrides: Record<string, string> = {
         "taskEdit.dateOnlyStartReminder": "Promemoria di inizio: {time} · orario predefinito per le sole date",
         "taskEdit.dateOnlyDueReminder": "Promemoria di scadenza: {time} · orario predefinito per le sole date",
         "taskEdit.advanceReminderNeedsReminderTime": "Aggiungi un orario di scadenza o scegli un orario di promemoria per le scadenze senza orario nelle impostazioni delle notifiche.",
+        "taskEdit.keepForLater": "Tieni per dopo",
+        "taskEdit.finishDraft": "Completare questa bozza?",
+        "taskEdit.finishDraftSaveDesc": "Salva questa bozza, scartala o tienila su questo dispositivo per dopo.",
+        "taskEdit.finishDraftDesc": "Scarta questa bozza o tienila su questo dispositivo per dopo. Il ripristino deve terminare prima di continuare a modificare.",
+        "taskEdit.resumeDraft": "Riprendi bozza",
 };

@@ -2506,4 +2506,9 @@ export const frOverrides: Record<string, string> = {
         "taskEdit.dateOnlyStartReminder": "Rappel de début : {time} · heure par défaut des dates seules",
         "taskEdit.dateOnlyDueReminder": "Rappel d’échéance : {time} · heure par défaut des dates seules",
         "taskEdit.advanceReminderNeedsReminderTime": "Ajoutez une heure d’échéance ou choisissez une heure de rappel pour les échéances sans heure dans les paramètres de notifications.",
+        "taskEdit.keepForLater": "Garder pour plus tard",
+        "taskEdit.finishDraft": "Terminer ce brouillon ?",
+        "taskEdit.finishDraftSaveDesc": "Enregistrez ce brouillon, supprimez-le ou gardez-le sur cet appareil pour plus tard.",
+        "taskEdit.finishDraftDesc": "Supprimez ce brouillon ou gardez-le sur cet appareil pour plus tard. La récupération doit se terminer avant de reprendre la modification.",
+        "taskEdit.resumeDraft": "Reprendre le brouillon",
 };

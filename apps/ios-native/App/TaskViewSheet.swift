@@ -467,7 +467,7 @@ struct TaskViewSheet: View {
             guard !closeDisabled, !discardConfirm, model.taskDirty || ownedCloseDecision else { return }
             requestClose()
         }.frame(width: 0, height: 0).accessibilityHidden(true))
-        .alert(ownedCloseDecision ? "Finish this draft?" : strings.text("taskEdit.discardChanges"), isPresented: $discardConfirm) {
+        .alert(strings.text(ownedCloseDecision ? "taskEdit.finishDraft" : "taskEdit.discardChanges"), isPresented: $discardConfirm) {
             Button(strings.text("common.discard"), role: .destructive) {
                 endEditingBeforeAction()
                 if ownedCloseDecision { Task { await model.discardTaskRecoveryDraft(close: true) } }
@@ -484,7 +484,7 @@ struct TaskViewSheet: View {
                 .accessibilityIdentifier("task-editor-save-close")
             }
             if model.taskRecoveryAvailable {
-                Button("Keep for later") {
+                Button(strings.text("taskEdit.keepForLater")) {
                     Task { await model.keepTaskRecoveryForLater() }
                 }
                 .accessibilityIdentifier("task-editor-keep-for-later")
@@ -492,11 +492,8 @@ struct TaskViewSheet: View {
             Button(strings.text("common.cancel"), role: .cancel) {}
                 .accessibilityIdentifier("task-editor-keep-editing")
         } message: {
-            Text(model.taskAttachmentState == .active
-                ? "Save this draft, discard it, or keep it on this device for later."
-                : ownedCloseDecision
-                    ? "Discard this draft or keep it on this device for later. Recovery must finish before editing can continue."
-                    : strings.text("taskEdit.discardChangesDesc"))
+            Text(strings.text(model.taskAttachmentState == .active ? "taskEdit.finishDraftSaveDesc"
+                : ownedCloseDecision ? "taskEdit.finishDraftDesc" : "taskEdit.discardChangesDesc"))
         }
         .onAppear {
             editing = model.taskInitialTab == "task"
