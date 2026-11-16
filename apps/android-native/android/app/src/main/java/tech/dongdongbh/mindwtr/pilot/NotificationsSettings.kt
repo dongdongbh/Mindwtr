@@ -77,15 +77,20 @@ internal fun NotificationsSettings(model: InboxViewModel, view: JSONObject) = wi
             contentDescription = "$label: $value"; role = Role.Button; if (on) onClick { open(); true } else disabled()
         }.clickable(enabled = on, onClick = open), dimmed = row.getBoolean("disabled"))
     }
-    val time = { row: JSONObject -> { pickTime(context, row, theme.isDark) { picked -> notifications(JSONObject().put("type", row.getString("type")).put("value", picked)) } } }
+    val setTime = { row: JSONObject, value: String -> notifications(JSONObject().put("type", row.getString("type")).put("value", value)) }
+    val time = { row: JSONObject -> { pickTime(context, row, theme.isDark) { picked -> setTime(row, picked) } } }
+    var offOrTime by remember { mutableStateOf<JSONObject?>(null) }
+    offOrTime?.let { row ->
+        ThemedAlert(row.getString("label"), row.getString("description"), offOrTimeButtons(row, { offOrTime = null }, { value -> setTime(row, value) }, time(row))) { offOrTime = null }
+    }
 
     Card {
         Toggle(reminders.getJSONObject("enable"), false)
         Pressable(reminders.getJSONObject("taskDefault")) { model.menu.keepDialog(JSONObject().put("kind", "settingsPicker").put("picker", "taskReminderDefault")) }
         Toggle(reminders.getJSONObject("startReminders"), true)
-        reminders.getJSONObject("dateOnlyStartTime").let { Pressable(it, time(it)) }
+        reminders.getJSONObject("dateOnlyStartTime").let { row -> Pressable(row) { offOrTime = row } }
         Toggle(reminders.getJSONObject("dueReminders"), true)
-        reminders.getJSONObject("dateOnlyDueTime").let { Pressable(it, time(it)) }
+        reminders.getJSONObject("dateOnlyDueTime").let { row -> Pressable(row) { offOrTime = row } }
 
 
         reminders.optJSONObject("exactAlarmNotice")?.let { notice ->
@@ -123,11 +128,16 @@ private val ALLOW_BLUE = Color(0xFF2563EB)
 
 
 internal fun pickTime(context: Context, row: JSONObject, dark: Boolean, picked: (String) -> Unit) {
-    val dialog = TimePickerDialog(systemDialogContext(context, dark), { _, hour, minute -> picked(coreTime(hour, minute)) }, row.getInt("hour"), row.getInt("minute"),
-        DateFormat.is24HourFormat(context))
-    row.optString("offLabel").takeIf { it.isNotEmpty() }?.let { off -> dialog.setButton(TimePickerDialog.BUTTON_NEUTRAL, off) { _, _ -> picked("") } }
-    dialog.show()
+    TimePickerDialog(systemDialogContext(context, dark), { _, hour, minute -> picked(coreTime(hour, minute)) }, row.getInt("hour"), row.getInt("minute"),
+        DateFormat.is24HourFormat(context)).show()
 }
+
+
+internal fun offOrTimeButtons(row: JSONObject, close: () -> Unit, set: (String) -> Unit, choose: () -> Unit) = listOf(
+    AlertButton(row.getString("offLabel"), "default") { close(); set("") },
+    AlertButton(t("settings.dateOnlyReminderChooseTime"), "default") { close(); choose() },
+    AlertButton(t("common.cancel"), "cancel", close),
+)
 
 
 internal fun coreTime(hour: Int, minute: Int): String = String.format(Locale.ROOT, "%02d:%02d", hour, minute)

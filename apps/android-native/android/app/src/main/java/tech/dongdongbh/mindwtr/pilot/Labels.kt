@@ -16,7 +16,7 @@ val LABEL_KEYS = listOf(
     "agenda.laterToday",
 
     "settings.lastSyncError", "settings.feedbackFailed",
-    "common.cancel", "common.close", "common.save", "common.ok", "common.clear", "common.discard",
+    "common.cancel", "common.close", "common.save", "common.ok", "common.clear", "common.discard", "settings.dateOnlyReminderChooseTime",
 
     "projects.actionsLabel", "projects.duplicate", "projects.complete", "projects.reactivate", "projects.cancel", "projects.archiveHelp",
     "projects.cancelConfirmTitle", "projects.cancelConfirmBody", "projects.deleteConfirm", "common.notice",

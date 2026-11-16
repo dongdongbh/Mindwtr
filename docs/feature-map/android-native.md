@@ -556,7 +556,7 @@ The native client is a Kotlin and Jetpack Compose app in `apps/android-native`. 
 
 ## Date-only task reminders (#1570)
 
-- Reach: Settings › Notifications › Date-only start reminders / Date-only due reminders. Each offers Off or a local reminder time; both default to Off. Task editor › start/due reminders shows the effective default and retains Skip, advance and configured repeat controls.
+- Reach: Settings › Notifications › Date-only start reminders / Date-only due reminders. Each offers Off or a local reminder time; both default to Off. Tapping either row first shows an alert with Off, Choose time and Cancel, as in the RN app; Choose time opens the time picker. Task editor › start/due reminders shows the effective default and retains Skip, advance and configured repeat controls.
 - Behavior: Only notification timing changes. Task dates, all-day calendar placement, availability and overdue calculations stay unchanged. Explicit task times take precedence; Review reminders are unchanged. Changing or disabling a default replaces pending reminders without replaying past alerts.
 - Code: `packages/core/src/schedule-utils.ts`, `packages/core/src/notifications-settings-model.ts`, `packages/core/src/task-editor-schedule.ts`
-- Checks: `packages/core/src/task-editor-schedule.test.ts`; validate independent defaults, explicit-time precedence, Skip, advance reminders and pending notification replacement.
+- Checks: `packages/core/src/task-editor-schedule.test.ts`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/NotificationsTimeTest.kt` (alert choices and order); validate independent defaults, explicit-time precedence, Skip, advance reminders and pending notification replacement.
