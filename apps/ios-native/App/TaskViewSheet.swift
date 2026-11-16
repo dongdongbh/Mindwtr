@@ -468,20 +468,21 @@ struct TaskViewSheet: View {
             requestClose()
         }.frame(width: 0, height: 0).accessibilityHidden(true))
         .alert(ownedCloseDecision ? "Finish this draft?" : strings.text("taskEdit.discardChanges"), isPresented: $discardConfirm) {
-            if model.taskAttachmentState == .active {
-                Button(strings.text("common.save")) {
-                    endEditingBeforeAction()
-                    Task { await model.saveTask() }
-                }
-                .disabled(operationFrozen || readOnly || model.taskPersonCreateNeedsReview)
-                .accessibilityIdentifier("task-editor-save-close")
-            }
             Button(strings.text("common.discard"), role: .destructive) {
                 endEditingBeforeAction()
                 if ownedCloseDecision { Task { await model.discardTaskRecoveryDraft(close: true) } }
                 else { model.discardTask() }
             }
                 .accessibilityIdentifier("task-editor-discard")
+            if !readOnly && (model.taskAttachmentState == .none || model.taskAttachmentState == .active) {
+                Button(strings.text("common.save")) {
+                    endEditingBeforeAction()
+                    Task { await model.saveTask() }
+                }
+                .disabled(operationFrozen || readOnly || model.taskPersonCreateNeedsReview)
+                .keyboardShortcut(.defaultAction)
+                .accessibilityIdentifier("task-editor-save-close")
+            }
             if model.taskRecoveryAvailable {
                 Button("Keep for later") {
                     Task { await model.keepTaskRecoveryForLater() }

@@ -38276,3 +38276,46 @@ extension FoundationUITests {
         XCTAssertFalse(app.buttons["persistence-retry"].exists)
     }
 }
+
+extension FoundationUITests {
+    private func uiBatchApp(language: String = "(en-US)", locale: String = "en_US") -> XCUIApplication {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", UUID().uuidString.lowercased(), "-AppleLanguages", language, "-AppleLocale", locale]
+        return app
+    }
+
+    private func uiBatchCapture(_ app: XCUIApplication, _ title: String) {
+        boardEnabled(app.buttons["capture-open"], timeout: 40)
+        boardTap(app, "capture-open")
+        let input = app.textViews["capture-input"]
+        boardEnabled(input); input.typeText(title)
+        boardTap(app, "capture-save")
+        boardEnabled(app.buttons[title], timeout: 30)
+    }
+
+    private func uiBatchDirtyEditor(_ app: XCUIApplication, _ title: String, edited: String) {
+        uiBatchCapture(app, title)
+        app.buttons[title].tap()
+        boardTap(app, "task-mode-edit")
+        let field = app.textFields["task-editor-title"]
+        boardEnabled(field, timeout: 30)
+        replaceProjectNotesText(field, with: edited)
+        XCTAssertEqual(field.value as? String, edited)
+        boardTap(app, "task-view-close")
+    }
+
+    func testUIBatchEditorClosePromptOffersSaveForPlainEdit() {
+        let app = uiBatchApp()
+        app.launch(); defer { app.terminate() }
+        uiBatchDirtyEditor(app, "UI batch close prompt", edited: "UI batch close prompt saved")
+        let save = app.buttons.matching(identifier: "task-editor-save-close").firstMatch
+        XCTAssertTrue(save.waitForExistence(timeout: 10), "The close prompt offers Save, as RN does")
+        XCTAssertTrue(app.buttons["task-editor-discard"].exists)
+        XCTAssertTrue(app.buttons["task-editor-keep-editing"].exists)
+        save.tap()
+        XCTAssertTrue(app.textFields["task-editor-title"].waitForNonExistence(timeout: 30))
+        boardEnabled(app.buttons["UI batch close prompt saved"], timeout: 30)
+        XCTAssertFalse(app.buttons["persistence-retry"].exists)
+    }
+}
