@@ -53,6 +53,7 @@ export function extractIssueNumbers(body, repository) {
     if (reference.slice(0, reference.lastIndexOf('#')).toLowerCase() === repository.toLowerCase()) add(number);
     return ' ';
   });
+  while (/\[[^\[\]\n]*\]/.test(remaining)) remaining = remaining.replace(/\[[^\[\]\n]*\]/g, ' ');
   for (const match of remaining.matchAll(/(?:^|[^\w/#])#([1-9]\d*)\b/g)) add(match[1]);
   return [...numbers].sort((a, b) => a - b);
 }

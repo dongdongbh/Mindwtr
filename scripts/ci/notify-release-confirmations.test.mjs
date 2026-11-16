@@ -198,3 +198,9 @@ test('malformed or unclosed explicit lists fail closed rather than falling back 
   }
   assert.deepEqual(extractIssueNumbers('#1460 <!-- unfinished #333', repo), [1460]);
 });
+
+test('nested link labels never fall through to local issue references', () => {
+  for (const body of ['[[#111]](https://github.com/other/repo/issues/111)', '[[#111]][foreign]\n[foreign]: https://github.com/other/repo/issues/111']) {
+    assert.deepEqual(extractIssueNumbers(body, repo), []);
+  }
+});

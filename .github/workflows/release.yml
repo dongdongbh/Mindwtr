@@ -641,7 +641,7 @@ jobs:
     uses: ./.github/workflows/notify-release-confirmations.yml
     with:
       release_tag: ${{ needs.validate.outputs.tag }}
-      dry_run: true
+      dry_run: false
 
   update-packages:
     needs: [validate, release]

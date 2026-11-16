@@ -2,7 +2,7 @@
 
 The stable release workflow calls `notify-release-confirmations.yml` after successful GitHub publication. GitHub publication is not proof that an update has reached a reporter: Apple review, staged rollouts, and downstream packaging proceed separately. The comment identifies the version containing a change and asks for retesting only once that version or newer is installed. It does not promise availability through every channel.
 
-The release caller starts in preview mode (`dry_run: true`). Enable posting only after reviewing the dry-run summary and selected issues. The manual workflow defaults to preview even when the release caller enables posting.
+The release caller enables posting (`dry_run: false`). The manual workflow defaults to preview. Before changing issue selection or comment wording, inspect a dry run; do not use a historical release for an unreviewed backfill.
 
 ## Selection
 
