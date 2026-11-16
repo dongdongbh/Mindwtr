@@ -300,6 +300,8 @@ export function TaskInput({
     });
     const pendingSelectionRef = useRef<PendingSelectionRestore | null>(null);
     const undoRef = useRef<Array<{ value: string; selection: InputSelection }>>([]);
+    const blurCloseTimerRef = useRef<number | undefined>(undefined);
+    useEffect(() => () => window.clearTimeout(blurCloseTimerRef.current), []);
     const prioritiesEnabled = useTaskStore((state) => resolveFeatureFlags(state.settings).priorities);
     const timeEstimatesEnabled = useTaskStore((state) => resolveFeatureFlags(state.settings).timeEstimates);
 
@@ -656,7 +658,7 @@ export function TaskInput({
                     updateTrigger(target.value, target.selectionStart ?? target.value.length);
                 }}
                 onBlur={() => {
-                    window.setTimeout(() => closeTrigger(), 250);
+                    blurCloseTimerRef.current = window.setTimeout(() => closeTrigger(), 250);
                 }}
                 placeholder={placeholder}
                 role="combobox"

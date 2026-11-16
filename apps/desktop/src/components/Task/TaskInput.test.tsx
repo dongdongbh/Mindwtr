@@ -75,6 +75,18 @@ describe('TaskInput autocomplete', () => {
         expect(onKeyDown).toHaveBeenCalledOnce();
     });
 
+    it('cancels its pending blur close when it unmounts', () => {
+        vi.useFakeTimers();
+        try {
+            const { getByRole, unmount } = render(<TaskInputHarness initialValue="@wo" contexts={['@work']} />);
+            fireEvent.blur(getByRole('combobox'));
+            unmount();
+            expect(vi.getTimerCount()).toBe(0);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
     it('suggests custom contexts for @ trigger', () => {
         const onChange = vi.fn();
         const { getByRole } = render(
