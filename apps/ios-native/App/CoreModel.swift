@@ -17215,7 +17215,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         let model = options.object("model"), expected = options.object("expected")
         let fields: Set<String> = ["notificationsEnabled", "startDateNotificationsEnabled", "dueDateNotificationsEnabled",
             "weeklyReviewEnabled", "dailyDigestMorningEnabled", "dailyDigestEveningEnabled", "weeklyReviewDay",
-            "weeklyReviewTime", "dailyDigestMorningTime", "dailyDigestEveningTime", "taskReminderDefault"]
+            "weeklyReviewTime", "dailyDigestMorningTime", "dailyDigestEveningTime", "taskReminderDefault", "dateOnlyStartReminderTime", "dateOnlyDueReminderTime"]
         guard Set(options.keys) == Set(["model", "expected"]), !model.text("title").isEmpty,
               model["task"] is CoreObject, model["weekly"] is CoreObject, model["digest"] is CoreObject,
               model["text"] is CoreObject, Set(expected.keys) == fields,

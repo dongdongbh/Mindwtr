@@ -7791,7 +7791,7 @@ private final class Engine: @unchecked Sendable {
 
     private static let notificationSettingFields = Set(["notificationsEnabled", "startDateNotificationsEnabled",
         "dueDateNotificationsEnabled", "weeklyReviewEnabled", "dailyDigestMorningEnabled", "dailyDigestEveningEnabled",
-        "weeklyReviewTime", "dailyDigestMorningTime", "dailyDigestEveningTime", "weeklyReviewDay", "taskReminderDefault"])
+        "weeklyReviewTime", "dailyDigestMorningTime", "dailyDigestEveningTime", "weeklyReviewDay", "taskReminderDefault", "dateOnlyStartReminderTime", "dateOnlyDueReminderTime"])
     private static func notificationSettingRequest(_ raw: String) throws -> [String: Any] {
         guard raw.utf8.count <= 8_192,
               let input = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any],
@@ -7809,6 +7809,8 @@ private final class Engine: @unchecked Sendable {
             valid = edit["value"] as? String == "send" || edit["value"] as? String == "skip"
         } else if type == "weeklyReviewDay" {
             valid = isInteger(edit["value"]) && (edit["value"] as? NSNumber).map { (0...6).contains($0.doubleValue) } == true
+        } else if type == "dateOnlyStartReminderTime" || type == "dateOnlyDueReminderTime" {
+            valid = (edit["value"] as? String).map { $0.isEmpty || $0.range(of: "^(?:[01][0-9]|2[0-3]):[0-5][0-9]$", options: .regularExpression) != nil } == true
         } else if ["weeklyReviewTime", "dailyDigestMorningTime", "dailyDigestEveningTime"].contains(type) {
             valid = (edit["value"] as? String).map { $0.range(of: "^(?:[01][0-9]|2[0-3]):[0-5][0-9]$", options: .regularExpression) != nil } == true
         } else { valid = isBoolean(edit["value"]) }

@@ -1006,7 +1006,7 @@ export function TaskItemFieldRenderer({
             {
                 const { date: dateValue, time: timeValue } = splitDateTime(editDueDate);
                 const hasTime = Boolean(timeValue);
-                const hasReminderHandoffSchedule = hasTimeComponent(editStartTime) || Boolean(editDueDate) || (draft.dueReminderLeadMinutes ?? 0) > 0;
+                const hasReminderHandoffSchedule = reminders.showSkip || Boolean(editDueDate) || (draft.dueReminderLeadMinutes ?? 0) > 0;
                 const parsed = editDueDate ? safeParseDate(editDueDate) : null;
                 const updateDueDate = (nextDueDate: string) => {
                     setEditDueDate(nextDueDate);

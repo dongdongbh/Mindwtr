@@ -2722,7 +2722,11 @@ struct SettingsScreen: View {
                 palette.border.frame(height: 0.5)
                 notificationToggle(task.object("start"))
                 palette.border.frame(height: 0.5)
+                notificationPickerRow(task.object("dateOnlyStartTime"), type: "dateOnlyStartReminderTime", summary: task.object("dateOnlyStartTime").text("description"))
+                palette.border.frame(height: 0.5)
                 notificationToggle(task.object("due"))
+                palette.border.frame(height: 0.5)
+                notificationPickerRow(task.object("dateOnlyDueTime"), type: "dateOnlyDueReminderTime", summary: task.object("dateOnlyDueTime").text("description"))
             }.background(palette.card, in: RoundedRectangle(cornerRadius: 12))
         })
     }
@@ -2850,7 +2854,7 @@ struct SettingsScreen: View {
         if type == "taskReminderDefault" { notificationDefaultDraft = row.text("value") }
         else if type == "weeklyReviewDay" { notificationDayDraft = row.number("value") }
         else {
-            let time = row.text("value").split(separator: ":").compactMap { Int($0) }
+            let time = (row.text("value").isEmpty ? "09:00" : row.text("value")).split(separator: ":").compactMap { Int($0) }
             guard time.count == 2, let date = Calendar.current.date(bySettingHour: time[0], minute: time[1], second: 0, of: Date()) else { return }
             notificationTimeDraft = date
         }
@@ -2861,6 +2865,8 @@ struct SettingsScreen: View {
         let type = notificationPicker ?? ""
         let weekly = model.notificationSettings.object("weekly")
         let row = type == "taskReminderDefault" ? model.notificationSettings.object("task").object("default")
+            : type == "dateOnlyStartReminderTime" ? model.notificationSettings.object("task").object("dateOnlyStartTime")
+            : type == "dateOnlyDueReminderTime" ? model.notificationSettings.object("task").object("dateOnlyDueTime")
             : type == "weeklyReviewDay" ? weekly.object("day") : type == "weeklyReviewTime" ? weekly.object("time")
             : model.notificationSettings.object("digest").object(type == "dailyDigestMorningTime" ? "morning" : "evening").object("time")
         return VStack(spacing: 12) {
@@ -2896,6 +2902,15 @@ struct SettingsScreen: View {
                 }
             }.accessibilityIdentifier("notifications-picker-scroll")
             HStack(spacing: 12) {
+                if !row.text("offLabel").isEmpty {
+                    Button {
+                        notificationPicker = nil
+                        model.saveNotificationSetting(["type": type, "value": ""])
+                    } label: {
+                        Text(row.text("offLabel")).rnFont(15)
+                            .frame(maxWidth: .infinity, minHeight: 48).contentShape(Rectangle())
+                    }.disabled(!model.notificationSettingEnabled).accessibilityIdentifier("notifications-picker-off")
+                }
                 Button { notificationPicker = nil } label: {
                     Text(model.notificationSettings.object("text").text("cancel")).rnFont(15)
                         .frame(maxWidth: .infinity, minHeight: 48).contentShape(Rectangle())

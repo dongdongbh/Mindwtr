@@ -163,6 +163,58 @@ describe('mobile reminder alarms', () => {
         expect(result.diagnostics).toMatchObject({ dateOnlyDueDateCount: 1, dateOnlyStartTimeCount: 1 });
     });
 
+    it('reconciles date-only clocks idempotently and withdraws obsolete pending and shifted alarms', async () => {
+        const tasks = [task('due', { dueDate: '2026-09-28', dueReminderLeadMinutes: 30, repeatReminderMinutes: 30 }),
+            task('start', { startTime: '2026-09-28' }), task('review', { reviewAt: '2026-09-28T15:00:00Z' })];
+        const settings = { dateOnlyStartReminderTime: '12:00', dateOnlyDueReminderTime: '11:00' };
+        const first = plan({ tasks, settings });
+        const alarms = new Map(first.oneShot.map((request, index): [string, ReminderAlarmEntry] => [request.key, { id: index + 1, signature: request.signature }]));
+        expect(plan({ tasks, settings, alarms }).schedule).toEqual([]);
+        const due = first.oneShot.find((request) => request.key === 'task:due')!;
+        const shifted = new Map([['task:due', { id: 1, signature: due.signature, fireAtMs: Date.parse('2026-09-28T11:01:00Z') }]]);
+        expect(plan({ tasks, settings, alarms: shifted, now: new Date('2026-09-28T11:00:30Z') }).shifted).toEqual(['task:due']);
+        const changed = plan({ tasks, alarms, settings: { ...settings, dateOnlyDueReminderTime: '13:00' } });
+        expect(changed.keep).toContain('task:start');
+        expect(changed.keep).toContain('task:review');
+        expect(changed.reasons['task:due']).toBe('withdrawn');
+        expect(changed.oneShot.find((request) => request.key === 'task:due')?.config.fireAt.toISOString()).toBe('2026-09-28T13:00:00.000Z');
+        const off = plan({ tasks, alarms, settings: {} });
+        expect(off.cancel).toContain('task:due');
+        expect(off.cancel).toContain('task:start');
+        expect(off.keep).toEqual(['task:review']);
+        expect(off.reasons['task:due']).toBe('withdrawn');
+        expect(plan({ tasks, settings: {}, alarms: shifted, now: new Date('2026-09-28T11:00:30Z') }))
+            .toMatchObject({ shifted: [], cancel: ['task:due'], reasons: { 'task:due': 'withdrawn' } });
+        const { port, calls } = recordingPort([], { next: 30 });
+        await scheduleReminderAlarms(first, new Map(), port);
+        expect(calls).toContainEqual(['logInfo', '[Local Notifications] Date-only reminder scheduled',
+            { releaseCheck: 'v1.3.9/date-only-reminders', outcome: 'scheduled' }]);
+    });
+
+    it('replaces date-only pending alarms after timezone travel while explicit datetimes stay fixed', () => {
+        const tasks = [task('local', { dueDate: '2026-09-29' }), task('absolute', { dueDate: '2026-09-29T09:00:00Z' })];
+        const settings = { dateOnlyDueReminderTime: '09:00' };
+        const first = plan({ tasks, settings });
+        const alarms = new Map(first.oneShot.map((request, index): [string, ReminderAlarmEntry] => [request.key, { id: index + 1, signature: request.signature }]));
+        try {
+            process.env.TZ = 'America/New_York';
+            const moved = plan({ tasks, settings, alarms });
+            expect(moved.schedule).toEqual(['task:local']);
+            expect(moved.reasons['task:local']).toBe('withdrawn');
+            expect(moved.keep).toEqual(['task:absolute']);
+            expect(moved.oneShot.find((request) => request.key === 'task:local')?.config.fireAt.toISOString()).toBe('2026-09-29T13:00:00.000Z');
+        } finally {
+            process.env.TZ = 'UTC';
+        }
+    });
+
+    it('does not schedule past date-only base or advance alerts when enabled after their clocks', () => {
+        const result = plan({ tasks: [task('past', { dueDate: '2026-09-28', dueReminderLeadMinutes: 30 }),
+            task('start', { startTime: '2026-09-28' })], settings: { dateOnlyStartReminderTime: '09:59', dateOnlyDueReminderTime: '09:59' } });
+        expect(result.oneShot).toEqual([]);
+        expect(result.schedule).toEqual([]);
+    });
+
     it('withdraws scheduled and shifted inherited alarms on Skip, then arms Send once without losing repeats or reviews', async () => {
         const tasks = [task('a', { reminderPolicy: 'inherit', dueDate: '2026-09-28T11:00:00.000Z', repeatReminderMinutes: 30 }),
             task('review', { reminderPolicy: 'inherit', reviewAt: '2026-09-28T12:00:00.000Z' })];
@@ -383,6 +435,8 @@ describe('mobile reminder alarms', () => {
         expect(shouldRescheduleReminderAlarms(base, { ...base, settings: { ...settings, taskReminderDefault: 'skip' } })).toBe(true);
         expect(shouldRescheduleReminderAlarms({ ...base, settings: { ...settings, language: 'de' } as NotificationSettings }, base)).toBe(true);
         expect(shouldRescheduleReminderAlarms({ ...base, settings: { ...settings, weeklyReviewTime: '09:00' } }, base)).toBe(true);
+        expect(shouldRescheduleReminderAlarms({ ...base, settings: { ...settings, dateOnlyStartReminderTime: '09:00' } }, base)).toBe(true);
+        expect(shouldRescheduleReminderAlarms({ ...base, settings: { ...settings, dateOnlyDueReminderTime: '17:00' } }, base)).toBe(true);
     });
 
     it('reads alarm and Pomodoro entries tolerantly', () => {

@@ -174,6 +174,100 @@ describe('desktop start advance reminders', () => {
     });
 });
 
+describe('desktop date-only reminders', () => {
+    const initial = useTaskStore.getState();
+    const tick = new Date(2026, 5, 17, 9, 0);
+    let delivered: ReturnType<typeof vi.fn<(...args: unknown[]) => void>>;
+
+    beforeEach(() => {
+        vi.useFakeTimers();
+        vi.setSystemTime(tick);
+        delivered = vi.fn();
+        vi.stubGlobal('Notification', Object.assign(function (...args: unknown[]) { delivered(...args); }, { permission: 'granted' }));
+        useTaskStore.setState({ _allTasks: [{ ...baseTask, dueDate: '2026-06-17' }], _allProjects: [],
+            settings: { notificationsEnabled: true, dateOnlyDueReminderTime: '09:01' } });
+    });
+    afterEach(() => {
+        stopDesktopNotifications();
+        useTaskStore.setState(initial, true);
+        vi.clearAllMocks();
+        vi.unstubAllGlobals();
+        vi.useRealTimers();
+    });
+
+    it.each(['start', 'due'] as const)('delivers %s at the configured clock once with a release receipt', async (kind) => {
+        useTaskStore.setState({ _allTasks: [{ ...baseTask, [kind === 'start' ? 'startTime' : 'dueDate']: '2026-06-17' }],
+            settings: { notificationsEnabled: true, dateOnlyStartReminderTime: '09:01', dateOnlyDueReminderTime: '09:01' } });
+        await startDesktopNotifications();
+        await vi.advanceTimersByTimeAsync(45_000);
+        expect(delivered).not.toHaveBeenCalled();
+        await vi.advanceTimersByTimeAsync(15_000);
+        expect(delivered).toHaveBeenCalledTimes(1);
+        expect(logMock.logInfo).toHaveBeenCalledWith('Date-only reminder delivered', expect.objectContaining({
+            extra: { releaseCheck: 'v1.3.9/date-only-reminders', outcome: 'delivered' },
+        }));
+        await vi.advanceTimersByTimeAsync(60_000);
+        expect(delivered).toHaveBeenCalledTimes(1);
+    });
+
+    it.each(['start', 'due'] as const)('uses the %s clock for an advance and retains its base reminder', async (kind) => {
+        useTaskStore.setState({ _allTasks: [{ ...baseTask,
+            [kind === 'start' ? 'startTime' : 'dueDate']: '2026-06-17',
+            [kind === 'start' ? 'startReminderLeadMinutes' : 'dueReminderLeadMinutes']: 60 }],
+            settings: { notificationsEnabled: true, dateOnlyStartReminderTime: '10:01', dateOnlyDueReminderTime: '10:01' } });
+        await startDesktopNotifications();
+        await vi.advanceTimersByTimeAsync(60_000);
+        expect(delivered).toHaveBeenCalledTimes(1);
+        await vi.advanceTimersByTimeAsync(60 * 60_000);
+        expect(delivered).toHaveBeenCalledTimes(2);
+    });
+
+    it.each(['', '09:02'])('skips a past clock introduced from %s and still admits a later clock', async (previous) => {
+        useTaskStore.setState({ settings: { notificationsEnabled: true, dateOnlyDueReminderTime: previous } });
+        await startDesktopNotifications();
+        await vi.advanceTimersByTimeAsync(5_000);
+        useTaskStore.setState({ settings: { notificationsEnabled: true, dateOnlyDueReminderTime: '09:00' } });
+        await vi.advanceTimersByTimeAsync(15_000);
+        expect(delivered).not.toHaveBeenCalled();
+        useTaskStore.setState({ settings: { notificationsEnabled: true, dateOnlyDueReminderTime: '09:01' } });
+        await vi.advanceTimersByTimeAsync(40_000);
+        expect(delivered).toHaveBeenCalledTimes(1);
+    });
+
+    it.each(['start', 'due'] as const)('keeps %s sleep catch-up when the other clock changes', async (kind) => {
+        useTaskStore.setState({ _allTasks: [{ ...baseTask, [kind === 'start' ? 'startTime' : 'dueDate']: '2026-06-17' }],
+            settings: { notificationsEnabled: true, dateOnlyStartReminderTime: '09:01', dateOnlyDueReminderTime: '09:01' } });
+        await startDesktopNotifications();
+        vi.setSystemTime(new Date(tick.getTime() + 3 * 60_000));
+        useTaskStore.setState({ settings: { notificationsEnabled: true,
+            dateOnlyStartReminderTime: kind === 'start' ? '09:01' : '10:00',
+            dateOnlyDueReminderTime: kind === 'due' ? '09:01' : '10:00' } });
+        await vi.advanceTimersByTimeAsync(15_000);
+        expect(delivered).toHaveBeenCalledTimes(1);
+    });
+
+    it('catches up an already active clock after sleep', async () => {
+        await startDesktopNotifications();
+        vi.setSystemTime(new Date(tick.getTime() + 3 * 60_000));
+        await vi.advanceTimersByTimeAsync(15_000);
+        expect(delivered).toHaveBeenCalledTimes(1);
+        await vi.advanceTimersByTimeAsync(15_000);
+        expect(delivered).toHaveBeenCalledTimes(1);
+    });
+
+    it('uses the effective due clock for repeats without catching up a newly enabled past repeat', async () => {
+        useTaskStore.setState({ _allTasks: [{ ...baseTask, dueDate: '2026-06-17', repeatReminderMinutes: 10 }],
+            settings: { notificationsEnabled: true } });
+        await startDesktopNotifications();
+        vi.setSystemTime(new Date(2026, 5, 17, 9, 20, 5));
+        useTaskStore.setState({ settings: { notificationsEnabled: true, dateOnlyDueReminderTime: '09:00' } });
+        await vi.advanceTimersByTimeAsync(15_000);
+        expect(delivered).not.toHaveBeenCalled();
+        await vi.advanceTimersByTimeAsync(10 * 60_000);
+        expect(delivered).toHaveBeenCalledTimes(1);
+    });
+});
+
 describe('desktop notification service', () => {
     it('includes the reminder type before the task description', () => {
         const task: Task = {

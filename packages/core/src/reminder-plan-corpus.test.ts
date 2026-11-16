@@ -251,7 +251,7 @@ describe('the undated skip in the reminder plan', () => {
 
     it('reads task dates only from dueDate, startTime and reviewAt', () => {
         const source = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'schedule-utils.ts'), 'utf8');
-        const read = new Set([...source.matchAll(/(?:parseExplicitReminderDate|hasTimeComponent|safeParseDate|safeParseDueDate)\(task\.(\w+)/g)].map((match) => match[1]));
+        const read = new Set([...source.matchAll(/(?:parseExplicitReminderDate|resolveTaskReminderDate|hasTimeComponent|safeParseDate|safeParseDueDate)\(task\.(\w+)/g)].map((match) => match[1]));
         const candidates = new Set([...source.matchAll(/addCandidate\(\s*'\w+',\s*task\.(\w+)/g)].map((match) => match[1]));
         expect([...read, ...candidates].filter((field) => !['dueDate', 'startTime', 'reviewAt'].includes(field))).toEqual([]);
         expect(source).toContain('if (!task.dueDate && !task.startTime && !task.reviewAt) continue;');

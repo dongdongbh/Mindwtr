@@ -192,3 +192,19 @@ describe('core\'s Settings › Notifications model against RN\'s frozen screen',
         });
     });
 });
+
+
+describe('date-only notification settings rows', () => {
+    it('offers Off or a clock without assigning a time to the task or storing defaults', () => {
+        const settings: AppSettings = {};
+        const build = (value: AppSettings) => buildNotificationsSettingsModel({ settings: value, t: (key) => key, language: 'en', systemLocale: 'en-US' });
+        expect(build(settings).reminders.dateOnlyStartTime).toMatchObject({ value: '', hour: 9, minute: 0, disabled: false, offLabel: 'settings.dateOnlyReminderOff' });
+        expect(settings).toEqual({});
+        const model = build({ notificationsEnabled: true, dateOnlyStartReminderTime: '07:15', dateOnlyDueReminderTime: '18:30', dueDateNotificationsEnabled: false });
+        expect(model.reminders.dateOnlyStartTime).toMatchObject({ value: '07:15', hour: 7, minute: 15, disabled: false });
+        expect(model.reminders.dateOnlyDueTime).toMatchObject({ value: '18:30', disabled: true });
+        expect(build({ notificationsEnabled: false }).reminders.dateOnlyStartTime.disabled).toBe(true);
+        expect(buildNotificationsSettingsUpdate({ type: 'dateOnlyStartReminderTime', value: '' })).toEqual({ dateOnlyStartReminderTime: '' });
+        expect(buildNotificationsSettingsUpdate({ type: 'dateOnlyDueReminderTime', value: '18:30' })).toEqual({ dateOnlyDueReminderTime: '18:30' });
+    });
+});

@@ -94,6 +94,11 @@ export const createNativeReminders = (bindings: NativeReminderBindings) => {
             && item.details.data && typeof item.details.data === 'object' && 'kind' in item.details.data
             && item.details.data.kind === 'task-start-advance')) log('Start advance reminder scheduled', { releaseCheck: 'v1.3.8/start-advance-reminder', outcome: 'scheduled' }, true);
 
+        if (refused === 0 && plan.schedule.some((item) => item && typeof item === 'object' && 'details' in item
+            && item.details && typeof item.details === 'object' && 'data' in item.details
+            && item.details.data && typeof item.details.data === 'object' && 'dateOnly' in item.details.data
+            && item.details.data.dateOnly === 'true')) log('Date-only reminder scheduled', { releaseCheck: 'v1.3.9/date-only-reminders', outcome: 'scheduled' });
+
         rebuilt = refused === 0;
         if (topUpTimer) clearTimeout(topUpTimer);
         topUpTimer = plan.topUpDelayMs === null ? null : setTimeout(() => {

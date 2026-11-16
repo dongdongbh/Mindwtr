@@ -78,6 +78,8 @@ export const SETTINGS_SEARCH_PAGE_KEYS: Record<SettingsSearchPageId, readonly Se
         'reviewAtNotifications',
         'weeklyReview',
         { key: 'weeklyReviewDay', section: 'weeklyReview' },
+        { key: 'dateOnlyStartReminders', section: 'dateOnlyStartReminderTime' },
+        { key: 'dateOnlyDueReminders', section: 'dateOnlyDueReminderTime' },
         { key: 'weeklyReviewTime', section: 'weeklyReview' },
         'dailyDigest',
         { key: 'dailyDigestMorning', section: 'dailyDigest' },

@@ -98,6 +98,33 @@ describe('native host contract: reminders', () => {
         vi.setSystemTime(new Date(NOW));
     };
 
+    it.each(['android', 'ios'] as const)('reconciles date-only preferences through durable native alarm maps (%s)', async (platform) => {
+        freezeClock();
+        const tasks = [task({ id: 'date-due', dueDate: '2026-09-28', dueReminderLeadMinutes: 30 }),
+            task({ id: 'date-start', startTime: '2026-09-28' }), task({ id: 'review', reviewAt: '2026-09-28T15:00:00Z' })];
+        const settings = { dateOnlyDueReminderTime: '11:00', dateOnlyStartReminderTime: '12:00' };
+        await seed(settings, tasks);
+        const host = await openHost(platform);
+        const first = value(await host.planReminderAlarms({ storedAlarms: null, permissionGranted: true }));
+        const due = first.schedule.find((alarm) => alarm.key === 'task:date-due')!;
+        expect(due.fireAtMs).toBe(Date.parse('2026-09-28T11:00:00Z'));
+        expect(due.details.data).toMatchObject({ dateOnly: 'true', dateOnlyKind: 'due' });
+        expect(value(await host.planReminderAlarms({ storedAlarms: first.alarms, storedState: first.state, permissionGranted: true })).schedule).toEqual([]);
+        useTaskStore.setState({ settings: { ...settings, dateOnlyDueReminderTime: '13:00' } });
+        const changed = value(await host.planReminderAlarms({ storedAlarms: first.alarms, storedState: first.state, permissionGranted: true }));
+        expect(changed.schedule.find((alarm) => alarm.key === 'task:date-due')).toMatchObject({ id: due.id, fireAtMs: Date.parse('2026-09-28T13:00:00Z'), replacing: 'withdrawn' });
+        expect(changed.schedule.some((alarm) => alarm.key === 'task:date-start')).toBe(false);
+        useTaskStore.setState({ settings: {} });
+        const off = value(await host.planReminderAlarms({ storedAlarms: changed.alarms, storedState: changed.state, permissionGranted: true }));
+        expect(off.cancel).toContainEqual({ key: due.key, id: due.id, reason: 'withdrawn' });
+        expect(off.schedule).toEqual([]);
+        useTaskStore.setState({ settings: { dateOnlyDueReminderTime: '09:59', dateOnlyStartReminderTime: '09:59' } });
+        const past = value(await host.planReminderAlarms({ storedAlarms: off.alarms, storedState: off.state, permissionGranted: true }));
+        expect(past.schedule).toEqual([]);
+        expect(useTaskStore.getState().tasks.map((entry) => [entry.startTime, entry.dueDate, entry.reviewAt]))
+            .toEqual(tasks.map((entry) => [entry.startTime, entry.dueDate, entry.reviewAt]));
+    });
+
     it.each(['android', 'ios'] as const)('gives advance alerts durable identities, replaces deadlines and supports Done/Snooze (%s)', async (platform) => {
         freezeClock();
         await seed({}, [task({ id: 'advance', dueDate: '2026-09-28T12:00:00Z', dueReminderLeadMinutes: 60, repeatReminderMinutes: 30 })]);

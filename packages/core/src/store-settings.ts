@@ -876,6 +876,13 @@ export const createSettingsActions = ({
 
 
     updateSettings: async (updates: Partial<AppData['settings']>) => {
+        for (const field of ['dateOnlyStartReminderTime', 'dateOnlyDueReminderTime'] as const) {
+            const value = updates[field];
+            if (value !== undefined && (typeof value !== 'string' || value !== '' && !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value))) {
+                set({ error: 'Date-only reminder time must be empty or HH:mm' });
+                return;
+            }
+        }
         if (updates.taskReminderDefault !== undefined && updates.taskReminderDefault !== 'send' && updates.taskReminderDefault !== 'skip') {
             set({ error: 'Task reminder default must be send or skip' });
             return;

@@ -258,6 +258,8 @@ export function getActiveCancelReason(
             includeDueDate: diagnostics.includeDueDate,
             includeReviewAt: diagnostics.includeReviewAt,
             taskReminderDefault: context.settings.taskReminderDefault,
+            dateOnlyStartReminderTime: context.settings.dateOnlyStartReminderTime,
+            dateOnlyDueReminderTime: context.settings.dateOnlyDueReminderTime,
         });
         return [plan.next, plan.advance, plan.startAdvance, ...plan.repeats].some((intent) => intent?.key === key && intent.scheduledAt.getTime() === firedAtMs)
             ? 'expired'
@@ -454,6 +456,7 @@ async function scheduleReminderAlarm(
             if (config.data?.kind === 'task-due-advance' || config.data?.kind === 'task-start-advance') {
                 port.logInfo('Advance reminder scheduled', { releaseCheck: config.data.kind === 'task-start-advance' ? 'v1.3.8/start-advance-reminder' : 'v1.3.8/due-advance-reminder', outcome: 'scheduled' });
             }
+            if (config.data?.dateOnly === 'true') port.logInfo('Date-only reminder scheduled', { releaseCheck: 'v1.3.9/date-only-reminders', outcome: 'scheduled' });
             if (config.data?.reminderSelection) port.logInfo('Selective task reminder scheduled', { releaseCheck: 'v1.3.9/selective-task-reminder', outcome: 'scheduled' });
             alarms.set(key, { id: Math.floor(id), signature, ...(retry > 0 ? { fireAtMs: fireAt.getTime() } : {}) });
             return true;
@@ -534,6 +537,8 @@ function getReminderSettingsSignature(settings: ReminderStoreSnapshot['settings'
         settings.startDateNotificationsEnabled,
         settings.dueDateNotificationsEnabled,
         settings.taskReminderDefault,
+        settings.dateOnlyStartReminderTime,
+        settings.dateOnlyDueReminderTime,
         settings.weeklyReviewEnabled,
         settings.reviewAtNotificationsEnabled,
         settings.dailyDigestMorningEnabled,

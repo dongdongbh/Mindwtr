@@ -663,6 +663,39 @@ describe('task reminder policy controls', () => {
         expect(draft.dueDate).toBe('2026-10-15');
     });
 
+    it('exposes date-only defaults and Skip without changing the draft', () => {
+        const draft = createTaskDraft({ ...task, startTime: '2026-10-15', dueDate: '2026-10-16', reminderPolicy: 'send' });
+        const before = structuredClone(draft);
+        const model = getTaskEditorReminders(draft, (key) => key, {
+            dateOnlyStartReminderTime: '08:00', dateOnlyDueReminderTime: '09:00',
+        });
+        expect(model.showSkip).toBe(true);
+        expect(model.startAdvance?.enabled).toBe(true);
+        expect(model.showAdvance).toBe(true);
+        expect(model.showRepeat).toBe(true);
+        expect(model.hint).toContain('Start reminder: 08:00');
+        expect(model.hint).toContain('Due reminder: 09:00');
+        expect(model.policyOptions.some((option) => option.value === 'skip')).toBe(true);
+        const skipped = getTaskEditorReminders({ ...draft, reminderPolicy: 'skip' }, (key) => key, {
+            dateOnlyStartReminderTime: '08:00', dateOnlyDueReminderTime: '09:00',
+        });
+        expect(skipped.showSkip).toBe(true);
+        expect(skipped.showAdvance).toBe(false);
+        expect(skipped.showRepeat).toBe(false);
+        expect(draft).toEqual(before);
+    });
+
+    it('ignores date-only defaults for explicit times and invalid preferences', () => {
+        const timed = getTaskEditorReminders(createTaskDraft(task), (key) => key, { dateOnlyDueReminderTime: '09:00' });
+        expect(timed.hint).not.toContain('date-only default');
+        const dateOnly = getTaskEditorReminders(createTaskDraft({ ...task, dueDate: '2026-10-15' }), (key) => key, {
+            dateOnlyDueReminderTime: '25:00',
+        });
+        expect(dateOnly.showSkip).toBe(false);
+        expect(dateOnly.showAdvance).toBe(false);
+        expect(dateOnly.showRepeat).toBe(false);
+    });
+
     it('keeps date-only reminders out of the controls and never invents a time', () => {
         const draft = createTaskDraft({ ...task, dueDate: '2026-10-15', reminderPolicy: 'send' });
         const model = getTaskEditorReminders(draft, (key) => key);

@@ -111,6 +111,8 @@ export function NotificationsSettingsScreen() {
     const choiceRow = choicePicker === 'taskReminderDefault' ? reminders.taskDefault : weeklyReview.day;
     const { showNotice: showExactAlarmNotice } = useExactAlarmPermission(reminders.exactAlarmNotice !== null);
     const timeRows: Record<TimeRow['type'], TimeRow> = {
+        dateOnlyStartReminderTime: reminders.dateOnlyStartTime,
+        dateOnlyDueReminderTime: reminders.dateOnlyDueTime,
         weeklyReviewTime: weeklyReview.time,
         dailyDigestMorningTime: dailyDigest.morningTime,
         dailyDigestEveningTime: dailyDigest.eveningTime,
@@ -169,12 +171,21 @@ export function NotificationsSettingsScreen() {
     );
 
     const openTimePicker = (row: TimeRow) => {
+        if (row.offLabel && Platform.OS === 'android') {
+            Alert.alert(row.label, row.description, [
+                { text: row.offLabel, onPress: () => applyEdit({ type: row.type, value: '' }) },
+                { text: t('settings.dateOnlyReminderChooseTime'), onPress: () => setTimePicker(row.type) },
+                { text: tFallback(t, 'common.cancel', 'Cancel'), style: 'cancel' },
+            ]);
+            return;
+        }
         setTimePicker(row.type);
         if (Platform.OS !== 'ios') return;
         setTimeDraft(toTimePickerDate(row));
     };
     const timeRow = (row: TimeRow) => (
         <SettingRow
+            testID={row.type}
             divider
             dimmed={row.disabled}
             onPress={() => openTimePicker(row)}
@@ -208,7 +219,9 @@ export function NotificationsSettingsScreen() {
                         description={reminders.taskDefault.description}
                     />
                     {toggleRow(reminders.startReminders)}
+                    {timeRow(reminders.dateOnlyStartTime)}
                     {toggleRow(reminders.dueReminders)}
+                    {timeRow(reminders.dateOnlyDueTime)}
 
                     {showExactAlarmNotice && reminders.exactAlarmNotice && (
                         <ExactAlarmNoticeRow
@@ -320,6 +333,17 @@ export function NotificationsSettingsScreen() {
                                     }}
                                 />
                                 <View style={[styles.timePickerActions, { borderTopColor: tc.border }]}>
+                                    {openTimeRow.offLabel && (
+                                        <TouchableOpacity
+                                            onPress={() => {
+                                                applyEdit({ type: openTimeRow.type, value: '' });
+                                                closeTimePicker();
+                                            }}
+                                            style={styles.timePickerActionButton}
+                                        >
+                                            <Text style={[styles.timePickerActionText, { color: tc.secondaryText }]}>{openTimeRow.offLabel}</Text>
+                                        </TouchableOpacity>
+                                    )}
                                     <TouchableOpacity onPress={closeTimePicker} style={styles.timePickerActionButton}>
                                         <Text style={[styles.timePickerActionText, { color: tc.secondaryText }]}>
                                             {tFallback(t, 'common.cancel', 'Cancel')}

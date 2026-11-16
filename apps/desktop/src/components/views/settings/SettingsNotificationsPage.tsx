@@ -17,6 +17,10 @@ type Labels = {
     startDateNotificationsDesc: string;
     dueDateNotifications: string;
     dueDateNotificationsDesc: string;
+    dateOnlyStartReminders: string;
+    dateOnlyDueReminders: string;
+    dateOnlyRemindersDesc: string;
+    dateOnlyReminderOff: string;
     reviewAtNotifications: string;
     reviewAtNotificationsDesc: string;
     weeklyReview: string;
@@ -38,6 +42,8 @@ export type SettingsNotificationsPageProps = {
     startDateNotificationsEnabled: boolean;
     dueDateNotificationsEnabled: boolean;
     reviewAtNotificationsEnabled: boolean;
+    dateOnlyStartReminderTime?: string;
+    dateOnlyDueReminderTime?: string;
     weeklyReviewEnabled: boolean;
     weeklyReviewDay: number;
     weeklyReviewTime: string;
@@ -57,6 +63,8 @@ export function SettingsNotificationsPage({
     startDateNotificationsEnabled,
     dueDateNotificationsEnabled,
     reviewAtNotificationsEnabled,
+    dateOnlyStartReminderTime = '',
+    dateOnlyDueReminderTime = '',
     weeklyReviewEnabled,
     weeklyReviewDay,
     weeklyReviewTime,
@@ -130,6 +138,31 @@ export function SettingsNotificationsPage({
                     disabled={!notificationsEnabled}
                 />
             </SettingRow>
+
+            {([
+                ['dateOnlyStartReminderTime', t.dateOnlyStartReminders, dateOnlyStartReminderTime, startDateNotificationsEnabled],
+                ['dateOnlyDueReminderTime', t.dateOnlyDueReminders, dateOnlyDueReminderTime, dueDateNotificationsEnabled],
+            ] as const).map(([field, label, value, enabled]) => (
+                <SettingRow key={field} settingsKey={field} title={label} description={t.dateOnlyRemindersDesc}>
+                    <TimeInput
+                        aria-label={label}
+                        value={value}
+                        placeholder={t.dateOnlyReminderOff}
+                        disabled={!notificationsEnabled || !enabled}
+                        onChange={(time) => handleUpdate({ [field]: time })}
+                        className="bg-muted px-2 py-1 rounded text-sm border border-border disabled:opacity-50 disabled:cursor-not-allowed"
+                    />
+                    <button
+                        type="button"
+                        onClick={() => handleUpdate({ [field]: '' })}
+                        aria-label={`${label}: ${t.dateOnlyReminderOff}`}
+                        disabled={!notificationsEnabled || !enabled || !value}
+                        className="text-sm text-muted-foreground disabled:opacity-50"
+                    >
+                        {t.dateOnlyReminderOff}
+                    </button>
+                </SettingRow>
+            ))}
 
             <SettingRow
                 settingsKey="reviewAtNotifications"

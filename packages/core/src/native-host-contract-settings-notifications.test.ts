@@ -57,6 +57,8 @@ describe('native host contract: Settings › Notifications', () => {
             disabled: false, edit: { type: 'notificationsEnabled', value: true }, askPermission: true });
         expect(view.reminders.startReminders).toMatchObject({ value: false, disabled: true });
         expect(view.reminders.dueReminders).toMatchObject({ value: false, disabled: true });
+        expect(view.reminders.dateOnlyStartTime).toMatchObject({ value: '', disabled: true });
+        expect(view.reminders.dateOnlyDueTime).toMatchObject({ value: '', disabled: true });
 
         expect(view.reminders.exactAlarmNotice).toBeNull();
         expect(view.reminders.persistentCapture).toBeNull();
@@ -115,6 +117,8 @@ describe('native host contract: Settings › Notifications', () => {
     it('refuses an edit the screen does not offer', async () => {
         const { host } = await openHost({});
         for (const edit of [
+            { type: 'dateOnlyStartReminderTime', value: '7:05' },
+            { type: 'dateOnlyDueReminderTime', value: '24:00' },
             { type: 'weeklyReviewTime', value: '7:05' },
             { type: 'weeklyReviewTime', value: '24:00' },
             { type: 'weeklyReviewDay', value: 7 },

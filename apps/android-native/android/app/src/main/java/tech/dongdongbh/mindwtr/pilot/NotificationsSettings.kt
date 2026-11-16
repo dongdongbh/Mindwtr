@@ -83,7 +83,9 @@ internal fun NotificationsSettings(model: InboxViewModel, view: JSONObject) = wi
         Toggle(reminders.getJSONObject("enable"), false)
         Pressable(reminders.getJSONObject("taskDefault")) { model.menu.keepDialog(JSONObject().put("kind", "settingsPicker").put("picker", "taskReminderDefault")) }
         Toggle(reminders.getJSONObject("startReminders"), true)
+        reminders.getJSONObject("dateOnlyStartTime").let { Pressable(it, time(it)) }
         Toggle(reminders.getJSONObject("dueReminders"), true)
+        reminders.getJSONObject("dateOnlyDueTime").let { Pressable(it, time(it)) }
 
 
         reminders.optJSONObject("exactAlarmNotice")?.let { notice ->
@@ -121,8 +123,10 @@ private val ALLOW_BLUE = Color(0xFF2563EB)
 
 
 internal fun pickTime(context: Context, row: JSONObject, dark: Boolean, picked: (String) -> Unit) {
-    TimePickerDialog(systemDialogContext(context, dark), { _, hour, minute -> picked(coreTime(hour, minute)) }, row.getInt("hour"), row.getInt("minute"),
-        DateFormat.is24HourFormat(context)).show()
+    val dialog = TimePickerDialog(systemDialogContext(context, dark), { _, hour, minute -> picked(coreTime(hour, minute)) }, row.getInt("hour"), row.getInt("minute"),
+        DateFormat.is24HourFormat(context))
+    row.optString("offLabel").takeIf { it.isNotEmpty() }?.let { off -> dialog.setButton(TimePickerDialog.BUTTON_NEUTRAL, off) { _, _ -> picked("") } }
+    dialog.show()
 }
 
 

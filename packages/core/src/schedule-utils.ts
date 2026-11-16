@@ -12,6 +12,8 @@ export type ScheduleOptions = {
     includeDueDate?: boolean;
     includeReviewAt?: boolean;
     taskReminderDefault?: NotificationSettings['taskReminderDefault'];
+    dateOnlyStartReminderTime?: string;
+    dateOnlyDueReminderTime?: string;
 };
 
 export type TaskReminderIntentKind = 'start' | 'due' | 'review' | 'due-repeat' | 'due-advance' | 'start-advance';
@@ -23,6 +25,7 @@ export type TaskReminderIntent = {
     kind: TaskReminderIntentKind;
     scheduledAt: Date;
     repeatIndex?: number;
+    dateOnly?: boolean;
 };
 
 export type TaskReminderPlan = {
@@ -55,7 +58,7 @@ export function normalizeRepeatReminderMinutes(value: unknown): number | undefin
 function getDueAdvanceReminderIntent(task: Task, now: Date, options: ScheduleOptions): TaskReminderIntent | null {
     if (isInactiveTask(task) || !shouldSendTaskReminderKind(task, 'due', options) || options.includeDueDate === false) return null;
     const lead = normalizeDueReminderLeadMinutes(task.dueReminderLeadMinutes);
-    const due = parseExplicitReminderDate(task.dueDate);
+    const due = resolveTaskReminderDate(task.dueDate, options.dateOnlyDueReminderTime);
     if (!lead || !due) return null;
 
     const scheduledAt = new Date(due);
@@ -63,24 +66,35 @@ function getDueAdvanceReminderIntent(task: Task, now: Date, options: ScheduleOpt
     else scheduledAt.setTime(scheduledAt.getTime() - lead * 60_000);
     if (!isAfter(scheduledAt, now)) return null;
     const key = `task:${task.id}:a${lead}:${scheduledAt.getTime()}`;
-    return { key, dedupeKey: key, taskId: task.id, kind: 'due-advance', scheduledAt };
+    return { key, dedupeKey: key, taskId: task.id, kind: 'due-advance', scheduledAt,
+        ...(!hasTimeComponent(task.dueDate) ? { dateOnly: true } : {}) };
 }
 
 function getStartAdvanceReminderIntent(task: Task, now: Date, options: ScheduleOptions): TaskReminderIntent | null {
     const lead = normalizeStartReminderLeadMinutes(task.startReminderLeadMinutes);
     if (!lead || isInactiveTask(task) || !shouldSendTaskReminderKind(task, 'start', options) || options.includeStartTime === false) return null;
-    const start = parseExplicitReminderDate(task.startTime);
+    const start = resolveTaskReminderDate(task.startTime, options.dateOnlyStartReminderTime);
     if (!start) return null;
     const scheduledAt = new Date(start.getTime() - lead * 60_000);
     if (!isAfter(scheduledAt, now)) return null;
     const key = `task:${task.id}:sa${lead}:${scheduledAt.getTime()}`;
-    return { key, dedupeKey: key, taskId: task.id, kind: 'start-advance', scheduledAt };
+    return { key, dedupeKey: key, taskId: task.id, kind: 'start-advance', scheduledAt,
+        ...(!hasTimeComponent(task.startTime) ? { dateOnly: true } : {}) };
+}
+
+export function resolveTaskReminderDate(value: string | undefined | null, defaultTime?: string): Date | null {
+    if (!value) return null;
+    if (hasTimeComponent(value)) return parseExplicitReminderDate(value);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || !defaultTime || !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(defaultTime)) return null;
+    const date = safeParseDate(value);
+    if (!date) return null;
+    const [hour, minute] = defaultTime.split(':').map(Number);
+    date.setHours(hour, minute, 0, 0);
+    return date;
 }
 
 function parseExplicitReminderDate(value: string | undefined | null): Date | null {
-    if (!hasTimeComponent(value ?? undefined)) {
-        return null;
-    }
+    if (!hasTimeComponent(value ?? undefined)) return null;
     return safeParseDate(value ?? undefined);
 }
 
@@ -100,9 +114,12 @@ function getNextTaskReminderIntent(
         kind: Exclude<TaskReminderIntentKind, 'due-repeat'>,
         value: string | undefined,
         enabled: boolean,
+        defaultTime?: string,
     ) => {
         if (!enabled) return;
-        const scheduledAt = parseExplicitReminderDate(value);
+        const scheduledAt = kind === 'review'
+            ? parseExplicitReminderDate(value)
+            : resolveTaskReminderDate(value, defaultTime);
         if (!scheduledAt || !isAfter(scheduledAt, now)) return;
         candidates.push({
             key: `task:${task.id}`,
@@ -110,6 +127,7 @@ function getNextTaskReminderIntent(
             taskId: task.id,
             kind,
             scheduledAt,
+            ...(!hasTimeComponent(value) ? { dateOnly: true } : {}),
         });
     };
 
@@ -118,12 +136,14 @@ function getNextTaskReminderIntent(
         task.startTime,
         shouldSendTaskReminderKind(task, 'start', options) && options.includeStartTime !== false
             && !(isSingleTaskReminder(task) && normalizeStartReminderLeadMinutes(task.startReminderLeadMinutes)),
+        options.dateOnlyStartReminderTime,
     );
     addCandidate(
         'due',
         task.dueDate,
         shouldSendTaskReminderKind(task, 'due', options) && options.includeDueDate !== false
             && !(isSingleTaskReminder(task) && normalizeDueReminderLeadMinutes(task.dueReminderLeadMinutes)),
+        options.dateOnlyDueReminderTime,
     );
     addCandidate('review', task.reviewAt, options.includeReviewAt === true);
 
@@ -147,7 +167,7 @@ export function getDueReminderRepeatTimes(task: Task, options: ScheduleOptions =
     const interval = normalizeRepeatReminderMinutes(task.repeatReminderMinutes);
     if (!interval) return [];
 
-    const due = parseExplicitReminderDate(task.dueDate);
+    const due = resolveTaskReminderDate(task.dueDate, options.dateOnlyDueReminderTime);
     if (!due) return [];
 
     const count = Math.min(
@@ -181,11 +201,12 @@ export function getTaskReminderPlan(
     const repeats = getDueReminderRepeatTimes(task, options).map(
         (scheduledAt, index): TaskReminderIntent => ({
             key: `task:${task.id}:r${index + 1}`,
-            dedupeKey: `${task.dueDate}#${index + 1}`,
+            dedupeKey: `${hasTimeComponent(task.dueDate) ? task.dueDate : scheduledAt.toISOString()}#${index + 1}`,
             taskId: task.id,
             kind: 'due-repeat',
             scheduledAt,
             repeatIndex: index + 1,
+            ...(!hasTimeComponent(task.dueDate) ? { dateOnly: true } : {}),
         }),
     );
     const next = getNextTaskReminderIntent(task, now, options);
@@ -483,27 +504,25 @@ export function buildReminderSchedule(input: ReminderScheduleInput): ReminderSch
 
             if (trackDiagnostics) {
                 const suppressTaskReminders = !shouldSendTaskReminders(task, settings);
-                const hasSuppressibleReminder = (includeDueDate && hasTimeComponent(task.dueDate))
-                    || (includeStartTime && hasTimeComponent(task.startTime));
+                const dueAt = resolveTaskReminderDate(task.dueDate, settings.dateOnlyDueReminderTime);
+                const startAt = resolveTaskReminderDate(task.startTime, settings.dateOnlyStartReminderTime);
+                const hasSuppressibleReminder = (includeDueDate && dueAt !== null)
+                    || (includeStartTime && startAt !== null);
                 if (suppressTaskReminders && hasSuppressibleReminder) {
                     suppressedTaskReminderCount += 1;
                 }
                 if (!suppressTaskReminders && includeDueDate && task.dueDate) {
-                    if (hasTimeComponent(task.dueDate)) {
-                        const dueAtMs = safeParseDate(task.dueDate)?.getTime() ?? NaN;
-                        if (Number.isFinite(dueAtMs) && dueAtMs > nowMs) futureDueDateReminderCount += 1;
-                        else if (Number.isFinite(dueAtMs)) pastDueDateReminderCount += 1;
-                    } else {
-                        dateOnlyDueDateCount += 1;
+                    if (!hasTimeComponent(task.dueDate)) dateOnlyDueDateCount += 1;
+                    if (dueAt) {
+                        if (dueAt.getTime() > nowMs) futureDueDateReminderCount += 1;
+                        else pastDueDateReminderCount += 1;
                     }
                 }
                 if (!suppressTaskReminders && includeStartTime && task.startTime) {
-                    if (hasTimeComponent(task.startTime)) {
-                        const startAtMs = safeParseDate(task.startTime)?.getTime() ?? NaN;
-                        if (Number.isFinite(startAtMs) && startAtMs > nowMs) futureStartTimeReminderCount += 1;
-                        else if (Number.isFinite(startAtMs)) pastStartTimeReminderCount += 1;
-                    } else {
-                        dateOnlyStartTimeCount += 1;
+                    if (!hasTimeComponent(task.startTime)) dateOnlyStartTimeCount += 1;
+                    if (startAt) {
+                        if (startAt.getTime() > nowMs) futureStartTimeReminderCount += 1;
+                        else pastStartTimeReminderCount += 1;
                     }
                 }
                 if (includeReviewAt && task.reviewAt && hasTimeComponent(task.reviewAt)) {
@@ -513,7 +532,10 @@ export function buildReminderSchedule(input: ReminderScheduleInput): ReminderSch
                 }
             }
 
-            const plan = getTaskReminderPlan(task, now, { includeStartTime, includeDueDate, includeReviewAt, taskReminderDefault: settings.taskReminderDefault });
+            const plan = getTaskReminderPlan(task, now, { includeStartTime, includeDueDate, includeReviewAt,
+                taskReminderDefault: settings.taskReminderDefault,
+                dateOnlyStartReminderTime: settings.dateOnlyStartReminderTime,
+                dateOnlyDueReminderTime: settings.dateOnlyDueReminderTime });
 
 
             for (const repeat of plan.repeats) {
@@ -526,7 +548,7 @@ export function buildReminderSchedule(input: ReminderScheduleInput): ReminderSch
                     fireAt: repeat.scheduledAt,
                     hasSnoozeAction: true,
                     hasCompleteAction: true,
-                    data: { kind: 'task-reminder', taskId: task.id },
+                    data: { kind: 'task-reminder', taskId: task.id, ...(repeat.dateOnly ? { dateOnly: 'true', dateOnlyKind: 'due' } : {}) },
                 });
             }
 
@@ -540,6 +562,7 @@ export function buildReminderSchedule(input: ReminderScheduleInput): ReminderSch
                     hasSnoozeAction: true,
                     hasCompleteAction: true,
                     data: { kind: advance.kind === 'start-advance' ? 'task-start-advance' : 'task-due-advance', taskId: task.id,
+                        ...(advance.dateOnly ? { dateOnly: 'true', dateOnlyKind: advance.kind === 'start-advance' ? 'start' : 'due' } : {}),
                         ...(isSingleTaskReminder(task) ? { reminderSelection: getTaskReminderPolicy(task) } : {}) },
                 });
             }
@@ -558,6 +581,7 @@ export function buildReminderSchedule(input: ReminderScheduleInput): ReminderSch
                 hasSnoozeAction: true,
                 hasCompleteAction: !isReview,
                 data: { kind: isReview ? 'task-review' : 'task-reminder', taskId: task.id,
+                    ...(next.dateOnly ? { dateOnly: 'true', dateOnlyKind: next.kind === 'start' ? 'start' : 'due' } : {}),
                     ...(!isReview && isSingleTaskReminder(task) ? { reminderSelection: getTaskReminderPolicy(task) } : {}) },
             });
         }

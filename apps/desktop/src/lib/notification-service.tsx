@@ -9,6 +9,7 @@ import {
     getTaskReminderNotificationTag,
     getTaskReminderPlan,
     resolveDueReminders,
+    shouldRescheduleReminderAlarms,
     type Language,
     type NotificationSettings,
     type Task,
@@ -64,6 +65,19 @@ const LINUX_NOTIFICATION_ERROR_TYPES = [
 
 const MAX_CATCH_UP_MS = 5 * 60_000;
 let lastPollAt: number | null = null;
+const dateOnlyPreferences = new Map<'start' | 'due', { signature: string; sinceMs: number }>();
+
+function observeDateOnlyPreferences(settings: NotificationSettings, nowMs: number): void {
+    for (const kind of ['start', 'due'] as const) {
+        const signature = JSON.stringify([
+            settings.notificationsEnabled,
+            settings.taskReminderDefault,
+            kind === 'start' ? settings.startDateNotificationsEnabled : settings.dueDateNotificationsEnabled,
+            kind === 'start' ? settings.dateOnlyStartReminderTime : settings.dateOnlyDueReminderTime,
+        ]);
+        if (dateOnlyPreferences.get(kind)?.signature !== signature) dateOnlyPreferences.set(kind, { signature, sinceMs: nowMs });
+    }
+}
 
 
 export function resolvePollCatchUpMs(nowMs: number, lastPollAtMs: number | null): number {
@@ -76,12 +90,13 @@ export function resolveDueRepeatToFire(
     task: Task,
     now: Date,
     alreadyNotifiedKey: string | undefined,
-    options: { includeDueDate: boolean; catchUpMs?: number; taskReminderDefault?: NotificationSettings['taskReminderDefault'] },
-): { key: string; index: number; scheduledAt: Date } | null {
+    options: Pick<NotificationSettings, 'taskReminderDefault' | 'dateOnlyDueReminderTime'> & { includeDueDate: boolean; catchUpMs?: number; dateOnlyNotBeforeMs?: number },
+): { key: string; index: number; scheduledAt: Date; dateOnly?: boolean } | null {
     const catchUpMs = options.catchUpMs ?? REPEAT_CATCH_UP_MS;
     const repeats = getTaskReminderPlan(task, now, {
         includeDueDate: options.includeDueDate,
         taskReminderDefault: options.taskReminderDefault,
+        dateOnlyDueReminderTime: options.dateOnlyDueReminderTime,
     }).repeats;
     if (repeats.length === 0) return null;
     const nowMs = now.getTime();
@@ -93,8 +108,9 @@ export function resolveDueRepeatToFire(
         }
     }
     if (!chosen || chosen.repeatIndex === undefined) return null;
+    if (chosen.dateOnly && chosen.scheduledAt.getTime() < (options.dateOnlyNotBeforeMs ?? -Infinity)) return null;
     if (alreadyNotifiedKey === chosen.dedupeKey) return null;
-    return { key: chosen.dedupeKey, index: chosen.repeatIndex, scheduledAt: chosen.scheduledAt };
+    return { key: chosen.dedupeKey, index: chosen.repeatIndex, scheduledAt: chosen.scheduledAt, ...(chosen.dateOnly ? { dateOnly: true } : {}) };
 }
 
 function getCurrentLanguage(): Language {
@@ -352,6 +368,7 @@ export function resolveDesktopReminderGates(
 function checkDueAndNotify() {
     const now = new Date();
     const { tasks, projects, settings } = useTaskStore.getState();
+    observeDateOnlyPreferences(settings, now.getTime());
 
     const dateKey = localDateKey(now);
     const lang = getCurrentLanguage();
@@ -374,10 +391,14 @@ function checkDueAndNotify() {
 
 
     tasks.forEach((task: Task) => {
-        const repeat = resolveDueRepeatToFire(task, now, repeatNotifiedByTask.get(task.id), { includeDueDate, catchUpMs, taskReminderDefault: settings.taskReminderDefault });
+        const repeat = resolveDueRepeatToFire(task, now, repeatNotifiedByTask.get(task.id), { includeDueDate, catchUpMs, taskReminderDefault: settings.taskReminderDefault,
+            dateOnlyDueReminderTime: settings.dateOnlyDueReminderTime, dateOnlyNotBeforeMs: dateOnlyPreferences.get('due')?.sinceMs });
         if (!repeat) return;
         logReminderFired('due-repeat', repeat.scheduledAt.toISOString());
-        void sendNotification(task.title, buildDesktopTaskNotificationBody(task, 'due-repeat', tr), getTaskReminderNotificationTag(task.id));
+        void sendNotification(task.title, buildDesktopTaskNotificationBody(task, 'due-repeat', tr), getTaskReminderNotificationTag(task.id)).then(sent => {
+            if (sent && repeat.dateOnly) void logInfo('Date-only reminder delivered', { scope: 'notifications', force: true,
+                extra: { releaseCheck: 'v1.3.9/date-only-reminders', outcome: 'delivered' } });
+        });
         repeatNotifiedByTask.set(task.id, repeat.key);
     });
 
@@ -387,6 +408,11 @@ function checkDueAndNotify() {
         { from: lookbackFrom, to: lookaheadTo },
     );
     for (const request of dueReminders) {
+        if (request.data.dateOnly === 'true') {
+            const kind = request.data.dateOnlyKind === 'start' ? 'start' : 'due';
+            if (request.fireAt.getTime() < (dateOnlyPreferences.get(kind)?.sinceMs ?? now.getTime())
+                || request.fireAt.getTime() > now.getTime()) continue;
+        }
         const fireIso = request.fireAt.toISOString();
         const taskId = request.data.taskId;
         const projectId = request.data.projectId;
@@ -395,6 +421,8 @@ function checkDueAndNotify() {
 
                 if (request.fireAt.getTime() > now.getTime() || !advanceObservedByTask.has(request.key)) continue;
                 void sendNotification(request.title, request.message, getReminderNotificationTag(request.key)).then((sent) => {
+                    if (sent && request.data.dateOnly === 'true') void logInfo('Date-only reminder delivered', { scope: 'notifications', force: true,
+                        extra: { releaseCheck: 'v1.3.9/date-only-reminders', outcome: 'delivered' } });
                     if (sent && request.data.reminderSelection) void logInfo('Selective task reminder delivered', { scope: 'notifications', force: true,
                         extra: { releaseCheck: 'v1.3.9/selective-task-reminder', outcome: 'delivered' } });
                     if (sent) void logInfo('Advance reminder delivered', { scope: 'notifications', force: true,
@@ -405,6 +433,8 @@ function checkDueAndNotify() {
             if (notifiedAtByTask.get(taskId) === fireIso) continue;
             logReminderFired('task', fireIso);
             void sendNotification(request.title, request.message, getReminderNotificationTag(request.key)).then(sent => {
+                if (sent && request.data.dateOnly === 'true') void logInfo('Date-only reminder delivered', { scope: 'notifications', force: true,
+                    extra: { releaseCheck: 'v1.3.9/date-only-reminders', outcome: 'delivered' } });
                 if (sent && request.data.reminderSelection) void logInfo('Selective task reminder delivered', { scope: 'notifications', force: true,
                     extra: { releaseCheck: 'v1.3.9/selective-task-reminder', outcome: 'delivered' } });
             });
@@ -421,7 +451,8 @@ function checkDueAndNotify() {
 
     advanceObservedByTask.clear();
     for (const task of gates.taskRemindersEnabled ? tasks : []) {
-        const plan = getTaskReminderPlan(task, now, { includeStartTime: settings.startDateNotificationsEnabled !== false, includeDueDate, taskReminderDefault: settings.taskReminderDefault });
+        const plan = getTaskReminderPlan(task, now, { includeStartTime: settings.startDateNotificationsEnabled !== false, includeDueDate, taskReminderDefault: settings.taskReminderDefault,
+            dateOnlyStartReminderTime: settings.dateOnlyStartReminderTime, dateOnlyDueReminderTime: settings.dateOnlyDueReminderTime });
         for (const advance of [plan.advance, plan.startAdvance]) {
             if (advance) advanceObservedByTask.add(advance.key);
         }
@@ -493,7 +524,8 @@ export async function startDesktopNotifications() {
         storeSubscription?.();
         storeSubscription = useTaskStore.subscribe((state, prevState) => {
             if (state.lastDataChangeAt === prevState.lastDataChangeAt
-                && state.settings.taskReminderDefault === prevState.settings.taskReminderDefault) return;
+                && !shouldRescheduleReminderAlarms(state, prevState)) return;
+            observeDateOnlyPreferences(state.settings, Date.now());
             if (checkDebounceTimer) {
                 clearTimeout(checkDebounceTimer);
             }
@@ -533,6 +565,7 @@ export function stopDesktopNotifications() {
     advanceObservedByTask.clear();
     notifiedAtByProject.clear();
     lastPollAt = null;
+    dateOnlyPreferences.clear();
     digestSentOnByKind.clear();
     weeklyReviewSentOnDate = null;
     started = false;

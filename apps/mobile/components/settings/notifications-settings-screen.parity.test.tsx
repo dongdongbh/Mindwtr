@@ -264,7 +264,7 @@ function hosts(root: ReactTestInstance, type: string, modals = false): ReactTest
   const out: ReactTestInstance[] = [];
   const walk = (node: ReactTestInstance) => {
 
-    if (node.props.testID === 'task-reminder-default') return;
+    if (['task-reminder-default', 'dateOnlyStartReminderTime', 'dateOnlyDueReminderTime'].includes(node.props.testID)) return;
     if (String(node.type) === 'Modal' && (!modals || !node.props.visible)) return;
     if (String(node.type) === type) out.push(node);
     node.children.forEach((child) => { if (typeof child !== 'string') walk(child); });

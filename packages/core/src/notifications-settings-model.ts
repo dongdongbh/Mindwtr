@@ -25,7 +25,7 @@ export const NOTIFICATIONS_BOOLEAN_SETTINGS = [
     'dailyDigestMorningEnabled',
     'dailyDigestEveningEnabled',
 ] as const;
-export const NOTIFICATIONS_TIME_SETTINGS = ['weeklyReviewTime', 'dailyDigestMorningTime', 'dailyDigestEveningTime'] as const;
+export const NOTIFICATIONS_TIME_SETTINGS = ['weeklyReviewTime', 'dailyDigestMorningTime', 'dailyDigestEveningTime', 'dateOnlyStartReminderTime', 'dateOnlyDueReminderTime'] as const;
 
 export type NotificationsSettingsEdit =
     | { type: typeof NOTIFICATIONS_BOOLEAN_SETTINGS[number]; value: boolean }
@@ -46,7 +46,7 @@ type Toggle = {
 };
 
 
-type TimeRow = { label: string; description: string; value: string; hour: number; minute: number; disabled: boolean; type: typeof NOTIFICATIONS_TIME_SETTINGS[number] };
+type TimeRow = { offLabel?: string; label: string; description: string; value: string; hour: number; minute: number; disabled: boolean; type: typeof NOTIFICATIONS_TIME_SETTINGS[number] };
 
 export type NotificationsSettingsModel = {
     title: string;
@@ -54,6 +54,8 @@ export type NotificationsSettingsModel = {
         enable: Toggle;
         startReminders: Toggle;
         dueReminders: Toggle;
+        dateOnlyStartTime: TimeRow;
+        dateOnlyDueTime: TimeRow;
         taskDefault: { label: string; description: string; disabled: false; pickerTitle: string; options: { label: string; selected: boolean; edit: NotificationsSettingsEdit }[] };
 
         exactAlarmNotice: { label: string; description: string; actionLabel: string } | null;
@@ -126,6 +128,13 @@ export function buildNotificationsSettingsModel(input: NotificationsSettingsInpu
         label, description: value, value, ...timeParts(value), disabled, type,
     });
 
+    const dateOnly = (type: 'dateOnlyStartReminderTime' | 'dateOnlyDueReminderTime', label: string, disabled: boolean): TimeRow => {
+        const raw = settings[type];
+        const value = typeof raw === 'string' && NOTIFICATIONS_TIME_PATTERN.test(raw) ? raw : '';
+        const offLabel = t('settings.dateOnlyReminderOff');
+        return { ...time(type, t(label), value, disabled), offLabel,
+            description: `${value || offLabel} · ${t('settings.dateOnlyRemindersDesc')}` };
+    };
     return {
         title: t('settings.notifications'),
         reminders: {
@@ -134,6 +143,8 @@ export function buildNotificationsSettingsModel(input: NotificationsSettingsInpu
                 startDateNotificationsEnabled, !notificationsEnabled),
             dueReminders: toggle('dueDateNotificationsEnabled', t('settings.dueDateNotifications'), t('settings.dueDateNotificationsDesc'),
                 dueDateNotificationsEnabled, !notificationsEnabled),
+            dateOnlyStartTime: dateOnly('dateOnlyStartReminderTime', 'settings.dateOnlyStartReminders', !startDateNotificationsEnabled),
+            dateOnlyDueTime: dateOnly('dateOnlyDueReminderTime', 'settings.dateOnlyDueReminders', !dueDateNotificationsEnabled),
             taskDefault: {
                 label: t('settings.taskReminderDefault'),
                 description: `${t(settings.taskReminderDefault === 'skip' ? 'settings.taskReminderDefaultSkip' : 'settings.taskReminderDefaultSend')} · ${t('settings.taskReminderDefaultDesc')}`,

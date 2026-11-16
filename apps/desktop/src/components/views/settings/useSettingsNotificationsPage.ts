@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { resolveDateLocaleTag, useTaskStore, type AppData } from '@mindwtr/core';
+import { NOTIFICATIONS_TIME_PATTERN, resolveDateLocaleTag, useTaskStore, type AppData } from '@mindwtr/core';
 
 import type { Language } from '../../../contexts/language-context';
 import type { SettingsNotificationsPageProps } from './SettingsNotificationsPage';
@@ -50,6 +50,8 @@ export function useSettingsNotificationsPage({
         taskReminderDefault: settings?.taskReminderDefault ?? 'send',
         startDateNotificationsEnabled: settings?.startDateNotificationsEnabled !== false,
         dueDateNotificationsEnabled: settings?.dueDateNotificationsEnabled !== false,
+        dateOnlyStartReminderTime: typeof settings.dateOnlyStartReminderTime === 'string' && NOTIFICATIONS_TIME_PATTERN.test(settings.dateOnlyStartReminderTime) ? settings.dateOnlyStartReminderTime : '',
+        dateOnlyDueReminderTime: typeof settings.dateOnlyDueReminderTime === 'string' && NOTIFICATIONS_TIME_PATTERN.test(settings.dateOnlyDueReminderTime) ? settings.dateOnlyDueReminderTime : '',
         reviewAtNotificationsEnabled: settings?.reviewAtNotificationsEnabled !== false,
         weeklyReviewEnabled: settings?.weeklyReviewEnabled === true,
         weeklyReviewDay: Number.isFinite(settings?.weeklyReviewDay)

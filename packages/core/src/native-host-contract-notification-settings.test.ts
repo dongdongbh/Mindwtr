@@ -51,6 +51,8 @@ describe('prepared notification Settings', () => {
         { type: 'dueDateNotificationsEnabled', value: false }, { type: 'weeklyReviewEnabled', value: false },
         { type: 'dailyDigestMorningEnabled', value: false }, { type: 'dailyDigestEveningEnabled', value: false },
         { type: 'weeklyReviewDay', value: 6 }, { type: 'weeklyReviewTime', value: '00:00' },
+        { type: 'dateOnlyStartReminderTime', value: '07:15' }, { type: 'dateOnlyDueReminderTime', value: '18:30' },
+        { type: 'dateOnlyStartReminderTime', value: '' }, { type: 'dateOnlyDueReminderTime', value: '' },
         { type: 'dailyDigestMorningTime', value: '23:59' }, { type: 'dailyDigestEveningTime', value: '08:05' },
     ];
     it.each(edits)('writes only $type and replays the exact same-host reply', async (edit) => {
@@ -65,6 +67,28 @@ describe('prepared notification Settings', () => {
         expect(await env.host.commitPreparedNotificationSetting(envelope)).toEqual(result);
         expect(env.saves()).toBe(1);
         expect(env.data().settings.deviceId).toBeUndefined();
+    });
+
+    it('validates app-store clock edits before any settings mutation and preserves task dates on save', async () => {
+        const data = structuredClone(initial());
+        data.tasks[0].startTime = '2026-09-02';
+        data.tasks[0].dueDate = '2026-09-03';
+        const env = await open(data);
+        const before = structuredClone(useTaskStore.getState().settings);
+        const tasks = structuredClone(useTaskStore.getState()._allTasks);
+        for (const value of ['7:15', '24:00', '12:60', null, false]) {
+            await useTaskStore.getState().updateSettings({ dateOnlyStartReminderTime: value } as never);
+            expect(useTaskStore.getState().settings).toEqual(before);
+            expect(env.saves()).toBe(0);
+        }
+        await useTaskStore.getState().updateSettings({ dateOnlyStartReminderTime: '07:15', dateOnlyDueReminderTime: '18:30' });
+        await flushPendingSave();
+        expect(env.data().settings).toMatchObject({ dateOnlyStartReminderTime: '07:15', dateOnlyDueReminderTime: '18:30' });
+        expect(env.data().tasks).toEqual(tasks);
+        await useTaskStore.getState().updateSettings({ dateOnlyStartReminderTime: '' });
+        await flushPendingSave();
+        expect(env.data().settings).toMatchObject({ dateOnlyStartReminderTime: '', dateOnlyDueReminderTime: '18:30' });
+        expect(env.data().tasks).toEqual(tasks);
     });
 
     it('syncs a changed task default once while leaving device notification switches alone', async () => {

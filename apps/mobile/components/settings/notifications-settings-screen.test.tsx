@@ -1,8 +1,9 @@
 import React from 'react';
 import renderer, { act } from 'react-test-renderer';
-import { Alert, View } from 'react-native';
+import { Alert, Platform, View } from 'react-native';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import DateTimePicker from '@react-native-community/datetimepicker';
 import type { NotificationSettings } from '@mindwtr/core';
 import { isIosAppBadgeSupported, readIosAppBadgeEnabled, setIosAppBadgeEnabled } from '@/lib/ios-app-badge';
 import { requestNotificationPermission } from '@/lib/notification-service';
@@ -184,5 +185,38 @@ describe('iOS app icon badge', () => {
     const tree = await mount();
     expect(tree.root.findAllByProps({ testID: 'app-icon-badge' })).toHaveLength(0);
     act(() => tree.unmount());
+  });
+});
+
+
+describe('date-only reminder Off-or-time controls', () => {
+  it('selects and clears a clock without changing task reminder switches', async () => {
+    const originalOs = Platform.OS;
+    Object.defineProperty(Platform, 'OS', { value: 'android', configurable: true });
+    storeState.settings = { notificationsEnabled: true, dateOnlyDueReminderTime: '18:30' };
+    storeState.updateSettings.mockClear();
+    vi.mocked(isIosAppBadgeSupported).mockReturnValue(false);
+    const alert = vi.spyOn(Alert, 'alert').mockImplementation(() => undefined);
+    let tree!: renderer.ReactTestRenderer;
+    try {
+      await act(async () => { tree = renderer.create(<NotificationsSettingsScreen />); });
+      const row = () => tree.root.findByProps({ testID: 'dateOnlyStartReminderTime' });
+      expect(row().props.disabled).toBe(false);
+      expect(row().props.description).toContain('settings.dateOnlyReminderOff');
+      act(() => row().props.onPress());
+      const buttons = alert.mock.calls.at(-1)![2]!;
+      act(() => buttons.find((button) => button.text === 'settings.dateOnlyReminderChooseTime')!.onPress!());
+      const selected = new Date(); selected.setHours(7, 15, 0, 0);
+      act(() => tree.root.findByType(DateTimePicker).props.onChange({ type: 'set' }, selected));
+      expect(storeState.updateSettings).toHaveBeenCalledWith({ dateOnlyStartReminderTime: '07:15' });
+      act(() => tree.root.findByProps({ testID: 'dateOnlyDueReminderTime' }).props.onPress());
+      act(() => alert.mock.calls.at(-1)![2]!.find((button) => button.text === 'settings.dateOnlyReminderOff')!.onPress!());
+      expect(storeState.updateSettings).toHaveBeenCalledWith({ dateOnlyDueReminderTime: '' });
+      expect(storeState.settings.notificationsEnabled).toBe(true);
+    } finally {
+      if (tree) act(() => tree.unmount());
+      Object.defineProperty(Platform, 'OS', { value: originalOs, configurable: true });
+      alert.mockRestore();
+    }
   });
 });

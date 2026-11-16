@@ -388,7 +388,7 @@ Widgets, App Intents and Siri, the Share Extension and the Watch app belong to t
 
 ### Selective task reminders (#1547)
 
-- Path: task editor → start/due reminders → Start only or Due only. The selected date needs an explicit time; its advance reminder replaces the date-time alert. Repeat reminders are hidden and inactive in these modes; hidden values are preserved when switching back to Send.
+- Path: task editor → start/due reminders → Start only or Due only. The selected date needs an explicit time or an enabled date-only reminder default; its advance reminder replaces the ordinary alert. Repeat reminders are hidden and inactive in these modes; hidden values are preserved when switching back to Send.
 - Ownership: `packages/core/src/task-reminder-policy.ts`, `packages/core/src/schedule-utils.ts`, `packages/core/src/task-editor-schedule.ts`; each platform consumes the shared reminder model and plan.
 - Checks: `packages/core/src/selective-reminders.test.ts`; confirm old alarms are withdrawn after changing modes, completion, or permission revocation. Review reminders remain separate.
 - Compatibility: older clients skip these selective reminders and cannot edit or preserve the new policy reliably. Update every device before using the new modes.
@@ -400,3 +400,10 @@ Widgets, App Intents and Siri, the Share Extension and the Watch app belong to t
 - Code: `apps/ios-native/App/ProjectsScreen.swift`, `apps/ios-native/App/CoreModel.swift`, `apps/ios-native/Sources/MindwtrNativeCore/CoreHost.swift`, `packages/core/src/native-host-contract-project-calendar-reference.ts`
 - Checks: `packages/core/src/native-host-contract-project-calendar-reference.test.ts`, `apps/ios-native/Tests/MindwtrNativeCoreTests/CoreHostTests.swift` (testProjectCalendarReference…)
 - Notes: One read-only ICS event reference belongs to the Project. Linking creates no task and changes no calendar event. Ambiguous identities and incomplete feed reads offer no candidates; unavailable feeds show last-known details. Expanding Details reads the stored link first with `summary: true`, which never downloads feeds; feeds download only when a link exists or the picker is open. Dates show "start – end". Archived Projects are read-only. Explicit unlink persists a null marker. Native writes freeze the selected candidate and Project snapshot before journaling, retain exact retries, and acknowledge only after durable storage.
+
+## Date-only task reminders (#1570)
+
+- Reach: Settings › Notifications › Date-only start reminders / Date-only due reminders. Each offers Off or a local reminder time; both default to Off. Task editor › start/due reminders shows the effective default and retains Skip, advance and configured repeat controls.
+- Behavior: Only notification timing changes. Task dates, all-day calendar placement, availability and overdue calculations stay unchanged. Explicit task times take precedence; Review reminders are unchanged. Changing or disabling a default replaces pending reminders without replaying past alerts.
+- Code: `packages/core/src/schedule-utils.ts`, `packages/core/src/notifications-settings-model.ts`, `packages/core/src/task-editor-schedule.ts`
+- Checks: `packages/core/src/task-editor-schedule.test.ts`; validate independent defaults, explicit-time precedence, Skip, advance reminders and pending notification replacement.

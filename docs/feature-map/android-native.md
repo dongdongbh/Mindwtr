@@ -539,7 +539,7 @@ The native client is a Kotlin and Jetpack Compose app in `apps/android-native`. 
 
 ### Selective task reminders (#1547)
 
-- Path: task editor → start/due reminders → Start only or Due only. The selected date needs an explicit time; its advance reminder replaces the date-time alert. Repeat reminders are hidden and inactive in these modes; hidden values are preserved when switching back to Send.
+- Path: task editor → start/due reminders → Start only or Due only. The selected date needs an explicit time or an enabled date-only reminder default; its advance reminder replaces the ordinary alert. Repeat reminders are hidden and inactive in these modes; hidden values are preserved when switching back to Send.
 - Ownership: `packages/core/src/task-reminder-policy.ts`, `packages/core/src/schedule-utils.ts`, `packages/core/src/task-editor-schedule.ts`; each platform consumes the shared reminder model and plan.
 - Checks: `packages/core/src/selective-reminders.test.ts`; confirm old alarms are withdrawn after changing modes, completion, or permission revocation. Review reminders remain separate.
 - Compatibility: older clients skip these selective reminders and cannot edit or preserve the new policy reliably. Update every device before using the new modes.
@@ -551,3 +551,10 @@ The native client is a Kotlin and Jetpack Compose app in `apps/android-native`. 
 - Code: `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/ProjectDetails.kt`, `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/core/CoreHost.kt`, `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/core/WriteJournal.kt`, `packages/core/src/native-host-contract-project-calendar-reference.ts`
 - Checks: `packages/core/src/native-host-contract-project-calendar-reference.test.ts`, `apps/android-native/bundle/host-project-calendar-reference.test.ts`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/core/WriteJournalTest.kt`, `apps/android-native/scripts/check-project-calendar-device.mjs` (phone: link from a local ICS stub, the stored event at once after a restart, "start – end", unlink)
 - Notes: One read-only ICS event reference belongs to the Project. Linking creates no task and changes no calendar event. Ambiguous identities and incomplete feed reads offer no candidates; unavailable feeds show last-known details. Opening a Project reads the stored link first with `summary: true`, which never downloads feeds. Feeds download only when a link exists (to refresh it) or the picker is open, on core's own `projectCalendar` feed slot, so the Project never cancels a Calendar-screen load. Dates show "start – end"; an all-day end moves back one day. Archived Projects are read-only. Explicit unlink persists a null marker. Native writes freeze the selected candidate and Project snapshot before journaling, retain exact retries, and acknowledge only after durable storage.
+
+## Date-only task reminders (#1570)
+
+- Reach: Settings › Notifications › Date-only start reminders / Date-only due reminders. Each offers Off or a local reminder time; both default to Off. Task editor › start/due reminders shows the effective default and retains Skip, advance and configured repeat controls.
+- Behavior: Only notification timing changes. Task dates, all-day calendar placement, availability and overdue calculations stay unchanged. Explicit task times take precedence; Review reminders are unchanged. Changing or disabling a default replaces pending reminders without replaying past alerts.
+- Code: `packages/core/src/schedule-utils.ts`, `packages/core/src/notifications-settings-model.ts`, `packages/core/src/task-editor-schedule.ts`
+- Checks: `packages/core/src/task-editor-schedule.test.ts`; validate independent defaults, explicit-time precedence, Skip, advance reminders and pending notification replacement.

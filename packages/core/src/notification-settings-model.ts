@@ -8,12 +8,12 @@ export const NOTIFICATION_SETTING_FIELDS = [
     'notificationsEnabled', 'startDateNotificationsEnabled', 'dueDateNotificationsEnabled',
     'weeklyReviewEnabled', 'dailyDigestMorningEnabled', 'dailyDigestEveningEnabled',
     'weeklyReviewDay', 'weeklyReviewTime', 'dailyDigestMorningTime', 'dailyDigestEveningTime',
-    'taskReminderDefault',
+    'taskReminderDefault', 'dateOnlyStartReminderTime', 'dateOnlyDueReminderTime',
 ] as const;
 export type NotificationSettingField = typeof NOTIFICATION_SETTING_FIELDS[number];
 type ToggleField = Exclude<NotificationSettingField, 'weeklyReviewDay' | 'weeklyReviewTime'
-    | 'dailyDigestMorningTime' | 'dailyDigestEveningTime' | 'taskReminderDefault'>;
-type TimeField = 'weeklyReviewTime' | 'dailyDigestMorningTime' | 'dailyDigestEveningTime';
+    | 'dailyDigestMorningTime' | 'dailyDigestEveningTime' | 'taskReminderDefault' | 'dateOnlyStartReminderTime' | 'dateOnlyDueReminderTime'>;
+type TimeField = 'weeklyReviewTime' | 'dailyDigestMorningTime' | 'dailyDigestEveningTime' | 'dateOnlyStartReminderTime' | 'dateOnlyDueReminderTime';
 export type NotificationSettingEdit = { type: ToggleField; value: boolean }
     | { type: TimeField; value: string } | { type: 'weeklyReviewDay'; value: number }
     | { type: 'taskReminderDefault'; value: 'send' | 'skip' };
@@ -33,6 +33,8 @@ export function isNotificationSettingEdit(value: unknown): value is Notification
     if (value.type === 'weeklyReviewDay') return Number.isInteger(value.value)
         && typeof value.value === 'number' && value.value >= 0 && value.value <= 6;
     if (value.type === 'taskReminderDefault') return value.value === 'send' || value.value === 'skip';
+    if (value.type === 'dateOnlyStartReminderTime' || value.type === 'dateOnlyDueReminderTime')
+        return typeof value.value === 'string' && (value.value === '' || /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value.value));
     if (['weeklyReviewTime', 'dailyDigestMorningTime', 'dailyDigestEveningTime'].includes(value.type as string))
         return typeof value.value === 'string' && /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value.value);
     return typeof value.value === 'boolean';
@@ -67,10 +69,11 @@ export function notificationSettingWitness(settings: AppSettings, field: Notific
 }
 
 type Toggle = { label: string; description: string; value: boolean; disabled: boolean; edit: NotificationSettingEdit };
-type Time = { label: string; value: string; disabled: boolean };
+type Time = { offLabel?: string; description?: string; label: string; value: string; disabled: boolean };
 export type NotificationSettingsModel = {
     title: string;
     task: { master: Toggle; start: Toggle; due: Toggle;
+        dateOnlyStartTime: Time; dateOnlyDueTime: Time;
         default: { label: string; description: string; value: 'send' | 'skip'; valueLabel: string; disabled: false;
             options: { value: 'send' | 'skip'; label: string; selected: boolean; edit: NotificationSettingEdit }[] } };
     weekly: { enabled: Toggle; time: Time; day: { label: string; value: number; valueLabel: string; disabled: boolean;
@@ -104,6 +107,13 @@ export function buildNotificationSettingsModel(input: { settings: AppSettings; l
     const morningTime = time('settings.dailyDigestMorningTime', digest.morning.hour, digest.morning.minute, digest.morning.enabled);
     const eveningTime = time('settings.dailyDigestEveningTime', digest.evening.hour, digest.evening.minute, digest.evening.enabled);
     const taskReminderDefault = settings.taskReminderDefault === 'skip' ? 'skip' : 'send';
+    const dateOnly = (type: 'dateOnlyStartReminderTime' | 'dateOnlyDueReminderTime', label: string, enabled: boolean): Time => {
+        const raw = settings[type];
+        const value = typeof raw === 'string' && /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(raw) ? raw : '';
+        const offLabel = tr('settings.dateOnlyReminderOff');
+        return { label: tr(label), value, disabled: !enabled, offLabel,
+            description: `${value || offLabel} · ${tr('settings.dateOnlyRemindersDesc')}` };
+    };
     return {
         title: tr('settings.notifications'),
         task: {
@@ -112,6 +122,8 @@ export function buildNotificationSettingsModel(input: { settings: AppSettings; l
                 areStartDateRemindersEnabled(settings), !master),
             due: toggle('dueDateNotificationsEnabled', 'settings.dueDateNotifications', 'settings.dueDateNotificationsDesc',
                 areDueDateRemindersEnabled(settings), !master),
+            dateOnlyStartTime: dateOnly('dateOnlyStartReminderTime', 'settings.dateOnlyStartReminders', areStartDateRemindersEnabled(settings)),
+            dateOnlyDueTime: dateOnly('dateOnlyDueReminderTime', 'settings.dateOnlyDueReminders', areDueDateRemindersEnabled(settings)),
             default: {
                 label: tr('settings.taskReminderDefault'), description: tr('settings.taskReminderDefaultDesc'),
                 value: taskReminderDefault,

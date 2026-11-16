@@ -474,6 +474,8 @@ export interface NotificationSettings {
     startDateNotificationsEnabled?: boolean;
     dueDateNotificationsEnabled?: boolean;
     reviewAtNotificationsEnabled?: boolean;
+    dateOnlyStartReminderTime?: string;
+    dateOnlyDueReminderTime?: string;
     dailyDigestMorningEnabled?: boolean;
     dailyDigestMorningTime?: string;
     dailyDigestEveningEnabled?: boolean;

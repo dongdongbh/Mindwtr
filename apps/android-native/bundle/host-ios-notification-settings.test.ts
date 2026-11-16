@@ -50,10 +50,10 @@ const request = (value: boolean, expected: unknown, requestId = '12345678-1234-1
     ({ requestId, edit: { type: 'notificationsEnabled', value }, expected });
 
 describe('actual private iOS prepared Notification Settings bridge', () => {
-    it('projects all eleven raw witnesses and validates a bounded frozen envelope without writing', async () => {
+    it('projects all thirteen raw witnesses and validates a bounded frozen envelope without writing', async () => {
         const f = fixture(); await f.boot();
         const options = await f.call('notificationSettingOptions', {});
-        expect(options.ok).toBe(true); expect(Object.keys(options.value.expected)).toHaveLength(11);
+        expect(options.ok).toBe(true); expect(Object.keys(options.value.expected)).toHaveLength(13);
         const selected = request(true, options.value.expected.notificationsEnabled);
         const prepared = await f.call('notificationSettingPrepare', selected);
         expect(prepared).toEqual({ ok: true, value: { kind: 'prepared', prepared: { version: 1, request: selected } } });
@@ -62,6 +62,21 @@ describe('actual private iOS prepared Notification Settings bridge', () => {
             value: { type: 'notificationsEnabled', value: true, changed: true } });
         expect((await f.call('notificationSettingValidate', { ...envelope, request: { ...selected, permissionGranted: true } })).ok).toBe(false);
         expect(f.writes).toEqual([]); expect(f.log()).toBe('');
+    });
+    it('persists and clears each date-only clock through prepared edits', async () => {
+        const f = fixture(); await f.boot();
+        let counter = 0;
+        for (const type of ['dateOnlyStartReminderTime', 'dateOnlyDueReminderTime']) {
+            for (const value of ['07:15', '']) {
+                const options = await f.call('notificationSettingOptions', {});
+                const selected = { requestId: `12345678-1234-4234-8234-${String(++counter).padStart(12, '0')}`,
+                    edit: { type, value }, expected: options.value.expected[type] };
+                const prepared = await f.call('notificationSettingPrepare', selected);
+                expect(prepared.ok).toBe(true);
+                expect((await f.call('notificationSettingCommit', { request: selected, prepared: prepared.value.prepared })).ok).toBe(true);
+                expect((await f.call('notificationSettingOptions', {})).value.expected[type]).toEqual({ present: true, value });
+            }
+        }
     });
     it('saves once through the existing receipt adapter and replays the original UUID after a later choice', async () => {
         const f = fixture(); await f.boot(); const options = await f.call('notificationSettingOptions', {});

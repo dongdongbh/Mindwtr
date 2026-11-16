@@ -159,7 +159,7 @@ const logNotificationError = (message: string, error?: unknown) => {
 };
 
 const logNotificationInfo = (message: string, extra?: Record<string, unknown>) => {
-  void logInfo(`[Local Notifications] ${message}`, { scope: 'notifications', extra, force: extra?.releaseCheck === 'v1.3.8/due-advance-reminder' || extra?.releaseCheck === 'v1.3.8/start-advance-reminder' });
+  void logInfo(`[Local Notifications] ${message}`, { scope: 'notifications', extra, force: extra?.releaseCheck === 'v1.3.9/date-only-reminders' || extra?.releaseCheck === 'v1.3.8/due-advance-reminder' || extra?.releaseCheck === 'v1.3.8/start-advance-reminder' });
 };
 
 const logNotificationWarn = (message: string, extra?: Record<string, unknown>) => {

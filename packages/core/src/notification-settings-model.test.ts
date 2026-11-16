@@ -130,3 +130,27 @@ describe('default task reminder setting', () => {
         expect(isNotificationSettingEdit({ type: 'taskReminderDefault', value })).toBe(false);
     });
 });
+
+
+describe('date-only reminder preferences', () => {
+    it('projects Off without storing defaults and keeps the two times independent', () => {
+        const settings = {};
+        expect(model(settings).task.dateOnlyStartTime).toMatchObject({ value: '', disabled: false });
+        expect(model(settings).task.dateOnlyDueTime).toMatchObject({ value: '', disabled: false });
+        expect(settings).toEqual({});
+        const value = model({ dateOnlyStartReminderTime: '07:15', dateOnlyDueReminderTime: '18:30', dueDateNotificationsEnabled: false });
+        expect(value.task.dateOnlyStartTime).toMatchObject({ value: '07:15', disabled: false });
+        expect(value.task.dateOnlyDueTime).toMatchObject({ value: '18:30', disabled: true });
+        expect(model({ notificationsEnabled: false }).task.dateOnlyStartTime.disabled).toBe(true);
+    });
+    it.each(['dateOnlyStartReminderTime', 'dateOnlyDueReminderTime'])('validates Off or a strict clock for %s', (type) => {
+        for (const value of ['', '00:00', '09:05', '23:59']) expect(isNotificationSettingEdit({ type, value })).toBe(true);
+        for (const value of ['9:05', '24:00', '12:60', ' 09:00', '09:00 ', null, true, 900]) {
+            expect(isNotificationSettingEdit({ type, value })).toBe(false);
+            const settings = { [type]: value };
+            const projected = model(settings);
+            expect(type === 'dateOnlyStartReminderTime' ? projected.task.dateOnlyStartTime.value : projected.task.dateOnlyDueTime.value).toBe('');
+            expect(settings).toEqual({ [type]: value });
+        }
+    });
+});
