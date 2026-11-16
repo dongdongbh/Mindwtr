@@ -31,7 +31,7 @@ vi.mock('../../lib/ai-config', () => ({
     loadAIKey: vi.fn(async () => 'test-key'),
 }));
 
-vi.mock('../../lib/app-log', () => ({ logWarn }));
+vi.mock('../../lib/app-log', () => ({ logWarn, logInfo: vi.fn() }));
 
 const settings = { ai: { enabled: true, provider: 'openai' } } as never;
 

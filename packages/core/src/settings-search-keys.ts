@@ -75,11 +75,11 @@ export const SETTINGS_SEARCH_PAGE_KEYS: Record<SettingsSearchPageId, readonly Se
         'taskReminderDefault',
         'startDateNotifications',
         'dueDateNotifications',
+        'dateOnlyStartReminderTime',
+        'dateOnlyDueReminderTime',
         'reviewAtNotifications',
         'weeklyReview',
         { key: 'weeklyReviewDay', section: 'weeklyReview' },
-        { key: 'dateOnlyStartReminders', section: 'dateOnlyStartReminderTime' },
-        { key: 'dateOnlyDueReminders', section: 'dateOnlyDueReminderTime' },
         { key: 'weeklyReviewTime', section: 'weeklyReview' },
         'dailyDigest',
         { key: 'dailyDigestMorning', section: 'dailyDigest' },
@@ -232,6 +232,8 @@ const SEARCH_KEY_I18N_OVERRIDES: Record<string, string> = {
     manageSomedaySections: 'viewSections.somedaySections',
     manageContexts: 'contexts.title',
     manageTags: 'tags.title',
+    dateOnlyStartReminderTime: 'settings.dateOnlyStartReminders',
+    dateOnlyDueReminderTime: 'settings.dateOnlyDueReminders',
 };
 
 export function resolveSettingsSearchI18nKey(key: string): string {

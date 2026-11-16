@@ -55,6 +55,7 @@ const DEVICE_LOCAL_TOP_LEVEL_KEYS = [
     'pendingRemoteWriteAt',
     'pendingRemoteWriteRetryAt',
     'pendingRemoteWriteAttempts',
+    'pomodoroCredits',
     'notificationsEnabled',
     'undoNotificationsEnabled',
     'startDateNotificationsEnabled',
