@@ -429,14 +429,19 @@ struct AppChipFlow: Layout {
         var x: CGFloat = 0
         var y: CGFloat = 0
         var rowHeight: CGFloat = 0
-        return subviews.map { view in
+        var rows: [Int] = []
+        var rowHeights: [CGFloat] = []
+        let frames = subviews.map { view in
             let ideal = view.sizeThatFits(.unspecified)
             let size = view.sizeThatFits(ProposedViewSize(width: min(ideal.width, width), height: nil))
-            if x > 0 && x + size.width > width { x = 0; y += rowHeight + 8; rowHeight = 0 }
+            if x > 0 && x + size.width > width { x = 0; y += rowHeight + 8; rowHeights.append(rowHeight); rowHeight = 0 }
             let frame = CGRect(x: x, y: y, width: size.width, height: size.height)
             x += size.width + 8
             rowHeight = max(rowHeight, size.height)
+            rows.append(rowHeights.count)
             return frame
         }
+        rowHeights.append(rowHeight)
+        return zip(frames, rows).map { frame, row in frame.offsetBy(dx: 0, dy: (rowHeights[row] - frame.height) / 2) }
     }
 }
