@@ -1,0 +1,56 @@
+name: Notify release confirmations
+
+on:
+  workflow_call:
+    inputs:
+      release_tag:
+        description: Published stable app release tag
+        required: true
+        type: string
+      dry_run:
+        description: Preview without creating comments
+        required: false
+        type: boolean
+        default: true
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Published stable app release tag, e.g. v1.3.9
+        required: true
+        type: string
+      dry_run:
+        description: Preview without creating comments
+        required: true
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: mindwtr-release-confirmations
+  cancel-in-progress: false
+
+jobs:
+  notify:
+    if: github.repository == 'dongdongbh/Mindwtr'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout notifier code
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
+        with:
+          persist-credentials: false
+      - name: Set up Node
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
+        with:
+          node-version: '22'
+      - name: Notify matching issues
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          DRY_RUN: ${{ inputs.dry_run && 'true' || 'false' }}
+          MAX_COMMENTS: '50'
+        run: node scripts/ci/notify-release-confirmations.mjs

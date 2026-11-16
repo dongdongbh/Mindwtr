@@ -632,6 +632,17 @@ jobs:
             fi
           fi
 
+  notify-confirmations:
+    needs: [validate, release]
+    if: ${{ always() && github.repository == 'dongdongbh/Mindwtr' && needs.validate.result == 'success' && needs.release.result == 'success' && !contains(needs.validate.outputs.tag, '-') }}
+    permissions:
+      contents: read
+      issues: write
+    uses: ./.github/workflows/notify-release-confirmations.yml
+    with:
+      release_tag: ${{ needs.validate.outputs.tag }}
+      dry_run: true
+
   update-packages:
     needs: [validate, release]
     runs-on: ubuntu-latest
