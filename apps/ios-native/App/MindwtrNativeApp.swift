@@ -1339,7 +1339,7 @@ private struct AppLockRoot: View {
                                     || (model.taskAttachmentState == .discardedCleanup && !model.taskAttachmentHasIndependentDraft)
                                     ? "File cleanup" : model.label("taskEdit.resumeDraft")) { model.showTaskRecovery() }
                                     .buttonStyle(.borderedProminent)
-                                    .padding(16)
+                                    .padding(.trailing, 16).padding(.bottom, 74)
                                     .accessibilityIdentifier("task-recovery-open")
                             }
                         }

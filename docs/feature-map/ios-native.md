@@ -138,7 +138,7 @@ Widgets, App Intents and Siri, the Share Extension and the Watch app belong to t
 
 ## Draft recovery
 
-- Reach: Shown by itself after a restart when an unsaved task draft exists. A Resume draft button also floats over the main screen.
+- Reach: Shown by itself after a restart when an unsaved task draft exists. A Resume draft button also floats over the main screen, above the tab bar so it never covers a tab. RN has no draft recovery, so this button has no RN counterpart.
 - Selectors: `task-recovery-gate`, `task-recovery-resume`, `task-recovery-keep`, `task-recovery-discard`, `task-recovery-discard-confirm`, `task-recovery-open`
 - Code: `apps/ios-native/App/MindwtrNativeApp.swift`, `apps/ios-native/Sources/MindwtrNativeCore/EditorDraftStore.swift`
 - Checks: `apps/ios-native/App/UITests/FoundationUITests.swift` (testTaskDraftRecovery…), `apps/ios-native/Tests/MindwtrNativeCoreTests/EditorDraftRecoveryHostTests.swift`

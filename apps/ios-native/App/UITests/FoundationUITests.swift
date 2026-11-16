@@ -38318,4 +38318,20 @@ extension FoundationUITests {
         boardEnabled(app.buttons["UI batch close prompt saved"], timeout: 30)
         XCTAssertFalse(app.buttons["persistence-retry"].exists)
     }
+
+    func testUIBatchResumeDraftButtonClearsTheTabBar() {
+        let app = uiBatchApp()
+        app.launch(); defer { app.terminate() }
+        uiBatchDirtyEditor(app, "UI batch resume", edited: "UI batch resume kept")
+        boardTap(app, "task-editor-keep-for-later")
+        let resume = app.buttons["task-recovery-open"]
+        XCTAssertTrue(resume.waitForExistence(timeout: 30))
+        for tab in ["tab-focus", "tab-inbox", "capture-open", "tab-review", "tab-menu"] {
+            let frame = app.buttons[tab].frame
+            XCTAssertFalse(frame.isEmpty, tab)
+            XCTAssertFalse(resume.frame.intersects(frame), "Resume draft must not cover " + tab)
+        }
+        resume.tap()
+        XCTAssertTrue(app.staticTexts["task-recovery-protected"].waitForExistence(timeout: 30))
+    }
 }
