@@ -429,6 +429,7 @@ struct TaskViewSheet: View {
                 }
                 .id(editing)
                 .scrollDisabled(checklistDragRow != nil)
+                .scrollDismissesKeyboard(.interactively)
                 .background(GeometryReader { geometry in
                     Color.clear.preference(key: ChecklistViewportPreference.self, value: geometry.frame(in: .global))
                 })

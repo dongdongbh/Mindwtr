@@ -122,7 +122,7 @@ Widgets, App Intents and Siri, the Share Extension and the Watch app belong to t
 
 ## Markdown editor
 
-- Reach: Task editor › Edit › Description, or Project Details › Notes › Edit. Tap the text. The format toolbar sits above the keyboard.
+- Reach: Task editor › Edit › Description, or Project Details › Notes › Edit. Tap the text. The format toolbar sits above the keyboard. Drag the task editor down to hide the keyboard, as in RN.
 - Selectors: `markdown-toolbar-` followed by the core action id (`heading`, `bold`, `italic`, `strikethrough`, `link`, `code`, `codeBlock`, `quote`, `horizontalRule`, `bulletList`, `orderedList`, `taskList`), `markdown-toolbar-undo`, `task-editor-note`, `project-notes-input`
 - Code: `apps/ios-native/App/TaskViewSheet.swift` (NativeMarkdownTextEditor and NativeMarkdownToolbar), `apps/ios-native/Sources/MindwtrNativeCore/NativeMarkdownHistory.swift`, `packages/core/src/native-host-contract.ts` (getMarkdownToolbarActions, applyMarkdownToolbar and applyMarkdownTextChange)
 - Checks: `apps/ios-native/App/UITests/FoundationUITests.swift` (testTaskNoteMarkdownToolbar…), `apps/ios-native/Tests/MindwtrNativeCoreTests/NativeMarkdownHistoryTests.swift`, `packages/core/src/native-host-contract-markdown-toolbar.test.ts`
