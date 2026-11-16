@@ -53,6 +53,39 @@ describe('TaskItem', () => {
         });
     });
 
+    it('releases editor ownership when a saved task leaves the list before its write returns', async () => {
+        const first: Task = { ...mockTask, id: 'deferred-editor', title: 'Defer this task', status: 'next' };
+        const second: Task = { ...mockTask, id: 'other-editor', title: 'Edit another task', status: 'next' };
+        const write = createDeferred<void>();
+        const updateTask = vi.fn(async (id: string, updates: Partial<Task>) => {
+            useTaskStore.setState((state) => ({ _allTasks: state._allTasks.map((task) => task.id === id ? { ...task, ...updates } : task) }));
+            await write.promise;
+            return { success: true };
+        });
+        useTaskStore.setState({ _allTasks: [first, second], updateTask });
+        function VisibleTasks() {
+            const tasks = useTaskStore((state) => state._allTasks);
+            return <>{tasks.filter((task) => !task.startTime).map((task) => <TaskItem key={task.id} task={task} enableDoubleClickEdit />)}</>;
+        }
+        const view = render(<LanguageProvider><VisibleTasks /></LanguageProvider>);
+        fireEvent.doubleClick(view.getByText(first.title));
+        fireEvent.change(view.getByRole('combobox', { name: 'Title' }), { target: { value: `${first.title} /start:tomorrow` } });
+        const titleInput = view.getByRole('combobox', { name: 'Title' }) as HTMLInputElement;
+        titleInput.setSelectionRange(titleInput.value.length, titleInput.value.length);
+        fireEvent.click(titleInput);
+        fireEvent.click(await view.findByRole('option', { name: '/start:tomorrow' }));
+        await waitFor(() => expect(titleInput).toHaveValue(first.title));
+        fireEvent.click(view.getByRole('button', { name: 'Save' }));
+        await waitFor(() => expect(updateTask).toHaveBeenCalledOnce());
+        await waitFor(() => expect(view.queryByRole('combobox', { name: 'Title' })).not.toBeInTheDocument());
+        expect(useUiStore.getState().editingTaskId).toBeNull();
+        fireEvent.doubleClick(view.getByText(second.title));
+        expect(view.getByRole('combobox', { name: 'Title' })).toHaveValue(second.title);
+        await act(async () => { write.resolve(); });
+        expect(useUiStore.getState().editingTaskId).toBe(second.id);
+        expect(view.getByRole('combobox', { name: 'Title' })).toHaveValue(second.title);
+    });
+
     it('renders task title', () => {
         const { getByText } = render(
             <LanguageProvider>

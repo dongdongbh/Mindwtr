@@ -23,8 +23,8 @@ export function tryClaimTaskEditSession(taskId: string, owner: object): boolean 
     return true;
 }
 
-export function releaseTaskEditSession(taskId: string, owner: object): void {
-    if (activeSessions.get(taskId) === owner) {
-        activeSessions.delete(taskId);
-    }
+export function releaseTaskEditSession(taskId: string, owner: object): boolean {
+    if (activeSessions.get(taskId) !== owner) return false;
+    activeSessions.delete(taskId);
+    return true;
 }

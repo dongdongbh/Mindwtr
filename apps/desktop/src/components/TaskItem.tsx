@@ -1,3 +1,4 @@
+import { useUiStore } from '../store/ui-store';
 import { taskDraftToUpdatePatch } from '@mindwtr/core/task-draft';
 import { TaskProjectConversionDialog } from './TaskProjectConversionDialog';
 import { useState, memo, useEffect, useRef, useCallback, useMemo, type DragEvent, type ReactNode } from 'react';
@@ -788,7 +789,15 @@ export const TaskItem = memo(function TaskItem({
         const owner = editSessionOwnerRef.current;
         return () => {
             unlockEditing();
-            releaseTaskEditSession(task.id, owner);
+            const released = releaseTaskEditSession(task.id, owner);
+            const ui = useUiStore.getState();
+            if (released && ui.editingTaskId === task.id) {
+                ui.setEditingTaskId(null);
+                void logInfo('Task editor ownership released with its row', {
+                    scope: 'ui',
+                    extra: { releaseCheck: 'v1.3.9/editor-row-release' },
+                });
+            }
         };
     }, [isEditing, lockEditing, task.id, unlockEditing]);
 

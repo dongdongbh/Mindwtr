@@ -235,6 +235,8 @@ Source: `apps/desktop/src` (Tauri + React). Labels come from `packages/core/src/
 
 ## Task editor
 
+- Save-and-move regression: setting a future start can move the task to Upcoming; removing the owning row releases its editor reference so later edit shortcuts work. Checks: `e2e/task-editor-deferred-save.spec.ts` and the deferred-write case in `TaskItem.test.tsx`.
+
 - Reference contexts: More › Reference › double-click an item › Contexts. Edit or clear its contexts and Save without changing Reference status. Existing contexts also appear on the row; an empty Contexts field follows the task editor layout. Checks: `apps/desktop/src/components/Task/useTaskItemFieldLayout.test.tsx`, `apps/desktop/src/components/Task/TaskItemDisplay.test.tsx`.
 - Reach: Double-click a task row. Sections: Details, Scheduling, Organization. Fields include Description, checklist, attachments, and recurrence. Settings › GTD › Task editor layout › Editor opening picks In-row or Pop-up.
 - Shortcuts: `e` (Vim), `Shift+Enter` (Standard), `Ctrl+E` (Emacs). `Ctrl+Enter` (`Cmd+Enter`) saves. `Esc` cancels.
