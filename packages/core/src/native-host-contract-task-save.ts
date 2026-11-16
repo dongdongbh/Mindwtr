@@ -202,6 +202,9 @@ export const validNativeTaskDraftBases = (before: Task, request: NativeTaskDraft
 
 export const validNativeTaskDraftScheduleEffect = (before: Task, request: NativeTaskDraftSaveRequest, after: Task,
     validateField: (field: TaskDraftField, value: unknown) => boolean): boolean => {
+    if ((own(request.patch, 'status') ? request.patch.status : before.status) === 'reference') {
+        return !after.startTime && !after.dueDate && !after.reviewAt && after.relativeStartOffset == null;
+    }
     for (const field of ['dueDate', 'reviewAt'] as const) {
         const expected = own(request.patch, field) ? request.patch[field] || undefined : before[field];
         if (!taskEditValuesEqual(after[field], expected)) return false;

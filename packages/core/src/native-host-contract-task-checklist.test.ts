@@ -745,6 +745,26 @@ describe('prepared native checklist Save and Reset', () => {
         expect(savedTask().focusOrder).toBeUndefined();
     });
 
+    it('saves a dated task as Reference and clears its dates like the store does', async () => {
+        const original = source({ dueDate: '2026-09-30T17:00', startTime: '2026-09-29T17:00', reviewAt: '2026-10-02',
+            relativeStartOffset: { amount: -1, unit: 'day' }, dueReminderLeadMinutes: 1440 });
+        const { host } = await open(original);
+        const loaded = useTaskStore.getState()._tasksById.get(original.id)!;
+        expect(loaded.relativeStartOffset).toEqual({ amount: -1, unit: 'day' });
+        const request = { id: original.id, requestId: id,
+            base: { status: 'next' }, patch: { status: 'reference' },
+            scheduleBase: { startTime: loaded.startTime!, dueDate: loaded.dueDate!,
+                relativeStartOffset: loaded.relativeStartOffset!, reviewAt: loaded.reviewAt! },
+            checklist: { base: original.checklist!, value: original.checklist! } };
+        const plan = unwrap(host.prepareTaskChecklistSave(request));
+        expect(plan.kind).toBe('prepared');
+        if (plan.kind !== 'prepared') return;
+        unwrap(await host.commitPreparedTaskChecklistWrite({ request, prepared: plan.prepared }));
+        expect(savedTask()).toMatchObject({ status: 'reference', rev: 4 });
+        expect([savedTask().dueDate, savedTask().startTime, savedTask().reviewAt, savedTask().relativeStartOffset])
+            .toEqual([undefined, undefined, undefined, undefined]);
+    });
+
     it('writes a nonempty already-open Reset and returns an empty saved-list no-write result', async () => {
         const { host, saves } = await open();
         const request = { id: 'checklist-task', requestId: id, checklistBase: savedTask().checklist };
