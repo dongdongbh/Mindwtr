@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-version="${1:?usage: rn-ios-release-allowed.sh <version>}"
+version="${1:?usage: rn-release-allowed.sh <version>}"
 base="${version#v}"
 base="${base%%-*}"
 IFS=. read -r major minor patch <<< "${base}"

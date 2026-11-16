@@ -165,6 +165,16 @@ jobs:
             exit 1
           fi
 
+      - name: Refuse a React Native stable release at 1.4.0 or higher
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          if [ "$(bash scripts/ci/rn-release-allowed.sh "$VERSION")" != true ]; then
+            echo "Stable ${VERSION} would ship the React Native apps, but 1.4.0 and later ship native apps only. Wire the native stable release path before tagging ${VERSION}." >&2
+            exit 1
+          fi
+
       - name: Resolve and validate release notes
         id: release_notes
         env:
