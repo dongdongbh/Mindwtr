@@ -33,7 +33,7 @@ const coreSrc = resolve(app, '../../packages/core/src');
 const { en } = await import(resolve(coreSrc, 'i18n/locales/en.ts'));
 
 const run = `${String(Date.now()).slice(-6)}${String(randomInt(1_000_000)).padStart(6, '0')}`;
-const titles = { a: `69${run}1`, b: `69${run}2`, c: `69${run}3`, d: `69${run}4`, e: `69${run}5`, f: `69${run}6` };
+const titles = { a: `69${run}1`, b: `69${run}2`, c: `69${run}3`, d: `69${run}4`, e: `69${run}5`, f: `69${run}6`, g: `69${run}7` };
 
 const CONTEXT = '@6901';
 
@@ -218,8 +218,9 @@ try {
     await capture(`${titles.d}%s/*`, `${titles.d} /*`);
     await capture(`${titles.e}%s/archived`, `${titles.e} /archived`);
     await capture(`${titles.f}%s/archived`, `${titles.f} /archived`);
+    await capture(titles.g, titles.g);
     let seen = core();
-    check(Object.values(titles).every((title) => seen.stored[title].length === 1), 'the six captures are stored once each');
+    check(Object.values(titles).every((title) => seen.stored[title].length === 1), 'the seven captures are stored once each');
 
 
     originalSort = seen.sort.find((option) => option.selected) ?? fail('core marks no sort selected');
@@ -295,8 +296,8 @@ try {
     check(seen.stored[titles.a][0].status === 'next' && seen.stored[titles.b][0].status === 'next' && commands('bulkAction') === bulkBefore + 1,
         '(c) Move to Next on two selected rows is one bulk write; both are stored Next');
 
-    nodes = await device.settle(await device.toTop());
-    await longPress(taskRows(nodes).sort((a, b) => box(a)[1] - box(b)[1])[0]?.text ?? fail('no Inbox row to select'));
+    await device.reveal(titles.g);
+    await longPress(titles.g);
     await waitFor('selection mode', (current) => selectedCount(current) === 1, 10_000);
     nodes = await back((current) => Number.isNaN(selectedCount(current)));
     check(tabSelected(nodes, en['tab.inbox']) && Number.isFinite(inboxCount(nodes)), '(c) Back ended the Inbox\'s selection mode, and the Inbox stayed open');
