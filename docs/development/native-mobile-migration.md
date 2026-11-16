@@ -122,7 +122,7 @@ Native Android first ships as release candidates, starting with `1.4.0-rc.1`. Un
   - the GitHub prerelease APK;
   - the GitHub prerelease `-foss.apk`.
   There is no React Native RC.
-- **RCs do not go to IzzyOnDroid or F-Droid.** Those channels get native Android only with the first native stable release.
+- **RCs do not go to IzzyOnDroid or F-Droid.** Those channels get native Android only with the first native stable release. IzzyOnDroid ignores GitHub prereleases, so an RC APK never reaches it (confirmed by dd, 2026-11-16).
 - **RC users stay on native.** A user can move from RN stable to the native RC by joining the beta. A native RC user never moves back to RN. A bug found in an RC is fixed in native and shipped as a new native RC, not by an RN release.
 - **When native is stable,** the stable workflow switches to native, and the RN Android release line ends.
 
