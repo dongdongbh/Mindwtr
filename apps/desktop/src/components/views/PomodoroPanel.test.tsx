@@ -208,7 +208,7 @@ describe('PomodoroPanel desktop persistence', () => {
     });
 
     it.each(['done', 'archived', 'cancelled', 'reference', 'deleted'] as const)(
-        'unlinks a task becoming %s while the picker is open without changing the timer', (transition) => {
+        'pauses and unlinks a task becoming %s while the picker is open', (transition) => {
             storeSession(task.id);
             renderPanel();
             fireEvent.click(screen.getByRole('button', { name: 'Start' }));
@@ -227,7 +227,11 @@ describe('PomodoroPanel desktop persistence', () => {
             expect(screen.getByRole('option', { name: 'Timer only' })).toHaveAttribute('aria-selected', 'true');
             expect(screen.queryByRole('option', { name: task.title })).toBeNull();
             expect(screen.queryByLabelText('Mark task done')).toBeNull();
-            expect(usePomodoroStore.getState().snapshot).toEqual({ ...before, selectedTaskId: undefined });
+            expect(usePomodoroStore.getState().snapshot).toMatchObject({
+                selectedTaskId: undefined,
+                timerState: { ...before.timerState, isRunning: false },
+                sessionHistory: before.sessionHistory,
+            });
         }
     );
 

@@ -206,6 +206,10 @@ export const createBackupFileName = (date: Date = new Date()): string => {
 };
 
 const compactBackupSettings = (settings: AppData['settings']): AppData['settings'] => {
+    if (settings.pomodoroCredits !== undefined) {
+        settings = { ...settings };
+        delete settings.pomodoroCredits;
+    }
     const pendingRemoteDeletes = settings.attachments?.pendingRemoteDeletes;
     if (!pendingRemoteDeletes?.length) return settings;
     return {
@@ -273,9 +277,10 @@ const carryForwardEntitiesMissingFromBackup = <T extends RestorableEntity>(
 
 
 const stripDeviceLocalRestoreSettings = (settings: AppData['settings']): AppData['settings'] => {
-    if (settings.security === undefined) return settings;
+    if (settings.security === undefined && settings.pomodoroCredits === undefined) return settings;
     const nextSettings: AppData['settings'] = { ...settings };
     delete nextSettings.security;
+    delete nextSettings.pomodoroCredits;
     return nextSettings;
 };
 
@@ -285,6 +290,7 @@ const keepDeviceLocalRestoreSettings = (
     previous: AppData['settings'] | undefined,
 ): AppData['settings'] => {
     const security = previous?.security;
+    if (previous?.pomodoroCredits !== undefined) restored = { ...restored, pomodoroCredits: previous.pomodoroCredits };
     if (security === undefined) return restored;
     return { ...restored, security: { ...security } };
 };

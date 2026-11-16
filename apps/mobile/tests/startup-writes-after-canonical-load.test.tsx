@@ -142,6 +142,7 @@ function RootLayoutStartupHarness() {
 describe('startup store writes wait for the canonical SQLite load', () => {
 
   let sqliteRows: Map<string, Task>;
+  let sqliteSettings: AppData['settings'];
   let firstRead!: { release: () => void; fail: (error: Error) => void };
   let storage: StorageAdapter & {
     getData: ReturnType<typeof vi.fn>;
@@ -169,6 +170,7 @@ describe('startup store writes wait for the canonical SQLite load', () => {
       _allPeople: [],
     });
     sqliteRows = new Map([task('11'), task('18')].map((row) => [row.id, row]));
+    sqliteSettings = {};
     const firstReadGate = new Promise<void>((release, fail) => { firstRead = { release, fail }; });
     storage = {
 
@@ -176,11 +178,17 @@ describe('startup store writes wait for the canonical SQLite load', () => {
       getData: vi.fn(async () => {
         const rows = [...sqliteRows.values()].map((row) => structuredClone(row));
         if (storage.getData.mock.calls.length === 1) await firstReadGate;
-        return document(rows);
+        return { ...document(rows), settings: structuredClone(sqliteSettings) };
       }),
       saveTask: vi.fn(async (row: Task) => { sqliteRows.set(row.id, structuredClone(row)); }),
       saveData: vi.fn(async (data: AppData) => {
         data.tasks.forEach((row) => sqliteRows.set(row.id, structuredClone(row)));
+        sqliteSettings = structuredClone(data.settings);
+      }),
+      saveDataIfUnchanged: vi.fn(async (data: AppData, expected: AppData) => {
+        const current = { ...document([...sqliteRows.values()].map((row) => structuredClone(row))), settings: sqliteSettings };
+        if (JSON.stringify(current) !== JSON.stringify(expected)) throw new Error('The document changed');
+        await storage.saveData(data);
       }),
     };
     setStorageAdapter(storage);
@@ -277,7 +285,7 @@ describe('startup store writes wait for the canonical SQLite load', () => {
   });
 
 
-  it('re-fetches after the Pomodoro panel credits a session on the snapshot', async () => {
+  it('keeps restored Pomodoro credit behind the canonical load', async () => {
     await startApp();
     const controller = createMobilePomodoroController({
       storage: {
@@ -297,14 +305,18 @@ describe('startup store writes wait for the canonical SQLite load', () => {
       },
     });
     await act(async () => { await controller.ensureHydrated(); });
-    await vi.waitFor(() => expect(storedTask('11')?.timeSpentMinutes).toBe(DEFAULT_POMODORO_DURATIONS.focusMinutes));
+    expect(readiness.canonicalDataReady).toBe(false);
+    expect(storedTask('11')?.timeSpentMinutes).toBeUndefined();
+    expect(storage.saveDataIfUnchanged).not.toHaveBeenCalled();
 
     await finishFirstRead();
+    await controller.flushPersistence();
+    await vi.waitFor(() => expect(storedTask('11')?.timeSpentMinutes).toBe(DEFAULT_POMODORO_DURATIONS.focusMinutes));
 
-    expect(storage.getData).toHaveBeenCalledTimes(2);
+    expect(readiness.canonicalDataReady).toBe(true);
     const whenReady = readiness.tasksWhenCanonical ?? [];
     expect(whenReady.map(({ id }) => id)).toEqual(expect.arrayContaining(['11', '18']));
-    expect(whenReady.find(({ id }) => id === '11')?.timeSpentMinutes).toBe(DEFAULT_POMODORO_DURATIONS.focusMinutes);
+    expect(sqliteRows.get('11')?.timeSpentMinutes).toBe(DEFAULT_POMODORO_DURATIONS.focusMinutes);
     expect(storedTask('18')).toBeDefined();
   });
 });

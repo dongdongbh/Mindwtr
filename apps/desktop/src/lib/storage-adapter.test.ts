@@ -22,6 +22,26 @@ vi.mock('./report-error', () => ({
 
 import { getDesktopSaveStatus, tauriStorage } from './storage-adapter';
 
+describe('conditional Pomodoro document persistence', () => {
+    afterEach(() => { vi.clearAllMocks(); });
+
+    it('uses the native exact writer for the coupled task and local receipt', async () => {
+        const expected = emptyData();
+        const data = { ...expected, settings: { pomodoroCredits: {
+            '00000000-0000-4000-8000-000000000001': { taskId: 'task', minutes: 3 },
+        } } };
+        invokeMock.mockResolvedValue(data);
+        await expect(tauriStorage.saveDataIfUnchanged!(data, expected)).resolves.toEqual(data);
+        expect(invokeMock).toHaveBeenCalledWith('save_data', { data, mode: 'exact', expectedData: expected });
+    });
+
+    it('keeps a stale conditional write failed instead of falling back to a merge', async () => {
+        invokeMock.mockRejectedValue(new Error('Snapshot changed'));
+        await expect(tauriStorage.saveDataIfUnchanged!(emptyData(), emptyData())).rejects.toThrow('Snapshot changed');
+        expect(invokeMock).toHaveBeenCalledTimes(1);
+    });
+});
+
 const entityIds = (tasks: string[] = []) => ({
     tasks,
     projects: [],

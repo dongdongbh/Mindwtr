@@ -222,7 +222,7 @@ describe('PomodoroPanel', () => {
   };
 
   it.each(['done', 'archived', 'cancelled', 'reference', 'deleted'] as const)(
-    'unlinks a task becoming %s while the picker is open and preserves the timer', async (transition) => {
+    'unlinks a task becoming %s while the picker is open', async (transition) => {
       const tree = await renderLinkedPanel();
       act(() => { mobilePomodoroController.toggle({}); });
       const picker = tree.root.findAllByType(Pressable)
@@ -242,8 +242,9 @@ describe('PomodoroPanel', () => {
       expect(tree.root.findAllByType(Pressable).some((node) => node.props.accessibilityLabel === 'Mark task done')).toBe(false);
       const after = mobilePomodoroController.getSnapshot();
       expect(after.selectedTaskId).toBeUndefined();
-      expect(after.timerState).toEqual(before.timerState);
-      expect(after.phaseEndsAt).toBe(before.phaseEndsAt);
+      const pauses = ['done', 'archived', 'cancelled'].includes(transition);
+      expect(after.timerState).toEqual({ ...before.timerState, isRunning: !pauses });
+      expect(after.phaseEndsAt).toBe(pauses ? undefined : before.phaseEndsAt);
       expect(after.sessionHistory).toEqual(before.sessionHistory);
       act(() => tree.unmount());
     }
@@ -263,10 +264,15 @@ describe('PomodoroPanel', () => {
     act(() => tree.unmount());
   });
 
-  it('preserves the link until Mark done changes live state and forwards auto-start options', async () => {
-    const onMarkDone = vi.fn();
+  it('pauses and detaches before Mark done changes live state and forwards auto-start options', async () => {
+    const onMarkDone = vi.fn(() => {
+      expect(mobilePomodoroController.getSnapshot().selectedTaskId).toBeUndefined();
+      expect(mobilePomodoroController.getSnapshot().timerState.isRunning).toBe(false);
+      updateLiveTasks([{ ...linkedTask, status: 'done' }, { ...linkedTask, id: 'recurring-next' }]);
+    });
     const tree = await renderLinkedPanel(onMarkDone);
-    const clearEvent = vi.spyOn(mobilePomodoroController, 'clearLastEvent');
+    act(() => { mobilePomodoroController.toggle(); });
+    const complete = vi.spyOn(mobilePomodoroController, 'completeSelectedTask');
     const selectTask = vi.spyOn(mobilePomodoroController, 'setSelectedTaskId');
     try {
       act(() => {
@@ -277,15 +283,16 @@ describe('PomodoroPanel', () => {
         .find((node) => node.props.accessibilityLabel === 'Mark task done');
       act(() => markDone?.props.onPress());
       expect(onMarkDone).toHaveBeenCalledWith(linkedTask.id);
-      expect(clearEvent).toHaveBeenCalledWith({ autoStartBreaks: true, autoStartFocus: true });
+      expect(complete).toHaveBeenCalledWith({ autoStartBreaks: true, autoStartFocus: true });
 
-      expect(mobilePomodoroController.getSnapshot().selectedTaskId).toBe(linkedTask.id);
+      expect(mobilePomodoroController.getSnapshot().selectedTaskId).toBeUndefined();
+      expect(mobilePomodoroController.getSnapshot().timerState.isRunning).toBe(false);
       act(() => updateLiveTasks([{ ...linkedTask, status: 'done' }]));
       expect(mobilePomodoroController.getSnapshot().selectedTaskId).toBeUndefined();
-      expect(selectTask).toHaveBeenCalledWith(undefined, { autoStartBreaks: true, autoStartFocus: true });
+      expect(selectTask).not.toHaveBeenCalled();
     } finally {
       act(() => tree.unmount());
-      clearEvent.mockRestore();
+      complete.mockRestore();
       selectTask.mockRestore();
     }
   });

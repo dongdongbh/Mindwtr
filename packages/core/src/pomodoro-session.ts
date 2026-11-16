@@ -11,6 +11,7 @@ import {
   type PomodoroSessionHistory,
   type PomodoroState,
 } from './pomodoro';
+import { accumulatePomodoroWork } from './pomodoro-work';
 
 export interface StoredPomodoroSession {
   durations?: Partial<PomodoroDurations>;
@@ -18,6 +19,7 @@ export interface StoredPomodoroSession {
   selectedTaskId?: string;
   phaseEndsAt?: string;
   sessionHistory?: Partial<PomodoroSessionHistory>;
+  workSecondsByTaskId?: Record<string, number>;
 
   updatedAtMs?: number;
 }
@@ -29,6 +31,7 @@ export interface ResolvedPomodoroSession {
   phaseEndsAt?: string;
   lastEvent: PomodoroEvent | null;
   sessionHistory: PomodoroSessionHistory;
+  workSecondsByTaskId?: Record<string, number>;
 }
 
 const isPomodoroPhase = (value: unknown): value is PomodoroPhase => value === 'focus' || value === 'break';
@@ -82,6 +85,12 @@ export const resolvePomodoroSession = (
   const selectedTaskId = typeof session?.selectedTaskId === 'string' && session.selectedTaskId.trim().length > 0
     ? session.selectedTaskId
     : undefined;
+  const workFor = (nextTimerState: PomodoroState) => accumulatePomodoroWork({
+    timerState,
+    durations,
+    selectedTaskId,
+    workSecondsByTaskId: session?.workSecondsByTaskId,
+  }, nextTimerState);
 
   if (!timerState.isRunning) {
     return {
@@ -91,6 +100,7 @@ export const resolvePomodoroSession = (
       phaseEndsAt: undefined,
       lastEvent: null,
       sessionHistory,
+      workSecondsByTaskId: workFor(timerState),
     };
   }
 
@@ -103,6 +113,7 @@ export const resolvePomodoroSession = (
       phaseEndsAt: undefined,
       lastEvent: null,
       sessionHistory,
+      workSecondsByTaskId: workFor(timerState),
     };
   }
 
@@ -115,6 +126,7 @@ export const resolvePomodoroSession = (
       phaseEndsAt: undefined,
       lastEvent: null,
       sessionHistory,
+      workSecondsByTaskId: workFor(timerState),
     };
   }
 
@@ -130,6 +142,7 @@ export const resolvePomodoroSession = (
       phaseEndsAt,
       lastEvent: null,
       sessionHistory,
+      workSecondsByTaskId: workFor({ ...timerState, remainingSeconds }),
     };
   }
 
@@ -161,6 +174,7 @@ export const resolvePomodoroSession = (
       : undefined,
     lastEvent: finished.lastEvent,
     sessionHistory: nextSessionHistory,
+    workSecondsByTaskId: workFor(nextTimerState),
   };
 };
 
@@ -208,4 +222,5 @@ export const serializePomodoroSession = (session: ResolvedPomodoroSession): Stor
   selectedTaskId: session.selectedTaskId,
   phaseEndsAt: session.phaseEndsAt,
   sessionHistory: session.sessionHistory,
+  workSecondsByTaskId: session.workSecondsByTaskId,
 });

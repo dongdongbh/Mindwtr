@@ -76,7 +76,7 @@ describe('native Watch desired timer transitions', () => {
             if (mode === 'running' && action === 'pause') expect(after.session.timerState.remainingSeconds).toBe(80);
             if (action === 'reset') expect(after.session.timerState.remainingSeconds).toBe(mode === 'expired' ? 300 : 1500);
             if (mode === 'expired') {
-                expect(plan.taskPatch).toMatchObject({ timeSpentMinutes: 29, rev: 3, revBy: 'device' });
+                expect(plan.taskPatch).toMatchObject({ timeSpentMinutes: 6, rev: 3, revBy: 'device' });
                 expect(after.session.sessionHistory.completedFocusSessionsByTaskId).toEqual({ 'old-task': 1 });
             } else expect(plan.taskPatch).toBeNull();
             expect(validatePreparedNativePomodoroTransition(plan)).toEqual(plan);

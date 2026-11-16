@@ -34,6 +34,8 @@ Source: `apps/desktop/src` (Tauri + React). Labels come from `packages/core/src/
 
 ## Pomodoro timer
 
+- Accounting: linked active work is preserved at pause, task completion, task switch, reset, preset change and work/break transitions. Pauses and breaks do not count; sub-minute remainders carry per task. Completion pauses the linked work timer and leaves completed-Pomodoro counts unchanged unless the work block finished.
+
 - Reach: Settings › GTD › Features › Pomodoro timer (turn on). Then Sidebar › Focus shows the timer panel.
 - Code: `apps/desktop/src/components/views/PomodoroPanel.tsx`, `apps/desktop/src/components/views/PomodoroTaskPicker.tsx`, `apps/desktop/src/hooks/usePomodoroAlerts.ts`
 - Checks: `apps/desktop/src/components/views/PomodoroPanel.test.tsx`, `apps/desktop/src/hooks/usePomodoroAlerts.test.tsx`

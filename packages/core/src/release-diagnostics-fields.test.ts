@@ -4,6 +4,7 @@ import { sanitizeLogContext } from './log-sanitize';
 
 
 const RELEASE_CHECK_FIELD_NAMES = [
+    'minutes',
 
     'staleTaskCount', 'staleProjectCount',
     'pruned',

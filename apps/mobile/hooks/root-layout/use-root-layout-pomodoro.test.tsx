@@ -7,7 +7,7 @@ import { DEFAULT_POMODORO_DURATIONS, getPomodoroLocalDayKey } from '@mindwtr/cor
 const { storeState } = vi.hoisted(() => ({
   storeState: {
     tasks: [] as unknown[],
-    updateTask: vi.fn(async () => ({ success: true })),
+    updateTask: vi.fn(async (_id: string, _updates: unknown) => ({ success: true })),
     settings: { gtd: { pomodoro: {} } } as Record<string, any>,
   },
 }));
@@ -17,7 +17,16 @@ vi.mock('@mindwtr/core', async () => {
   const useTaskStore = Object.assign((selector?: (state: typeof storeState) => unknown) => (
     selector ? selector(storeState) : storeState
   ), { getState: () => storeState });
-  return { ...actual, useTaskStore };
+  return {
+    ...actual,
+    useTaskStore,
+    applyPomodoroCredit: vi.fn(async ({ taskId, minutes }) => {
+      const task = storeState.tasks.find((candidate) => (candidate as { id: string }).id === taskId) as { timeSpentMinutes?: number };
+      await storeState.updateTask(taskId, { timeSpentMinutes: (task?.timeSpentMinutes ?? 0) + minutes });
+      return 'applied';
+    }),
+    acknowledgePomodoroCredits: vi.fn(async () => undefined),
+  };
 });
 
 vi.mock('@react-native-async-storage/async-storage', () => ({
@@ -32,7 +41,7 @@ const notificationMocks = vi.hoisted(() => ({
   scheduleMobilePomodoroCompletionNotification: vi.fn(async () => undefined),
 }));
 vi.mock('@/lib/notification-service', () => notificationMocks);
-vi.mock('@/lib/app-log', () => ({ logWarn: vi.fn(async () => undefined) }));
+vi.mock('@/lib/app-log', () => ({ logInfo: vi.fn(async () => undefined), logWarn: vi.fn(async () => undefined) }));
 
 // eslint-disable-next-line import/first
 import { mobilePomodoroController } from '@/lib/pomodoro-controller';
@@ -132,4 +141,28 @@ describe('useRootLayoutPomodoro', () => {
     expect(notificationMocks.cancelMobilePomodoroCompletionNotification).toHaveBeenCalledWith('completion-alert-off');
     act(() => tree.unmount());
   });
+
+  it('pauses a linked task completed on another screen without mounting the timer panel', async () => {
+    vi.useFakeTimers();
+    const task = { id: 'outside', title: 'Outside', status: 'next', timeSpentMinutes: 0, completedAt: undefined as string | undefined };
+    storeState.tasks = [task];
+    let tree!: renderer.ReactTestRenderer;
+    await act(async () => { tree = renderer.create(<Harness />); });
+    await act(async () => {
+      mobilePomodoroController.setSelectedTaskId(task.id);
+      mobilePomodoroController.toggle();
+      await mobilePomodoroController.flushPersistence();
+    });
+    await act(async () => { await vi.advanceTimersByTimeAsync(90_000); });
+    task.status = 'done';
+    task.completedAt = new Date(Date.now()).toISOString();
+    storeState.tasks = [{ ...task }, { ...task, id: 'next-recurrence', status: 'next' }];
+    await act(async () => { tree.update(<Harness />); });
+    await mobilePomodoroController.flushPersistence();
+    expect(mobilePomodoroController.getSnapshot().timerState.isRunning).toBe(false);
+    expect(mobilePomodoroController.getSnapshot().selectedTaskId).toBeUndefined();
+    expect(storeState.updateTask).toHaveBeenCalledWith(task.id, { timeSpentMinutes: 1 });
+    act(() => tree.unmount());
+  });
+
 });

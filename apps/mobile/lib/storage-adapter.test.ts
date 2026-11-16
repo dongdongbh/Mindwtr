@@ -28,7 +28,7 @@ const {
   updateMobileWidgetFromDataMock: vi.fn(),
   appStateListeners: [] as Array<(state: string) => void>,
   appStateCurrentState: { value: undefined as string | undefined },
-  mockPlatformOS: { value: 'android' as 'android' | 'ios' },
+  mockPlatformOS: { value: 'android' as 'android' | 'ios' | 'web' },
 }));
 
 vi.mock('expo-constants', () => ({
@@ -140,6 +140,7 @@ describe('mobile storage adapter', () => {
 
     const { __mobileStorageTestUtils } = await import('./storage-adapter');
     __mobileStorageTestUtils.reset();
+    vi.unstubAllGlobals();
   });
 
   it('uses the JSON fallback without loading op-sqlite when the native module is absent', async () => {
@@ -488,6 +489,81 @@ describe('mobile storage adapter', () => {
     return stored;
   };
 
+  const browserStorage = async (variant: 'standalone' | 'inline') => {
+    mockPlatformOS.value = 'web';
+    const stored = new Map<string, string>();
+    localStorageMock.getItem.mockImplementation((name: string) => stored.get(name) ?? null);
+    localStorageMock.setItem.mockImplementation((name: string, value: string) => { stored.set(name, value); });
+    vi.stubGlobal('localStorage', localStorageMock);
+    const tails = new Map<string, Promise<unknown>>();
+    vi.stubGlobal('navigator', { locks: { request: vi.fn((name: string, operation: () => unknown) => {
+      const pending = (tails.get(name) ?? Promise.resolve()).then(operation);
+      tails.set(name, pending.catch(() => undefined));
+      return pending;
+    }) } });
+    const storage = variant === 'standalone' ? (await import('./storage-adapter.web')).mobileStorage
+      : (await import('./storage-adapter')).mobileStorage;
+    return { storage, stored };
+  };
+
+  it.each(['standalone', 'inline'] as const)('rejects a stale ordinary browser save queued during a credit (%s)', async (variant) => {
+    const { storage } = await browserStorage(variant);
+    const { StorageConflictError } = await import('@mindwtr/core');
+    const initial = makeWidgetSnapshot({ ...makeWidgetTask('task'), timeSpentMinutes: 5 });
+    await storage.saveData(initial);
+    const expected = await storage.getData();
+    const credited = { ...expected, tasks: [{ ...expected.tasks[0], timeSpentMinutes: 8 }], settings: { pomodoroCredits: {
+      '00000000-0000-4000-8000-000000000001': { taskId: 'task', minutes: 3 },
+    } } };
+    const credit = storage.saveDataIfUnchanged!(credited, expected);
+    const ordinary = storage.saveData({ ...expected, tasks: [{ ...expected.tasks[0], title: 'External edit' }] });
+    await expect(credit).resolves.toBeUndefined();
+    await expect(ordinary).rejects.toBeInstanceOf(StorageConflictError);
+    expect((await storage.getData()).tasks[0].timeSpentMinutes).toBe(8);
+  });
+
+  it.each(['standalone', 'inline'] as const)('keeps a browser credit behind the shared writer lock (%s)', async (variant) => {
+    const { storage, stored } = await browserStorage(variant);
+    const { StorageConflictError } = await import('@mindwtr/core');
+    const initial = makeWidgetSnapshot(makeWidgetTask('task'));
+    await storage.saveData(initial);
+    const expected = await storage.getData();
+    let release!: () => void;
+    let entered!: () => void;
+    const ready = new Promise<void>((resolve) => { entered = resolve; });
+    const held = navigator.locks.request('mindwtr-data:write', async () => {
+      entered();
+      await new Promise<void>((resolve) => { release = resolve; });
+    });
+    await ready;
+    const ordinary = storage.saveData({ ...expected, tasks: [{ ...expected.tasks[0], title: 'External edit' }] });
+    const credit = storage.saveDataIfUnchanged!({ ...expected, tasks: [{ ...expected.tasks[0], timeSpentMinutes: 3 }] }, expected);
+    expect(JSON.parse(stored.get('mindwtr-data')!).tasks[0].title).toBe(initial.tasks[0].title);
+    release();
+    await held;
+    await ordinary;
+    await expect(credit).rejects.toBeInstanceOf(StorageConflictError);
+    expect((await storage.getData()).tasks[0].title).toBe('External edit');
+  });
+
+  it.each(['standalone', 'inline'] as const)('fails closed for browser credits without Web Locks (%s)', async (variant) => {
+    const { storage } = await browserStorage(variant);
+    vi.stubGlobal('navigator', {});
+    const initial = makeWidgetSnapshot(makeWidgetTask('task'));
+    await storage.saveData(initial);
+    const expected = await storage.getData();
+    await expect(storage.saveDataIfUnchanged!({ ...expected, tasks: [{ ...expected.tasks[0], timeSpentMinutes: 3 }] }, expected))
+      .rejects.toThrow('Atomic browser storage');
+    expect((await storage.getData()).tasks[0].timeSpentMinutes).toBeUndefined();
+  });
+
+  it.each(['standalone', 'inline'] as const)('keeps a legacy browser document without settings writable (%s)', async (variant) => {
+    const { storage, stored } = await browserStorage(variant);
+    stored.set('mindwtr-data', JSON.stringify({ tasks: [], projects: [] }));
+    const loaded = await storage.getData();
+    await expect(storage.saveData({ ...loaded, settings: {} })).resolves.toBeUndefined();
+  });
+
   const makeOversizedLibrary = (): AppData => ({
     ...makeWidgetSnapshot(makeWidgetTask('task-0')),
     tasks: Array.from({ length: 6_000 }, (_, index) => ({
@@ -736,6 +812,63 @@ describe('mobile storage adapter', () => {
     stored.set('mindwtr-data:startup-backup-version', '2');
     stored.set('mindwtr-data:startup-backup-updated-at', '1');
   };
+
+  it('conditionally saves Pomodoro task and receipt together and refreshes the backup', async () => {
+    const stored = storedAsyncStorage();
+    const expected = makeWidgetSnapshot(makeWidgetTask('task'));
+    const data = { ...expected, tasks: [{ ...expected.tasks[0], timeSpentMinutes: 3 }], settings: { pomodoroCredits: {
+      '00000000-0000-4000-8000-000000000001': { taskId: 'task', minutes: 3 },
+    } } };
+    storeVersionedBackup(stored, expected);
+    const { mobileStorage, __mobileStorageTestUtils } = await import('./storage-adapter');
+    const conditionalSave = vi.fn().mockResolvedValue(undefined);
+    __mobileStorageTestUtils.setSqliteStateForTests({ adapter: { saveTask: sqliteAdapterSaveTask,
+      saveDataIfUnchanged: conditionalSave } as never, client: {} });
+    await mobileStorage.saveDataIfUnchanged!(data, expected);
+    await __mobileStorageTestUtils.flushPendingStartupJsonBackup();
+    expect(conditionalSave).toHaveBeenCalledWith(data, expected);
+    expect(JSON.parse(stored.get('mindwtr-data')!)).toEqual(data);
+  });
+
+  it('keeps a conditional Pomodoro conflict failed without writing the stale fallback', async () => {
+    const stored = storedAsyncStorage();
+    const expected = makeWidgetSnapshot(makeWidgetTask('task'));
+    storeVersionedBackup(stored, expected);
+    const { StorageConflictError } = await import('@mindwtr/core');
+    const { mobileStorage, __mobileStorageTestUtils } = await import('./storage-adapter');
+    __mobileStorageTestUtils.setSqliteStateForTests({ adapter: { saveTask: sqliteAdapterSaveTask,
+      saveDataIfUnchanged: vi.fn().mockRejectedValue(new StorageConflictError()) } as never, client: {} });
+    await expect(mobileStorage.saveDataIfUnchanged!({ ...expected, settings: { theme: 'dark' } }, expected))
+      .rejects.toBeInstanceOf(StorageConflictError);
+    expect(JSON.parse(stored.get('mindwtr-data')!)).toEqual(expected);
+  });
+
+  it('stores conditional Pomodoro task and receipt in one JSON fallback when SQLite fails', async () => {
+    const stored = storedAsyncStorage();
+    const expected = makeWidgetSnapshot(makeWidgetTask('task'));
+    const data = { ...expected, tasks: [{ ...expected.tasks[0], timeSpentMinutes: 3 }], settings: { pomodoroCredits: {
+      '00000000-0000-4000-8000-000000000001': { taskId: 'task', minutes: 3 },
+    } } };
+    storeVersionedBackup(stored, expected);
+    const { mobileStorage, __mobileStorageTestUtils } = await import('./storage-adapter');
+    __mobileStorageTestUtils.setSqliteStateForTests({ adapter: { saveTask: sqliteAdapterSaveTask,
+      saveDataIfUnchanged: vi.fn().mockRejectedValue(new Error('disk I/O error')) } as never, client: {} });
+    await mobileStorage.saveDataIfUnchanged!(data, expected);
+    expect(JSON.parse(stored.get('mindwtr-data')!)).toEqual(data);
+    expect(stored.get(__mobileStorageTestUtils.jsonAheadOfSqliteKeyForTests)).toBeDefined();
+  });
+
+  it('refuses a conditional Pomodoro JSON fallback when its baseline differs', async () => {
+    const stored = storedAsyncStorage();
+    const expected = makeWidgetSnapshot(makeWidgetTask('task'));
+    storeVersionedBackup(stored, { ...expected, tasks: [{ ...expected.tasks[0], timeSpentMinutes: 42 }] });
+    const { StorageConflictError } = await import('@mindwtr/core');
+    const { mobileStorage, __mobileStorageTestUtils } = await import('./storage-adapter');
+    __mobileStorageTestUtils.setSqliteStateForTests({ adapter: { saveTask: sqliteAdapterSaveTask,
+      saveDataIfUnchanged: vi.fn().mockRejectedValue(new Error('disk I/O error')) } as never, client: {} });
+    await expect(mobileStorage.saveDataIfUnchanged!(expected, expected)).rejects.toBeInstanceOf(StorageConflictError);
+    expect(JSON.parse(stored.get('mindwtr-data')!).tasks[0].timeSpentMinutes).toBe(42);
+  });
 
   const failSetItemFor = (match: (key: string) => boolean) => {
     const setItem = asyncStorageMock.setItem.getMockImplementation()!;

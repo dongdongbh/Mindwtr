@@ -399,6 +399,21 @@ export const tauriStorage: StorageAdapter = {
         if (!canonical) throw new Error('save_data returned no canonical data');
         return canonical;
     },
+    saveDataIfUnchanged: async (data: AppData, expectedData: AppData): Promise<AppData> => {
+        const queuedSaveVersion = beginSaveGeneration();
+        const canonical = await enqueueSave((_predecessor, recordPersisted) => withStuckSaveWarning('save_data', 'Save', async () => {
+            markLocalWrite(data);
+            markLocalSqliteWrite();
+            const canonical = await invokeNative<AppData>('save_data', { data, mode: 'exact', expectedData });
+            lastPersistedData = canonical;
+            if (saveVersion === queuedSaveVersion) lastObservedData = canonical;
+            recordPersisted({ canonical, attempted: data });
+            markLocalSqliteWrite();
+            return { canonical, attempted: data };
+        }));
+        if (!canonical) throw new Error('Conditional save returned no canonical data');
+        return canonical;
+    },
     saveTask: async (task: Task): Promise<void> => {
         const baselineTask = lastObservedData && Array.isArray(lastObservedData.tasks)
             ? lastObservedData.tasks.find((item) => item.id === task.id)

@@ -13,8 +13,9 @@ import { logInfo } from './logger';
 import { TASK_SQLITE_COLUMNS } from './task-sync-schema';
 import { stripSensitiveSettings } from './store-helpers';
 import { runStoreCommand } from './store-write-gate';
-import { decodeNativePomodoroSession, nativePomodoroOwedCreditCount, nativePomodoroReceiptPayload, NATIVE_POMODORO_SCHEMA4_TASK_COLUMNS, parseNativeWatchPomodoroSource, validatePreparedNativePomodoroTransition,
+import { decodeNativePomodoroSession, nativePomodoroOwedCreditCount, nativePomodoroPendingCredits, nativePomodoroReceiptPayload, NATIVE_POMODORO_SCHEMA4_TASK_COLUMNS, parseNativeWatchPomodoroSource, validatePreparedNativePomodoroTransition,
     type NativePomodoroSessionRead, type NativePomodoroResult, type PreparedNativePomodoroTransition } from './native-pomodoro-session';
+import { readPomodoroCreditReceipts } from './pomodoro-credit-receipts';
 
 
 export type NativeRequestReceipts = {
@@ -642,6 +643,18 @@ export class NativeReceiptSqliteAdapter extends SqliteAdapter {
                                 const raw = rows.length === 0 ? null : TASK_SQLITE_COLUMNS.map((name) => rows[0][name]);
                                 if (rows.length > 1 || !taskEditValuesEqual(raw, target.row)) stale('Stale Pomodoro task baseline');
                             }
+                            const pendingCredits = nativePomodoroPendingCredits(plan.request);
+                            if (pendingCredits.length > 0) {
+                                const settings = await this.receiptClient.get<{ data: string }>('SELECT data FROM settings WHERE id = 1');
+                                const receipts = readPomodoroCreditReceipts((JSON.parse(settings?.data ?? '{}') as AppData['settings']).pomodoroCredits);
+                                for (const credit of pendingCredits) {
+                                    const receipt = receipts[credit.id.toLowerCase()];
+                                    if (receipt ? receipt.taskId !== credit.taskId || receipt.minutes !== credit.minutes
+                                        : !tasks.some(({ target }) => target.id === credit.taskId && target.row === null)) {
+                                        stale('Pomodoro pending credit has no matching durable receipt');
+                                    }
+                                }
+                            }
                             if (patched) {
                                 const settings = await this.receiptClient.get<{ data: string }>('SELECT data FROM settings WHERE id = 1');
                                 let device: unknown;
@@ -678,6 +691,10 @@ export class NativeReceiptSqliteAdapter extends SqliteAdapter {
                         durableReceipts?.set(requestId, { fingerprint: payload, reply: result, savedAt: new Date().toISOString(), pomodoroAction: plan.request.action });
                         try { logInfo('Native Pomodoro transition confirmed', { scope: 'storage', force: true,
                             context: { releaseCheck: 'v1.3.5/ios-pomodoro-credit', outcome: 'confirmed' } }); } catch {                                              }
+                        if (plan.result.creditedMinutes > 0) {
+                            try { logInfo('Native Pomodoro active work settled', { scope: 'storage', force: true,
+                                context: { releaseCheck: 'v1.3.9/pomodoro-partial-work', outcome: replayed ? 'already-applied' : 'applied' } }); } catch {}
+                        }
                         const owedCredits = replayed ? 0 : nativePomodoroOwedCreditCount(plan.request);
                         if (owedCredits > 0) {
                             try { logInfo('Native Pomodoro adoption settled owed credits', { scope: 'storage', force: true,
@@ -1038,6 +1055,16 @@ export class NativeReceiptSqliteAdapter extends SqliteAdapter {
         this.ordinaryWrites += 1;
         try { await super.saveTask(task); }
         finally { this.ordinaryWrites -= 1; }
+    }
+
+    override async saveDataIfUnchanged(data: AppData, expectedData: AppData): Promise<void> {
+        this.refusePomodoroWriteFence();
+        if (this.documentBusy || pendingReceipts.size > 0 || receiptedWritesRunning > 0) throw new Error('Receipt storage is busy');
+        this.ordinaryWrites += 1;
+        try {
+            await super.saveDataIfUnchanged(data, expectedData);
+            this.carried.delete(data);
+        } finally { this.ordinaryWrites -= 1; }
     }
 
 

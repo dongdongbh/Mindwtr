@@ -38,6 +38,8 @@ Source: `apps/mobile`. Routes live in `apps/mobile/app` (expo-router). Labels be
 
 ## Pomodoro
 
+- Accounting: linked active work is preserved at pause, task completion, task switch, reset, preset change and work/break transitions. Pauses and breaks do not count; sub-minute remainders carry per task. Completion pauses the linked work timer and leaves completed-Pomodoro counts unchanged unless the work block finished.
+
 - Reach: Settings › GTD › Pomodoro timer (switch on) › Focus tab shows the Pomodoro Focus panel. Settings › GTD › Pomodoro settings for presets.
 - Selectors: `gtd-nav-pomodoro`, `pomodoro-completion-alert`, `exact-alarm-notice`, `exact-alarm-allow`
 - Code: `apps/mobile/components/pomodoro-panel.tsx`, `apps/mobile/lib/pomodoro-controller.ts`, `apps/mobile/hooks/root-layout/use-root-layout-pomodoro.ts`

@@ -1,4 +1,4 @@
-import { AppData, countSqliteCopyRepairs, mergeLegacyJsonCopy, repairAppDataForSqlite, SqliteAdapter, searchAll, splitSqlStatements, taskMatchesQuery, type SqliteClient, type CalendarSyncEntry, StorageAdapter, type Task } from '@mindwtr/core';
+import { AppData, countSqliteCopyRepairs, mergeLegacyJsonCopy, repairAppDataForSqlite, SqliteAdapter, searchAll, splitSqlStatements, taskMatchesQuery, taskEditValuesEqual, StorageConflictError, withWebStorageLock, readPomodoroCreditReceipts, type SqliteClient, type CalendarSyncEntry, StorageAdapter, type Task } from '@mindwtr/core';
 import { AppState, NativeModules, Platform } from 'react-native';
 import Constants from 'expo-constants';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -1180,45 +1180,56 @@ const getSqliteState = async (): Promise<SqliteState> => {
 const createStorage = (): StorageAdapter => {
 
     if (Platform.OS === 'web') {
-        return {
-            getData: async (): Promise<AppData> => {
-                if (typeof window === 'undefined') {
-                    return { tasks: [], projects: [], sections: [], areas: [], people: [], settings: {} };
-                }
-                let jsonValue = localStorage.getItem(DATA_KEY);
-                if (jsonValue == null) {
-                    for (const legacyKey of LEGACY_DATA_KEYS) {
-                        const legacyValue = localStorage.getItem(legacyKey);
-                        if (legacyValue != null) {
-                            localStorage.setItem(DATA_KEY, legacyValue);
-                            jsonValue = legacyValue;
-                            break;
-                        }
+        const readData = (): AppData => {
+            if (typeof window === 'undefined') {
+                return { tasks: [], projects: [], sections: [], areas: [], people: [], settings: {} };
+            }
+            let jsonValue = localStorage.getItem(DATA_KEY);
+            if (jsonValue == null) {
+                for (const legacyKey of LEGACY_DATA_KEYS) {
+                    const legacyValue = localStorage.getItem(legacyKey);
+                    if (legacyValue != null) {
+                        localStorage.setItem(DATA_KEY, legacyValue);
+                        jsonValue = legacyValue;
+                        break;
                     }
                 }
-                if (jsonValue == null) {
-                    return { tasks: [], projects: [], sections: [], areas: [], people: [], settings: {} };
-                }
-                try {
-                    const data = parseStoredAppDataJson(jsonValue);
-                    return data;
-                } catch (e) {
+            }
+            if (jsonValue == null) {
+                return { tasks: [], projects: [], sections: [], areas: [], people: [], settings: {} };
+            }
+            try {
+                const data = parseStoredAppDataJson(jsonValue);
+                return data;
+            } catch (e) {
 
-                    logStorageError('Failed to parse stored data - may be corrupted', e);
-                    throw new Error('Data appears corrupted. Please restore from backup.');
+                logStorageError('Failed to parse stored data - may be corrupted', e);
+                throw new Error('Data appears corrupted. Please restore from backup.');
+            }
+        };
+        const writeData = (data: AppData): void => {
+            try {
+                if (typeof window !== 'undefined') {
+                    const jsonValue = JSON.stringify(data);
+                    localStorage.setItem(DATA_KEY, jsonValue);
                 }
-            },
-            saveData: async (data: AppData): Promise<void> => {
-                try {
-                    if (typeof window !== 'undefined') {
-                        const jsonValue = JSON.stringify(data);
-                        localStorage.setItem(DATA_KEY, jsonValue);
-                    }
-                } catch (e) {
-                    logStorageError('Failed to save data', e);
-                    throw new Error('Failed to save data: ' + (e as Error).message);
-                }
-            },
+            } catch (e) {
+                logStorageError('Failed to save data', e);
+                throw new Error('Failed to save data: ' + (e as Error).message);
+            }
+        };
+        return {
+            getData: async () => withWebStorageLock(readData),
+            saveData: async (data) => withWebStorageLock(() => {
+                if (!taskEditValuesEqual(readPomodoroCreditReceipts(readData().settings?.pomodoroCredits),
+                    readPomodoroCreditReceipts(data.settings?.pomodoroCredits))) throw new StorageConflictError();
+                writeData(data);
+            }),
+            saveDataIfUnchanged: async (data, expectedData) => withWebStorageLock(() => {
+                const current = readData();
+                if (!taskEditValuesEqual(current, expectedData)) throw new StorageConflictError();
+                writeData(data);
+            }, { required: true }),
         };
     }
 
@@ -1226,6 +1237,20 @@ const createStorage = (): StorageAdapter => {
     const sqliteUnavailableReason = getSqliteUnavailableReason();
     const shouldUseSqlite = sqliteUnavailableReason == null;
     registerBackgroundFlushListener();
+
+    const saveJsonIfUnchanged = async (data: AppData, expectedData: AppData, queuedWriteStartedAtMs: number): Promise<void> => {
+        await flushPendingStartupJsonBackup();
+        if (!isJsonCopyServable() || !isJsonBackupUsable()) throw new Error('Pomodoro JSON storage is unavailable');
+        if (shouldUseSqlite && await readJsonBackupOutgrown()) throw new Error('The JSON backup is older than SQLite');
+        const raw = await getLegacyJson(AsyncStorage);
+        const current = raw === null ? EMPTY_APP_DATA : parseStoredAppDataJson(raw);
+        if (!taskEditValuesEqual(current, expectedData)) throw new StorageConflictError();
+        await markJsonAheadOfSqlite();
+        markPreferJsonBackup();
+        scheduleStartupJsonBackup(data, 'mobile.storage.pomodoro_credit', queuedWriteStartedAtMs);
+        await flushPendingStartupJsonBackup();
+        assertJsonFallbackLanded();
+    };
 
     return {
         getData: async (): Promise<AppData> => {
@@ -1480,6 +1505,30 @@ const createStorage = (): StorageAdapter => {
                         logStorageError('Failed to save data', e);
                         throw new Error('Failed to save data: ' + (e as Error).message);
                     }
+                }
+            });
+        },
+        saveDataIfUnchanged: async (data, expectedData) => {
+            const reloadRequiredWhenEnqueued = canonicalReloadRequired;
+            return enqueueSave(async () => {
+                const queuedWriteStartedAtMs = markQueuedWriteStarted();
+                if (reloadRequiredWhenEnqueued || canonicalReloadRequired) throw new SqliteWriteBlockedError('canonical-reload');
+                if (!shouldUseSqlite || jsonIsReadAuthority()) {
+                    if (shouldUseSqlite) assertSqliteWritesAllowed(await getSqliteState(), reloadRequiredWhenEnqueued);
+                    await saveJsonIfUnchanged(data, expectedData, queuedWriteStartedAtMs);
+                    return;
+                }
+                try {
+                    const state = await getSqliteState();
+                    assertSqliteWritesAllowed(state, reloadRequiredWhenEnqueued);
+                    await state.adapter.saveDataIfUnchanged(data, expectedData);
+                    clearPreferJsonBackup();
+                    await clearJsonAheadOfSqlite();
+                    scheduleStartupJsonBackup(data, 'mobile.storage.pomodoro_credit', queuedWriteStartedAtMs);
+                } catch (error) {
+                    if (error instanceof StorageConflictError || error instanceof SqliteWriteBlockedError) throw error;
+                    assertJsonBackupNotFrozen(error);
+                    await saveJsonIfUnchanged(data, expectedData, queuedWriteStartedAtMs);
                 }
             });
         },

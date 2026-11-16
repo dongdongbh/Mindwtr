@@ -10,6 +10,7 @@ import { mergeAppDataWithStats } from './sync';
 import { toStableSyncJson } from './sync-helpers';
 import { taskToSqliteRow } from './task-sync-schema';
 import type { AppData } from './types';
+import { readPomodoroCreditReceipts } from './pomodoro-credit-receipts';
 
 
 export const LEGACY_JSON_BACKUP_VERSION = '2';
@@ -63,6 +64,13 @@ export function mergeLegacyJsonCopy(current: AppData, rawCopy: AppData, move: Le
             result.data.settings = { ...copySettings, ...result.data.settings };
         }
     }
+    const receipts = readPomodoroCreditReceipts(current.settings.pomodoroCredits);
+    for (const [id, receipt] of Object.entries(readPomodoroCreditReceipts(copy.settings.pomodoroCredits))) {
+        const saved = receipts[id];
+        if (saved && (saved.taskId !== receipt.taskId || saved.minutes !== receipt.minutes)) throw new Error('Pomodoro copy receipt identity changed');
+        receipts[id] = receipt;
+    }
+    if (Object.keys(receipts).length > 0) result.data.settings.pomodoroCredits = readPomodoroCreditReceipts(receipts);
     return { ...result, repairs };
 }
 

@@ -617,6 +617,7 @@ export interface AppSettings extends NotificationSettings {
     network?: NetworkSettings;
     filters?: FilterSettings;
     deviceId?: string;
+    pomodoroCredits?: Record<string, { taskId: string; minutes: number }>;
 
 
     analyticsProfileId?: string;

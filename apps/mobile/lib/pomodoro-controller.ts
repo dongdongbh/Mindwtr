@@ -1,12 +1,16 @@
 import { workspaceSessionStorage as AsyncStorage } from '@/lib/workspace-session-storage';
 import {
   addTimeSpentMinutes,
+  acknowledgePomodoroCredits,
+  applyPomodoroCredit,
+  generateUUID,
+  settlePomodoroWork,
+  type PomodoroCredit,
   createPomodoroState,
   DEFAULT_POMODORO_DURATIONS,
   resetPomodoroState,
   flushPendingSave,
   runStoreCommand,
-  sanitizePomodoroSessionHistory,
   type PomodoroAutoStartOptions,
   type PomodoroDurations,
   type PomodoroSessionHistory,
@@ -47,19 +51,25 @@ type TaskStoreAccess = () => {
 };
 
 
-type PomodoroCredit = { taskId: string; from?: number; to: number };
+type LegacyPomodoroCredit = { taskId: string; from?: number; to: number };
+type PendingPomodoroCredit = PomodoroCredit | LegacyPomodoroCredit;
 
-const readCredits = (value: unknown): PomodoroCredit[] => (Array.isArray(value) ? value : []).flatMap((item) => {
-  const credit = item as Partial<PomodoroCredit> | null;
-  if (!credit || typeof credit.taskId !== 'string' || typeof credit.to !== 'number' || !Number.isFinite(credit.to)) return [];
-  const from = typeof credit.from === 'number' && Number.isFinite(credit.from) ? credit.from : undefined;
-  return [{ taskId: credit.taskId, ...(from === undefined ? {} : { from }), to: credit.to }];
+const readCredits = (value: unknown): PendingPomodoroCredit[] => (Array.isArray(value) ? value : []).flatMap((item): PendingPomodoroCredit[] => {
+  if (!item || typeof item !== 'object' || typeof item.taskId !== 'string') return [];
+  if (typeof item.id === 'string' && Number.isSafeInteger(item.minutes) && item.minutes > 0) {
+    return [{ id: item.id, taskId: item.taskId, minutes: item.minutes }];
+  }
+  if (typeof item.to !== 'number' || !Number.isFinite(item.to)) return [];
+  const from = typeof item.from === 'number' && Number.isFinite(item.from) ? item.from : undefined;
+  return [{ taskId: item.taskId, ...(from === undefined ? {} : { from }), to: item.to }];
 });
 
 type ControllerOptions = {
   storage?: Storage;
   getTaskStore?: TaskStoreAccess;
   now?: () => number;
+  applyCredit?: typeof applyPomodoroCredit;
+  acknowledgeCredits?: typeof acknowledgePomodoroCredits;
 };
 
 const historyEquals = (left: PomodoroSessionHistory, right: PomodoroSessionHistory): boolean => (
@@ -83,6 +93,7 @@ const sessionEquals = (left: ResolvedPomodoroSession, right: ResolvedPomodoroSes
   && left.phaseEndsAt === right.phaseEndsAt
   && left.lastEvent === right.lastEvent
   && historyEquals(left.sessionHistory, right.sessionHistory)
+  && JSON.stringify(left.workSecondsByTaskId) === JSON.stringify(right.workSecondsByTaskId)
 );
 
 const initialSession = resolvePomodoroSession({
@@ -95,7 +106,7 @@ export function createMobilePomodoroController(options: ControllerOptions = {}) 
   const getTaskStore = options.getTaskStore ?? (() => {
     const state = useTaskStore.getState();
     return {
-      tasks: state.tasks,
+      tasks: state._allTasks ?? state.tasks,
       updateTask: state.updateTask,
 
 
@@ -105,54 +116,51 @@ export function createMobilePomodoroController(options: ControllerOptions = {}) 
       },
     };
   });
-  const now = options.now ?? Date.now;
+  const now = options.now ?? (() => Date.now());
+  const applyCredit = options.applyCredit ?? applyPomodoroCredit;
+  const acknowledgeCredits = options.acknowledgeCredits ?? acknowledgePomodoroCredits;
   let state: MobilePomodoroControllerState = {
     ...initialSession,
     isHydrating: true,
     updatedAtMs: 0,
   };
+  let workCheckpoint: ResolvedPomodoroSession = state;
+  let workCheckpointAtMs = 0;
   let hydrationPromise: Promise<void> | null = null;
   let persistenceQueue: Promise<void> = Promise.resolve();
 
-  let pendingCredits: PomodoroCredit[] = [];
+  let pendingCredits: PendingPomodoroCredit[] = [];
 
-  let loadedCredits = new Set<PomodoroCredit>();
+  let loadedCredits = new Set<PendingPomodoroCredit>();
 
-  const writtenCredits = new WeakSet<PomodoroCredit>();
+  const writtenCredits = new WeakSet<PendingPomodoroCredit>();
   const listeners = new Set<() => void>();
 
   const emit = () => listeners.forEach((listener) => listener());
 
-  const queueCredits = (
-    previous: PomodoroSessionHistory,
-    next: PomodoroSessionHistory,
-    focusMinutes: number,
-  ) => {
-    const { tasks } = getTaskStore();
-    for (const [taskId, count] of Object.entries(next.completedFocusSessionsByTaskId)) {
-      const delta = count - (previous.completedFocusSessionsByTaskId[taskId] ?? 0);
-      if (delta <= 0) continue;
-      const task = tasks.find((candidate) => candidate.id === taskId);
-      if (!task) continue;
-
-      const owed = pendingCredits.filter((credit) => credit.taskId === taskId).pop();
-      const from = owed ? owed.to : task.timeSpentMinutes;
-      const to = addTimeSpentMinutes(from, delta * focusMinutes);
-      if (to === undefined || to === from) continue;
-      pendingCredits.push({ taskId, ...(from === undefined ? {} : { from }), to });
-    }
-  };
-
-  const payloadOf = (credits: PomodoroCredit[]): StoredPomodoroSession & { pendingCredits?: PomodoroCredit[] } => ({
+  const payloadOf = (credits: PendingPomodoroCredit[]): StoredPomodoroSession & { pendingCredits?: PendingPomodoroCredit[] } => ({
     ...serializePomodoroSession(state),
     updatedAtMs: state.updatedAtMs,
-    ...(credits.length > 0 ? { pendingCredits: credits } : {}),
+    ...(credits.length > 0 ? { pendingCredits: credits.slice() } : {}),
   });
 
 
-  const settleCredits = async (credits: PomodoroCredit[]): Promise<boolean> => {
+  const settleCredits = async (credits: PendingPomodoroCredit[]): Promise<PendingPomodoroCredit[]> => {
     let settled = 0;
     for (const credit of credits) {
+      if ('id' in credit) {
+        try {
+          const outcome = await applyCredit(credit);
+          void logInfo('Pomodoro partial work credit settled', {
+            scope: 'pomodoro',
+            extra: { releaseCheck: 'v1.3.9/pomodoro-partial-work', outcome, minutes: credit.minutes },
+          });
+          settled += 1;
+        } catch {
+          break;
+        }
+        continue;
+      }
 
       const outcome = await runStoreCommand(async () => {
         const task = getTaskStore().tasks.find((candidate) => candidate.id === credit.taskId);
@@ -170,7 +178,7 @@ export function createMobilePomodoroController(options: ControllerOptions = {}) 
 
           let movedTo = credit.to;
           for (const later of pendingCredits.slice(pendingCredits.indexOf(credit) + 1)) {
-            if (later.taskId !== credit.taskId || later.from !== chainTo || loadedCredits.has(later)) continue;
+            if ('id' in later || later.taskId !== credit.taskId || later.from !== chainTo || loadedCredits.has(later)) continue;
             chainTo = later.to;
             later.to = addTimeSpentMinutes(movedTo, later.to - later.from) ?? later.to;
             later.from = movedTo;
@@ -207,22 +215,42 @@ export function createMobilePomodoroController(options: ControllerOptions = {}) 
         });
       }
     }
-    if (settled === 0) return false;
-    const done = new Set(credits.slice(0, settled));
-    pendingCredits = pendingCredits.filter((credit) => !done.has(credit));
-    return true;
+    return credits.slice(0, settled);
   };
 
-  const persist = () => {
-    const credits = pendingCredits.slice();
-    const payload = payloadOf(credits);
-    persistenceQueue = persistenceQueue
-      .catch(() => undefined)
-      .then(() => storage.setItem(POMODORO_SESSION_STORAGE_KEY, JSON.stringify(payload)))
+  let requestedPayload: ReturnType<typeof payloadOf> | null = null;
+  let latestPayload = payloadOf([]);
+  let isPersisting = false;
 
-      .then(async () => {
-        if (credits.length > 0 && await settleCredits(credits)) persist();
-      });
+  const persist = () => {
+    latestPayload = payloadOf(pendingCredits);
+    requestedPayload = latestPayload;
+    if (isPersisting) return;
+    isPersisting = true;
+    persistenceQueue = persistenceQueue.catch(() => undefined).then(async () => {
+      try {
+        while (requestedPayload) {
+          const payload = requestedPayload;
+          requestedPayload = null;
+          await storage.setItem(POMODORO_SESSION_STORAGE_KEY, JSON.stringify(payload));
+          const settled = await settleCredits(payload.pendingCredits ?? []);
+          if (settled.length === 0) continue;
+          const done = new Set(settled);
+          const remaining = pendingCredits.filter((credit) => !done.has(credit));
+          const removalSource = latestPayload;
+          const removalPayload = { ...removalSource, pendingCredits: remaining.length > 0 ? remaining : undefined };
+          await storage.setItem(POMODORO_SESSION_STORAGE_KEY, JSON.stringify(removalPayload));
+          pendingCredits = pendingCredits.filter((credit) => !done.has(credit));
+          latestPayload = latestPayload === removalSource
+            ? removalPayload
+            : { ...latestPayload, pendingCredits: pendingCredits.length > 0 ? pendingCredits.slice() : undefined };
+          if (requestedPayload) requestedPayload = latestPayload;
+          await acknowledgeCredits(settled.flatMap((credit) => 'id' in credit ? [credit.id] : [])).catch(() => undefined);
+        }
+      } finally {
+        isPersisting = false;
+      }
+    });
     void persistenceQueue.catch(() => {
       void logWarn('Failed to persist pomodoro session', {
         scope: 'pomodoro',
@@ -233,20 +261,29 @@ export function createMobilePomodoroController(options: ControllerOptions = {}) 
 
   const replaceSession = (
     next: ResolvedPomodoroSession,
-    config: { persist?: boolean; updatedAtMs?: number; previousHistory?: PomodoroSessionHistory; creditFocusMinutes?: number } = {},
+    config: { persist?: boolean; updatedAtMs?: number; settle?: boolean } = {},
   ): boolean => {
-    const previousHistory = config.previousHistory ?? state.sessionHistory;
+    const owed = pendingCredits.length;
+    if (config.settle !== false) {
+      const settled = settlePomodoroWork(next.workSecondsByTaskId ?? {});
+      next = { ...next, workSecondsByTaskId: settled.workSecondsByTaskId };
+      pendingCredits.push(...settled.credits.map((credit) => ({ ...credit, id: generateUUID() })));
+
+    }
     const changed = !sessionEquals(state, next)
       || (config.updatedAtMs !== undefined && config.updatedAtMs !== state.updatedAtMs)
-      || state.isHydrating;
+      || state.isHydrating
+      || pendingCredits.length > owed;
     if (!changed) return false;
-    const owed = pendingCredits.length;
-    queueCredits(previousHistory, next.sessionHistory, config.creditFocusMinutes ?? next.durations.focusMinutes);
     state = {
       ...next,
       isHydrating: false,
       updatedAtMs: config.updatedAtMs ?? state.updatedAtMs,
     };
+    if (config.settle !== false) {
+      workCheckpoint = state;
+      workCheckpointAtMs = now();
+    }
     emit();
     if (config.persist !== false || pendingCredits.length > owed) persist();
     return true;
@@ -266,12 +303,23 @@ export function createMobilePomodoroController(options: ControllerOptions = {}) 
 
         pendingCredits = readCredits(parsed.pendingCredits);
         loadedCredits = new Set(pendingCredits);
-        const previousHistory = sanitizePomodoroSessionHistory(parsed.sessionHistory);
-        const resolved = resolvePomodoroSession(parsed, now(), autoStartOptions);
         const updatedAtMs = typeof parsed.updatedAtMs === 'number' && Number.isFinite(parsed.updatedAtMs)
           ? Math.max(0, parsed.updatedAtMs)
           : 0;
-        replaceSession(resolved, { previousHistory, updatedAtMs });
+        const task = getTaskStore().tasks.find((candidate) => candidate.id === parsed.selectedTaskId);
+        const terminal = task && (task.status === 'done' || task.status === 'archived' || !!task.deletedAt);
+        const completedAtMs = task?.completedAt ? Date.parse(task.completedAt) : NaN;
+        const resolveAtMs = terminal && Number.isFinite(completedAtMs) && completedAtMs >= updatedAtMs
+          ? Math.min(now(), completedAtMs)
+          : now();
+        const resolved = resolvePomodoroSession(parsed, resolveAtMs, autoStartOptions);
+        if (terminal) {
+          resolved.timerState = { ...resolved.timerState, isRunning: false };
+          resolved.selectedTaskId = undefined;
+          resolved.phaseEndsAt = undefined;
+          resolved.lastEvent = null;
+        }
+        replaceSession(resolved, { updatedAtMs });
       } catch {
         void logWarn('Failed to restore pomodoro session', {
           scope: 'pomodoro',
@@ -285,13 +333,15 @@ export function createMobilePomodoroController(options: ControllerOptions = {}) 
   };
 
   const reconcile = (autoStartOptions: PomodoroAutoStartOptions = {}, nowMs = now()): boolean => {
-    if (state.isHydrating || !state.timerState.isRunning) return false;
+    if (state.isHydrating) return false;
+    if (reconcileTaskCompletion(autoStartOptions, nowMs)) return true;
+    if (!state.timerState.isRunning) return false;
     const next = resolvePomodoroSession(state, nowMs, autoStartOptions);
     const structuralChange = next.timerState.phase !== state.timerState.phase
       || next.timerState.isRunning !== state.timerState.isRunning
       || next.phaseEndsAt !== state.phaseEndsAt
       || !historyEquals(next.sessionHistory, state.sessionHistory);
-    return replaceSession(next, { persist: structuralChange });
+    return replaceSession(next, { persist: structuralChange, settle: structuralChange });
   };
 
   const mutate = (
@@ -299,10 +349,11 @@ export function createMobilePomodoroController(options: ControllerOptions = {}) 
     autoStartOptions: PomodoroAutoStartOptions = {},
     nowMs = now(),
   ): boolean => {
+    reconcileTaskCompletion(autoStartOptions, nowMs);
     const completedBeforeAction = state.sessionHistory.totalCompletedFocusSessions;
     const current = resolvePomodoroSession(state, nowMs, autoStartOptions);
     const updatedAtMs = Math.max(nowMs, state.updatedAtMs + 1);
-    const changed = replaceSession(mutation(current, nowMs), { updatedAtMs, creditFocusMinutes: current.durations.focusMinutes });
+    const changed = replaceSession(mutation(current, nowMs), { updatedAtMs });
     if (changed && current.sessionHistory.totalCompletedFocusSessions > completedBeforeAction) {
       void logInfo('Pomodoro elapsed focus boundary resolved before action', {
         scope: 'pomodoro',
@@ -310,6 +361,32 @@ export function createMobilePomodoroController(options: ControllerOptions = {}) 
       }).catch(() => undefined);
     }
     return changed;
+  };
+
+  const completeSelectedTask = (autoStartOptions: PomodoroAutoStartOptions = {}, completedAtMs = now()): boolean => {
+    if (state.isHydrating || !state.selectedTaskId) return false;
+    const source = workCheckpoint.selectedTaskId === state.selectedTaskId
+      && workCheckpoint.timerState.isRunning
+      && completedAtMs >= workCheckpointAtMs
+      ? workCheckpoint
+      : state;
+    const resolutionAtMs = completedAtMs >= workCheckpointAtMs ? completedAtMs : now();
+    const current = resolvePomodoroSession(source, resolutionAtMs, autoStartOptions);
+    return replaceSession({
+      ...current,
+      timerState: { ...current.timerState, isRunning: false },
+      selectedTaskId: undefined,
+      phaseEndsAt: undefined,
+      lastEvent: null,
+    }, { updatedAtMs: Math.max(now(), state.updatedAtMs + 1) });
+  };
+
+  const reconcileTaskCompletion = (autoStartOptions: PomodoroAutoStartOptions = {}, nowMs = now()): boolean => {
+    if (state.isHydrating || !state.selectedTaskId) return false;
+    const task = getTaskStore().tasks.find((candidate) => candidate.id === state.selectedTaskId);
+    if (!task || (!task.deletedAt && task.status !== 'done' && task.status !== 'archived')) return false;
+    const completedAtMs = task.completedAt ? Date.parse(task.completedAt) : NaN;
+    return completeSelectedTask(autoStartOptions, Number.isFinite(completedAtMs) ? Math.min(nowMs, completedAtMs) : nowMs);
   };
 
   const setDurations = (durations: PomodoroDurations, autoStartOptions: PomodoroAutoStartOptions = {}) => mutate((current) => ({
@@ -370,7 +447,9 @@ export function createMobilePomodoroController(options: ControllerOptions = {}) 
       return 'already-applied';
     }
 
-    const current = resolvePomodoroSession(state, now(), autoStartOptions);
+    const commandNowMs = now();
+    reconcileTaskCompletion(autoStartOptions, commandNowMs);
+    const current = resolvePomodoroSession(state, commandNowMs, autoStartOptions);
     const commandTask = policy.linkTaskEnabled !== false && command.taskId
       ? getTaskStore().tasks.find((task) => (
         task.id === command.taskId
@@ -386,9 +465,9 @@ export function createMobilePomodoroController(options: ControllerOptions = {}) 
         : current.selectedTaskId;
     let next = selectedTaskId === current.selectedTaskId ? current : { ...current, selectedTaskId };
     if (command.action === 'start') {
-      if (!next.timerState.isRunning) next = startPomodoroSession(next, now(), autoStartOptions);
+      if (!next.timerState.isRunning) next = startPomodoroSession(next, commandNowMs, autoStartOptions);
     } else if (command.action === 'pause') {
-      if (next.timerState.isRunning) next = pausePomodoroSession(next, now(), autoStartOptions);
+      if (next.timerState.isRunning) next = pausePomodoroSession(next, commandNowMs, autoStartOptions);
     } else {
       next = {
         ...next,
@@ -416,6 +495,8 @@ export function createMobilePomodoroController(options: ControllerOptions = {}) 
     switchPhase,
     setSelectedTaskId,
     clearLastEvent,
+    completeSelectedTask,
+    reconcileTaskCompletion,
     applyWatchCommand,
     flushPersistence: () => persistenceQueue,
     resetForTests: () => {
@@ -429,9 +510,15 @@ export function createMobilePomodoroController(options: ControllerOptions = {}) 
         isHydrating: true,
         updatedAtMs: 0,
       };
+      workCheckpoint = state;
+      workCheckpointAtMs = 0;
       hydrationPromise = null;
       persistenceQueue = Promise.resolve();
       pendingCredits = [];
+      loadedCredits = new Set();
+      requestedPayload = null;
+      latestPayload = payloadOf([]);
+      isPersisting = false;
     },
   };
 }

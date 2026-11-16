@@ -60,7 +60,8 @@ export function PomodoroPanel({ tasks }: PomodoroPanelProps) {
         }
         if (!snapshot.selectedTaskId) return;
         if (actionableTasksById.has(snapshot.selectedTaskId)) return;
-        commitSnapshot((prev) => ({ ...prev, selectedTaskId: undefined }));
+        commitSnapshot((prev) => ({ ...prev, selectedTaskId: undefined,
+            timerState: prev.timerState.phase === 'focus' ? { ...prev.timerState, isRunning: false } : prev.timerState }));
     }, [commitSnapshot, linkTaskEnabled, snapshot.selectedTaskId, actionableTasksById]);
 
 

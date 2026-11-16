@@ -209,9 +209,10 @@ import { classifyAppleReminderForImport, normalizeAppleRemindersImportSettings }
 import { prepareNativeAppleReminderImportItem, validatePreparedNativeAppleReminderImportItem,
     type NativeAppleReminderImportRequest } from '../../../packages/core/src/native-apple-reminders-import-item';
 import { createNativeAppleReminderImportOwner } from '../../../packages/core/src/native-apple-reminders-import-owner';
-import { nativePomodoroOwedTaskIds, prepareNativePomodoroTransition, validatePreparedNativePomodoroTransition,
+import { nativePomodoroOwedTaskIds, drainNativePomodoroLegacyCredits, prepareNativePomodoroTransition, validatePreparedNativePomodoroTransition,
     MAX_NATIVE_POMODORO_PLAN_BYTES, parseNativeWatchPomodoroSource, type NativePomodoroRequest } from '../../../packages/core/src/native-pomodoro-session';
 import { NativePomodoroTransitionRefusal } from '../../../packages/core/src/native-request-receipts';
+import { applyPomodoroCredit } from '../../../packages/core/src/pomodoro-credit';
 import { buildNativePomodoroAlarmIntent, buildNativePomodoroLegacyAlert, NATIVE_POMODORO_LATE_LIMIT_MS } from '../../../packages/core/src/native-pomodoro-alarm';
 import { planNativePomodoroAlarmEffects, prepareNativePomodoroAlarmDispatch } from '../../../packages/core/src/native-pomodoro-alarm-effects';
 import { buildNativeAISettingsProjection } from '../../../packages/core/src/native-ai-settings-projection';
@@ -550,12 +551,19 @@ class ValidatedSqliteAdapter extends NativeReceiptSqliteAdapter {
 type Pending = { done: boolean; value?: unknown; error?: string; controller: AbortController };
 const pending = new Map<number, Pending>();
 let nextId = 1;
+let nativePomodoroSettlementPending = false;
+let nativePomodoroCompletionRevision: { taskId: string; beforeRevision: string; afterRevision: string;
+    adapter: ReturnType<typeof getStorageAdapter> } | null = null;
 
 const submit = (work: (signal: AbortSignal) => Promise<unknown>): string => {
     const id = nextId++;
     const slot: Pending = { done: false, controller: new AbortController() };
     pending.set(id, slot);
-    void work(slot.controller.signal).then(
+    const tasks = useTaskStore.getState()._allTasks;
+    void work(slot.controller.signal).then(async value => {
+        if (tasks !== useTaskStore.getState()._allTasks || nativePomodoroSettlementPending) await reconcileNativePomodoroAfterTaskChange();
+        return value;
+    }).then(
         (value) => { slot.value = value; },
         (error) => { slot.error = error instanceof Error ? error.message : String(error); },
     ).finally(() => { slot.done = true; });
@@ -2401,6 +2409,11 @@ const preparePomodoroRequest = async (requestJSON: string, watchSourceJSON?: str
         return status;
     };
     ready();
+    const supplied = watchSourceJSON === undefined ? pomodoroJSON(requestJSON) as NativePomodoroRequest : null;
+    const adopted = supplied?.action === 'adoptLegacy' ? await drainNativePomodoroLegacyCredits(supplied, async credit => {
+        await applyPomodoroCredit(credit);
+    }) : null;
+    ready();
     if (watchSourceJSON !== undefined) {
         parseNativeWatchPomodoroSource(watchSourceJSON);
         const saved = await adapter.readWatchPomodoroPlan(watchSourceJSON);
@@ -2439,7 +2452,7 @@ const preparePomodoroRequest = async (requestJSON: string, watchSourceJSON?: str
             autoStart: { autoStartFocus: options?.autoStartFocus === true, autoStartBreaks: options?.autoStartBreaks === true },
             durations: sanitizePomodoroDurations(options?.customDurations), selectedTaskId: linked?.id ?? null };
     } else {
-        const parsed = pomodoroJSON(requestJSON) as NativePomodoroRequest;
+        const parsed = adopted ?? supplied!;
         request = parsed.action === 'adoptLegacy' ? parsed : pomodoroJSON(requestJSON, 8192) as NativePomodoroRequest;
         if (request.action === 'watch') throw new Error('INVALID_INPUT: Watch timer requires its source owner');
     }
@@ -2456,13 +2469,45 @@ const preparePomodoroRequest = async (requestJSON: string, watchSourceJSON?: str
         return { id, row };
     };
     const plan = prepareNativePomodoroTransition({ request, session, target: selected ? before(selected) : null,
-        owed: request.action === 'adoptLegacy' ? nativePomodoroOwedTaskIds(request).map(before) : [],
+        owed: nativePomodoroOwedTaskIds(request, session).map(before),
         deviceId: request.action === 'initialize' ? null : typeof data.settings.deviceId === 'string' ? data.settings.deviceId : null });
     assertCurrent();
     if (!plan) return { kind: 'noop' };
     const planJSON = JSON.stringify(validatePreparedNativePomodoroTransition(plan));
     pomodoroWarmAdmission = { planJSON, assertCurrent };
     return { kind: 'prepared', planJSON };
+};
+const reconcileNativePomodoroAfterTaskChange = async () => {
+    if (!bootAdapter || getStorageAdapter() !== bootAdapter || isSandboxMode() || isWorkspaceTransitionActive()) return;
+    nativePomodoroSettlementPending = true;
+    try {
+        const session = await pomodoroAdapter().readPomodoroSession();
+        const selectedTaskId = session.state?.session.selectedTaskId;
+        if (!selectedTaskId) { nativePomodoroSettlementPending = false; return; }
+        const selected = useTaskStore.getState()._allTasks.find(task => task.id === selectedTaskId);
+        if (selected && !selected.deletedAt && !isTaskCancelled(selected) && isTaskActionable(selected)) {
+            nativePomodoroSettlementPending = false; return;
+        }
+        const now = new Date(), options = useTaskStore.getState().settings.gtd?.pomodoro;
+        const request: NativePomodoroRequest = { action: 'reconcile', requestId: generateUUID(),
+            observedAtMs: now.getTime(), localDayKey: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`,
+            autoStart: { autoStartFocus: options?.autoStartFocus === true, autoStartBreaks: options?.autoStartBreaks === true } };
+        const prepared = await preparePomodoroRequest(JSON.stringify(request));
+        if (prepared.kind === 'prepared' && prepared.planJSON) {
+            const plan = validatePreparedNativePomodoroTransition(pomodoroJSON(prepared.planJSON));
+            const saved = await pomodoroAdapter().savePomodoroTransitionWithReceipt(plan);
+            const current = useTaskStore.getState()._tasksById.get(selectedTaskId);
+            if (selected && current && plan.taskPatch && saved.projectionReloaded) {
+                nativePomodoroSettlementPending = false;
+                nativePomodoroCompletionRevision = { taskId: selectedTaskId, beforeRevision: taskRevisionOf(selected),
+                    afterRevision: taskRevisionOf(current), adapter: getStorageAdapter() };
+                return nativePomodoroCompletionRevision;
+            }
+        }
+        nativePomodoroSettlementPending = false;
+    } catch {
+        try { logWarn('Native Pomodoro task completion settlement deferred', { scope: 'storage' }); } catch {}
+    }
 };
 let iosPomodoroAlarmTurn: { token: string; current: () => Promise<void> } | null = null;
 const requirePomodoroAlarmTurn = async (token: string) => {
@@ -6795,11 +6840,27 @@ globalThis.MindwtrHost = {
     },
 
     complete(id: string, taskRevision = ''): string {
-        return submit(async () => taskResult('complete', await contract.completeTask({ id, taskRevision: taskRevision || undefined })));
+        return submit(async () => {
+            const result = taskResult('complete', await contract.completeTask({ id, taskRevision: taskRevision || undefined }));
+            const settlement = await reconcileNativePomodoroAfterTaskChange();
+            return result.undo && settlement?.taskId === result.id && settlement.beforeRevision === result.undo.taskRevision
+                ? { ...result, undo: { ...result.undo, taskRevision: settlement.afterRevision } } : result;
+        });
     },
 
     completeUndo(json: string): string {
-        return submit(async () => taskResult('completeUndo', await contract.undoTaskCompletion(JSON.parse(json))));
+        return submit(async () => {
+            if (nativePomodoroSettlementPending) {
+                await reconcileNativePomodoroAfterTaskChange();
+                if (nativePomodoroSettlementPending) throw new Error('NOT_READY: Pomodoro work settlement is pending');
+            }
+            const input = JSON.parse(json);
+            const proof = nativePomodoroCompletionRevision;
+            const current = proof ? useTaskStore.getState()._tasksById.get(proof.taskId) : undefined;
+            if (proof && proof.adapter === getStorageAdapter() && current && input?.id === proof.taskId && input.taskRevision === proof.beforeRevision
+                && taskRevisionOf(current) === proof.afterRevision) input.taskRevision = proof.afterRevision;
+            return taskResult('completeUndo', await contract.undoTaskCompletion(input));
+        });
     },
 
     taskFocus(id: string, focused: boolean, taskRevision = ''): string {

@@ -39,6 +39,7 @@ describe('usePomodoroAlerts', () => {
             _allTasks: [],
             settings: { features: { pomodoro: true } },
             error: null,
+            isLoading: false,
         });
     });
 
@@ -83,15 +84,12 @@ describe('usePomodoroAlerts', () => {
         });
         render(<LanguageProvider><Harness /></LanguageProvider>);
 
-        act(() => {
-            usePomodoroStore.getState().hydratePomodoro({ autoStartBreaks: false, autoStartFocus: false });
-        });
-
         expect(usePomodoroStore.getState().snapshot.lastEvent).toBe('focus-finished');
         expect(sendAlert).not.toHaveBeenCalled();
     });
 
     it('still alerts for a session that finishes after hydration', () => {
+        window.localStorage.setItem(DESKTOP_POMODORO_SESSION_STORAGE_KEY, JSON.stringify(runningSnapshot('focus', 2)));
         usePomodoroStore.setState({ hasHydrated: false, snapshot: runningSnapshot('focus', 2) });
         render(<LanguageProvider><Harness /></LanguageProvider>);
 

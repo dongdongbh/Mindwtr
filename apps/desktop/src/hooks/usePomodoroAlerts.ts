@@ -7,6 +7,8 @@ import { reconcilePomodoroSnapshot, usePomodoroStore } from '../store/pomodoro-s
 
 export function usePomodoroAlerts(): void {
     const personalServicesAllowed = !isSandboxMode();
+    const dataReady = useTaskStore((state) => !state.isLoading && !state.error);
+    const hydratePomodoro = usePomodoroStore((state) => state.hydratePomodoro);
     const pomodoroEnabled = useTaskStore((state) => resolveFeatureFlags(state.settings).pomodoro);
     const completionAlertEnabled = useTaskStore((state) => state.settings.gtd?.pomodoro?.completionAlert !== false);
     const autoStartBreaks = useTaskStore((state) => state.settings.gtd?.pomodoro?.autoStartBreaks === true);
@@ -24,6 +26,10 @@ export function usePomodoroAlerts(): void {
         () => ({ autoStartBreaks, autoStartFocus }),
         [autoStartBreaks, autoStartFocus]
     );
+
+    useEffect(() => {
+        if (personalServicesAllowed && pomodoroEnabled && dataReady && !hasHydrated) hydratePomodoro(autoStartOptions);
+    }, [personalServicesAllowed, pomodoroEnabled, dataReady, hasHydrated, hydratePomodoro, autoStartOptions]);
 
     useEffect(() => {
         if (!personalServicesAllowed || !pomodoroEnabled || !isRunning) return;

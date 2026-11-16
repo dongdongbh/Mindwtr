@@ -128,6 +128,8 @@ The native client is a Kotlin and Jetpack Compose app in `apps/android-native`. 
 
 ## Pomodoro
 
+- Accounting: linked active work is preserved at pause, task completion, task switch, reset, preset change and work/break transitions. Pauses and breaks do not count; sub-minute remainders carry per task. Completion pauses the linked work timer and leaves completed-Pomodoro counts unchanged unless the work block finished.
+
 - Reach: Focus › Pomodoro card at the top of the list, when core shows it.
 - Selectors: `pomodoro-card`, `pomodoro-clock`, `pomodoro-primary`, `pomodoro-picker`, `pomodoro-task`, `pomodoro-done`, `pomodoro-fold`, `pomodoro-event`, `pomodoro-link`
 - Code: `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/Pomodoro.kt`, `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/PomodoroAlarms.kt`

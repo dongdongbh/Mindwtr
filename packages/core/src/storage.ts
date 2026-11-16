@@ -18,6 +18,17 @@ export type SearchProjectResult = Pick<Project, 'id' | 'title' | 'status' | 'can
 
 export const SEARCH_RESULT_LIMIT = 200;
 
+export class StorageConflictError extends Error {
+    constructor() { super('Stored data changed before the write'); }
+}
+
+export const withWebStorageLock = async <T>(operation: () => T | Promise<T>, options: { required?: boolean } = {}): Promise<T> => {
+    const locks = typeof navigator === 'undefined' ? undefined : navigator.locks;
+    if (typeof locks?.request === 'function') return locks.request('mindwtr-data:write', operation);
+    if (options.required) throw new Error('Atomic browser storage is unavailable');
+    return operation();
+};
+
 export type SearchResults = {
     tasks: SearchTaskResult[];
     projects: SearchProjectResult[];
@@ -32,6 +43,7 @@ export interface StorageAdapter {
     acknowledgeDataLoad?: (data: AppData) => void;
 
     saveData(data: AppData): Promise<AppData | void>;
+    saveDataIfUnchanged?: (data: AppData, expectedData: AppData) => Promise<AppData | void>;
     saveTask?: (task: Task, snapshot?: AppData) => Promise<void>;
     queryTasks?: (options: TaskQueryOptions) => Promise<Task[]>;
     searchAll?: (query: string) => Promise<SearchResults>;

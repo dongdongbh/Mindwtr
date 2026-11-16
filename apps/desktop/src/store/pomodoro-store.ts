@@ -2,6 +2,11 @@ import { createWithEqualityFn } from 'zustand/traditional';
 import { armPomodoroCompletionSound } from '../lib/pomodoro-alert';
 import {
     addTimeSpentMinutes,
+    accumulatePomodoroWork,
+    settlePomodoroWork,
+    applyPomodoroCredit,
+    acknowledgePomodoroCredits,
+    isTaskActionable,
     advancePomodoroState,
     createPomodoroState,
     DEFAULT_POMODORO_DURATIONS,
@@ -26,7 +31,8 @@ export const DESKTOP_POMODORO_SESSION_STORAGE_KEY = 'mindwtr:pomodoro:session:v1
 export const DESKTOP_POMODORO_COLLAPSED_STORAGE_KEY = 'mindwtr:pomodoro:collapsed:v1';
 
 
-type PomodoroCredit = { taskId: string; from?: number; to: number };
+type LegacyPomodoroCredit = { taskId: string; from?: number; to: number };
+type PomodoroCredit = LegacyPomodoroCredit | { id: string; taskId: string; minutes: number };
 
 export type PomodoroSnapshot = {
     durations: PomodoroDurations;
@@ -37,6 +43,7 @@ export type PomodoroSnapshot = {
     sessionHistory: PomodoroSessionHistory;
 
     pendingCredits?: PomodoroCredit[];
+    workSecondsByTaskId?: Record<string, number>;
 };
 
 
@@ -44,8 +51,12 @@ const loadedCredits = new WeakSet<PomodoroCredit>();
 
 const writtenCredits = new WeakSet<PomodoroCredit>();
 
-const readCredits = (value: unknown): PomodoroCredit[] => (Array.isArray(value) ? value : []).flatMap((item) => {
-    if (!isRecord(item) || typeof item.taskId !== 'string' || typeof item.to !== 'number' || !Number.isFinite(item.to)) return [];
+const readCredits = (value: unknown): PomodoroCredit[] => (Array.isArray(value) ? value : []).flatMap<PomodoroCredit>((item) => {
+    if (!isRecord(item) || typeof item.taskId !== 'string') return [];
+    if (typeof item.id === 'string' && typeof item.minutes === 'number' && Number.isSafeInteger(item.minutes) && item.minutes > 0) {
+        return [{ id: item.id, taskId: item.taskId, minutes: item.minutes }];
+    }
+    if (typeof item.to !== 'number' || !Number.isFinite(item.to)) return [];
     const credit: PomodoroCredit = { taskId: item.taskId, to: item.to,
         ...(typeof item.from === 'number' && Number.isFinite(item.from) ? { from: item.from } : {}) };
     loadedCredits.add(credit);
@@ -71,7 +82,7 @@ export const reconcilePomodoroSnapshot = (
     autoStartOptions: PomodoroAutoStartOptions
 ): PomodoroSnapshot => {
     if (!snapshot.timerState.isRunning) {
-        return { ...snapshot, updatedAtMs: nowMs };
+        return { ...snapshot, workSecondsByTaskId: accumulatePomodoroWork(snapshot, snapshot.timerState), updatedAtMs: nowMs };
     }
     const elapsedSeconds = Math.floor((nowMs - snapshot.updatedAtMs) / 1000);
     if (elapsedSeconds <= 0) return snapshot;
@@ -91,9 +102,30 @@ export const reconcilePomodoroSnapshot = (
             ),
         },
         sessionHistory,
+        workSecondsByTaskId: accumulatePomodoroWork(snapshot, advanced.state),
         lastEvent: advanced.lastEvent ?? snapshot.lastEvent,
         updatedAtMs,
     };
+};
+
+const reconcileLinkedTask = (snapshot: PomodoroSnapshot, nowMs: number, options: PomodoroAutoStartOptions, checkpoint = snapshot): PomodoroSnapshot => {
+    const state = useTaskStore.getState();
+    const task = snapshot.selectedTaskId ? state._tasksById.get(snapshot.selectedTaskId) : undefined;
+    const detached = Boolean(snapshot.selectedTaskId && !state.isLoading && (!task || task.deletedAt || !isTaskActionable(task)));
+    const stoppedAt = detached && task ? Date.parse(task.completedAt ?? task.cancelledAt ?? task.deletedAt ?? '') : NaN;
+    const source = detached && Number.isFinite(stoppedAt)
+        && checkpoint.selectedTaskId === snapshot.selectedTaskId
+        && checkpoint.timerState.isRunning && stoppedAt >= checkpoint.updatedAtMs
+        ? { ...checkpoint, pendingCredits: snapshot.pendingCredits }
+        : snapshot;
+    const resolvedAt = Number.isFinite(stoppedAt) ? Math.max(source.updatedAtMs, Math.min(nowMs, stoppedAt)) : nowMs;
+    const resolved = reconcilePomodoroSnapshot(source, resolvedAt, options);
+    return detached ? {
+        ...resolved,
+        selectedTaskId: undefined,
+        timerState: resolved.timerState.phase === 'focus' ? { ...resolved.timerState, isRunning: false } : resolved.timerState,
+        updatedAtMs: nowMs,
+    } : resolved;
 };
 
 const sanitizeStoredPomodoroState = (
@@ -149,6 +181,10 @@ const parseStoredPomodoroSnapshot = (value: unknown, nowMs: number): PomodoroSna
         lastEvent: null,
         updatedAtMs,
         sessionHistory,
+        workSecondsByTaskId: accumulatePomodoroWork({
+            durations, timerState, selectedTaskId,
+            workSecondsByTaskId: isRecord(value.workSecondsByTaskId) ? value.workSecondsByTaskId as Record<string, number> : undefined,
+        }, timerState),
         ...(pendingCredits.length > 0 ? { pendingCredits } : {}),
     };
 };
@@ -176,6 +212,7 @@ const saveStoredPomodoroSnapshot = (snapshot: PomodoroSnapshot): boolean => {
             selectedTaskId: snapshot.selectedTaskId,
             updatedAtMs: snapshot.updatedAtMs,
             sessionHistory: snapshot.sessionHistory,
+            workSecondsByTaskId: snapshot.workSecondsByTaskId,
             ...(snapshot.pendingCredits?.length ? { pendingCredits: snapshot.pendingCredits } : {}),
         }));
         return true;
@@ -215,36 +252,48 @@ const saveStoredCollapsed = (collapsed: boolean) => {
 };
 
 
-const withNewCredits = (prev: PomodoroSnapshot, next: PomodoroSnapshot): PomodoroSnapshot => {
-    const prevByTask = prev.sessionHistory.completedFocusSessionsByTaskId;
-    const nextByTask = next.sessionHistory.completedFocusSessionsByTaskId;
-    if (prevByTask === nextByTask) return next;
-    const credits = [...(next.pendingCredits ?? [])];
-    const { tasks } = useTaskStore.getState();
-    for (const [taskId, count] of Object.entries(nextByTask)) {
-        const delta = count - (prevByTask[taskId] ?? 0);
-        const task = tasks.find((candidate) => candidate.id === taskId);
-        if (delta <= 0 || !task) continue;
-
-        const from = credits.filter((credit) => credit.taskId === taskId).pop()?.to ?? task.timeSpentMinutes;
-        const to = addTimeSpentMinutes(from, delta * next.durations.focusMinutes);
-        if (to !== undefined && to !== from) credits.push({ taskId, ...(from === undefined ? {} : { from }), to });
-    }
-    return credits.length === (next.pendingCredits?.length ?? 0) ? next : { ...next, pendingCredits: credits };
+const withNewCredits = (next: PomodoroSnapshot): PomodoroSnapshot => {
+    const work = settlePomodoroWork(next.workSecondsByTaskId ?? {});
+    if (work.credits.length === 0) return next;
+    return {
+        ...next,
+        workSecondsByTaskId: work.workSecondsByTaskId,
+        pendingCredits: [...(next.pendingCredits ?? []), ...work.credits.map((credit) => ({ ...credit, id: crypto.randomUUID() }))],
+    };
 };
 
 
+let workCheckpoint = createInitialSnapshot();
 let settling: Promise<void> | null = null;
 
 let settleGeneration = 0;
+let settlementRequested = false;
 const settleCredits = (): Promise<void> => {
+    if (settling) { settlementRequested = true; return settling; }
     const generation = settleGeneration;
+    settlementRequested = false;
     settling ??= (async () => {
         const credits = usePomodoroStore.getState().snapshot.pendingCredits ?? [];
         const done = new Set<PomodoroCredit>();
         for (const credit of credits) {
-
+            if (generation !== settleGeneration) return;
+            if ('id' in credit) {
+                try {
+                    const outcome = await applyPomodoroCredit(credit);
+                    done.add(credit);
+                    void logInfo('Pomodoro active work settled', {
+                        scope: 'pomodoro', context: { releaseCheck: 'v1.3.9/pomodoro-partial-work', outcome },
+                    });
+                } catch {
+                    void logWarn('Pomodoro active work kept pending', {
+                        scope: 'pomodoro', context: { releaseCheck: 'v1.3.9/pomodoro-partial-work', outcome: 'pending' },
+                    });
+                    break;
+                }
+                continue;
+            }
             const outcome = await runStoreCommand(async () => {
+                if (generation !== settleGeneration) return null;
                 const { tasks, updateTask } = useTaskStore.getState();
                 const task = tasks.find((candidate) => candidate.id === credit.taskId);
                 const time = task?.timeSpentMinutes;
@@ -262,7 +311,7 @@ const settleCredits = (): Promise<void> => {
                     const pending = usePomodoroStore.getState().snapshot.pendingCredits ?? [];
                     let movedTo = to;
                     for (const later of pending.slice(pending.indexOf(credit) + 1)) {
-                        if (later.taskId !== credit.taskId || later.from !== chainTo || loadedCredits.has(later)) continue;
+                        if ('id' in later || later.taskId !== credit.taskId || later.from !== chainTo || loadedCredits.has(later)) continue;
                         chainTo = later.to;
                         later.to = addTimeSpentMinutes(movedTo, later.to - later.from) ?? later.to;
                         later.from = movedTo;
@@ -290,14 +339,26 @@ const settleCredits = (): Promise<void> => {
             }
             done.add(credit);
         }
+        if (generation !== settleGeneration) return;
         if (done.size > 0) {
             const snapshot = usePomodoroStore.getState().snapshot;
             const left = (snapshot.pendingCredits ?? []).filter((credit) => !done.has(credit));
             const next = { ...snapshot, pendingCredits: left.length > 0 ? left : undefined };
-            saveStoredPomodoroSnapshot(next);
+            const saved = saveStoredPomodoroSnapshot(next);
             usePomodoroStore.setState({ snapshot: next });
+            if (saved) {
+                const ids = [...done].flatMap((credit) => 'id' in credit ? [credit.id] : []);
+                if (ids.length > 0) await acknowledgePomodoroCredits(ids).catch(() => undefined);
+            }
         }
-    })().finally(() => { if (generation === settleGeneration) settling = null; });
+    })().finally(() => {
+        if (generation !== settleGeneration) return;
+        settling = null;
+        if (settlementRequested) {
+            settlementRequested = false;
+            if (usePomodoroStore.getState().snapshot.pendingCredits?.length) void settleCredits();
+        }
+    });
     return settling;
 };
 
@@ -328,21 +389,29 @@ export const usePomodoroStore = createWithEqualityFn<PomodoroStoreState>((set, g
         const stored = readStoredPomodoroSnapshot(nowMs);
         settleGeneration += 1;
         settling = null;
-        const reconciled = withNewCredits(stored, reconcilePomodoroSnapshot(stored, nowMs, autoStartOptions));
+        const reconciled = withNewCredits(reconcileLinkedTask(stored, nowMs, autoStartOptions));
         const saved = saveStoredPomodoroSnapshot(reconciled);
+        workCheckpoint = reconciled;
         set({ snapshot: reconciled, hasHydrated: true });
         if (saved && reconciled.pendingCredits?.length) void settleCredits();
     },
     commitPomodoro: (updater) => {
         const prev = get().snapshot;
-        const next = updater(prev);
+        const options = useTaskStore.getState().settings.gtd?.pomodoro;
+        const reconciled = reconcileLinkedTask(prev, Date.now(), {
+            autoStartFocus: options?.autoStartFocus === true,
+            autoStartBreaks: options?.autoStartBreaks === true,
+        }, workCheckpoint);
+        const next = updater(reconciled);
 
 
         if (!prev.timerState.isRunning && next.timerState.isRunning) {
             armPomodoroCompletionSound();
         }
-        const credited = withNewCredits(prev, next);
-        const saved = !isCountdownTickOnly(prev, credited) && saveStoredPomodoroSnapshot(credited);
+        const countdownOnly = isCountdownTickOnly(prev, next);
+        const credited = countdownOnly ? next : withNewCredits(next);
+        const saved = !countdownOnly && saveStoredPomodoroSnapshot(credited);
+        if (!countdownOnly) workCheckpoint = credited;
         set({ snapshot: credited });
         if (saved && credited.pendingCredits?.length) void settleCredits();
     },
@@ -371,3 +440,17 @@ export const usePomodoroStore = createWithEqualityFn<PomodoroStoreState>((set, g
         });
     },
 }));
+
+useTaskStore.subscribe((state, previous) => {
+    if (state.tasks === previous.tasks || state.isLoading) return;
+    const timer = usePomodoroStore.getState();
+    const selectedTaskId = timer.snapshot.selectedTaskId;
+    if (!timer.hasHydrated || !selectedTaskId) return;
+    const task = state._tasksById.get(selectedTaskId);
+    if (task && !task.deletedAt && isTaskActionable(task)) return;
+    timer.commitPomodoro((snapshot) => ({
+        ...snapshot,
+        selectedTaskId: undefined,
+        timerState: snapshot.timerState.phase === 'focus' ? { ...snapshot.timerState, isRunning: false } : snapshot.timerState,
+    }));
+});

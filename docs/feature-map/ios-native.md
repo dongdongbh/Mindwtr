@@ -100,6 +100,8 @@ Widgets, App Intents and Siri, the Share Extension and the Watch app belong to t
 
 ## Pomodoro
 
+- Accounting: linked active work is preserved at pause, task completion, task switch, reset, preset change and work/break transitions. Pauses and breaks do not count; sub-minute remainders carry per task. Completion pauses the linked work timer and leaves completed-Pomodoro counts unchanged unless the work block finished.
+
 - Reach: Settings › GTD › Pomodoro settings turns it on. The timer panel then shows on Focus.
 - Selectors: `gtd-pomodoro-enable`, `pomodoro-toggle`, `pomodoro-clock`, `pomodoro-reset`, `pomodoro-switch`, `pomodoro-task`, `pomodoro-complete`, `pomodoro-collapse`
 - Code: `apps/ios-native/App/FocusControlsPanel.swift`, `apps/ios-native/Sources/MindwtrNativeCore/NativePomodoroAlarmEffects.swift`

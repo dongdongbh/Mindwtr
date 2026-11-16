@@ -3,7 +3,8 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createNativeRequestReceipts, loadNativeRequestReceipts, NativeReceiptSqliteAdapter, pruneNativeRequestReceipts, resetNativeRequestReceipts } from './native-request-receipts';
-import { decodeNativePomodoroSession, nativePomodoroReceiptPayload, prepareNativePomodoroTransition, type NativePomodoroRequest } from './native-pomodoro-session';
+import { decodeNativePomodoroSession, drainNativePomodoroLegacyCredits, nativePomodoroReceiptPayload, prepareNativePomodoroTransition, type NativePomodoroRequest } from './native-pomodoro-session';
+import { applyPomodoroCredit } from './pomodoro-credit';
 import { openScratchSqlite } from './screen-parity.replay';
 import { SqliteAdapter, type SqliteClient } from './sqlite-adapter';
 import { TASK_SQLITE_COLUMNS } from './task-sync-schema';
@@ -63,6 +64,7 @@ async function openLegacy() {
     const env = await open();
     await env.sql.client.run('DELETE FROM native_pomodoro_session');
     const legacy = decodeNativePomodoroSession(env.plan.sessionBefore!).session;
+    delete legacy.workSecondsByTaskId;
     legacy.durations = { focusMinutes: 50, breakMinutes: 10 }; legacy.updatedAtMs = now - 1000;
     const sessionRaw = ` ${JSON.stringify(legacy)} `;
     const plan = prepareNativePomodoroTransition({ request: { action: 'adoptLegacy', requestId: NEXT, observedAtMs: now,
@@ -82,6 +84,59 @@ const watchRequest = (action: 'start' | 'pause' | 'reset' = 'start'): Extract<Na
     autoStart: { autoStartFocus: false, autoStartBreaks: false }, durations: { focusMinutes: 50, breakMinutes: 10 }, selectedTaskId: null,
     sourceJSON: JSON.stringify({ protocolVersion: 1, id: NEXT, source: 'apple-watch', kind: 'pomodoro',
         action, createdAt: new Date(now + 1).toISOString() }),
+});
+
+describe('native partial credit UUID migration', () => {
+    const credit = { id: '33333333-3333-4333-8333-333333333333', taskId: 'task', minutes: 2 };
+    const adoption = (env: Awaited<ReturnType<typeof openLegacy>>): Extract<NativePomodoroRequest, { action: 'adoptLegacy' }> => {
+        if (env.plan.request.action !== 'adoptLegacy') throw new Error('fixture');
+        return { ...env.plan.request, legacy: { ...env.plan.request.legacy, sessionRaw: JSON.stringify({
+            durations: { focusMinutes: 25, breakMinutes: 5 }, timerState: { phase: 'focus', remainingSeconds: 1500,
+                isRunning: false, completedFocusSessions: 0 }, selectedTaskId: 'task', workSecondsByTaskId: { task: 31 }, pendingCredits: [credit],
+        }) } };
+    };
+    const prepare = async (env: Awaited<ReturnType<typeof openLegacy>>, request: NativePomodoroRequest) => {
+        const [row] = await env.sql.client.all<Record<string, string | number | null>>('SELECT * FROM tasks WHERE id=?', ['task']);
+        return prepareNativePomodoroTransition({ request, session: { raw: null, state: null },
+            target: { id: 'task', row: TASK_SQLITE_COLUMNS.map(name => row[name]) }, deviceId: 'device' })!;
+    };
+    it.each(['missing', 'mismatched'] as const)('refuses %s durable credit proof before any native domain mutation', async kind => {
+        const env = await openLegacy();
+        if (kind === 'mismatched') await env.sql.client.run('UPDATE settings SET data=? WHERE id=1', [JSON.stringify({
+            deviceId: 'device', pomodoroCredits: { [credit.id]: { taskId: 'task', minutes: 3 } },
+        })]);
+        await useTaskStore.getState().fetchData({ recoveryLoad: true, throwOnError: true });
+        const plan = await prepare(env, adoption(env)); const before = await env.state(); env.events.length = 0;
+        await expect(env.adapter.savePomodoroTransitionWithReceipt(plan)).rejects.toThrow();
+        expect(await env.state()).toEqual(before);
+        expect(env.events.some(statement => /^(INSERT|UPDATE)/u.test(statement))).toBe(false);
+    });
+    it('retains original source and credits once across a predrain lost reply, failed adoption, and cold receipt replay', async () => {
+        const env = await openLegacy(); const request = adoption(env); const source = request.legacy.sessionRaw;
+        await expect(drainNativePomodoroLegacyCredits(request, async pending => {
+            await applyPomodoroCredit(pending); throw new Error('lost reply');
+        })).rejects.toThrow('lost reply');
+        expect(useTaskStore.getState()._tasksById.get('task')?.timeSpentMinutes).toBe(6);
+        expect(await drainNativePomodoroLegacyCredits(request, async pending => {
+            expect(await applyPomodoroCredit(pending)).toBe('already-applied');
+        })).toEqual(request);
+        expect(request.legacy.sessionRaw).toBe(source);
+        const plan = await prepare(env, request); expect(plan.taskPatch).toBeNull();
+        const before = await env.state(); let fail = true;
+        env.hooks.run = async statement => { if (fail && statement.startsWith('INSERT INTO native_pomodoro_session')) {
+            fail = false; throw new Error('adoption interrupted');
+        } };
+        await expect(env.adapter.savePomodoroTransitionWithReceipt(plan)).rejects.toThrow();
+        expect(await env.state()).toEqual(before); env.hooks.run = undefined;
+        await env.adapter.savePomodoroTransitionWithReceipt(plan);
+        expect(decodeNativePomodoroSession((await env.adapter.readPomodoroSession()).raw!).session.workSecondsByTaskId).toEqual({ task: 31 });
+        await env.sql.client.run('UPDATE tasks SET timeSpentMinutes=12 WHERE id=?', ['task']);
+        await useTaskStore.getState().fetchData({ recoveryLoad: true, throwOnError: true });
+        resetNativeRequestReceipts(); await loadNativeRequestReceipts(env.sql.client, { durableCommands: ['pomodoroTransition'] });
+        expect((await env.adapter.savePomodoroTransitionWithReceipt(plan, { replayOnly: true })).replayed).toBe(true);
+        expect(useTaskStore.getState()._tasksById.get('task')?.timeSpentMinutes).toBe(12);
+        expect(request.legacy.sessionRaw).toBe(source);
+    });
 });
 const watchPlan = (env: Awaited<ReturnType<typeof open>>, request = watchRequest()) => prepareNativePomodoroTransition({ request,
     session: { raw: env.plan.sessionBefore!, state: decodeNativePomodoroSession(env.plan.sessionBefore!) },
@@ -395,7 +450,8 @@ describe('legacy Pomodoro adoption through the unchanged atomic SQLite owner', (
     });
     it.each(['other task', 'device'])('refuses an owed-only adoption whose %s changed after prepare, with no writes', async (change) => {
 
-        const env = await openOwed([{ taskId: 'other', from: 10, to: 35 }], { timerState: { phase: 'focus', remainingSeconds: 60, isRunning: false, completedFocusSessions: 3 } });
+        const env = await openOwed([{ taskId: 'other', from: 10, to: 35 }], { workSecondsByTaskId: {},
+            timerState: { phase: 'focus', remainingSeconds: 60, isRunning: false, completedFocusSessions: 3 } });
         const plan = await env.adopt(); expect(plan.taskPatch).toBeNull(); expect(plan.owed![0].taskPatch).not.toBeNull();
         if (change === 'other task') await env.sql.client.run('UPDATE tasks SET title=? WHERE id=?', ['Edited elsewhere', 'other']);
         else await env.sql.client.run('UPDATE settings SET data=? WHERE id=1', [JSON.stringify({ deviceId: 'another' })]);
@@ -404,7 +460,8 @@ describe('legacy Pomodoro adoption through the unchanged atomic SQLite owner', (
         expect(await env.state()).toEqual(before); expect(env.events.some((sql) => /^(UPDATE|INSERT|DELETE)/u.test(sql))).toBe(false);
     });
     it('commits an owed-only adoption and reloads the store projection', async () => {
-        const env = await openOwed([{ taskId: 'other', from: 10, to: 35 }], { timerState: { phase: 'focus', remainingSeconds: 60, isRunning: false, completedFocusSessions: 3 } });
+        const env = await openOwed([{ taskId: 'other', from: 10, to: 35 }], { workSecondsByTaskId: {},
+            timerState: { phase: 'focus', remainingSeconds: 60, isRunning: false, completedFocusSessions: 3 } });
         const plan = await env.adopt();
         expect(await env.adapter.savePomodoroTransitionWithReceipt(plan)).toEqual({ result: plan.result, replayed: false, projectionReloaded: true });
         expect(useTaskStore.getState()._tasksById.get('other')!.timeSpentMinutes).toBe(35);
@@ -589,6 +646,7 @@ describe('native Pomodoro atomic storage over real SQLite', () => {
             const receipts = createNativeRequestReceipts({ save: async () => ({ ok: true, value: null }) });
             const assertFenced = async () => {
                 await expect(env.adapter.saveData(preCredit)).rejects.toThrow(/busy|reload/);
+                await expect(env.adapter.saveDataIfUnchanged(preCredit, preCredit)).rejects.toThrow(/busy|reload/);
                 await expect(env.adapter.saveDocumentWithReceipt({ requestId: ID,
                     payload: JSON.stringify(['backupDocument', 'merge', ID, 'a'.repeat(64)]),
                     expectedCurrent: preCredit, data: preCredit, reply: { unchanged: true } })).rejects.toThrow(/busy|reload/);
@@ -626,6 +684,7 @@ describe('native Pomodoro atomic storage over real SQLite', () => {
         const write = env.adapter.savePomodoroTransitionWithReceipt(env.plan); await held.waiting;
         await expect(env.adapter.getData()).rejects.toThrow(/busy/);
         await expect(env.adapter.saveData(original)).rejects.toThrow(/busy/);
+        await expect(env.adapter.saveDataIfUnchanged(original, original)).rejects.toThrow(/busy/);
         const generationWrite = vi.fn(async () => ({ ok: true as const, value: 1 }));
         const generationReceipts = createNativeRequestReceipts({ save: async () => ({ ok: true, value: null }) });
         try {
@@ -638,11 +697,13 @@ describe('native Pomodoro atomic storage over real SQLite', () => {
         const load = gate(); env.hooks.all = async (statement) => { if (statement.includes('FROM tasks') && !statement.includes('WHERE id')) await load.hold(); };
         const replay = fresh.savePomodoroTransitionWithReceipt(env.plan); await load.waiting;
         await expect(fresh.saveData(original)).rejects.toThrow(/reload|busy/);
+        await expect(fresh.saveDataIfUnchanged(original, original)).rejects.toThrow(/reload|busy/);
         await expect(fresh.commitReceiptOnly(ID, '[]')).rejects.toThrow(/reload|busy/);
         setStorageAdapter(oldAdapter); load.release();
         expect((await replay).projectionReloaded).toBe(false);
         expect(useTaskStore.getState()._tasksById.get('task')!.timeSpentMinutes).toBe(29);
         await expect(fresh.saveData(original)).rejects.toThrow(/reload/);
+        await expect(fresh.saveDataIfUnchanged(original, original)).rejects.toThrow(/reload/);
     });
     it('initialization does not strand ordinary saves and corrupt local rows stay preserved outside ordinary loads', async () => {
         const env = await open(); await env.sql.client.run('DELETE FROM native_pomodoro_session');
@@ -675,7 +736,7 @@ describe('native Pomodoro atomic storage over real SQLite', () => {
     });
     it('refuses Pomodoro while an ordinary write, baseline read, document write or receipt-only transaction owns the connection', async () => {
         const env = await open();
-        for (const kind of ['ordinary', 'baseline', 'document'] as const) {
+        for (const kind of ['ordinary', 'conditional', 'baseline', 'document'] as const) {
             const held = gate(); let operation: Promise<unknown>;
             if (kind === 'baseline') {
                 env.hooks.all = async (statement) => { if (statement.includes('FROM tasks') && !statement.includes('WHERE id')) await held.hold(); };
@@ -683,6 +744,9 @@ describe('native Pomodoro atomic storage over real SQLite', () => {
             } else {
                 env.hooks.run = async (statement) => { if (statement === 'BEGIN IMMEDIATE') await held.hold(); };
                 if (kind === 'ordinary') operation = env.adapter.saveData(await env.adapter.getData());
+                else if (kind === 'conditional') {
+                    const data = await env.adapter.getData(); operation = env.adapter.saveDataIfUnchanged(data, data);
+                }
                 else operation = env.adapter.saveDocumentWithReceipt({ requestId: ID,
                     payload: JSON.stringify(['backupDocument', 'merge', ID, 'a'.repeat(64)]),
                     expectedCurrent: await env.adapter.getData(), data: await env.adapter.getData(), reply: { unchanged: true } });
@@ -722,6 +786,7 @@ describe('native Pomodoro atomic storage over real SQLite', () => {
         expect(useTaskStore.getState()._tasksById.get('task')!.title).toBe('Retained pending edit');
         const discarded = await env.adapter.getData(); env.adapter.acknowledgeDataLoad(discarded);
         await expect(env.adapter.saveData(discarded)).rejects.toThrow(/reload/);
+        await expect(env.adapter.saveDataIfUnchanged(discarded, discarded)).rejects.toThrow(/reload/);
         const writer = vi.fn(async () => ({ ok: true as const, value: 1 }));
         const receipts = createNativeRequestReceipts({ save: async () => ({ ok: true, value: null }) });
         expect(await receipts.run(ID, '["other"]', writer)).toMatchObject({ ok: false });
@@ -753,6 +818,7 @@ describe('native Pomodoro atomic storage over real SQLite', () => {
         expect((await write).projectionReloaded).toBe(false);
         expect(useTaskStore.getState()._tasksById.get('task')!.title).toBe('Edit during SQL');
         await expect(env.adapter.saveData(original)).rejects.toThrow(/reload/);
+        await expect(env.adapter.saveDataIfUnchanged(original, original)).rejects.toThrow(/reload/);
     });
     it('refreshes capped identical revision/timestamp and refuses forged oversized plans before BEGIN', async () => {
         const env = await open();

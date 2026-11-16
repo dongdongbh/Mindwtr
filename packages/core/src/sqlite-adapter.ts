@@ -7,7 +7,8 @@ export type CalendarSyncEntry = {
     platform: string;
     lastSyncedAt: string;
 };
-import { SEARCH_RESULT_LIMIT, type SearchProjectResult, type SearchResults, type SearchTaskResult, type TaskQueryOptions } from './storage';
+import { SEARCH_RESULT_LIMIT, StorageConflictError, type SearchProjectResult, type SearchResults, type SearchTaskResult, type TaskQueryOptions } from './storage';
+import { taskEditValuesEqual } from './json-value-equality';
 import { buildTaskWhere } from './task-query';
 import { FTS_MAINTENANCE_TRIGGERS, SQLITE_BASE_SCHEMA, SQLITE_FTS_SCHEMA, SQLITE_INDEX_SCHEMA } from './sqlite-schema';
 import { normalizeTaskStatus } from './task-status';
@@ -1177,7 +1178,7 @@ export class SqliteAdapter {
     }
 
 
-    protected async getDataNow(options?: { rawTasks?: true } & SqliteStaleOption): Promise<AppData & { people: Person[] }> {
+    protected async getDataNow(options?: { rawTasks?: true } & SqliteStaleOption, captureReadToken = false): Promise<AppData & { people: Person[] }> {
 
         this.rowBaseline = null;
         await this.ensureSchemaNow();
@@ -1193,7 +1194,7 @@ export class SqliteAdapter {
         let snapshotRows: Awaited<ReturnType<typeof loadSnapshotRows>> | null = null;
         let epoch: number | undefined;
         const generation = this.generation;
-        if (this.rejectConcurrentWrites) {
+        if (this.rejectConcurrentWrites || captureReadToken) {
             for (let attempt = 0; attempt < 2; attempt += 1) {
                 const beforeEpoch = await this.readExternalChangeEpoch();
                 const candidateRows = await loadSnapshotRows();
@@ -1514,6 +1515,16 @@ export class SqliteAdapter {
 
     async saveData(data: AppData, options?: { token?: SqliteReadToken } & SqliteStaleOption): Promise<void> {
         return this.exclusive('saveData', () => this.saveDataNow(data, options));
+    }
+
+    async saveDataIfUnchanged(data: AppData, expectedData: AppData): Promise<void> {
+        return this.exclusive('saveDataIfUnchanged', async () => {
+            const current = await this.getDataNow(undefined, true);
+            if (!taskEditValuesEqual(current, expectedData)) throw new StorageConflictError();
+            const token = this.readTokenOf(current);
+            if (!token) throw new Error('SQLite conditional write has no read token');
+            await this.saveDataNow(data, { token, onStale: () => new StorageConflictError() });
+        });
     }
 
     protected async saveDataNow(data: AppData, options?: { token?: SqliteReadToken } & SqliteStaleOption): Promise<void> {

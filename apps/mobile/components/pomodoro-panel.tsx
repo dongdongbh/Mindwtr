@@ -62,7 +62,9 @@ export function PomodoroPanel({
     }
     if (!selectedTaskId) return;
     if (actionableTasksById.has(selectedTaskId)) return;
-    mobilePomodoroController.setSelectedTaskId(undefined, autoStartOptions);
+    if (!mobilePomodoroController.reconcileTaskCompletion(autoStartOptions)) {
+      mobilePomodoroController.setSelectedTaskId(undefined, autoStartOptions);
+    }
   }, [actionableTasksById, autoStartOptions, linkTaskEnabled, selectedTaskId]);
 
   const selectedTask = linkTaskEnabled && selectedTaskId ? actionableTasksById.get(selectedTaskId) : undefined;
@@ -134,8 +136,8 @@ export function PomodoroPanel({
 
   const handleMarkDone = () => {
     if (!selectedTask) return;
+    mobilePomodoroController.completeSelectedTask(autoStartOptions);
     onMarkDone(selectedTask.id);
-    mobilePomodoroController.clearLastEvent(autoStartOptions);
   };
 
   const collapseLabel = tFallback(t, 'pomodoro.collapse', 'Collapse timer');

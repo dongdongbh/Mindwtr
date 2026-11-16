@@ -4,6 +4,7 @@ import { decodeNativePomodoroSession, nativePomodoroReceiptPayload, prepareNativ
 import { resolvePomodoroSession, serializePomodoroSession, type StoredPomodoroSession } from './pomodoro-session';
 import { TASK_SQLITE_COLUMNS } from './task-sync-schema';
 import { TIME_SPENT_MAX_MINUTES } from './time-spent';
+import { settlePomodoroWork } from './pomodoro-work';
 
 const ID = '11111111-1111-4111-8111-111111111111';
 const AT = '2026-10-10T00:00:00.000Z';
@@ -31,7 +32,7 @@ describe('native Pomodoro legacy adoption', () => {
             session: { durations: { focusMinutes: 25, breakMinutes: 5 },
                 timerState: { phase: 'focus', remainingSeconds: 1500, isRunning: false, completedFocusSessions: 0 },
                 sessionHistory: { totalCompletedFocusSessions: 0, completedFocusSessionsByTaskId: {},
-                    todayDayKey: '2026-10-10', completedTodayFocusSessions: 0 }, updatedAtMs: 0 } });
+                    todayDayKey: '2026-10-10', completedTodayFocusSessions: 0 }, workSecondsByTaskId: {}, updatedAtMs: 0 } });
         expect(plan.request).toEqual(request(null, 'true'));
         expect(plan.result).toEqual({ sessionID: ID, generation: 0, completedFocusSessions: 0,
             creditedMinutes: 0, creditDisposition: 'none' });
@@ -51,7 +52,7 @@ describe('native Pomodoro legacy adoption', () => {
             timerState: { phase: 'break', remainingSeconds: 600, isRunning: false, completedFocusSessions: 6 },
             selectedTaskId: 'task', sessionHistory: { totalCompletedFocusSessions: 6,
                 completedFocusSessionsByTaskId: { task: 4 }, todayDayKey: '2026-10-10', completedTodayFocusSessions: 1 },
-            updatedAtMs: now - 1000 });
+            workSecondsByTaskId: {}, updatedAtMs: now - 1000 });
     });
     it.each([{}, { durations: { focusMinutes: 50 } }, { timerState: { completedFocusSessions: 3 } },
         { sessionHistory: { completedFocusSessionsByTaskId: { task: 2, zero: 0 } } },
@@ -73,8 +74,10 @@ describe('native Pomodoro legacy adoption', () => {
             const plan = prepareNativePomodoroTransition({ request: { ...request(JSON.stringify(source)), autoStart: options },
                 session: { raw: null, state: null }, target: selectedRow(), deviceId: 'device' })!;
             const expected = resolvePomodoroSession(source, now, options, '2026-10-10');
-            expect(decodeNativePomodoroSession(plan.sessionAfter).session).toEqual({ ...serializePomodoroSession(expected), updatedAtMs: 0 });
-            expect(plan.result.creditedMinutes).toBe((expected.sessionHistory.totalCompletedFocusSessions - 3) * 25);
+            const settled = settlePomodoroWork(expected.workSecondsByTaskId ?? {});
+            expect(decodeNativePomodoroSession(plan.sessionAfter).session).toEqual({ ...serializePomodoroSession(expected),
+                workSecondsByTaskId: settled.workSecondsByTaskId, updatedAtMs: 0 });
+            expect(plan.result.creditedMinutes).toBe(settled.credits.reduce((sum, credit) => sum + credit.minutes, 0));
             if (overdue === 0) {
                 expect(expected.timerState.phase).toBe(phase === 'focus' ? 'break' : 'focus');
                 expect(expected.timerState.isRunning).toBe(phase === 'focus' ? autoStartBreaks : autoStartFocus);

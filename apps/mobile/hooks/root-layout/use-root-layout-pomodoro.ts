@@ -18,6 +18,7 @@ export function useRootLayoutPomodoro({
   resolveText: (key: string, fallback: string) => string;
 }) {
   const snapshot = useMobilePomodoroNotificationState();
+  const tasks = useTaskStore((state) => state._allTasks ?? state.tasks);
   const completionAlertEnabled = useTaskStore((state) => state.settings.gtd?.pomodoro?.completionAlert !== false);
   const autoStartBreaks = useTaskStore((state) => state.settings.gtd?.pomodoro?.autoStartBreaks === true);
   const autoStartFocus = useTaskStore((state) => state.settings.gtd?.pomodoro?.autoStartFocus === true);
@@ -31,6 +32,11 @@ export function useRootLayoutPomodoro({
     }, 1000);
     return () => clearInterval(interval);
   }, [autoStartBreaks, autoStartFocus, canonicalDataReady, disabled]);
+
+  useEffect(() => {
+    if (!canonicalDataReady || disabled || snapshot.isHydrating) return;
+    mobilePomodoroController.reconcileTaskCompletion({ autoStartBreaks, autoStartFocus });
+  }, [autoStartBreaks, autoStartFocus, canonicalDataReady, disabled, snapshot.isHydrating, tasks]);
 
   useEffect(() => {
     if (!canonicalDataReady || disabled || snapshot.isHydrating) return;

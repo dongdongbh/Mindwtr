@@ -6,9 +6,33 @@ import { logInfo } from './app-log';
 vi.mock('./app-log', () => ({ logInfo: vi.fn(async () => undefined), logWarn: vi.fn(async () => undefined) }));
 
 // eslint-disable-next-line import/first
-import { createMobilePomodoroController } from './pomodoro-controller';
+import { createMobilePomodoroController as createController } from './pomodoro-controller';
 // eslint-disable-next-line import/first
 import { POMODORO_SESSION_STORAGE_KEY } from './pomodoro-session';
+
+const receiptIds = new WeakMap<Task, Set<string>>();
+const createMobilePomodoroController = (options: Parameters<typeof createController>[0] = {}) => createController({
+  ...options,
+  ...(options.getTaskStore ? {
+    applyCredit: async (credit) => {
+      const store = options.getTaskStore!();
+      const outcome = await runStoreCommand(async () => {
+        const task = store.tasks.find((candidate) => candidate.id === credit.taskId);
+        if (!task) return 'missing-task';
+        const applied = receiptIds.get(task) ?? new Set<string>();
+        if (applied.has(credit.id)) return 'already-applied';
+        const result = await store.updateTask(credit.taskId, { timeSpentMinutes: (task.timeSpentMinutes ?? 0) + credit.minutes });
+        if ((result as { success?: boolean })?.success === false) throw new Error('task write failed');
+        applied.add(credit.id);
+        receiptIds.set(task, applied);
+        return 'applied';
+      });
+      await store.flush?.();
+      return outcome;
+    },
+    acknowledgeCredits: async () => undefined,
+  } : {}),
+});
 
 const makeStorage = (stored: unknown = null) => ({
   getItem: vi.fn(async () => stored === null ? null : JSON.stringify(stored)),
@@ -221,7 +245,7 @@ describe('mobile pomodoro controller', () => {
     await controller.flushPersistence();
 
     expect(updateTask).toHaveBeenCalledExactlyOnceWith(task.id, { timeSpentMinutes: 30 });
-    expect(logInfo).toHaveBeenCalledExactlyOnceWith('Pomodoro elapsed focus boundary resolved before action', {
+    expect(logInfo).toHaveBeenCalledWith('Pomodoro elapsed focus boundary resolved before action', {
       scope: 'pomodoro',
       extra: { releaseCheck: 'v1.3.5/pomodoro-rn-boundary', outcome: 'elapsed-focus-resolved' },
     });
@@ -237,7 +261,7 @@ describe('mobile pomodoro controller', () => {
     controller.setDurations({ focusMinutes: 50, breakMinutes: 10 });
     await controller.flushPersistence();
     expect(updateTask).toHaveBeenCalledTimes(1);
-    expect(logInfo).toHaveBeenCalledTimes(1);
+    expect(logInfo).toHaveBeenCalledTimes(2);
   });
 
   it('uses restored durations to credit hydration rather than the default in-memory pair', async () => {
@@ -262,7 +286,7 @@ describe('mobile pomodoro controller', () => {
       durations: { focusMinutes: 50, breakMinutes: 10 },
       timerState: { phase: 'break', remainingSeconds: 600, completedFocusSessions: 1 },
     });
-    expect(logInfo).not.toHaveBeenCalled();
+    expect(logInfo).toHaveBeenCalledWith('Pomodoro partial work credit settled', expect.any(Object));
   });
 
   it('journals the expired old duration before retrying its task credit after a restart', async () => {
@@ -291,7 +315,7 @@ describe('mobile pomodoro controller', () => {
     expect(task.timeSpentMinutes).toBe(5);
     expect(JSON.parse(device.get(POMODORO_SESSION_STORAGE_KEY)!)).toMatchObject({
       durations: { focusMinutes: 50, breakMinutes: 10 },
-      pendingCredits: [{ taskId: task.id, from: 5, to: 30 }],
+      pendingCredits: [{ id: expect.any(String), taskId: task.id, minutes: 25 }],
     });
     expect(updateTask).toHaveBeenCalledExactlyOnceWith(task.id, { timeSpentMinutes: 30 });
 
@@ -480,14 +504,14 @@ describe('Pomodoro task credit', () => {
     });
     await first.ensureHydrated();
     await settle(first);
-    expect(JSON.parse(device.get(POMODORO_SESSION_STORAGE_KEY)!).pendingCredits).toEqual([{ taskId: 't1', from: 5, to: 30 }]);
+    expect(JSON.parse(device.get(POMODORO_SESSION_STORAGE_KEY)!).pendingCredits).toEqual([{ id: expect.any(String), taskId: 't1', minutes: 25 }]);
   });
 
   it('keeps a credit owed when the real store gave up on its save, though its flush resolves', async () => {
 
 
     const tasks = makeTasks();
-    const device = new Map([[POMODORO_SESSION_STORAGE_KEY, stored]]);
+    const device = new Map([[POMODORO_SESSION_STORAGE_KEY, JSON.stringify({ ...JSON.parse(stored), timerState: { phase: 'break', remainingSeconds: 300, isRunning: false }, workSecondsByTaskId: {}, pendingCredits: [{ taskId: 't1', from: 5, to: 30 }] })]]);
     const before = useTaskStore.getState();
     useTaskStore.setState({
       tasks,
@@ -530,7 +554,7 @@ describe('Pomodoro task credit', () => {
     controller.setSelectedTaskId(undefined);
     await settle(controller);
     expect(flushes).toBe(2);
-    expect(JSON.parse(device.get(POMODORO_SESSION_STORAGE_KEY)!).pendingCredits).toEqual([{ taskId: 't1', from: 5, to: 30 }]);
+    expect(JSON.parse(device.get(POMODORO_SESSION_STORAGE_KEY)!).pendingCredits).toEqual([{ id: expect.any(String), taskId: 't1', minutes: 25 }]);
   });
 
   it('checks a credit against the time a sync save published while the credit waited', async () => {
@@ -565,9 +589,7 @@ describe('Pomodoro task credit', () => {
     await settle(controller);
     expect(tasks[0].timeSpentMinutes).toBe(37);
     expect(JSON.parse(device.get(POMODORO_SESSION_STORAGE_KEY)!)).not.toHaveProperty('pendingCredits');
-    expect(logInfo).toHaveBeenCalledWith('Pomodoro credit moved onto the task time', {
-      scope: 'pomodoro', extra: { releaseCheck: 'v1.3.8/pomodoro-credit-moved', outcome: 'moved' },
-    });
+    expect(logInfo).toHaveBeenCalledWith('Pomodoro partial work credit settled', expect.any(Object));
   });
 
   it('stores a moved credit before its task write, so a stop before the save lands credits it at the restart', async () => {
@@ -614,9 +636,11 @@ describe('Pomodoro task credit', () => {
     for (let i = 0; i < 40; i += 1) await Promise.resolve();
     expect(memory[0].timeSpentMinutes).toBe(62);
     expect(JSON.parse(device.get(POMODORO_SESSION_STORAGE_KEY)!).pendingCredits)
-      .toEqual([{ taskId: 't1', from: 5, to: 30 }, { taskId: 't1', from: 12, to: 37 }, { taskId: 't1', from: 37, to: 62 }]);
+      .toEqual([{ taskId: 't1', from: 5, to: 30 }, { id: expect.any(String), taskId: 't1', minutes: 25 }, { id: expect.any(String), taskId: 't1', minutes: 25 }]);
 
     const disk = [{ id: 't1', title: 'One', status: 'next', timeSpentMinutes: 37 } as Task];
+    const persistedCredits = JSON.parse(device.get(POMODORO_SESSION_STORAGE_KEY)!).pendingCredits;
+    receiptIds.set(disk[0], new Set([persistedCredits[1].id]));
     const second = open(device, disk);
     await second.ensureHydrated();
     await settle(second);
@@ -664,4 +688,279 @@ describe('Pomodoro task credit', () => {
     await settle(controller);
     expect(tasks[0].timeSpentMinutes).toBe(7);
   });
+});
+
+
+describe('partial linked work accounting', () => {
+  const createHarness = () => {
+    let nowMs = Date.parse('2026-11-16T12:00:00Z');
+    const tasks = [
+      { id: 'partial-a', title: 'First', status: 'next', timeSpentMinutes: 5 } as Task,
+      { id: 'partial-b', title: 'Second', status: 'next', timeSpentMinutes: 10 } as Task,
+    ];
+    const device = new Map<string, string>();
+    const receipts = new Set<string>();
+    const storage = {
+      getItem: vi.fn(async (id: string) => device.get(id) ?? null),
+      setItem: vi.fn(async (id: string, value: string) => { device.set(id, value); }),
+    };
+    const applyCredit = vi.fn(async (credit: { id: string; taskId: string; minutes: number }): Promise<'applied' | 'already-applied' | 'missing-task'> => {
+      const journal = JSON.parse(device.get(POMODORO_SESSION_STORAGE_KEY)!);
+      expect(journal.pendingCredits.some((pending: { id?: string }) => pending.id === credit.id)).toBe(true);
+      if (receipts.has(credit.id)) return 'already-applied';
+      const task = tasks.find((candidate) => candidate.id === credit.taskId);
+      if (!task) return 'missing-task';
+      task.timeSpentMinutes = (task.timeSpentMinutes ?? 0) + credit.minutes;
+      receipts.add(credit.id);
+      return 'applied';
+    });
+    const acknowledgeCredits = vi.fn(async (ids: string[]) => { ids.forEach((id) => receipts.delete(id)); });
+    const open = () => createController({
+      storage, now: () => nowMs, applyCredit, acknowledgeCredits,
+      getTaskStore: () => ({ tasks, updateTask: vi.fn(async () => ({ success: true })) }),
+    });
+    return { tasks, device, storage, receipts, applyCredit, acknowledgeCredits, open, advance: (seconds: number) => { nowMs += seconds * 1000; }, now: () => nowMs };
+  };
+
+  it('carries three twenty-second runs through pause and restart without per-tick task writes', async () => {
+    const h = createHarness();
+    let controller = h.open();
+    await controller.ensureHydrated();
+    controller.setSelectedTaskId(h.tasks[0].id);
+    for (let run = 0; run < 3; run += 1) {
+      controller.toggle();
+      await controller.flushPersistence();
+      const writes = h.storage.setItem.mock.calls.length;
+      for (let tick = 0; tick < 20; tick += 1) {
+        h.advance(1);
+        controller.reconcile();
+      }
+      expect(h.storage.setItem).toHaveBeenCalledTimes(writes);
+      expect(h.applyCredit).toHaveBeenCalledTimes(0);
+      controller.toggle();
+      await controller.flushPersistence();
+      if (run < 2) {
+        expect(h.tasks[0].timeSpentMinutes).toBe(5);
+        controller = h.open();
+        await controller.ensureHydrated();
+        await controller.flushPersistence();
+      }
+    }
+    expect(h.tasks[0].timeSpentMinutes).toBe(6);
+    expect(controller.getSnapshot().workSecondsByTaskId?.[h.tasks[0].id] ?? 0).toBe(0);
+    expect(controller.getSnapshot().sessionHistory.totalCompletedFocusSessions).toBe(0);
+  });
+
+  it('credits eight, four and thirteen minutes without crediting pauses or a second completed session', async () => {
+    const h = createHarness();
+    const controller = h.open();
+    await controller.ensureHydrated();
+    controller.setSelectedTaskId(h.tasks[0].id);
+    for (const minutes of [8, 4, 13]) {
+      controller.toggle();
+      h.advance(minutes * 60);
+      controller.reconcile();
+      if (controller.getSnapshot().timerState.isRunning) controller.toggle();
+      await controller.flushPersistence();
+      h.advance(300);
+      controller.reconcile();
+    }
+    expect(h.tasks[0].timeSpentMinutes).toBe(30);
+    expect(controller.getSnapshot().sessionHistory.totalCompletedFocusSessions).toBe(1);
+    expect(h.applyCredit.mock.calls.map(([credit]) => credit.minutes)).toEqual([8, 4, 13]);
+  });
+
+  it('settles reset, preset and task switch to each original owner while retaining remainders', async () => {
+    const h = createHarness();
+    const controller = h.open();
+    await controller.ensureHydrated();
+    controller.setSelectedTaskId(h.tasks[0].id);
+    controller.toggle();
+    h.advance(40);
+    controller.reset();
+    controller.toggle();
+    h.advance(40);
+    controller.setDurations({ focusMinutes: 50, breakMinutes: 10 });
+    controller.toggle();
+    h.advance(40);
+    controller.setSelectedTaskId(h.tasks[1].id);
+    h.advance(80);
+    controller.switchPhase();
+    controller.toggle();
+    h.advance(80);
+    controller.toggle();
+    await controller.flushPersistence();
+    expect(h.tasks.map((task) => task.timeSpentMinutes)).toEqual([7, 11]);
+    expect(controller.getSnapshot().workSecondsByTaskId?.[h.tasks[1].id]).toBe(20);
+    expect(controller.getSnapshot().sessionHistory.totalCompletedFocusSessions).toBe(0);
+  });
+
+  it('settles the previous owner when Watch starts another task on the running timer', async () => {
+    const h = createHarness();
+    const controller = h.open();
+    await controller.applyWatchCommand({ action: 'start', taskId: h.tasks[0].id, createdAt: new Date(h.now()).toISOString() });
+    h.advance(80);
+    await controller.applyWatchCommand({ action: 'start', taskId: h.tasks[1].id, createdAt: new Date(h.now()).toISOString() });
+    h.advance(80);
+    await controller.applyWatchCommand({ action: 'pause', createdAt: new Date(h.now()).toISOString() });
+    expect(h.tasks.map((task) => task.timeSpentMinutes)).toEqual([6, 11]);
+    expect(controller.getSnapshot().workSecondsByTaskId).toEqual({ [h.tasks[0].id]: 20, [h.tasks[1].id]: 20 });
+  });
+
+  it('caps global completion at completedAt after later ticks, detaches and keeps effort after undo', async () => {
+    const h = createHarness();
+    const controller = h.open();
+    await controller.ensureHydrated();
+    controller.setSelectedTaskId(h.tasks[0].id);
+    controller.toggle();
+    h.advance(95);
+    const completedAt = new Date(h.now()).toISOString();
+    h.advance(50);
+    controller.reconcile();
+    h.tasks[0].status = 'done';
+    h.tasks[0].completedAt = completedAt;
+    controller.reconcileTaskCompletion();
+    await controller.flushPersistence();
+    expect(h.tasks[0].timeSpentMinutes).toBe(6);
+    expect(controller.getSnapshot()).toMatchObject({
+      timerState: { isRunning: false },
+      workSecondsByTaskId: { [h.tasks[0].id]: 35 },
+    });
+    expect(controller.getSnapshot().selectedTaskId).toBeUndefined();
+    h.tasks[0].status = 'next';
+    h.tasks.push({ ...h.tasks[0], id: 'recurring-next', timeSpentMinutes: undefined });
+    h.advance(600);
+    controller.reconcile();
+    await controller.flushPersistence();
+    expect(h.tasks[0].timeSpentMinutes).toBe(6);
+    expect(h.tasks.at(-1)?.timeSpentMinutes).toBeUndefined();
+  });
+
+  it('pauses a restored completed task at its completion timestamp before hydration credits elapsed time', async () => {
+    const h = createHarness();
+    const controller = h.open();
+    await controller.ensureHydrated();
+    controller.setSelectedTaskId(h.tasks[0].id);
+    controller.toggle();
+    await controller.flushPersistence();
+    h.advance(90);
+    h.tasks[0].completedAt = new Date(h.now()).toISOString();
+    h.tasks[0].status = 'done';
+    h.advance(600);
+    const restarted = h.open();
+    await restarted.ensureHydrated();
+    await restarted.flushPersistence();
+    expect(h.tasks[0].timeSpentMinutes).toBe(6);
+    expect(restarted.getSnapshot().timerState.isRunning).toBe(false);
+    expect(restarted.getSnapshot().selectedTaskId).toBeUndefined();
+    expect(restarted.getSnapshot().workSecondsByTaskId?.[h.tasks[0].id]).toBe(30);
+  });
+
+  it('preserves credited effort when a backdated completion predates the latest resume', async () => {
+    const h = createHarness();
+    const controller = h.open();
+    await controller.ensureHydrated();
+    controller.setSelectedTaskId(h.tasks[0].id);
+    controller.toggle();
+    h.advance(120);
+    controller.toggle();
+    await controller.flushPersistence();
+    const oldCompletion = new Date(h.now() - 60_000).toISOString();
+    h.advance(30);
+    controller.toggle();
+    h.advance(60);
+    h.tasks[0].status = 'done';
+    h.tasks[0].completedAt = oldCompletion;
+    controller.reconcileTaskCompletion();
+    await controller.flushPersistence();
+    expect(h.tasks[0].timeSpentMinutes).toBe(8);
+    expect(controller.getSnapshot().timerState).toMatchObject({ remainingSeconds: 1320, isRunning: false });
+  });
+
+  it('replays the stable receipt after removal persistence fails even if manual time equals its old target', async () => {
+    const h = createHarness();
+    const controller = h.open();
+    await controller.ensureHydrated();
+    controller.setSelectedTaskId(h.tasks[0].id);
+    controller.toggle();
+    await controller.flushPersistence();
+    h.advance(120);
+    let writes = 0;
+    const setItem = h.storage.setItem.getMockImplementation()!;
+    h.storage.setItem.mockImplementation(async (id, value) => {
+      writes += 1;
+      if (writes === 2) throw new Error('removal failed');
+      await setItem(id, value);
+    });
+    controller.toggle();
+    await expect(controller.flushPersistence()).rejects.toThrow('removal failed');
+    const creditId = h.applyCredit.mock.calls[0][0].id;
+    expect(h.receipts.has(creditId)).toBe(true);
+    expect(h.acknowledgeCredits).not.toHaveBeenCalledWith([creditId]);
+    h.tasks[0].timeSpentMinutes = 5;
+    const restarted = h.open();
+    await restarted.ensureHydrated();
+    await restarted.flushPersistence();
+    expect(h.tasks[0].timeSpentMinutes).toBe(5);
+    expect(h.applyCredit.mock.calls.at(-1)?.[0].id).toBe(creditId);
+    expect(h.receipts.has(creditId)).toBe(false);
+    expect(JSON.parse(h.device.get(POMODORO_SESSION_STORAGE_KEY)!)).not.toHaveProperty('pendingCredits');
+  });
+
+  it('drains a second transition queued while the first receipt is being applied', async () => {
+    const h = createHarness();
+    const apply = h.applyCredit.getMockImplementation()!;
+    let release!: () => void;
+    const waiting = new Promise<void>((resolve) => { release = resolve; });
+    h.applyCredit.mockImplementationOnce(async (credit) => { await waiting; return apply(credit); });
+    const controller = h.open();
+    await controller.ensureHydrated();
+    controller.setSelectedTaskId(h.tasks[0].id);
+    controller.toggle();
+    await controller.flushPersistence();
+    h.advance(60);
+    controller.toggle();
+    for (let turn = 0; turn < 10; turn += 1) await Promise.resolve();
+    controller.toggle();
+    h.advance(60);
+    controller.toggle();
+    release();
+    await controller.flushPersistence();
+    expect(h.tasks[0].timeSpentMinutes).toBe(7);
+    expect(h.applyCredit.mock.calls).toHaveLength(2);
+    expect(new Set(h.applyCredit.mock.calls.map(([credit]) => credit.id)).size).toBe(2);
+    expect(JSON.parse(h.device.get(POMODORO_SESSION_STORAGE_KEY)!)).not.toHaveProperty('pendingCredits');
+  });
+
+  it('retains a new credit requested while the prior receipt removal is being stored', async () => {
+    const h = createHarness();
+    const controller = h.open();
+    await controller.ensureHydrated();
+    controller.setSelectedTaskId(h.tasks[0].id);
+    controller.toggle();
+    await controller.flushPersistence();
+    let release!: () => void;
+    let held = false;
+    const waiting = new Promise<void>((resolve) => { release = resolve; });
+    const write = h.storage.setItem.getMockImplementation()!;
+    h.storage.setItem.mockImplementation(async (id, value) => {
+      if (!held && h.applyCredit.mock.calls.length === 1 && !JSON.parse(value).pendingCredits) {
+        held = true;
+        await waiting;
+      }
+      await write(id, value);
+    });
+    h.advance(60);
+    controller.toggle();
+    await vi.waitFor(() => expect(held).toBe(true));
+    controller.toggle();
+    h.advance(60);
+    controller.toggle();
+    release();
+    await controller.flushPersistence();
+    expect(h.tasks[0].timeSpentMinutes).toBe(7);
+    expect(h.applyCredit).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(h.device.get(POMODORO_SESSION_STORAGE_KEY)!)).not.toHaveProperty('pendingCredits');
+  });
+
 });

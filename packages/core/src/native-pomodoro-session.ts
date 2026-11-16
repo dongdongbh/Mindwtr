@@ -5,6 +5,7 @@ import { TASK_SQLITE_COLUMNS } from './task-sync-schema';
 import { addTimeSpentMinutes, normalizeTimeSpentMinutes, TIME_SPENT_MAX_MINUTES } from './time-spent';
 import { nextRevision } from './sync-revision';
 import { taskEditValuesEqual } from './json-value-equality';
+import { settlePomodoroWork } from './pomodoro-work';
 
 export const MAX_NATIVE_POMODORO_SESSION_BYTES = 1_000_000;
 export const MAX_NATIVE_POMODORO_PLAN_BYTES = 2_000_000;
@@ -51,6 +52,7 @@ export type PreparedNativePomodoroTransition = { version: 1; request: NativePomo
 
     owed?: NativePomodoroOwedTask[] };
 type OwedCredit = { taskId: string; from?: number | null; to: number };
+type PendingCredit = { id: string; taskId: string; minutes: number };
 
 function invalid(): never { throw new Error('Invalid native Pomodoro transition'); }
 const record = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object'
@@ -70,6 +72,8 @@ const date = (value: unknown): value is string => typeof value === 'string' && v
 const bounded = (value: string, bytes: number): boolean => value.length <= bytes && strToU8(value).length <= bytes;
 const durations = (value: unknown): value is PomodoroDurations => exact(value, ['focusMinutes', 'breakMinutes'])
     && [value.focusMinutes, value.breakMinutes].every((n) => count(n) && n >= 1 && n <= 180);
+const work = (value: unknown): value is Record<string, number> => record(value)
+    && Object.keys(value).length <= 10_000 && Object.entries(value).every(([id, seconds]) => identity(id, 500) && count(seconds));
 
 
 const parseSession = (raw: string): unknown => {
@@ -131,16 +135,19 @@ export function parseNativeWatchPomodoroSource(sourceJSON: string): {
 }
 
 
-const legacySessionOf = (raw: string | null): StoredPomodoroSession & { pendingCredits?: OwedCredit[] } => {
+const legacySessionOf = (raw: string | null): StoredPomodoroSession & { pendingCredits?: (OwedCredit | PendingCredit)[] } => {
     if (raw === null) return {};
     const value = parseSession(raw);
-    if (!exact(value, [], ['durations', 'timerState', 'sessionHistory', 'selectedTaskId', 'phaseEndsAt', 'updatedAtMs', 'pendingCredits'])) invalid();
+    if (!exact(value, [], ['durations', 'timerState', 'sessionHistory', 'selectedTaskId', 'phaseEndsAt', 'updatedAtMs', 'pendingCredits', 'workSecondsByTaskId'])) invalid();
+    if (Object.prototype.hasOwnProperty.call(value, 'workSecondsByTaskId') && !work(value.workSecondsByTaskId)) invalid();
 
     if (Object.prototype.hasOwnProperty.call(value, 'pendingCredits') && (!Array.isArray(value.pendingCredits)
-        || value.pendingCredits.length > 10_000 || !value.pendingCredits.every((credit: unknown) => exact(credit, ['taskId', 'to'], ['from'])
+        || value.pendingCredits.length > 10_000 || !value.pendingCredits.every((credit: unknown) => (exact(credit, ['id', 'taskId', 'minutes'])
+            && uuid(credit.id) && identity(credit.taskId, 500) && count(credit.minutes) && credit.minutes > 0 && credit.minutes <= TIME_SPENT_MAX_MINUTES)
+            || (exact(credit, ['taskId', 'to'], ['from'])
             && identity(credit.taskId, 500) && count(credit.to) && credit.to <= TIME_SPENT_MAX_MINUTES
             && (!Object.prototype.hasOwnProperty.call(credit, 'from') || credit.from === null
-                || (typeof credit.from === 'number' && Number.isFinite(credit.from)))))) invalid();
+                || (typeof credit.from === 'number' && Number.isFinite(credit.from))))))) invalid();
     const present = (name: string, object = value) => Object.prototype.hasOwnProperty.call(object, name);
     if ((present('selectedTaskId') && !identity(value.selectedTaskId, 500))
         || (present('phaseEndsAt') && !date(value.phaseEndsAt)) || (present('updatedAtMs') && !time(value.updatedAtMs))) invalid();
@@ -172,7 +179,7 @@ const legacySessionOf = (raw: string | null): StoredPomodoroSession & { pendingC
             }
         }
     }
-    return value as StoredPomodoroSession;
+    return value as StoredPomodoroSession & { pendingCredits?: (OwedCredit | PendingCredit)[] };
 };
 
 export function decodeNativePomodoroSession(raw: string): NativePomodoroSession {
@@ -180,8 +187,9 @@ export function decodeNativePomodoroSession(raw: string): NativePomodoroSession 
     if (!exact(value, ['version', 'sessionID', 'generation', 'session']) || value.version !== 1
         || !uuid(value.sessionID) || !count(value.generation)) invalid();
     const session = value.session;
-    if (!exact(session, ['durations', 'timerState', 'sessionHistory', 'updatedAtMs'], ['selectedTaskId', 'phaseEndsAt'])
+    if (!exact(session, ['durations', 'timerState', 'sessionHistory', 'updatedAtMs'], ['selectedTaskId', 'phaseEndsAt', 'workSecondsByTaskId'])
         || !durations(session.durations) || !time(session.updatedAtMs)
+        || (Object.prototype.hasOwnProperty.call(session, 'workSecondsByTaskId') && !work(session.workSecondsByTaskId))
         || (Object.prototype.hasOwnProperty.call(session, 'selectedTaskId') && !identity(session.selectedTaskId, 500))) invalid();
     const timer = session.timerState; const history = session.sessionHistory;
     if (!exact(timer, ['phase', 'remainingSeconds', 'isRunning', 'completedFocusSessions'])
@@ -271,15 +279,32 @@ const targetOf = (value: unknown, id: string | undefined): NativePomodoroTaskBef
 };
 const cell = (row: readonly (string | number | null)[], name: string) => row[TASK_SQLITE_COLUMNS.indexOf(name)];
 const legacyOf = (request: NativePomodoroRequest) => request.action === 'adoptLegacy' ? legacySessionOf(request.legacy.sessionRaw) : null;
-const owedIdsOf = (legacy: ReturnType<typeof legacySessionOf> | null): string[] =>
-    [...new Set((legacy?.pendingCredits ?? []).map((credit) => credit.taskId))].filter((id) => id !== legacy?.selectedTaskId);
+const owedIdsOf = (session: (StoredPomodoroSession & { pendingCredits?: (OwedCredit | PendingCredit)[] }) | null): string[] =>
+    [...new Set([...(session?.pendingCredits ?? []).map((credit) => credit.taskId),
+        ...Object.entries(session?.workSecondsByTaskId ?? {}).filter(([, seconds]) => seconds >= 60).map(([id]) => id)])]
+        .filter((id) => id !== session?.selectedTaskId);
 
-export function nativePomodoroOwedTaskIds(request: NativePomodoroRequest): string[] {
-    return owedIdsOf(legacyOf(requestOf(request)));
+export function nativePomodoroOwedTaskIds(request: NativePomodoroRequest, session?: NativePomodoroSessionRead): string[] {
+    return owedIdsOf(legacyOf(requestOf(request)) ?? session?.state?.session ?? null);
 }
 
 export function nativePomodoroOwedCreditCount(request: NativePomodoroRequest): number {
     return legacyOf(requestOf(request))?.pendingCredits?.length ?? 0;
+}
+
+export async function drainNativePomodoroLegacyCredits(request: NativePomodoroRequest,
+    apply: (credit: PendingCredit) => Promise<void>): Promise<NativePomodoroRequest> {
+    const parsed = requestOf(request);
+    if (parsed.action !== 'adoptLegacy') return parsed;
+    const legacy = legacyOf(parsed)!;
+    const pending = legacy.pendingCredits?.filter((credit): credit is PendingCredit => 'id' in credit) ?? [];
+    if (pending.length === 0) return parsed;
+    for (const credit of pending) await apply(credit);
+    return parsed;
+}
+
+export function nativePomodoroPendingCredits(request: NativePomodoroRequest): PendingCredit[] {
+    return legacyOf(requestOf(request))?.pendingCredits?.filter((credit): credit is PendingCredit => 'id' in credit) ?? [];
 }
 
 const applyWatchCommand = (current: ResolvedPomodoroSession, request: Extract<NativePomodoroRequest, { action: 'watch' }>) => {
@@ -294,11 +319,17 @@ const applyWatchCommand = (current: ResolvedPomodoroSession, request: Extract<Na
     return { ...resolved, selectedTaskId: request.selectedTaskId ?? undefined };
 };
 
-export function prepareNativePomodoroTransition(input: { request: NativePomodoroRequest; session: NativePomodoroSessionRead;
-    target: NativePomodoroTaskBefore | null; owed?: readonly NativePomodoroTaskBefore[]; deviceId: string | null }): PreparedNativePomodoroTransition | null {
+type NativePomodoroTransitionInput = { request: NativePomodoroRequest; session: NativePomodoroSessionRead;
+    target: NativePomodoroTaskBefore | null; owed?: readonly NativePomodoroTaskBefore[]; deviceId: string | null };
+
+export function prepareNativePomodoroTransition(input: NativePomodoroTransitionInput): PreparedNativePomodoroTransition | null {
+    return prepareTransition(input, false);
+}
+
+function prepareTransition(input: NativePomodoroTransitionInput, legacyAccounting: boolean): PreparedNativePomodoroTransition | null {
     const request = requestOf(input.request);
     const legacySource = legacyOf(request);
-    const owedIds = owedIdsOf(legacySource);
+    const owedIds = owedIdsOf(legacySource ?? input.session.state?.session ?? null);
     const owedInput = input.owed ?? [];
     if (!Array.isArray(owedInput) || owedInput.length !== owedIds.length) invalid();
     const owedTargets = owedIds.map((id, index) => targetOf(owedInput[index], id)!);
@@ -308,12 +339,39 @@ export function prepareNativePomodoroTransition(input: { request: NativePomodoro
     let creditDisposition: NativePomodoroResult['creditDisposition'] = 'none';
     let deviceId: string | null = null;
     let creditFocusMinutes = 0;
+    let credits: { taskId: string; minutes: number }[] = [];
     let unchangedSessionRaw: string | null = null;
+    const serialize = (session: ResolvedPomodoroSession) => {
+        const stored = serializePomodoroSession(session);
+        if (legacyAccounting) delete stored.workSecondsByTaskId;
+        return stored;
+    };
+    const settle = (session: ResolvedPomodoroSession): ResolvedPomodoroSession => {
+        if (legacyAccounting) return session;
+        const settled = settlePomodoroWork(session.workSecondsByTaskId ?? {});
+        credits = settled.credits;
+        return { ...session, workSecondsByTaskId: settled.workSecondsByTaskId };
+    };
+    const resolve = (session: StoredPomodoroSession, before: NativePomodoroTaskBefore | null) => {
+        const status = before?.row ? cell(before.row, 'status') : null;
+        const completedAt = before?.row ? cell(before.row, 'completedAt') : null;
+        const stopped = !legacyAccounting && before !== null && (!before.row || cell(before.row, 'deletedAt')
+            || status === 'done' || status === 'archived' || status === 'reference');
+        const completedAtMs = typeof completedAt === 'string' ? Date.parse(completedAt) : NaN;
+        const deadlineMs = session.phaseEndsAt ? Date.parse(session.phaseEndsAt) : NaN;
+        const checkpointMs = Number.isFinite(deadlineMs) ? deadlineMs - (session.timerState?.remainingSeconds ?? 0) * 1000 : request.observedAtMs;
+        const observedAtMs = stopped && Number.isFinite(completedAtMs)
+            ? Math.max(checkpointMs, Math.min(request.observedAtMs, completedAtMs)) : request.observedAtMs;
+        const resolved = resolvePomodoroSession(session, observedAtMs, request.action === 'initialize' ? {} : request.autoStart, request.localDayKey);
+        return stopped ? { ...resolved, selectedTaskId: undefined, timerState: { ...resolved.timerState, isRunning: false },
+            phaseEndsAt: undefined, lastEvent: null } : resolved;
+    };
     if (request.action === 'initialize') {
         if (input.session.raw !== null || input.session.state !== null || input.target !== null || input.deviceId !== null) invalid();
         after = { version: 1, sessionID: request.requestId, generation: 0, session: { durations: request.durations,
             timerState: createPomodoroState(request.durations), sessionHistory: { totalCompletedFocusSessions: 0,
                 completedFocusSessionsByTaskId: {}, todayDayKey: request.localDayKey, completedTodayFocusSessions: 0 }, updatedAtMs: request.observedAtMs } };
+        if (!legacyAccounting) after.session.workSecondsByTaskId = {};
     } else if (request.action === 'adoptLegacy') {
         if (input.session.raw !== null || input.session.state !== null) invalid();
         const { pendingCredits: _owed, ...legacy } = legacySource!;
@@ -322,19 +380,19 @@ export function prepareNativePomodoroTransition(input: { request: NativePomodoro
 
         const saved = resolvePomodoroSession({ ...legacy, timerState: { ...legacy.timerState, isRunning: false } },
             request.observedAtMs, request.autoStart, request.localDayKey);
-        const resolved = resolvePomodoroSession(legacy, request.observedAtMs, request.autoStart, request.localDayKey);
+        const resolved = settle(resolve(legacy, target));
         delta = resolved.sessionHistory.totalCompletedFocusSessions - saved.sessionHistory.totalCompletedFocusSessions;
         if (!count(delta)) invalid();
         creditFocusMinutes = saved.durations.focusMinutes;
         after = { version: 1, sessionID: request.requestId, generation: 0,
-            session: { ...serializePomodoroSession(resolved), durations: resolved.durations, timerState: resolved.timerState,
+            session: { ...serialize(resolved), durations: resolved.durations, timerState: resolved.timerState,
                 sessionHistory: resolved.sessionHistory, updatedAtMs: Math.max(0, legacy.updatedAtMs ?? 0) } };
     } else if (request.action === 'watch' && input.session.raw === null) {
         if (input.session.state !== null || input.target !== null || (input.deviceId !== null && !identity(input.deviceId, 200))) invalid();
         const current = resolvePomodoroSession({ durations: request.durations }, request.observedAtMs, request.autoStart, request.localDayKey);
         const resolved = applyWatchCommand(current, request);
         after = { version: 1, sessionID: request.requestId, generation: 0,
-            session: { ...serializePomodoroSession(resolved), durations: resolved.durations, timerState: resolved.timerState,
+            session: { ...serialize(resolved), durations: resolved.durations, timerState: resolved.timerState,
                 sessionHistory: resolved.sessionHistory, updatedAtMs: parseNativeWatchPomodoroSource(request.sourceJSON).createdAtMs } };
     } else {
         if (typeof input.session.raw !== 'string') invalid();
@@ -349,7 +407,7 @@ export function prepareNativePomodoroTransition(input: { request: NativePomodoro
             unchangedSessionRaw = input.session.raw;
         } else {
             if (request.action === 'reconcile' && request.observedAtMs < before.session.updatedAtMs) return null;
-            const current = resolvePomodoroSession(before.session, request.observedAtMs, request.autoStart, request.localDayKey);
+            const current = resolve(before.session, target);
             delta = current.sessionHistory.totalCompletedFocusSessions - before.session.sessionHistory.totalCompletedFocusSessions;
             if (!count(delta)) invalid();
             creditFocusMinutes = before.session.durations.focusMinutes;
@@ -361,7 +419,8 @@ export function prepareNativePomodoroTransition(input: { request: NativePomodoro
                 timerState: resetPomodoroState(current.timerState, current.durations, request.action === 'reset' ? current.timerState.phase
                     : current.timerState.phase === 'focus' ? 'break' : 'focus'), phaseEndsAt: undefined, lastEvent: null };
             else if (request.action === 'selectTask') resolved = { ...current, selectedTaskId: request.taskId ?? undefined };
-            else if (request.action === 'toggle' && !current.lastEvent) {
+            else if (request.action === 'toggle' && !current.lastEvent
+                && (legacyAccounting || !before.session.selectedTaskId || current.selectedTaskId !== undefined)) {
                 if (current.timerState.isRunning) resolved = { ...current, timerState: { ...current.timerState, isRunning: false },
                     phaseEndsAt: undefined, lastEvent: null };
                 else {
@@ -373,17 +432,23 @@ export function prepareNativePomodoroTransition(input: { request: NativePomodoro
                 }
             }
             if (request.action === 'reconcile') {
-                const structural = { ...serializePomodoroSession(resolved), timerState: { ...resolved.timerState,
+                const structural = { ...serialize(resolved), timerState: { ...resolved.timerState,
                     remainingSeconds: before.session.timerState.remainingSeconds } };
+                if (!legacyAccounting) {
+                    if (before.session.workSecondsByTaskId === undefined) delete structural.workSecondsByTaskId;
+                    else structural.workSecondsByTaskId = before.session.workSecondsByTaskId;
+                }
                 const { updatedAtMs: _mutationClock, ...previous } = before.session;
-                if (taskEditValuesEqual(structural, previous)) return null;
+                if (taskEditValuesEqual(structural, previous)
+                    && (legacyAccounting || !Object.values(before.session.workSecondsByTaskId ?? {}).some(seconds => seconds >= 60))) return null;
             }
+            resolved = settle(resolved);
             if (before.generation === Number.MAX_SAFE_INTEGER) invalid();
             const updatedAtMs = watchSource ? watchSource.createdAtMs
                 : request.action === 'reconcile' ? request.observedAtMs : Math.max(request.observedAtMs, before.session.updatedAtMs + 1);
             if (!time(updatedAtMs)) invalid();
             after = { version: 1, sessionID: before.sessionID, generation: before.generation + 1,
-                session: { ...serializePomodoroSession(resolved), durations: resolved.durations, timerState: resolved.timerState,
+                session: { ...serialize(resolved), durations: resolved.durations, timerState: resolved.timerState,
                     sessionHistory: resolved.sessionHistory, updatedAtMs } };
         }
     }
@@ -400,6 +465,7 @@ export function prepareNativePomodoroTransition(input: { request: NativePomodoro
         return minutesOf.get(before.id)!;
     };
     for (const credit of legacySource?.pendingCredits ?? []) {
+        if ('id' in credit) continue;
         const before = credit.taskId === target?.id ? target : owedTargets.find((owed) => owed.id === credit.taskId)!;
 
 
@@ -409,7 +475,7 @@ export function prepareNativePomodoroTransition(input: { request: NativePomodoro
     }
 
 
-    if (delta > 0) {
+    if (legacyAccounting && delta > 0) {
         if (!target) creditDisposition = 'unlinked';
         else if (!available(target)) creditDisposition = 'unavailable';
         else {
@@ -421,6 +487,21 @@ export function prepareNativePomodoroTransition(input: { request: NativePomodoro
             creditedMinutes = minutes - oldMinutes;
             if (creditedMinutes === 0) creditDisposition = 'capped';
             else { minutesOf.set(target.id, minutes); creditDisposition = 'credited'; }
+        }
+    }
+    if (!legacyAccounting) {
+        if (delta > 0 && !target) creditDisposition = 'unlinked';
+        for (const credit of credits) {
+            const before = credit.taskId === target?.id ? target : owedTargets.find((owed) => owed.id === credit.taskId);
+            if (!before) invalid();
+            if (!available(before)) { creditDisposition = 'unavailable'; continue; }
+            const rawMinutes = minutesFor(before);
+            const oldMinutes = normalizeTimeSpentMinutes(rawMinutes) ?? 0;
+            const minutes = addTimeSpentMinutes(rawMinutes, credit.minutes) ?? 0;
+            const increment = minutes - oldMinutes;
+            creditedMinutes += increment;
+            if (increment === 0) creditDisposition = creditedMinutes > 0 ? 'credited' : 'capped';
+            else { minutesOf.set(before.id, minutes); creditDisposition = 'credited'; }
         }
     }
     const patchOf = (before: NativePomodoroTaskBefore | null): NativePomodoroTaskPatch | null => {
@@ -451,12 +532,21 @@ export function validatePreparedNativePomodoroTransition(value: unknown): Prepar
         || value.version !== 1 || (value.sessionBefore !== null && typeof value.sessionBefore !== 'string')
         || !exact(value.result, ['sessionID', 'generation', 'completedFocusSessions', 'creditedMinutes', 'creditDisposition'])
         || (value.taskPatch !== null && !exact(value.taskPatch, ['timeSpentMinutes', 'rev', 'revBy', 'updatedAt']))) invalid();
-    const prepared = prepareNativePomodoroTransition({ request: value.request as NativePomodoroRequest,
+    const input = { request: value.request as NativePomodoroRequest,
         session: value.sessionBefore === null ? { raw: null, state: null } : { raw: value.sessionBefore, state: decodeNativePomodoroSession(value.sessionBefore) },
         target: value.target as NativePomodoroTaskBefore | null,
-        owed: ((value.owed ?? []) as NativePomodoroOwedTask[]).map((entry) => entry.target), deviceId: value.deviceId as string | null });
-    if (!prepared || !taskEditValuesEqual(value, prepared)) invalid();
-    return prepared;
+        owed: ((value.owed ?? []) as NativePomodoroOwedTask[]).map((entry) => entry.target), deviceId: value.deviceId as string | null } satisfies NativePomodoroTransitionInput;
+    const after = typeof value.sessionAfter === 'string' ? decodeNativePomodoroSession(value.sessionAfter) : invalid();
+    const historical = input.session.state?.session.workSecondsByTaskId === undefined && after.session.workSecondsByTaskId === undefined
+        && legacyOf(input.request)?.workSecondsByTaskId === undefined && nativePomodoroPendingCredits(input.request).length === 0;
+    try {
+        const prepared = prepareNativePomodoroTransition(input);
+        if (prepared && taskEditValuesEqual(value, prepared)) return prepared;
+    } catch (error) { if (!historical) throw error; }
+    if (!historical) invalid();
+    const legacy = prepareTransition(input, true);
+    if (!legacy || !taskEditValuesEqual(value, legacy)) invalid();
+    return legacy;
 }
 export function nativePomodoroReceiptPayload(plan: PreparedNativePomodoroTransition): string {
     return JSON.stringify(['pomodoroTransition', validatePreparedNativePomodoroTransition(plan)]);

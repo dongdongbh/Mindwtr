@@ -20,7 +20,7 @@ const running = (selectedTaskId: string | undefined = 'task') => {
     const raw = JSON.stringify(state);
     return { raw, state };
 };
-const task = (extra = {}) => ({ id: 'task', row: taskToSqliteRow({ id: 'task', title: 'Private', status: 'done',
+const task = (extra = {}) => ({ id: 'task', row: taskToSqliteRow({ id: 'task', title: 'Private', status: 'next',
     contexts: [], tags: [], createdAt: new Date(AT).toISOString(), updatedAt: new Date(AT).toISOString(),
     rev: 2, timeSpentMinutes: 4, ...extra }) as (string | number | null)[] });
 const reconcile = (extra = {}, target = task()) => prepareNativePomodoroTransition({ request: { action: 'reconcile', requestId: NEXT,
@@ -33,8 +33,14 @@ const SCHEMA4_TASK_COLUMNS = ['id', 'title', 'status', 'priority', 'energyLevel'
     'orderNum', 'boardOrder', 'focusOrder', 'isFocusedToday', 'timeEstimate', 'timeSpentMinutes', 'suppressMindwtrReminders',
     'reviewAt', 'completedAt', 'statusBeforeProjectArchive', 'completedAtBeforeProjectArchive', 'isFocusedTodayBeforeProjectArchive',
     'projectArchivedAt', 'rev', 'revBy', 'createdAt', 'updatedAt', 'deletedAt', 'purgedAt', 'viewSectionIds', 'cancelledAt', 'archivedAt'];
+const historical = (raw: string) => { const value = JSON.parse(raw); delete value.session.workSecondsByTaskId; return JSON.stringify(value); };
+const legacyInitialize = () => { const plan = initialize(); plan.sessionAfter = historical(plan.sessionAfter); return plan; };
 const legacyReconcile = () => {
-    const plan = structuredClone(reconcile()!); plan.target!.row = plan.target!.row!.slice(0, SCHEMA4_TASK_COLUMNS.length); return plan;
+    const plan = structuredClone(reconcile()!);
+    plan.sessionBefore = historical(plan.sessionBefore!); plan.sessionAfter = historical(plan.sessionAfter);
+    plan.target!.row = plan.target!.row!.slice(0, SCHEMA4_TASK_COLUMNS.length);
+    (plan.target!.row as (string | number | null)[])[TASK_SQLITE_COLUMNS.indexOf('status')] = 'done';
+    return plan;
 };
 
 describe('strict native Pomodoro preparation', () => {
@@ -167,13 +173,13 @@ describe('native Pomodoro explicit actions', () => {
         expect(Object.prototype.hasOwnProperty.call(after.session, 'phaseEndsAt')).toBe(after.session.timerState.isRunning);
         expect(validatePreparedNativePomodoroTransition(plan)).toEqual(plan);
     });
-    it('toggle before the deadline pauses the remaining interval without credit', () => {
+    it('toggle before the deadline credits only elapsed whole minutes and pauses the interval', () => {
         const session = running(); session.state.session.phaseEndsAt = new Date(AT + 1).toISOString(); session.raw = JSON.stringify(session.state);
         const plan = prepareNativePomodoroTransition({ request: { action: 'toggle', requestId: NEXT, observedAtMs: AT,
-            localDayKey: day, autoStart: { autoStartFocus: true, autoStartBreaks: true } }, session, target: task(), deviceId: null })!;
+            localDayKey: day, autoStart: { autoStartFocus: true, autoStartBreaks: true } }, session, target: task(), deviceId: 'existing-device' })!;
         expect(decodeNativePomodoroSession(plan.sessionAfter).session.timerState).toEqual({ phase: 'focus', remainingSeconds: 1,
             isRunning: false, completedFocusSessions: 0 });
-        expect(plan.taskPatch).toBeNull(); expect(plan.result.creditedMinutes).toBe(0);
+        expect(plan.taskPatch?.timeSpentMinutes).toBe(28); expect(plan.result.creditedMinutes).toBe(24);
     });
     it('orders successive same-time and skewed toggles logically but starts at their actual observation', () => {
         let session = { raw: initialize().sessionAfter, state: decodeNativePomodoroSession(initialize().sessionAfter) };
@@ -221,14 +227,15 @@ describe('native Pomodoro explicit actions', () => {
         expect(after.session.timerState).toEqual({ phase: 'break', remainingSeconds: 300, isRunning: true, completedFocusSessions: 3 });
         expect(after.session.selectedTaskId).toBe('next-task');
     });
-    it('tapping the active preset resets an in-progress interval without false credit', () => {
+    it('tapping the active preset settles partial work before resetting the interval', () => {
         const session = running(); session.state.session.phaseEndsAt = new Date(AT + 30_000).toISOString(); session.raw = JSON.stringify(session.state);
         const plan = prepareNativePomodoroTransition({ request: { action: 'setDurations', requestId: NEXT, observedAtMs: AT,
             localDayKey: day, autoStart: { autoStartFocus: true, autoStartBreaks: true }, durations: { focusMinutes: 25, breakMinutes: 5 } },
-            session, target: task(), deviceId: null })!;
+            session, target: task(), deviceId: 'existing-device' })!;
         const after = decodeNativePomodoroSession(plan.sessionAfter);
         expect(after.session.timerState).toEqual({ phase: 'focus', remainingSeconds: 1500, isRunning: false, completedFocusSessions: 0 });
-        expect(after.session.phaseEndsAt).toBeUndefined(); expect(plan.taskPatch).toBeNull(); expect(after.generation).toBe(1);
+        expect(after.session.phaseEndsAt).toBeUndefined(); expect(plan.taskPatch?.timeSpentMinutes).toBe(28);
+        expect(after.session.workSecondsByTaskId).toEqual({ task: 30 }); expect(after.generation).toBe(1);
     });
     it.each([{ action: 'reset' }, { action: 'setDurations', durations: { focusMinutes: 25, breakMinutes: 5 } },
         { action: 'selectTask', taskId: null }] as const)('keeps clock-only %j intent while unchanged reconcile remains zero-work', (action) => {
@@ -245,12 +252,12 @@ describe('native Pomodoro explicit actions', () => {
     it('keeps original initialize/reconcile receipt bytes and accepts their unchanged plans', () => {
 
         expect(TASK_SQLITE_COLUMNS).toEqual([...SCHEMA4_TASK_COLUMNS, 'reminderPolicy', 'dueReminderLeadMinutes', 'startReminderLeadMinutes']);
-        for (const [plan, digest] of [[initialize(), '9001a8d3126988bfdab00114e606ff7c2d8f88c8ae6585a790262db10a0a22f1'],
+        for (const [plan, digest] of [[legacyInitialize(), '9001a8d3126988bfdab00114e606ff7c2d8f88c8ae6585a790262db10a0a22f1'],
             [legacyReconcile(), '765d1dc0af0b8743c48884a4563c2975928b6849008e01140e7c4618fa2760b6']] as const) {
             expect(createHash('sha256').update(nativePomodoroReceiptPayload(plan)).digest('hex')).toBe(digest);
             expect(validatePreparedNativePomodoroTransition(JSON.parse(JSON.stringify(plan)))).toEqual(plan);
         }
-        const current = reconcile()!;
+        const current = legacyReconcile(); current.target!.row = [...current.target!.row!, null, null, null];
         expect(current.target!.row).toEqual([...legacyReconcile().target!.row!, null, null, null]);
         const schema5 = structuredClone(current); schema5.target!.row = schema5.target!.row!.slice(0, SCHEMA4_TASK_COLUMNS.length + 1);
         expect(validatePreparedNativePomodoroTransition(schema5)).toEqual(schema5);
