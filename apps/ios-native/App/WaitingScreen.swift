@@ -273,7 +273,7 @@ struct StatusListBulkBar: View {
                             Task { await model.openSelectedSomedaySectionMove() }
                         }
                     }
-                    action(bar.object("addTag").text("label"), accessibility: bar.object("addTag").text("accessibilityLabel"),
+                    action(bar.object("addTag").text("label"),
                            id: "-bulk-tag-open", enabled: model.statusListBulkTagEnabled) { model.openStatusListBulkTag() }
                     if ["waiting", "someday"].contains(idPrefix) {
                         action(bar.object("range").text("label"), id: "-bulk-range", enabled: model.statusListBulkRangeEnabled,

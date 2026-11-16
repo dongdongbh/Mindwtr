@@ -519,6 +519,7 @@ private struct CaptureDestinationPicker: View {
         }
         .padding(16).background(palette.card, in: RoundedRectangle(cornerRadius: 16))
         .overlay(RoundedRectangle(cornerRadius: 16).stroke(palette.border, lineWidth: 1))
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("capture-destination-picker")
         .onAppear { focused = true }
     }

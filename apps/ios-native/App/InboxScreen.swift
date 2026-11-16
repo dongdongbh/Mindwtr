@@ -890,7 +890,7 @@ private struct InboxSurface: View {
                         inboxBulkActionLabel(model.inboxBulk.object("bar").object("addTag").text("label"))
                     }
                     .buttonStyle(.plain).foregroundStyle(palette.tint).modifier(ModelDisabled { !model.inboxBulkTagEnabled })
-                    .accessibilityLabel(model.inboxBulk.object("bar").object("addTag").text("accessibilityLabel"))
+                    .accessibilityLabel(model.inboxBulk.object("bar").object("addTag").text("label"))
                     .accessibilityIdentifier("inbox-bulk-tag-open")
                     Button { model.openInboxBulkRemove() } label: {
                         inboxBulkActionLabel(model.inboxBulk.object("bar").object("removeTag").text("label"))

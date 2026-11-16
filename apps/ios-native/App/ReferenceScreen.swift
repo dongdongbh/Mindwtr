@@ -110,13 +110,13 @@ struct ReferenceScreen: View {
                         bulkActionLabel(model.referenceBulk.object("bar").object("addTag").text("label"))
                     }
                     .buttonStyle(.plain).foregroundStyle(palette.tint).disabled(!model.referenceBulkTagEnabled)
-                    .accessibilityLabel(model.referenceBulk.object("bar").object("addTag").text("accessibilityLabel"))
+                    .accessibilityLabel(model.referenceBulk.object("bar").object("addTag").text("label"))
                     .accessibilityIdentifier("reference-bulk-add-tag")
                     Button { model.openReferenceBulkRemove() } label: {
                         bulkActionLabel(model.referenceBulk.object("bar").object("removeTag").text("label"))
                     }
                     .buttonStyle(.plain).foregroundStyle(palette.tint).disabled(!model.referenceBulkRemoveEnabled)
-                    .accessibilityLabel(model.referenceBulk.object("bar").object("removeTag").text("accessibilityLabel"))
+                    .accessibilityLabel(model.referenceBulk.object("bar").object("removeTag").text("label"))
                     .accessibilityIdentifier("reference-bulk-remove-tag")
                     Button {
                         model.requestDeleteSelectedReferenceTasks()

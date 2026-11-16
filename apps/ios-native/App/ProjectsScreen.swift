@@ -1260,7 +1260,7 @@ struct ProjectDetailScreen: View {
                         projectBulkActionLabel(model.projectBulk.object("bar").object("addTag").text("label"))
                     }
                     .buttonStyle(.plain).foregroundStyle(palette.tint).disabled(!model.projectBulkTagEnabled)
-                    .accessibilityLabel(model.projectBulk.object("bar").object("addTag").text("accessibilityLabel"))
+                    .accessibilityLabel(model.projectBulk.object("bar").object("addTag").text("label"))
                     .accessibilityIdentifier("project-bulk-tag-open")
                     Button { model.openProjectBulkRemove() } label: {
                         projectBulkActionLabel(model.projectBulk.object("bar").object("removeTag").text("label"))

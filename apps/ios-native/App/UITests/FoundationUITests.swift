@@ -38334,4 +38334,29 @@ extension FoundationUITests {
         resume.tap()
         XCTAssertTrue(app.staticTexts["task-recovery-protected"].waitForExistence(timeout: 30))
     }
+
+    func testUIBatchInboxBulkTagButtonsHaveLabels() {
+        let app = uiBatchApp()
+        app.launch(); defer { app.terminate() }
+        uiBatchCapture(app, "UI batch bulk label")
+        boardTap(app, "tab-inbox")
+        let card = app.buttons["UI batch bulk label"]
+        boardEnabled(card, timeout: 30)
+        card.press(forDuration: 1)
+        let add = app.buttons["inbox-bulk-tag-open"]
+        XCTAssertTrue(add.waitForExistence(timeout: 20))
+        XCTAssertEqual(add.label, "Add tag")
+    }
+
+    func testUIBatchCaptureDestinationPickerKeepsChildIdentifiers() {
+        let app = uiBatchApp()
+        app.launch(); defer { app.terminate() }
+        boardEnabled(app.buttons["capture-open"], timeout: 40)
+        boardTap(app, "capture-open")
+        boardTap(app, "capture-destination")
+        XCTAssertTrue(app.textFields["capture-destination-query"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["capture-destination-close"].exists)
+        boardTap(app, "capture-destination-close")
+        XCTAssertTrue(app.textFields["capture-destination-query"].waitForNonExistence(timeout: 10))
+    }
 }
