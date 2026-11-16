@@ -150,6 +150,7 @@ export function useRootLayoutSyncEffects({
             readStoredBackend: () => AsyncStorage.getItem(SYNC_BACKEND_KEY),
             resolveSupportedBackend: (rawBackend) => coerceSupportedBackend(resolveBackend(rawBackend), supportsNativeICloudSync()),
             getSyncChangeFingerprint: () => getInMemorySyncChangeFingerprint(),
+            getPendingRemoteWriteRetryAt: () => useTaskStore.getState().settings.pendingRemoteWriteRetryAt,
             isLikelyOfflineSyncError: (error) => isLikelyOfflineSyncError(error),
             classifySyncFailure: (error) => classifySyncFailure(error),
             reportError: logAppError,

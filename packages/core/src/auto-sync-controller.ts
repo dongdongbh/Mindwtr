@@ -38,6 +38,7 @@ export type AutoSyncControllerOptions = {
 
 
     hasPendingLocalChanges?: () => boolean;
+    getPendingRemoteWriteRetryAt?: () => string | undefined;
     logInfo?: (message: string, extra?: Record<string, string>, force?: boolean) => void;
     now?: () => number;
     setTimer?: typeof setTimeout;
@@ -95,6 +96,7 @@ export type AutoSyncController = {
 
 
     notifyExternalSyncSuccess: () => void;
+    refreshRemoteWriteRetry: () => void;
 
 
     takePendingSuspendedRequest: () => boolean;
@@ -112,6 +114,8 @@ const DEFAULT_MAX_FAILURE_COOLDOWN_MS = 10 * 60_000;
 const DEFAULT_INITIAL_SYNC_DELAY_MS = 1_500;
 const DEFAULT_PERIODIC_SYNC_INTERVAL_MS = 15 * 60 * 1000;
 const FOCUS_TRIGGER_DEDUPE_MS = 1_000;
+const REMOTE_WRITE_RETRY_MARGIN_MS = 1_000;
+const MAX_REMOTE_WRITE_RETRY_WAIT_MS = 60 * 60_000;
 
 export const createAutoSyncController = (
     options: AutoSyncControllerOptions
@@ -147,6 +151,8 @@ export const createAutoSyncController = (
     let syncThrottleTimer: ReturnType<typeof setTimeout> | null = null;
     let initialSyncTimer: ReturnType<typeof setTimeout> | null = null;
     let periodicSyncTimer: ReturnType<typeof setTimeout> | null = null;
+    let remoteWriteRetryTimer: ReturnType<typeof setTimeout> | null = null;
+    let remoteWriteRetryAtMs: number | null = null;
     let autoSyncRetryAfter = 0;
     let consecutiveAutoSyncFailures = 0;
     let lastFocusTriggerAt = 0;
@@ -206,6 +212,38 @@ export const createAutoSyncController = (
             }
             schedulePeriodicSync();
         }, periodicSyncIntervalMs);
+    };
+
+    const clearRemoteWriteRetry = () => {
+        remoteWriteRetryAtMs = null;
+        if (!remoteWriteRetryTimer) return;
+        clearTimer(remoteWriteRetryTimer);
+        remoteWriteRetryTimer = null;
+    };
+
+    const refreshRemoteWriteRetry = () => {
+        const retryAtMs = Date.parse(options.getPendingRemoteWriteRetryAt?.() ?? '');
+        if (remoteWriteRetryTimer && retryAtMs === remoteWriteRetryAtMs) return;
+        clearRemoteWriteRetry();
+        if (!allowDeferredWork || disposed || !Number.isFinite(retryAtMs) || retryAtMs <= now()) return;
+        remoteWriteRetryAtMs = retryAtMs;
+        remoteWriteRetryTimer = setTimer(() => {
+            remoteWriteRetryTimer = null;
+            if (disposed) return;
+            if (now() < retryAtMs) {
+                refreshRemoteWriteRetry();
+                return;
+            }
+            remoteWriteRetryAtMs = null;
+            const runtimeActive = options.isRuntimeActive();
+            trace('Auto sync retried a deferred remote write', {
+                releaseCheck: 'v1.3.9/deferred-write-retry',
+                latenessMs: String(Math.max(0, now() - retryAtMs)),
+                outcome: runtimeActive ? 'requested' : 'inactive',
+            }, true);
+            if (!runtimeActive) return;
+            void requestAutoSync(0, 'remote-write-retry').catch((error) => options.reportError('Sync failed', error));
+        }, Math.min(retryAtMs - now() + REMOTE_WRITE_RETRY_MARGIN_MS, MAX_REMOTE_WRITE_RETRY_WAIT_MS));
     };
 
     const scheduleAutoRetryAfterCooldown = (source: string, replaceExisting = false) => {
@@ -368,6 +406,7 @@ export const createAutoSyncController = (
             if (!result.success && result.error && !ignorableFailure) {
                 options.onSyncFailure?.(result.error);
             }
+            refreshRemoteWriteRetry();
 
             if (adaptivePacing) {
                 const cycleEndedAt = now();
@@ -503,6 +542,7 @@ export const createAutoSyncController = (
             }, true);
             void requestAutoSync(undefined, 'external-success').catch((error) => options.reportError('Sync failed', error));
         },
+        refreshRemoteWriteRetry,
         takePendingSuspendedRequest: () => {
             const pending = requestedWhileSuspended;
             requestedWhileSuspended = false;
@@ -520,6 +560,7 @@ export const createAutoSyncController = (
             clearSyncThrottle();
             clearInitialSync();
             clearPeriodicSync();
+            clearRemoteWriteRetry();
             autoSyncOrchestrator.reset();
         },
     };

@@ -97,6 +97,13 @@ describe('desktop sync runtime helpers', () => {
         expect(writeLog).toHaveBeenLastCalledWith('Auto sync trigger', { scope: 'sync', extra: { source: 'periodic' } });
     });
 
+    it('forces a release-diagnostics line the controller marks as forced', () => {
+        const writeLog = vi.fn();
+        const extra = { releaseCheck: 'v1.3.9/deferred-write-retry', latenessMs: '1000', outcome: 'requested' };
+        logDesktopAutoSyncTrace('Auto sync retried a deferred remote write', extra, 'visible', writeLog, true);
+        expect(writeLog).toHaveBeenLastCalledWith('Auto sync retried a deferred remote write', { scope: 'sync', force: true, extra });
+    });
+
     it('keeps auto sync active for the browser/PWA shell while the app is active', () => {
         expect(isDesktopSyncRuntimeActive(true)).toBe(true);
     });

@@ -63,6 +63,32 @@ describe('mobile sync triggers', () => {
     });
   });
 
+  it('uploads by itself when the retry time of a deferred write arrives, even after a manual sync deferred it', async () => {
+    vi.setSystemTime(Date.parse('2026-11-16T12:00:00.000Z'));
+    let retryAt: string | undefined;
+    const { ports } = createPorts({ getPendingRemoteWriteRetryAt: () => retryAt, logInfo: vi.fn() });
+    const triggers = createMobileSyncTriggers(ports);
+    triggers.start();
+    await flush();
+
+    retryAt = new Date(Date.now() + 20_000).toISOString();
+    triggers.handleStoreChange(
+      { lastDataChangeAt: 1, settings: { pendingRemoteWriteRetryAt: retryAt } },
+      { lastDataChangeAt: 1, settings: {} },
+    );
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(ports.performSync).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(ports.performSync).toHaveBeenCalledTimes(1);
+    expect(ports.logInfo).toHaveBeenCalledWith('Auto sync retried a deferred remote write', {
+      scope: 'sync',
+      force: true,
+      extra: expect.objectContaining({ releaseCheck: 'v1.3.9/deferred-write-retry', outcome: 'requested' }),
+    });
+    triggers.dispose();
+  });
+
   it('aborts the running cycle and syncs once when the app leaves the foreground', async () => {
     const { ports } = createPorts();
     const triggers = createMobileSyncTriggers(ports);

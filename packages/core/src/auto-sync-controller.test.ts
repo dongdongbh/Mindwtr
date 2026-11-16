@@ -1463,3 +1463,178 @@ describe('createAutoSyncController invocation-owned mode', () => {
         controller.dispose();
     });
 });
+
+describe('createAutoSyncController deferred remote write retry', () => {
+    const START_MS = Date.parse('2026-11-16T12:00:00.000Z');
+    const iso = (ms: number) => new Date(ms).toISOString();
+
+    const createDeferringHarness = (options: { isRuntimeActive?: () => boolean; canSync?: () => Promise<boolean> } = {}) => {
+        const scheduler = createManualScheduler(START_MS);
+        const store: { retryAt: string | undefined } = { retryAt: undefined };
+        const outcomes: Array<{ success: boolean; error?: string; retryInMs?: number }> = [];
+        const performSync = vi.fn(async () => {
+            const next = outcomes.shift() ?? { success: true };
+            store.retryAt = next.retryInMs === undefined ? undefined : iso(scheduler.now() + next.retryInMs);
+            return { success: next.success, error: next.error };
+        });
+        const logInfo = vi.fn();
+        const timerDelays: number[] = [];
+        const setTimer = ((callback: () => void, delay?: number) => {
+            timerDelays.push(Number(delay ?? 0));
+            return scheduler.setTimer(callback, delay);
+        }) as unknown as typeof setTimeout;
+        const controller = createAutoSyncController({
+            canSync: options.canSync ?? (async () => true),
+            performSync,
+            flushPendingSave: async () => undefined,
+            reportError: vi.fn(),
+            isRuntimeActive: options.isRuntimeActive ?? (() => true),
+            getPendingRemoteWriteRetryAt: () => store.retryAt,
+            logInfo,
+            now: scheduler.now,
+            setTimer,
+            clearTimer: scheduler.clearTimer,
+            minIntervalMs: 0,
+            periodicSyncIntervalMs: null,
+        });
+        return { scheduler, store, outcomes, performSync, controller, logInfo, timerDelays };
+    };
+
+    it('starts a sync by itself once the deferred upload may retry', async () => {
+        const { scheduler, outcomes, performSync, controller, logInfo } = createDeferringHarness();
+        outcomes.push({ success: true, retryInMs: 10_000 });
+
+        await controller.requestSync();
+        expect(performSync).toHaveBeenCalledTimes(1);
+
+        await scheduler.advanceBy(10_000);
+        expect(performSync).toHaveBeenCalledTimes(1);
+
+        await scheduler.advanceBy(1_000);
+        await waitForAssertion(() => expect(performSync).toHaveBeenCalledTimes(2));
+        expect(logInfo).toHaveBeenCalledWith(
+            'Auto sync retried a deferred remote write',
+            expect.objectContaining({ releaseCheck: 'v1.3.9/deferred-write-retry', outcome: 'requested' }),
+            true,
+        );
+    });
+
+    it('replaces the retry when a newer deferral moves the retry time', async () => {
+        const { scheduler, store, outcomes, performSync, controller } = createDeferringHarness();
+        outcomes.push({ success: true, retryInMs: 10_000 });
+        await controller.requestSync();
+
+        store.retryAt = iso(scheduler.now() + 60_000);
+        controller.refreshRemoteWriteRetry();
+
+        await scheduler.advanceBy(30_000);
+        expect(performSync).toHaveBeenCalledTimes(1);
+
+        await scheduler.advanceBy(31_000);
+        await waitForAssertion(() => expect(performSync).toHaveBeenCalledTimes(2));
+        await scheduler.advanceBy(120_000);
+        expect(performSync).toHaveBeenCalledTimes(2);
+    });
+
+    it('drops the retry after a sync uploads the deferred changes', async () => {
+        const { scheduler, store, outcomes, performSync, controller } = createDeferringHarness();
+        outcomes.push({ success: true, retryInMs: 10_000 });
+        await controller.requestSync();
+
+        await controller.requestSync();
+        expect(performSync).toHaveBeenCalledTimes(2);
+        expect(store.retryAt).toBeUndefined();
+
+        await scheduler.advanceBy(60_000);
+        expect(performSync).toHaveBeenCalledTimes(2);
+    });
+
+    it('drops the retry when another sync clears the deferral', async () => {
+        const { scheduler, store, outcomes, performSync, controller } = createDeferringHarness();
+        outcomes.push({ success: true, retryInMs: 10_000 });
+        await controller.requestSync();
+
+        store.retryAt = undefined;
+        controller.refreshRemoteWriteRetry();
+
+        await scheduler.advanceBy(60_000);
+        expect(performSync).toHaveBeenCalledTimes(1);
+        expect(scheduler.getTimerCount()).toBe(0);
+    });
+
+    it('waits at most an hour per timer for a retry time far ahead and syncs only once it arrives', async () => {
+        const { scheduler, outcomes, performSync, controller, timerDelays } = createDeferringHarness();
+        const thirtyDaysMs = 30 * 24 * 60 * 60_000;
+        outcomes.push({ success: true, retryInMs: thirtyDaysMs });
+        await controller.requestSync();
+        expect(timerDelays).toEqual([60 * 60_000]);
+
+        await scheduler.advanceBy(1);
+        await settle();
+        expect(performSync).toHaveBeenCalledTimes(1);
+        await scheduler.advanceBy(60 * 60_000);
+        await settle();
+        expect(performSync).toHaveBeenCalledTimes(1);
+        expect(timerDelays).toEqual([60 * 60_000, 60 * 60_000]);
+
+        await scheduler.advanceBy(thirtyDaysMs);
+        await waitForAssertion(() => expect(performSync).toHaveBeenCalledTimes(2));
+        expect(timerDelays.every((delay) => delay <= 60 * 60_000)).toBe(true);
+    });
+
+    it('drops the retry when sync stops', async () => {
+        const { scheduler, outcomes, performSync, controller } = createDeferringHarness();
+        outcomes.push({ success: true, retryInMs: 10_000 });
+        await controller.requestSync();
+
+        controller.dispose();
+        expect(scheduler.getTimerCount()).toBe(0);
+
+        await scheduler.advanceBy(60_000);
+        expect(performSync).toHaveBeenCalledTimes(1);
+        expect(scheduler.getTimerCount()).toBe(0);
+    });
+
+    it('runs nothing and does not re-arm when the retry fires while sync is unavailable', async () => {
+        let available = true;
+        const { scheduler, outcomes, performSync, controller } = createDeferringHarness({ canSync: async () => available });
+        outcomes.push({ success: true, retryInMs: 10_000 });
+        await controller.requestSync();
+
+        available = false;
+        await scheduler.advanceBy(11_000);
+        await settle();
+        expect(performSync).toHaveBeenCalledTimes(1);
+        expect(scheduler.getTimerCount()).toBe(0);
+    });
+
+    it('follows the growing write backoff and the failure cooldown when deferrals repeat', async () => {
+        const { scheduler, outcomes, performSync, controller } = createDeferringHarness();
+        outcomes.push(
+            { success: true, retryInMs: 5_000 },
+            { success: true, retryInMs: 10_000 },
+            { success: false, error: 'Remote write failed', retryInMs: 20_000 },
+            { success: true },
+        );
+        await controller.requestSync();
+
+        await scheduler.advanceBy(5_999);
+        expect(performSync).toHaveBeenCalledTimes(1);
+        await scheduler.advanceBy(1);
+        await waitForAssertion(() => expect(performSync).toHaveBeenCalledTimes(2));
+
+        await scheduler.advanceBy(10_999);
+        expect(performSync).toHaveBeenCalledTimes(2);
+        await scheduler.advanceBy(1);
+        await waitForAssertion(() => expect(performSync).toHaveBeenCalledTimes(3));
+
+        await scheduler.advanceBy(21_000);
+        await settle();
+        expect(performSync).toHaveBeenCalledTimes(3);
+        await scheduler.advanceBy(39_000);
+        await waitForAssertion(() => expect(performSync).toHaveBeenCalledTimes(4));
+
+        await scheduler.advanceBy(600_000);
+        expect(performSync).toHaveBeenCalledTimes(4);
+    });
+});

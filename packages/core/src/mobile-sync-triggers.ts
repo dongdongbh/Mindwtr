@@ -50,7 +50,7 @@ export const getMobileAutoSyncCadence = (backend: string): MobileAutoSyncCadence
 
 type SyncStoreSnapshot = {
   lastDataChangeAt: number;
-  settings?: { lastSyncStatus?: string; lastSyncAt?: string } | null;
+  settings?: { lastSyncStatus?: string; lastSyncAt?: string; pendingRemoteWriteRetryAt?: string } | null;
 };
 
 export type MobileSyncTriggerPorts = {
@@ -66,6 +66,8 @@ export type MobileSyncTriggerPorts = {
   resolveSupportedBackend(raw: string | null): string;
 
   getSyncChangeFingerprint(): string | null;
+
+  getPendingRemoteWriteRetryAt?(): string | undefined;
   isLikelyOfflineSyncError(error: string): boolean;
   classifySyncFailure(error: string): string;
   reportError(error: unknown): void;
@@ -315,6 +317,7 @@ export const createMobileSyncTriggers = (ports: MobileSyncTriggerPorts) => {
         if (isActive && extra?.releaseCheck) void ports.logInfo?.(message, force ? { scope: 'sync', force, extra } : { scope: 'sync', extra });
       },
       hasPendingLocalChanges: hasPendingLocalChange,
+      getPendingRemoteWriteRetryAt: () => ports.getPendingRemoteWriteRetryAt?.(),
       isRuntimeActive: () => isActive,
       onSyncFailure: reportAutoSyncFailure,
 
@@ -399,6 +402,9 @@ export const createMobileSyncTriggers = (ports: MobileSyncTriggerPorts) => {
 
 
         activeController.notifyExternalSyncSuccess();
+      }
+      if (state.settings?.pendingRemoteWriteRetryAt !== prevState.settings?.pendingRemoteWriteRetryAt) {
+        activeController.refreshRemoteWriteRetry();
       }
 
 

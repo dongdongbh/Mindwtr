@@ -119,6 +119,7 @@ export type NativeSyncBindings = {
 };
 
 const IOS_SERVER_ANSWER_WINDOW_MS = 20_000;
+const IOS_REMOTE_WRITE_RETRY_MARGIN_MS = 1_000;
 const NATIVE_DROPBOX_SEEN_KEY = 'mindwtr-native-dropbox-seen';
 
 
@@ -625,6 +626,13 @@ export const createNativeSync = (bindings: NativeSyncBindings, fileEncryptionSta
     const hasPendingLocalChange = () => useTaskStore.getState().lastDataChangeAt !== iosUploadedChangeAt;
     let iosChangeSeenAt = iosUploadedChangeAt;
     let iosChangeDueAt: number | null = null;
+    let iosRetriedRemoteWriteAt: string | undefined;
+    const iosRemoteWriteRetryDueAt = (): number | null => {
+        const retryAt = useTaskStore.getState().settings.pendingRemoteWriteRetryAt;
+        const retryAtMs = Date.parse(retryAt ?? '');
+        if (!retryAt || retryAt === iosRetriedRemoteWriteAt || !Number.isFinite(retryAtMs)) return null;
+        return retryAtMs + IOS_REMOTE_WRITE_RETRY_MARGIN_MS;
+    };
 
     const assertSelfHostedSyncAdmission = async () => {
         if (platform !== 'ios') return;
@@ -686,8 +694,11 @@ export const createNativeSync = (bindings: NativeSyncBindings, fileEncryptionSta
         try {
             const before = platform === 'ios' && options.manual && !options.activationProbe
                 ? useTaskStore.getState().settings : null;
+            const retryAt = platform === 'ios' ? useTaskStore.getState().settings.pendingRemoteWriteRetryAt : undefined;
+            const startedAt = Date.now();
             const answer = await service.performMobileSync(syncPathOverride, options);
             if (fatalCleanupError) throw fatalCleanupError;
+            if (retryAt && Date.parse(retryAt) <= startedAt) iosRetriedRemoteWriteAt = retryAt;
             if (before) {
                 const after = useTaskStore.getState().settings;
                 if ((after.lastSyncStatus === 'success' || after.lastSyncStatus === 'conflict')
@@ -778,6 +789,8 @@ export const createNativeSync = (bindings: NativeSyncBindings, fileEncryptionSta
         }
         if (iosAutomaticFrame) throw new Error('An automatic foreground sync is already in progress');
         if (reason === 'change') iosChangeDueAt = null;
+        const retryDueAt = reason === 'change' ? iosRemoteWriteRetryDueAt() : null;
+        const remoteWriteRetry = retryDueAt !== null && retryDueAt <= Date.now();
         const frame: AutomaticFrame = { result: null };
         iosAutomaticFrame = frame;
         try {
@@ -810,6 +823,10 @@ export const createNativeSync = (bindings: NativeSyncBindings, fileEncryptionSta
                 scope: 'native-ios', force: true, extra: { releaseCheck: 'v1.3.9/ios-sync-unanswered', operation: reason, windowMs: String(windowMs) },
             });
             if (fatalCleanupError) throw fatalCleanupError;
+            if (remoteWriteRetry) try {
+                await logLine('info', 'Native iOS sync retried a deferred remote write', { scope: 'native-ios', force: true,
+                    extra: { releaseCheck: 'v1.3.9/deferred-write-retry', outcome: frame.result ? 'ran' : 'not-run' } });
+            } catch { }
             if (reason === 'change' && !frame.result && hasPendingLocalChange()) {
                 iosChangeDueAt = Date.now() + getMobileAutoSyncCadence(backend).debounceContinuousChangeMs;
             }
@@ -826,19 +843,20 @@ export const createNativeSync = (bindings: NativeSyncBindings, fileEncryptionSta
 
     const syncChangeSchedule = (eligible: boolean): { delayMs: number | null } => {
         const changeAt = useTaskStore.getState().lastDataChangeAt;
-        if (fatalCleanupError || !eligible || !hasPendingLocalChange()) {
+        const nowMs = Date.now();
+        const blocked = fatalCleanupError !== null || !eligible;
+        if (blocked || !hasPendingLocalChange()) {
             iosChangeSeenAt = changeAt;
             iosChangeDueAt = null;
-            return { delayMs: null };
-        }
-        const nowMs = Date.now();
-        if (changeAt !== iosChangeSeenAt) {
+        } else if (changeAt !== iosChangeSeenAt) {
             const cadence = getMobileAutoSyncCadence(iosAutomaticBackend);
             iosChangeDueAt = nowMs + (iosChangeDueAt === null ? cadence.debounceFirstChangeMs : cadence.debounceContinuousChangeMs);
             iosChangeSeenAt = changeAt;
         }
-        if (iosChangeDueAt === null) return { delayMs: null };
-        return { delayMs: Math.max(0, iosChangeDueAt - nowMs, iosAutomaticController?.getAutoSyncWaitMs() ?? 0) };
+        const retryDueAt = blocked ? null : iosRemoteWriteRetryDueAt();
+        if (iosChangeDueAt === null && retryDueAt === null) return { delayMs: null };
+        return { delayMs: Math.max(0, (iosChangeDueAt ?? nowMs) - nowMs, (retryDueAt ?? nowMs) - nowMs,
+            iosAutomaticController?.getAutoSyncWaitMs() ?? 0) };
     };
 
     const backgroundSyncWanted = async () => {
@@ -1070,6 +1088,7 @@ export const createNativeSync = (bindings: NativeSyncBindings, fileEncryptionSta
                 readStoredBackend: () => keyValue.get(SYNC_BACKEND_KEY),
                 resolveSupportedBackend: (raw) => coerceSupportedBackend(resolveBackend(raw), false),
                 getSyncChangeFingerprint: () => getInMemorySyncChangeFingerprint(),
+                getPendingRemoteWriteRetryAt: () => useTaskStore.getState().settings.pendingRemoteWriteRetryAt,
                 isLikelyOfflineSyncError: (error) => isLikelyOfflineSyncError(error),
                 classifySyncFailure: (error) => classifySyncFailure(error),
                 reportError: (error) => { void logError(error, { scope: 'app' }); },

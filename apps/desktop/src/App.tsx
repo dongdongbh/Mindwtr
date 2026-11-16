@@ -919,8 +919,8 @@ function App() {
             }
         };
 
-        const traceAutoSync = (message: string, extra?: Record<string, string>) => {
-            logDesktopAutoSyncTrace(message, extra, document.visibilityState, logInfo);
+        const traceAutoSync = (message: string, extra?: Record<string, string>, force?: boolean) => {
+            logDesktopAutoSyncTrace(message, extra, document.visibilityState, logInfo, force);
         };
         traceAutoSync('Desktop auto sync lifecycle', { phase: 'start', runtimeActive: 'true' });
         const autoSyncController = createAutoSyncController({
@@ -941,6 +941,7 @@ function App() {
                 || useUiStore.getState().editingTaskId !== null
             ),
             hasPendingLocalChanges: () => SyncService.hasPendingLocalChangesForAutoSync(),
+            getPendingRemoteWriteRetryAt: () => useTaskStore.getState().settings.pendingRemoteWriteRetryAt,
             logInfo: traceAutoSync,
         });
 
@@ -993,6 +994,9 @@ function App() {
         };
 
         const storeUnsubscribe = useTaskStore.subscribe((state, prevState) => {
+            if (state.settings.pendingRemoteWriteRetryAt !== prevState.settings.pendingRemoteWriteRetryAt) {
+                autoSyncController.refreshRemoteWriteRetry();
+            }
             if (state.lastDataChangeAt === prevState.lastDataChangeAt) return;
             autoSyncController.handleDataChange();
         });

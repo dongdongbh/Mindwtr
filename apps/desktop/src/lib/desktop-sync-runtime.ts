@@ -6,6 +6,7 @@ export function logDesktopAutoSyncTrace(
     extra: Record<string, string> | undefined,
     visibility: DocumentVisibilityState,
     writeLog: (message: string, context: { scope: string; force?: boolean; extra?: Record<string, string> }) => unknown,
+    force?: boolean,
 ): void {
     let fields: string[] | undefined;
     if (message === 'Desktop auto sync lifecycle') {
@@ -22,7 +23,7 @@ export function logDesktopAutoSyncTrace(
         if (message === 'Auto sync skipped during failure cooldown') fields = ['source', 'waitMs'];
     }
     if (!fields) {
-        void writeLog(message, { scope: 'sync', extra });
+        void writeLog(message, force ? { scope: 'sync', force, extra } : { scope: 'sync', extra });
         return;
     }
 

@@ -924,6 +924,33 @@ describe('event-owned iOS stored/resume pacing', () => {
         expect(fixture.schedules).toEqual([]);
     });
 
+    it('schedules one sync for a deferred remote write once its retry time arrives, and none while sync is off', async () => {
+        resetForTests(); serve();
+        let now = 100_000;
+        spyOn(Date, 'now').mockImplementation(() => now);
+        const fixture = configured();
+        expect(await fixture.sync.performStoredAutomaticSync('startup')).toEqual({ success: true, skipped: false });
+        const deferUntil = (at: number) => core.useTaskStore.setState((state) => ({
+            settings: { ...state.settings, pendingRemoteWriteRetryAt: new Date(at).toISOString() } }) as never);
+        deferUntil(now + 20_000);
+        expect(fixture.sync.syncChangeObservation()).toEqual({ pending: false });
+        expect(fixture.sync.syncChangeSchedule(false)).toEqual({ delayMs: null });
+        expect(fixture.sync.syncChangeSchedule(true)).toEqual({ delayMs: 21_000 });
+        deferUntil(now + 60_000);
+        expect(fixture.sync.syncChangeSchedule(true)).toEqual({ delayMs: 61_000 });
+        const retryAt = now + 60_000;
+        now += 61_000;
+        expect(fixture.sync.syncChangeSchedule(true)).toEqual({ delayMs: 0 });
+        expect(await fixture.sync.performStoredAutomaticSync('change')).toMatchObject({ success: true });
+        expect(fixture.sync.state().cycles).toBe(2);
+        expect(fixture.entries.find((entry) => entry.message === 'Native iOS sync retried a deferred remote write')?.context)
+            .toMatchObject({ releaseCheck: 'v1.3.9/deferred-write-retry', outcome: 'ran' });
+        deferUntil(retryAt);
+        expect(fixture.sync.syncChangeSchedule(true)).toEqual({ delayMs: null });
+        deferUntil(now + 10_000);
+        expect(fixture.sync.syncChangeSchedule(true)).toEqual({ delayMs: 11_000 });
+    });
+
     it('reports the Menu tab sync badge from the stored sync, an unsynced edit and a failed sync like RN', async () => {
         resetForTests(); serve();
         let now = 100_000;
