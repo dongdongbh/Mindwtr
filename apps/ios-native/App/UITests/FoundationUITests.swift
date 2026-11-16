@@ -38359,4 +38359,27 @@ extension FoundationUITests {
         boardTap(app, "capture-destination-close")
         XCTAssertTrue(app.textFields["capture-destination-query"].waitForNonExistence(timeout: 10))
     }
+
+    func testUIBatchProjectActionsStayEnabledWithNotesOpen() {
+        let app = uiBatchApp()
+        app.launch(); defer { app.terminate() }
+        boardEnabled(app.buttons["capture-open"], timeout: 40)
+        boardTap(app, "capture-open")
+        let input = app.textViews["capture-input"]
+        boardEnabled(input); input.typeText("UI batch notes task +UIBatchNotes ")
+        boardTap(app, "capture-save")
+        XCTAssertTrue(input.waitForNonExistence(timeout: 30))
+        boardTap(app, "tab-menu"); boardTap(app, "menu-projects")
+        let row = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "project-open-")).firstMatch
+        boardEnabled(row, timeout: 30); row.tap()
+        boardEnabled(app.buttons["project-actions-menu"], timeout: 30)
+        boardTap(app, "project-details-toggle")
+        let notes = app.buttons["project-notes-toggle"]
+        revealPagedElement(app, notes, in: app.scrollViews["project-detail-scroll"], outerEdge: true)
+        boardEnabled(notes, timeout: 30); notes.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["project-notes-input"].waitForExistence(timeout: 20))
+        let actions = app.buttons["project-actions-menu"]
+        let enabled = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: actions)
+        XCTAssertEqual(XCTWaiter.wait(for: [enabled], timeout: 10), .completed, "Opening Notes without an edit keeps the actions menu available, as in RN")
+    }
 }

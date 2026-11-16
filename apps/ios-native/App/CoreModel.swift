@@ -3840,7 +3840,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     var projectDeleteOpenEnabled: Bool {
         projectActionsEnabled && !appLock.concealed && !projectDetail.text("projectRevision").isEmpty
             && projectDeleteRequest == nil && projectDeleteUndoRequest == nil
-            && !projectNotesEditMode && !projectNotesDirty && !projectNotesWritePending && !capturePresented
+            && !projectNotesDirty && !projectNotesWritePending && !capturePresented
             && !areaPickerPresented && !areaManagerPresented && !morePresented
             && !projectSectionsPresented && !projectAreaPresented && !projectTagsPresented
             && projectDateField == nil && !projectStatusOpen && !projectAttachmentLinkPresented
