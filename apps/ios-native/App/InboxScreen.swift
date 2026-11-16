@@ -1171,13 +1171,13 @@ private struct FocusSurface: View {
         let selected = item.flag("selected")
         let remove = { Task { await model.openFocusSavedFilter(["type": "delete", "id": item.text("id")], message: item.text("label")) } }
         return HStack(spacing: 0) {
-            Button { model.selectFocusSavedFilter(item.text("id")) } label: {
+            LongPressButton(identity: item.text("id"), action: { model.selectFocusSavedFilter(item.text("id")) },
+                            longPress: { _ = remove() }) {
                 Text(item.text("label")).rnFont(12, .semibold).fixedSize()
                     .padding(.leading, 12).padding(.trailing, 8).frame(minHeight: 44).contentShape(Rectangle())
             }
             .buttonStyle(.plain).accessibilityIdentifier("focus-saved-" + item.text("id"))
             .accessibilityAddTraits(selected ? .isSelected : [])
-            .onLongPressGesture { _ = remove() }
             .accessibilityAction(named: item.text("deleteLabel")) { _ = remove() }
             Button { _ = remove() } label: {
                 AppIcon(name: "x", size: 12).frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
@@ -2299,6 +2299,28 @@ extension View {
 
     func projectRowLongPress(identity: String, enabled: Bool, action: @escaping () -> Void) -> some View {
         modifier(TaskCardStackLongPress(identity: identity, enabled: enabled, action: action))
+    }
+}
+
+struct LongPressButton<Label: View>: View {
+    let identity: String
+    let action: () -> Void
+    let longPress: () -> Void
+    @ViewBuilder let label: () -> Label
+    @Environment(\.isEnabled) private var enabled
+
+    @ViewBuilder var body: some View {
+        if #available(iOS 18.0, *) {
+            Button(action: action) { label() }
+                .modifier(TaskCardStackLongPress(identity: identity, enabled: enabled, action: longPress))
+        } else {
+            label()
+                .onTapGesture(perform: action)
+                .onLongPressGesture(minimumDuration: 0.5, perform: longPress)
+                .accessibilityElement(children: .combine)
+                .accessibilityAddTraits(.isButton)
+                .accessibilityAction { action() }
+        }
     }
 }
 

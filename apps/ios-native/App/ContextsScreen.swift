@@ -230,36 +230,40 @@ struct ContextsScreen: View {
 
 
     @ViewBuilder private func chip(_ chip: CoreObject) -> some View {
-        let selected = chip.flag("selected")
         let additive = chip.object("additive")
-        let button = Button { endInput(); model.selectContextsChip(chip.text("id")) } label: {
-            HStack(spacing: 6) {
-                Text(chip.text("label")).rnFont(13, .medium).fixedSize()
-                Text(String(chip.number("count"))).rnFont(10, .semibold)
-                    .foregroundStyle(selected ? palette.text : palette.secondary)
-                    .padding(.horizontal, 5).padding(.vertical, 1).frame(minWidth: 18)
-                    .background(selected ? palette.card : (palette.dark ? Color.white : Color.black).opacity(0.08),
-                                in: RoundedRectangle(cornerRadius: 8))
-            }
-            .foregroundStyle(selected ? palette.onTint : palette.text)
-            .padding(.horizontal, 12).padding(.vertical, 6).frame(minHeight: 44)
-            .background(selected ? palette.tint : palette.filter, in: RoundedRectangle(cornerRadius: 16))
-            .overlay(RoundedRectangle(cornerRadius: 16).stroke(selected ? palette.tint : palette.border, lineWidth: 1))
-            .contentShape(RoundedRectangle(cornerRadius: 16))
-        }
-        .buttonStyle(.plain).disabled(!model.contextsControlsEnabled)
-        .accessibilityLabel(chip.text("accessibilityLabel"))
-        .accessibilityAddTraits(selected ? .isSelected : [])
-        .accessibilityIdentifier("contexts-chip-" + chip.text("id"))
+        let select = { endInput(); model.selectContextsChip(chip.text("id")) }
         if additive.isEmpty {
-            button
+            chipControl(Button(action: select) { chipLabel(chip) }, chip: chip)
         } else {
             let add = { endInput(); model.selectContextsChip(chip.text("id"), additive: true) }
-            button
-
-                .highPriorityGesture(LongPressGesture().onEnded { _ in add() })
+            chipControl(LongPressButton(identity: chip.text("id"), action: select, longPress: add) { chipLabel(chip) }, chip: chip)
                 .accessibilityAction(named: additive.text("label"), add)
         }
+    }
+
+    private func chipControl(_ control: some View, chip: CoreObject) -> some View {
+        control
+            .buttonStyle(.plain).disabled(!model.contextsControlsEnabled)
+            .accessibilityLabel(chip.text("accessibilityLabel"))
+            .accessibilityAddTraits(chip.flag("selected") ? .isSelected : [])
+            .accessibilityIdentifier("contexts-chip-" + chip.text("id"))
+    }
+
+    private func chipLabel(_ chip: CoreObject) -> some View {
+        let selected = chip.flag("selected")
+        return HStack(spacing: 6) {
+            Text(chip.text("label")).rnFont(13, .medium).fixedSize()
+            Text(String(chip.number("count"))).rnFont(10, .semibold)
+                .foregroundStyle(selected ? palette.text : palette.secondary)
+                .padding(.horizontal, 5).padding(.vertical, 1).frame(minWidth: 18)
+                .background(selected ? palette.card : (palette.dark ? Color.white : Color.black).opacity(0.08),
+                            in: RoundedRectangle(cornerRadius: 8))
+        }
+        .foregroundStyle(selected ? palette.onTint : palette.text)
+        .padding(.horizontal, 12).padding(.vertical, 6).frame(minHeight: 44)
+        .background(selected ? palette.tint : palette.filter, in: RoundedRectangle(cornerRadius: 16))
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(selected ? palette.tint : palette.border, lineWidth: 1))
+        .contentShape(RoundedRectangle(cornerRadius: 16))
     }
 
     private func matchOptions(_ mode: CoreObject) -> some View {

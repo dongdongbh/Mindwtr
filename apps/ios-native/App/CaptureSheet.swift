@@ -421,7 +421,9 @@ struct CaptureSheet: View {
     }
 
     @ViewBuilder private var captureControls: some View {
-        Button { model.openContextPicker() } label: {
+        LongPressButton(identity: "capture-contexts", action: { model.openContextPicker() }, longPress: {
+            Task { await model.editCapture(model.capture.object("contexts").object("reset")) }
+        }) {
             HStack(spacing: 6) {
                 Text("@").rnFont(17, .medium)
                 Text(model.capture.object("contexts").text("label")).rnFont(12, .bold)
@@ -432,9 +434,6 @@ struct CaptureSheet: View {
         .buttonStyle(.plain).modifier(ModelDisabled { model.busy || model.retryNeeded })
         .accessibilityLabel(model.capture.object("contexts").text("accessibilityLabel"))
         .accessibilityIdentifier("capture-contexts")
-        .onLongPressGesture {
-            Task { await model.editCapture(model.capture.object("contexts").object("reset")) }
-        }
         Button { Task { await model.editCapture(model.capture.object("focus").object("edit")) } } label: {
             HStack(spacing: 6) {
                 AppFocusStar(focused: model.capture.object("focus").flag("selected"),
