@@ -346,25 +346,27 @@ struct ProjectsScreen: View {
         let moves = ["up", "down"].filter { model.projectRowCanMove(row, direction: $0) }
         let duplicate: CoreObject = ["id": "duplicate", "label": model.label("projects.duplicate"), "enabled": true]
         let delete: CoreObject = ["id": "delete", "label": model.label("common.delete"), "enabled": true]
+        let open = { Task { await model.openProject(row) } }
         return HStack(spacing: 8) {
-            Button { Task { await model.openProject(row) } } label: {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(row.text("title")).rnFont(16, .medium).foregroundStyle(palette.text)
-                    if !row.text("nextActionTitle").isEmpty {
-                        Text("↳ " + row.text("nextActionTitle")).rnFont(12).foregroundStyle(palette.secondary)
-                    } else if row.flag("focusedWithoutNextAction") {
-                        HStack(spacing: 4) {
-                            Image(systemName: "exclamationmark.triangle").font(.system(size: 12)).accessibilityHidden(true)
-                            Text(model.label("projects.noNextAction")).rnFont(12)
-                        }
-                        .foregroundStyle(Color(hex: "F59E0B"))
-                    } else {
-                        Text(row.text("statusLabel")).rnFont(12).foregroundStyle(statusColor(row.text("status")))
+            VStack(alignment: .leading, spacing: 4) {
+                Text(row.text("title")).rnFont(16, .medium).foregroundStyle(palette.text)
+                if !row.text("nextActionTitle").isEmpty {
+                    Text("↳ " + row.text("nextActionTitle")).rnFont(12).foregroundStyle(palette.secondary)
+                } else if row.flag("focusedWithoutNextAction") {
+                    HStack(spacing: 4) {
+                        Image(systemName: "exclamationmark.triangle").font(.system(size: 12)).accessibilityHidden(true)
+                        Text(model.label("projects.noNextAction")).rnFont(12)
                     }
+                    .foregroundStyle(Color(hex: "F59E0B"))
+                } else {
+                    Text(row.text("statusLabel")).rnFont(12).foregroundStyle(statusColor(row.text("status")))
                 }
-                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).contentShape(Rectangle())
             }
-            .buttonStyle(.plain).disabled(model.busy || model.retryNeeded)
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).contentShape(Rectangle())
+            .onTapGesture { _ = open() }
+            .accessibilityElement(children: .combine).accessibilityAddTraits(.isButton)
+            .accessibilityAction { _ = open() }
+            .disabled(model.busy || model.retryNeeded)
             .accessibilityActions {
                 ForEach(moves, id: \.self) { direction in
                     Button(rowMoveLabel(direction)) { Task { await model.moveProjectRow(row, direction: direction) } }
