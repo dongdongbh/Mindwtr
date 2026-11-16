@@ -33624,6 +33624,32 @@ extension FoundationUITests {
         let value = input.value as? String ?? "", raw = value == input.placeholderValue ? "" : value
         XCTAssertEqual(Set(raw.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }), expected)
     }
+    func testInboxBulkOrganizeQuickStartDateStaysEditableAndApplies() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication(), library = UUID().uuidString.lowercased()
+        app.launchArguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en-US)", "-AppleLocale", "en_US"]
+        app.launch(); defer { app.terminate() }
+        boardEnabled(app.buttons["capture-open"], timeout: 40)
+        boardTap(app, "capture-open")
+        app.textViews["capture-input"].typeText("Organize quick date")
+        boardTap(app, "capture-save")
+        task736OpenInbox(app)
+        let row = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "task-title-", "Organize quick date")).firstMatch
+        task740InboxStatusReady(row); row.press(forDuration: 0.8); task739Count(app, 1)
+        task743Open(app)
+        task743Control(app, "inbox-organize-startDate-tomorrow").tap()
+        let formatter = DateFormatter(); formatter.locale = Locale(identifier: "en_US_POSIX"); formatter.dateFormat = "yyyy-MM-dd"
+        let tomorrow = formatter.string(from: Calendar.current.date(byAdding: .day, value: 1, to: Date())!)
+        let start = task743Control(app, "inbox-organize-startDate", text: true)
+        boardEnabled(app.buttons["inbox-organize-apply"]); start.tap()
+        let editable = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in (start.value as? String) == tomorrow }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [editable], timeout: 5), .completed, "Focused quick date shows ISO, got \(start.value ?? "nil")")
+        XCTAssertFalse(app.descendants(matching: .any)["inbox-organize-error"].waitForExistence(timeout: 3))
+        boardEnabled(app.buttons["inbox-organize-apply"]); boardTap(app, "inbox-organize-apply")
+        XCTAssertTrue(app.staticTexts["inbox-bulk-count"].waitForNonExistence(timeout: 30))
+        XCTAssertFalse(app.buttons["persistence-retry"].exists)
+    }
+
     private func task743InboxOrganize(_ role: String, largest: Bool = false) throws {
         continueAfterFailure = false
         guard let library = ProcessInfo.processInfo.environment["MINDWTR_INBOX_ORGANIZE_UI_" + role + "_LIBRARY"],

@@ -214,10 +214,11 @@ export const readBulkOrganizeDraftShape = (value: unknown): BulkOrganizeDraft | 
     const draft = { ...EMPTY_BULK_ORGANIZE_DRAFT, ...value } as BulkOrganizeDraft;
     const valid = (draft.status === BULK_ORGANIZE_KEEP || BULK_ORGANIZE_STATUS_OPTIONS.includes(draft.status))
         && isText(draft.projectChoice, 200) && isText(draft.areaChoice, 200)
-        && (Object.keys(TEXT_LIMITS) as BulkOrganizeTextField[]).every((field) => isText(draft[field], TEXT_LIMITS[field]))
-        && BULK_ORGANIZE_DATE_FIELDS.every((field) => draft[field] === '' || isDay(draft[field]));
+        && (Object.keys(TEXT_LIMITS) as BulkOrganizeTextField[]).every((field) => isText(draft[field], TEXT_LIMITS[field]));
     return valid ? draft : null;
 };
+export const hasValidBulkOrganizeDates = (draft: BulkOrganizeDraft): boolean =>
+    BULK_ORGANIZE_DATE_FIELDS.every((field) => draft[field] === '' || isDay(draft[field]));
 
 const offersChoices = (draft: BulkOrganizeDraft): boolean => {
     const state = useTaskStore.getState();
@@ -261,6 +262,7 @@ export function buildNativeBulkOrganizeView(
     const now = new Date();
     return {
         ...dialog,
+        canApply: dialog.canApply && hasValidBulkOrganizeDates(draft),
         draft,
         statuses: dialog.statuses.map((status) => ({ ...status, edit: { type: 'setStatus', value: status.value } })),
         waitingFor: dialog.waitingFor ? { ...dialog.waitingFor, value: draft.delegateWho } : null,
@@ -326,7 +328,7 @@ export function buildNativeRemoveTagPicker(tags: readonly string[], query: strin
 
 export function readBulkOrganizeApply(value: unknown): NativeHostResult<BulkOrganizeTaskUpdateInput> {
     const draft = readDraft(value);
-    if (!draft) return fail('INVALID_INPUT', 'A Bulk organize draft with choices the dialog offers is required');
+    if (!draft || !hasValidBulkOrganizeDates(draft)) return fail('INVALID_INPUT', 'A Bulk organize draft with choices the dialog offers is required');
     if (draft.status === 'waiting' && !draft.delegateWho.trim()) return fail('INVALID_INPUT', 'Waiting needs the person these tasks wait for');
     return { ok: true, value: buildBulkOrganizeInput(draft) };
 }

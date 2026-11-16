@@ -3756,7 +3756,7 @@ private struct InboxBulkOrganizeDialog: View {
             Text(part.text("label")).rnFont(13, .semibold).foregroundStyle(palette.secondary)
             TextField(part.text("placeholder"), text: Binding(
                 get: { shownText(field, part: part) },
-                set: { model.setInboxBulkOrganizeText(field, value: $0) }))
+                set: { if !isDisplayEcho(field, $0, part: part) { model.setInboxBulkOrganizeText(field, value: $0) } }))
                 .focused($editingField, equals: field)
                 .rnFont(16).textInputAutocapitalization(.never).autocorrectionDisabled()
                 .padding(12).frame(minHeight: 44).background(palette.input, in: RoundedRectangle(cornerRadius: 10))
@@ -3768,6 +3768,10 @@ private struct InboxBulkOrganizeDialog: View {
         let typed = model.inboxBulkOrganizeInputs[field] ?? part.text("value")
         guard editingField != field, typed == part.text("value"), let display = part["displayValue"] as? String else { return typed }
         return display
+    }
+    private func isDisplayEcho(_ field: String, _ value: String, part: CoreObject) -> Bool {
+        guard let display = part["displayValue"] as? String, !display.isEmpty, display != part.text("value") else { return false }
+        return value == display && (model.inboxBulkOrganizeInputs[field] ?? part.text("value")) == part.text("value")
     }
     private func date(_ part: CoreObject) -> some View {
         let field = part.text("field")

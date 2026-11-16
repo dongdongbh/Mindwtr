@@ -10,7 +10,7 @@ import { exact, iso, record } from './native-host-contract-project-shared';
 import { validSection } from './native-host-contract-project-section-rename';
 import { validFrozenFocusDate } from './native-host-contract-task-focus';
 import { historyRowLoadProjection } from './native-host-contract-task-checklist';
-import { readBulkOrganizeDraftShape } from './native-host-contract-bulk-actions';
+import { hasValidBulkOrganizeDates, readBulkOrganizeDraftShape } from './native-host-contract-bulk-actions';
 import { BULK_ORGANIZE_KEEP, BULK_ORGANIZE_NONE, EMPTY_BULK_ORGANIZE_DRAFT, buildBulkOrganizeInput,
     getBulkOrganizeAreaOptions, getBulkOrganizeProjectOptions, planBulkOrganize, type BulkOrganizeDraft } from './task-list-bulk-actions';
 import { createAreaSaveGuard, readAreaDurableData } from './native-host-contract-area-durable';
@@ -67,7 +67,7 @@ const readRequest = (input: unknown, source: OrganizeSource): OrganizeRequest | 
     const request = detachReferenceBatchJson<OrganizeRequest>(input);
     return request && exact(request, ['requestId', 'source', 'taskIds', 'taskRevisions', 'draft', 'params'])
         && record(request.draft) && exact(request.draft, Object.keys(EMPTY_BULK_ORGANIZE_DRAFT))
-        && readBulkOrganizeDraftShape(request.draft)
+        && readBulkOrganizeDraftShape(request.draft) && hasValidBulkOrganizeDates(request.draft)
         && (request.draft.status !== 'waiting' || Boolean(request.draft.delegateWho.trim()))
         && readStatusBatchSelectionRequest(selectionRequest(request), organizeListSource(request, source)) ? request : null;
 };

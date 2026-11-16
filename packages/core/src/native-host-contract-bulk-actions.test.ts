@@ -213,6 +213,21 @@ describe('native host contract: selection mode', () => {
             });
             expect(dates[1]).toMatchObject({ value: '', displayValue: '', pickerStart: '2026-09-26' });
         });
+
+        it('keeps a date the user is still typing in the organize dialog and only blocks Apply', async () => {
+            freezeClock();
+            const { host } = await open();
+            const read = (organize: Record<string, unknown>) => value(host.getBulkActions({ list: 'inbox', taskIds: ['i-milk', 'i-read'], organize })).organize!;
+            for (const [typed, canApply] of [['09/27/2026', false], ['2026-09-2', false], ['2026-09-28', true], ['', true]] as const) {
+                const edited = read({ draft: ORGANIZE, edit: { type: 'setText', field: 'startDate', value: typed } });
+                expect([edited.draft.startDate, edited.canApply]).toEqual([typed, canApply]);
+                expect(read({ draft: edited.draft }).draft.startDate).toBe(typed);
+            }
+            const partial = { ...EMPTY_BULK_ORGANIZE_DRAFT, ...ORGANIZE, startDate: '2026-09-2' };
+            expect(await host.runBulkAction({ requestId: requestId(), list: 'inbox',
+                action: withRevisions(host, 'inbox', { type: 'organize', taskIds: ['i-read'], draft: partial }) }))
+                .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+        });
     });
 
     describe('retries exactly after a failed save', () => {
@@ -840,7 +855,7 @@ describe('native host contract: selection mode', () => {
         view({ list: 'waiting', organize: {} });
         view({ list: 'waiting', picker: { kind: 'removeTag' } });
         view({ list: 'inbox', params: { offset: 3 } });
-        view({ list: 'inbox', organize: { draft: {}, edit: { type: 'setText', field: 'dueDate', value: 'tomorrow' } } });
+        view({ list: 'inbox', organize: { draft: {}, edit: { type: 'setText', field: 'dueDate', value: '2026-10-20 9' } } });
         view({ list: 'inbox', organize: { edit: { type: 'rename' } } });
         view({ list: 'inbox', selectAll: {}, selectionEdit: { taskId: 'i-call' } });
         expect(host.getBulkActions({ list: 'inbox', picker: { kind: 'project', offset: 1 } } as never)).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
