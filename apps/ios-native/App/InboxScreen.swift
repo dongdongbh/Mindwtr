@@ -2150,7 +2150,8 @@ private struct TaskRowSwipeButton: View {
     private var actionButton: some View {
         Button(action: activate) {
             VStack(spacing: 4) {
-                Image(systemName: symbol).font(.system(size: 20)).accessibilityHidden(true)
+                Image(uiImage: UIImage(systemName: symbol, withConfiguration: UIImage.SymbolConfiguration(pointSize: 20)) ?? UIImage())
+                    .renderingMode(.template).accessibilityHidden(true)
                 if !dynamicTypeSize.isAccessibilitySize {
                     Text(action.text("label")).rnFont(12, .semibold).multilineTextAlignment(.center).lineLimit(2)
                 }
