@@ -239,9 +239,6 @@ Mindwtr 的发展离不开用户与贡献者的支持，感谢大家一起把它
   <a href="https://github.com/PLPeeters" title="@PLPeeters">
     <img src="docs/assets/sponsors/plpeeters-avatar.png" width="60" height="60" alt="@PLPeeters" />
   </a>
-  <a href="https://github.com/danhs" title="@danhs">
-    <img src="docs/assets/sponsors/danhs.png" width="60" height="60" alt="@danhs" />
-  </a>
   <a href="https://github.com/NikoScotch" title="@NikoScotch">
     <img src="docs/assets/sponsors/nikoscotch.png" width="60" height="60" alt="@NikoScotch" />
   </a>
@@ -263,7 +260,7 @@ Mindwtr 的发展离不开用户与贡献者的支持，感谢大家一起把它
 </p>
 
 <p align="center">
-  <sub><a href="https://github.com/jarrydstan">@jarrydstan</a> · <a href="https://github.com/ronmolenda">@ronmolenda</a> · <a href="https://github.com/karl1990">@karl1990</a> · <a href="https://github.com/srijan">@srijan</a> · <a href="https://github.com/davibicudo">@davibicudo</a> · <a href="https://github.com/PLPeeters">@PLPeeters</a> · <a href="https://github.com/danhs">@danhs</a> · <a href="https://github.com/NikoScotch">@NikoScotch</a> · <a href="https://github.com/nicopico-dev">@nicopico-dev</a> · <a href="https://github.com/Hillside502">@Hillside502</a> · <a href="https://github.com/alxgda">@alxgda</a> · <a href="https://github.com/TomLisankie">@TomLisankie</a> · <a href="https://github.com/MrSirMangoo">@MrSirMangoo</a></sub>
+  <sub><a href="https://github.com/jarrydstan">@jarrydstan</a> · <a href="https://github.com/ronmolenda">@ronmolenda</a> · <a href="https://github.com/karl1990">@karl1990</a> · <a href="https://github.com/srijan">@srijan</a> · <a href="https://github.com/davibicudo">@davibicudo</a> · <a href="https://github.com/PLPeeters">@PLPeeters</a> · <a href="https://github.com/NikoScotch">@NikoScotch</a> · <a href="https://github.com/nicopico-dev">@nicopico-dev</a> · <a href="https://github.com/Hillside502">@Hillside502</a> · <a href="https://github.com/alxgda">@alxgda</a> · <a href="https://github.com/TomLisankie">@TomLisankie</a> · <a href="https://github.com/MrSirMangoo">@MrSirMangoo</a></sub>
 </p>
 
 ---
