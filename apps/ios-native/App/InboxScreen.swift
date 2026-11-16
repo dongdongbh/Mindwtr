@@ -400,6 +400,10 @@ struct InboxScreen: View {
     @ViewBuilder private var taskActionNoticeView: some View {
         if !model.taskActionNotice.isEmpty && !model.taskPresented {
                             VStack(alignment: .leading, spacing: 8) {
+                                if model.taskActionNotice.text("operation").hasSuffix("BulkDelete") {
+                                    Text(model.label("common.done")).rnFont(14, .semibold)
+                                        .accessibilityIdentifier("task-" + model.taskActionNotice.text("operation") + "-title")
+                                }
                                 Text(model.taskActionNotice.text("message")).rnFont(14)
                                     .accessibilityIdentifier("task-" + model.taskActionNotice.text("operation") + "-notice")
                                 if model.taskActionNotice.flag("undoEnabled") {

@@ -38383,4 +38383,22 @@ extension FoundationUITests {
         let enabled = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: actions)
         XCTAssertEqual(XCTWaiter.wait(for: [enabled], timeout: 10), .completed, "Opening Notes without an edit keeps the actions menu available, as in RN")
     }
+
+    func testUIBatchBulkDeleteToastHasDoneTitle() {
+        let app = uiBatchApp()
+        app.launch(); defer { app.terminate() }
+        uiBatchCapture(app, "UI batch bulk toast")
+        boardTap(app, "tab-inbox")
+        let card = app.buttons["UI batch bulk toast"]
+        boardEnabled(card, timeout: 30)
+        card.press(forDuration: 1)
+        let delete = task192Reveal(app, "inbox-bulk-delete", buttons: true, scrollID: "inbox-bulk-actions-scroll", horizontal: true, scans: 12)
+        boardEnabled(delete, timeout: 20); delete.tap()
+        let confirm = app.alerts.buttons.matching(identifier: "inbox-bulk-confirm").firstMatch
+        boardEnabled(confirm); confirm.tap()
+        let title = app.staticTexts["task-inboxBulkDelete-title"]
+        XCTAssertTrue(title.waitForExistence(timeout: 30))
+        XCTAssertEqual(title.label, "Done")
+        XCTAssertEqual(app.staticTexts["task-inboxBulkDelete-notice"].label, "1 task")
+    }
 }
