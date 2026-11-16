@@ -64,6 +64,14 @@ final class NativeWidgetFamilyPublisherTests: XCTestCase {
         for selection in denied {
             XCTAssertNil(NativeWidgetFamilyPublisher.group(selection: selection, bundleIdentifier: "tech.dongdongbh.mindwtr"))
         }
+        let dev = "tech.dongdongbh.mindwtr.native.dev"
+        let standardDev = NativeLaunchSelection.standard(databaseURL: database, containerURL: root, namespace: dev)
+        XCTAssertEqual(NativeWidgetFamilyPublisher.group(selection: standardDev, bundleIdentifier: dev), "group.tech.dongdongbh.mindwtr.native.dev")
+        for (selection, bundle) in [(production, dev), (denied[0], dev),
+                                    (NativeLaunchSelection.isolated(databaseURL: database, containerURL: root, namespace: dev, identifier: UUID()), dev),
+                                    (NativeLaunchSelection.rehearsal(containerURL: root, databaseURL: database, bundleIdentifier: dev), dev)] {
+            XCTAssertNil(NativeWidgetFamilyPublisher.group(selection: selection, bundleIdentifier: bundle))
+        }
         let bundles: [String?] = [nil, "", "tech.dongdongbh.mindwtr.native.dev", "tech.dongdongbh.mindwtr.MindwtrWidgets", "foreign.app"]
         for bundle in bundles {
             XCTAssertNil(NativeWidgetFamilyPublisher.group(selection: production, bundleIdentifier: bundle))

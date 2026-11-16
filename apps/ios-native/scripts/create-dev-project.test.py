@@ -107,7 +107,9 @@ class DevProjectTests(unittest.TestCase):
         self.assertEqual(objects["app-sources"], saved["objects"]["app-sources"])
         self.assertEqual(objects["tests"]["dependencies"], ["test-app-dependency"])
         self.assertEqual(objects["app-Debug"]["buildSettings"]["SWIFT_ACTIVE_COMPILATION_CONDITIONS"],
-                         ["$(inherited)", "KEEP_ME", "NATIVE_DEVICE_TEST"])
+                         ["$(inherited)", "KEEP_ME", "NATIVE_DEVICE_TEST", "MINDWTR_NATIVE_DEV"])
+        self.assertEqual(objects["app-Release"]["buildSettings"]["SWIFT_ACTIVE_COMPILATION_CONDITIONS"],
+                         ["$(inherited)", "MINDWTR_NATIVE_DEV"])
         targets = {item["name"]: (key, item) for key, item in objects.items() if item.get("isa") == "PBXNativeTarget"}
         self.assertEqual(set(targets), {"MindwtrNative", "MindwtrNativeUITests", "MindwtrNativeShare", "MindwtrNativeCaptureWidget"})
         self.assertEqual(targets["MindwtrNative"][0], "app")
@@ -132,12 +134,11 @@ class DevProjectTests(unittest.TestCase):
                 if directory == "CaptureWidget":
                     self.assertEqual(settings["CODE_SIGN_ENTITLEMENTS"], "CaptureWidget/Widget.entitlements")
                     self.assertEqual(settings["CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]"], "CaptureWidget/Simulator.entitlements")
-                    self.assertEqual(settings["SWIFT_ACTIVE_COMPILATION_CONDITIONS"], "$(inherited) MINDWTR_WIDGET_EXTENSION")
+                    self.assertEqual(settings["SWIFT_ACTIVE_COMPILATION_CONDITIONS"], "$(inherited) MINDWTR_NATIVE_DEV")
                     self.assertNotIn("Sources/MindwtrNativeCore/CoreHost.swift", paths)
                     self.assertNotIn("Sources/MindwtrNativeCore/DurableFile.swift", paths)
-                    self.assertTrue({"CaptureWidget/NativeWidgetActionIntents.swift",
-                                     "Sources/MindwtrNativeCore/NativeWidgetNextActionSnapshot.swift",
-                                     "Sources/MindwtrNativeCore/NativeWidgetActionStore.swift"}.issubset(paths))
+                    self.assertTrue({"../mobile/widgets-ios/MindwtrWidgetsBundle.swift",
+                                     "../mobile/modules/ios-widget/ios/MindwtrWidgetActionStore.swift"}.issubset(paths))
                     self.assertFalse(any("SQLite" in path or "JavaScriptCore" in path for path in paths))
                     self.assertEqual(objects["project"]["attributes"]["TargetAttributes"][identifier]["SystemCapabilities"],
                                      {"com.apple.ApplicationGroups.iOS": {"enabled": 1}})
@@ -159,7 +160,7 @@ class DevProjectTests(unittest.TestCase):
         scratch = HERE.parent / ".build"
         scratch.mkdir(exist_ok=True)
         with tempfile.TemporaryDirectory(prefix="dev-project-test-", dir=scratch) as directory:
-            native = Path(directory)
+            native = Path(directory) / "ios-native"
             for name in [*generator.SHARE_SOURCES, *generator.WIDGET_SOURCES, "App/NativeCaptureIntents.swift",
                          "App/NativeShareDev.entitlements", "App/NativeShareDevSimulator.entitlements"]:
                 target = native / name
@@ -202,7 +203,7 @@ class DevProjectTests(unittest.TestCase):
         scratch = HERE.parent / ".build"
         scratch.mkdir(exist_ok=True)
         with tempfile.TemporaryDirectory(prefix="dev-cloudkit-project-test-", dir=scratch) as directory:
-            native = Path(directory)
+            native = Path(directory) / "ios-native"
             for name in [*generator.SHARE_SOURCES, *generator.WIDGET_SOURCES, "App/NativeCaptureIntents.swift",
                          "App/Info.plist", "App/NativeShareDev.entitlements", "App/NativeShareDevSimulator.entitlements"]:
                 target = native / name

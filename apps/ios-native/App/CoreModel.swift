@@ -10965,8 +10965,8 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     }
 
     private var productionWidgetFamilySelection: NativeLaunchSelection? {
-        guard Bundle.main.bundleIdentifier == NativeWidgetFamilyPublisher.namespace,
-              let selection = trustedSearchSelection, case .production = selection else { return nil }
+        guard let selection = trustedSearchSelection,
+              NativeWidgetFamilyPublisher.group(selection: selection, bundleIdentifier: Bundle.main.bundleIdentifier) != nil else { return nil }
         return selection
     }
 

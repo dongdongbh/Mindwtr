@@ -48,7 +48,7 @@ private struct MindwtrFocusLockView: View {
 
     var body: some View {
         content
-            .widgetURL(URL(string: entry.payload.focusUri) ?? URL(fileURLWithPath: "/"))
+            .widgetURL(safeMindwtrURL(entry.payload.focusUri))
             .mindwtrLockWidgetBackground()
     }
 

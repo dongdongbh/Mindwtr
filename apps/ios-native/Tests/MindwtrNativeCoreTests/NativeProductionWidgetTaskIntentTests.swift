@@ -57,11 +57,19 @@ final class NativeProductionWidgetTaskIntentTests: XCTestCase {
         XCTAssertEqual(url("task")?.absoluteString, "mindwtr://open?task=task")
     }
 
-    func testEveryNonproductionSelectionIsRefusedEvenWithProductionNamespace() {
+    func testDevelopmentBuildOpensTasksThroughItsOwnScheme() {
+        let database = home.appendingPathComponent("Documents/SQLite/mindwtr.db")
+        let dev = "tech.dongdongbh.mindwtr.native.dev"
+        let selection = NativeLaunchSelection.standard(databaseURL: database, containerURL: home, namespace: dev)
+        XCTAssertEqual(NativeProductionWidgetTaskIntent.url(taskId: "a+b", selection: selection, bundleIdentifier: dev)?.absoluteString,
+                       "mindwtr-native-dev://open?task=a%2Bb")
+        XCTAssertNil(NativeProductionWidgetTaskIntent.url(taskId: "task", selection: selection, bundleIdentifier: productionBundle))
+    }
+
+    func testEveryOtherSelectionIsRefusedEvenWithProductionNamespace() {
         let database = home.appendingPathComponent("Documents/SQLite/mindwtr.db")
         let selections: [NativeLaunchSelection] = [
             .standard(databaseURL: database, containerURL: home, namespace: productionBundle),
-            .standard(databaseURL: database, containerURL: home, namespace: "tech.dongdongbh.mindwtr.native.dev"),
             .isolated(databaseURL: database, containerURL: home, namespace: productionBundle, identifier: UUID()),
             .rehearsal(containerURL: home, databaseURL: database, bundleIdentifier: productionBundle)
         ]

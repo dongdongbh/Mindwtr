@@ -4,6 +4,8 @@ import Foundation
 public final class NativeWidgetFamilyPublisher {
     public static let namespace = NativeLaunchSelection.productionNamespace
     public static let group = "group.tech.dongdongbh.mindwtr"
+    public static let devNamespace = "tech.dongdongbh.mindwtr.native.dev"
+    public static let devGroup = "group." + devNamespace
     public static let kinds = ["MindwtrTasksWidget", "MindwtrCompactWidget", "MindwtrFocusLockWidget", "MindwtrCaptureLockWidget"]
     private let defaults: UserDefaults
     private var published: [(String, String)]?
@@ -18,9 +20,12 @@ public final class NativeWidgetFamilyPublisher {
         #endif
     }
 
-    static func group(selection: NativeLaunchSelection, bundleIdentifier: String?) -> String? {
-        guard bundleIdentifier == namespace, case .production = selection else { return nil }
-        return group
+    public nonisolated static func group(selection: NativeLaunchSelection, bundleIdentifier: String?) -> String? {
+        switch selection {
+        case .production where bundleIdentifier == namespace: return group
+        case let .standard(_, _, selected) where bundleIdentifier == devNamespace && selected == devNamespace: return devGroup
+        default: return nil
+        }
     }
 
     init?(defaults: UserDefaults?) {

@@ -250,7 +250,11 @@ private struct MindwtrWidgetActionState: Codable, Equatable {
 }
 
 final class MindwtrWidgetActionStore: @unchecked Sendable {
+#if MINDWTR_NATIVE_DEV
+    static let appGroupIdentifier = "group.tech.dongdongbh.mindwtr.native.dev"
+#else
     static let appGroupIdentifier = "group.tech.dongdongbh.mindwtr"
+#endif
     static let minimumUndoDelayMilliseconds = 3_000.0
     static let maximumPendingActions = 256
     static let maximumConsumedReceipts = 512

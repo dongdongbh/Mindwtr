@@ -7,7 +7,7 @@ import UIKit
 #endif
 
 let mindwtrWidgetKind = "MindwtrTasksWidget"
-private let mindwtrWidgetAppGroup = "group.tech.dongdongbh.mindwtr"
+private let mindwtrWidgetAppGroup = MindwtrWidgetActionStore.appGroupIdentifier
 private let mindwtrWidgetPayloadKey = "mindwtr-ios-widget-payload"
 private let mindwtrWidgetPayloadKeySmall = "mindwtr-ios-widget-payload-small"
 private let mindwtrWidgetPayloadKeyMedium = "mindwtr-ios-widget-payload-medium"
@@ -977,9 +977,13 @@ func safeMindwtrURL(_ rawValue: String) -> URL {
         let url = URL(string: rawValue),
         url.scheme?.lowercased() == "mindwtr"
     else {
-        return URL(string: MindwtrTasksWidgetPayload.fallback.focusUri)!
+        return safeMindwtrURL(MindwtrTasksWidgetPayload.fallback.focusUri)
     }
+#if MINDWTR_NATIVE_DEV
+    return URL(string: "mindwtr-native-dev" + rawValue.drop(while: { $0 != ":" })) ?? url
+#else
     return url
+#endif
 }
 
 func hexColor(_ hex: String) -> Color {

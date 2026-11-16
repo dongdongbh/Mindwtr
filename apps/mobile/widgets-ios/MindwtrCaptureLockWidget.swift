@@ -46,7 +46,7 @@ private struct MindwtrCaptureLockView: View {
 
     var body: some View {
         content
-            .widgetURL(URL(string: entry.payload.quickCaptureUri) ?? URL(fileURLWithPath: "/"))
+            .widgetURL(safeMindwtrURL(entry.payload.quickCaptureUri))
             .mindwtrCaptureLockWidgetBackground()
     }
 

@@ -22,8 +22,6 @@ const widgetSources = fs
 
 const nativeSources = [
   'apps/ios-native/App/NativeCaptureIntents.swift',
-  'apps/ios-native/CaptureWidget/NativeCaptureWidgetIntent.swift',
-  'apps/ios-native/CaptureWidget/NativeWidgetActionIntents.swift',
 ].map((name) => ({ label: name, text: fs.readFileSync(path.join(repoRoot, name), 'utf8') }));
 
 const supportedModesMatches = source.match(/static\s+var\s+supportedModes\s*:\s*IntentModes/g) || [];

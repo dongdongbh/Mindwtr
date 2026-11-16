@@ -29,18 +29,16 @@ SHARE_SOURCES = (
     "Sources/MindwtrNativeCore/HostFailure.swift",
 )
 WIDGET_SOURCES = (
-    "CaptureWidget/NativeCaptureWidget.swift",
-    "CaptureWidget/NativeCaptureWidgetIntent.swift",
-    "CaptureWidget/NativeNextWidget.swift",
-    "CaptureWidget/NativeWidgetActionIntents.swift",
-    "Sources/MindwtrNativeCore/HostFailure.swift",
-    "Sources/MindwtrNativeCore/NativeJSON.swift",
-    "Sources/MindwtrNativeCore/NativeWidgetNextSnapshot.swift",
-    "Sources/MindwtrNativeCore/NativeWidgetNextActionSnapshot.swift",
-    "Sources/MindwtrNativeCore/NativeWidgetActionStore.swift",
-    "Sources/MindwtrNativeCore/NativeWidgetNextCache.swift",
-    "Sources/MindwtrNativeCore/NativeWidgetTaskLink.swift",
+    "../mobile/widgets-ios/MindwtrWidgetsBundle.swift",
+    "../mobile/widgets-ios/MindwtrTasksWidget.swift",
+    "../mobile/widgets-ios/MindwtrTasksWidgetIntents.swift",
+    "../mobile/widgets-ios/MindwtrCompactWidget.swift",
+    "../mobile/widgets-ios/MindwtrFocusLockWidget.swift",
+    "../mobile/widgets-ios/MindwtrCaptureLockWidget.swift",
+    "../mobile/modules/ios-widget/ios/MindwtrWidgetActionStore.swift",
+    "../mobile/modules/ios-widget/ios/MindwtrWidgetTaskItem.swift",
 )
+DEV_WIDGET_CONDITION = "MINDWTR_NATIVE_DEV"
 
 
 def require(condition, message):
@@ -120,10 +118,10 @@ def overlay(project, locales):
         settings["INFOPLIST_KEY_CFBundleDisplayName"] = "Mindwtr Native Dev"
         settings["CODE_SIGN_ENTITLEMENTS"] = "App/NativeShareDev.entitlements"
         settings["CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]"] = "App/NativeShareDevSimulator.entitlements"
-        if configuration["name"] == "Debug":
-            conditions = settings.get("SWIFT_ACTIVE_COMPILATION_CONDITIONS", [])
-            conditions = conditions.split() if isinstance(conditions, str) else list(conditions)
-            settings["SWIFT_ACTIVE_COMPILATION_CONDITIONS"] = list(dict.fromkeys(["$(inherited)", *conditions, "NATIVE_DEVICE_TEST"]))
+        conditions = settings.get("SWIFT_ACTIVE_COMPILATION_CONDITIONS", [])
+        conditions = conditions.split() if isinstance(conditions, str) else list(conditions)
+        extra = ["NATIVE_DEVICE_TEST", DEV_WIDGET_CONDITION] if configuration["name"] == "Debug" else [DEV_WIDGET_CONDITION]
+        settings["SWIFT_ACTIVE_COMPILATION_CONDITIONS"] = list(dict.fromkeys(["$(inherited)", *conditions, *extra]))
     for configuration in configurations(tests):
         settings = configuration["buildSettings"]
         require(settings.get("PRODUCT_BUNDLE_IDENTIFIER") == "tech.dongdongbh.mindwtr.uitests", "Unexpected base UI-test identity")
@@ -182,7 +180,7 @@ def overlay(project, locales):
                     "CODE_SIGN_ENTITLEMENTS": "ShareExtension/ShareExtension.entitlements",
                     "CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]": "ShareExtension/Simulator.entitlements"})
             else:
-                settings.update({"SWIFT_ACTIVE_COMPILATION_CONDITIONS": "$(inherited) MINDWTR_WIDGET_EXTENSION",
+                settings.update({"SWIFT_ACTIVE_COMPILATION_CONDITIONS": "$(inherited) " + DEV_WIDGET_CONDITION,
                     "CODE_SIGN_ENTITLEMENTS": "CaptureWidget/Widget.entitlements",
                     "CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]": "CaptureWidget/Simulator.entitlements"})
             configs.append(add(name + ":config:" + original["name"],
