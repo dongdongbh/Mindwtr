@@ -3,12 +3,27 @@ import XCTest
 
 final class MindwtrWidgetPayloadTests: XCTestCase {
     func testPublishedMembershipSurvivesMidnightUntilTheAppReplacesTheSnapshot() throws {
+        try compileAndRun(Self.checks)
+    }
+
+    func testNativeDevelopmentBuildUsesItsOwnAppGroupAndLinkScheme() throws {
+        try compileAndRun(Self.productionIdentityChecks)
+        try compileAndRun(Self.developmentIdentityChecks, conditions: ["MINDWTR_NATIVE_DEV"])
+    }
+
+    func testNativePublishedFamilySnapshotDecodesForEveryWidgetList() throws {
+        try compileAndRun(Self.nativeSnapshotChecks, resources: ["native-family-snapshot.json"])
+    }
+
+    private func compileAndRun(_ checks: String, conditions: [String] = [], resources: [String] = []) throws {
         let package = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
         let mobile = package.deletingLastPathComponent().deletingLastPathComponent()
         let widget = try String(contentsOf: mobile.appendingPathComponent("widgets-ios/MindwtrTasksWidget.swift"))
         let boundary = try XCTUnwrap(widget.range(of: "struct MindwtrTasksWidgetEntry: TimelineEntry"))
+        let links = try XCTUnwrap(widget.range(of: "func safeMindwtrURL"))
+        let linksEnd = try XCTUnwrap(widget.range(of: "func hexColor"))
 
-        let payload = "import Foundation\n" + widget[..<boundary.lowerBound]
+        let payload = "import Foundation\n" + (widget[..<boundary.lowerBound] + widget[links.lowerBound..<linksEnd.lowerBound])
             .replacingOccurrences(of: "import AppIntents\n", with: "")
             .replacingOccurrences(of: "import SwiftUI\n", with: "")
             .replacingOccurrences(of: "import WidgetKit\n", with: "")
@@ -19,15 +34,17 @@ final class MindwtrWidgetPayloadTests: XCTestCase {
         let main = output.appendingPathComponent("main.swift")
         let executable = output.appendingPathComponent("projection")
         try payload.write(to: projection, atomically: true, encoding: .utf8)
-        try Self.checks.write(to: main, atomically: true, encoding: .utf8)
+        try checks.write(to: main, atomically: true, encoding: .utf8)
         let compilation = try run("/usr/bin/env", [
             "swiftc", package.appendingPathComponent("ios/MindwtrWidgetActionStore.swift").path,
             package.appendingPathComponent("ios/MindwtrWidgetTaskItem.swift").path,
             projection.path, main.path, "-o", executable.path,
-        ])
+        ] + conditions.flatMap { ["-D", $0] })
         XCTAssertEqual(compilation.status, 0, compilation.log)
         guard compilation.status == 0 else { return }
-        let result = try run(executable.path, [])
+        let result = try run(executable.path, resources.map {
+            URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("Fixtures/" + $0).path
+        })
         XCTAssertEqual(result.status, 0, result.log)
     }
 
@@ -123,5 +140,52 @@ final class MindwtrWidgetPayloadTests: XCTestCase {
     precondition(replacement.selectingList("upcoming", at: midnight).dateLabel == "Published Mar 8", "fresh app header ignored")
     precondition(replacement.selectingList("focus", at: midnight).items.map(\.id) == ["tomorrow"], "fresh Focus membership ignored")
     print("Production widget payload: cached midnight/DST/timezone retention, app replacement, and completion projection passed")
+    """##
+    private static let productionIdentityChecks = ##"""
+    import Foundation
+
+    precondition(MindwtrWidgetActionStore.appGroupIdentifier == "group.tech.dongdongbh.mindwtr", "production widget group changed")
+    precondition(safeMindwtrURL("mindwtr:///widget-list/filter:a%20b").absoluteString == "mindwtr:///widget-list/filter:a%20b", "production link changed")
+    precondition(safeMindwtrURL("mindwtr://open?task=t").absoluteString == "mindwtr://open?task=t", "production task link changed")
+    precondition(safeMindwtrURL("https://example.com").absoluteString == "mindwtr:///focus", "foreign link was not refused")
+    print("Production widget identity unchanged")
+    """##
+
+    private static let developmentIdentityChecks = ##"""
+    import Foundation
+
+    precondition(MindwtrWidgetActionStore.appGroupIdentifier == "group.tech.dongdongbh.mindwtr.native.dev", "dev widget group")
+    precondition(safeMindwtrURL("mindwtr:///widget-list/filter:a%20b").absoluteString == "mindwtr-native-dev:///widget-list/filter:a%20b", "dev list link")
+    precondition(safeMindwtrURL("MINDWTR://open?task=t").absoluteString == "mindwtr-native-dev://open?task=t", "dev task link")
+    precondition(safeMindwtrURL("https://example.com").absoluteString == "mindwtr-native-dev:///focus", "dev foreign link was not refused")
+    print("Native development widget identity uses its own group and scheme")
+    """##
+
+    private static let nativeSnapshotChecks = ##"""
+    import Foundation
+
+    let root = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[1]))) as! [String: Any]
+    let payloads = root["payloads"] as! [String: String]
+    precondition(Set(payloads.keys) == ["default", "small", "medium", "large", "extraLarge"], "family set changed")
+    for (family, json) in payloads {
+        let payload = try JSONDecoder().decode(MindwtrTasksWidgetPayload.self, from: Data(json.utf8))
+        precondition(payload.quickCaptureUri.hasPrefix("mindwtr:///capture-quick"), "\(family) capture link")
+        for list in ["focus", "focus:available", "inbox", "next", "upcoming", "waiting", "someday"] {
+            let selected = payload.selectingList(list)
+            precondition(!selected.headerTitle.isEmpty, "\(family) \(list) lost its title")
+            precondition(safeMindwtrURL(selected.focusUri).scheme == "mindwtr", "\(family) \(list) header link")
+        }
+        for filter in payload.savedFilters ?? [] {
+            precondition(payload.title(forList: "filter:" + filter.id) == filter.name, "\(family) saved filter title")
+        }
+        let next = payload.selectingList("next")
+        let rows = next.items + (next.sections ?? []).flatMap(\.items)
+        precondition(!rows.isEmpty, "\(family) Next list is empty")
+        for row in rows {
+            precondition(row.completionToken.map { !$0.isEmpty } == true, "\(family) row cannot be checked off")
+            precondition(row.openUri.map { $0.hasPrefix("mindwtr://open?task=") } == true, "\(family) row link")
+        }
+    }
+    print("Native family snapshot decodes for every list in every size")
     """##
 }

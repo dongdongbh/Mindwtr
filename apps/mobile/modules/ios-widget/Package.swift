@@ -27,7 +27,8 @@ let package = Package(
         .testTarget(
             name: "MindwtrWidgetActionStoreTests",
             dependencies: ["MindwtrWidgetActionStore"],
-            path: "tests"
+            path: "tests",
+            exclude: ["Fixtures"]
         ),
     ]
 )

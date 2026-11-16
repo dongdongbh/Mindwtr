@@ -38438,3 +38438,233 @@ extension FoundationUITests {
         XCTAssertFalse(app.staticTexts["calendar-push-lifecycle-error"].waitForExistence(timeout: 15))
     }
 }
+
+extension FoundationUITests {
+    private func rnWidgetRun() throws -> (run: String, environment: [String: String]) {
+        let environment = ProcessInfo.processInfo.environment
+        guard environment["MINDWTR_RN_WIDGET_UI"] == "1", let run = environment["MINDWTR_RN_WIDGET_RUN"],
+              UUID(uuidString: run)?.uuidString.lowercased() == run else {
+            throw XCTSkip("Root-owned native.dev RN widget run required")
+        }
+        continueAfterFailure = false
+        return (run, environment)
+    }
+
+    private func rnWidgetEvidence(_ home: XCUIApplication, _ name: String) {
+        let screen = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        screen.name = name; screen.lifetime = .keepAlways; add(screen)
+        let hierarchy = XCTAttachment(string: String(home.debugDescription.suffix(40_000)))
+        hierarchy.name = name + "-hierarchy"; hierarchy.lifetime = .keepAlways; add(hierarchy)
+    }
+
+    private func rnWidgetFind(_ home: XCUIApplication, _ element: XCUIElement) -> Bool {
+        for _ in 0..<4 {
+            if element.waitForExistence(timeout: 4) { return true }
+            home.swipeLeft()
+        }
+        if !element.exists { rnWidgetEvidence(home, "rn-widget-missing") }
+        return element.exists
+    }
+
+    func testRNWidgetSeedNextTask() throws {
+        let (run, environment) = try rnWidgetRun()
+        let app = XCUIApplication(bundleIdentifier: "tech.dongdongbh.mindwtr.native.dev")
+        app.launchArguments = ["-AppleLanguages", "(en-US)", "-AppleLocale", "en_US"]
+        app.launch(); defer { app.terminate() }
+        boardEnabled(app.buttons["capture-open"], timeout: 40)
+        boardTap(app, "capture-open")
+        let input = app.textViews["capture-input"]
+        boardEnabled(input)
+        input.typeText((environment["MINDWTR_RN_WIDGET_TITLE"] ?? "RN widget " + run) + " /next")
+        let another = app.switches["capture-add-another"]
+        if another.exists && another.value as? String == "1" { another.tap() }
+        boardTap(app, "capture-save")
+        XCTAssertTrue(input.waitForNonExistence(timeout: 30))
+        boardEnabled(app.buttons["capture-open"], timeout: 30)
+        XCTAssertFalse(app.buttons["persistence-retry"].exists)
+        Thread.sleep(forTimeInterval: 5)
+    }
+
+    func testRNWidgetPlaceFromGallery() throws {
+        let (run, environment) = try rnWidgetRun()
+        let card = try XCTUnwrap(environment["MINDWTR_RN_WIDGET_CARD"])
+        let swipes = Int(environment["MINDWTR_RN_WIDGET_SWIPES"] ?? "0") ?? 0
+        XCUIDevice.shared.press(.home)
+        let home = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        XCTAssertEqual(home.state, .runningForeground)
+        defer { rnWidgetEvidence(home, "rn-widget-placed-" + run) }
+        if home.buttons["Done"].exists { home.buttons["Done"].tap() }
+        home.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.72)).press(forDuration: 1.5)
+        let edit = home.buttons["Edit"]
+        if edit.waitForExistence(timeout: 5) { edit.tap() }
+        let addWidget = home.buttons["Add Widget"]
+        XCTAssertTrue(addWidget.waitForExistence(timeout: 5)); addWidget.tap()
+        let search = home.searchFields.firstMatch
+        XCTAssertTrue(search.waitForExistence(timeout: 5)); search.tap(); search.typeText("Mindwtr Native Dev")
+        Thread.sleep(forTimeInterval: 2)
+        rnWidgetEvidence(home, "rn-widget-search-" + run)
+        let results = home.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Mindwtr Native Dev"))
+        let result = results.allElementsBoundByIndex.first { $0.isHittable && $0.elementType != .icon }
+        XCTAssertNotNil(result); result?.tap()
+        let preview = home.buttons.matching(NSPredicate(format: "label CONTAINS %@", card)).firstMatch
+        var pages = 0
+        while !preview.waitForExistence(timeout: 3), pages < 6 {
+            home.buttons.matching(NSPredicate(format: "label CONTAINS %@", ", ")).firstMatch.swipeLeft(); pages += 1
+        }
+        rnWidgetEvidence(home, "rn-widget-gallery-" + run)
+        XCTAssertTrue(preview.exists)
+        for _ in 0..<swipes { preview.swipeLeft() }
+        let install = home.buttons[" Add Widget"]
+        XCTAssertTrue(install.waitForExistence(timeout: 5)); install.tap()
+        let done = home.buttons["Done"]
+        XCTAssertTrue(done.waitForExistence(timeout: 10)); done.tap()
+        Thread.sleep(forTimeInterval: 4)
+    }
+
+    func testRNWidgetCompleteFromHome() throws {
+        let (run, environment) = try rnWidgetRun()
+        let title = try XCTUnwrap(environment["MINDWTR_RN_WIDGET_TITLE"])
+        XCUIDevice.shared.press(.home)
+        let home = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let row = home.buttons.matching(NSPredicate(format: "label ENDSWITH %@", ": " + title))
+        let complete = row.firstMatch
+        XCTAssertTrue(rnWidgetFind(home, complete))
+        let completeLabel = complete.label
+        rnWidgetEvidence(home, "rn-widget-before-complete-" + run)
+        complete.tap()
+        let undo = row.matching(NSPredicate(format: "label != %@", completeLabel)).firstMatch
+        XCTAssertTrue(undo.waitForExistence(timeout: 5))
+        rnWidgetEvidence(home, "rn-widget-pending-complete-" + run)
+        Thread.sleep(forTimeInterval: 4)
+        let app = XCUIApplication(bundleIdentifier: "tech.dongdongbh.mindwtr.native.dev")
+        app.launchArguments = ["-AppleLanguages", "(en-US)", "-AppleLocale", "en_US"]
+        app.launch()
+        boardEnabled(app.buttons["capture-open"], timeout: 40)
+        Thread.sleep(forTimeInterval: 6)
+        XCTAssertFalse(app.buttons["persistence-retry"].exists)
+        XCUIDevice.shared.press(.home)
+        let next = home.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", completeLabel.replacingOccurrences(of: title, with: ""))).firstMatch
+        XCTAssertTrue(rnWidgetFind(home, next))
+        XCTAssertTrue(complete.waitForNonExistence(timeout: 20))
+        XCTAssertFalse(undo.exists)
+        rnWidgetEvidence(home, "rn-widget-after-complete-" + run)
+        app.terminate()
+    }
+}
+
+
+extension FoundationUITests {
+    func testRNWidgetLockScreenPlace() throws {
+        let (run, environment) = try rnWidgetRun()
+        let cards = (environment["MINDWTR_RN_WIDGET_LOCK_CARDS"] ?? "Focus,Add Task").split(separator: ",").map(String.init)
+        let home = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        XCUIDevice.shared.perform(NSSelectorFromString("pressLockButton"))
+        Thread.sleep(forTimeInterval: 2)
+        XCUIDevice.shared.press(.home)
+        Thread.sleep(forTimeInterval: 2)
+        rnWidgetEvidence(home, "rn-widget-lock-awake-" + run)
+        home.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45)).press(forDuration: 1.5)
+        Thread.sleep(forTimeInterval: 2)
+        rnWidgetEvidence(home, "rn-widget-lock-gallery-" + run)
+        let customize = home.buttons["Customize"]
+        XCTAssertTrue(customize.waitForExistence(timeout: 5)); customize.tap()
+        Thread.sleep(forTimeInterval: 2)
+        rnWidgetEvidence(home, "rn-widget-lock-customize-" + run)
+        let lockScreen = home.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS[c] %@", "Lock Screen")).firstMatch
+        if lockScreen.waitForExistence(timeout: 5) { lockScreen.tap(); Thread.sleep(forTimeInterval: 2) }
+        rnWidgetEvidence(home, "rn-widget-lock-editor-" + run)
+        let addWidgets = home.buttons["grouped-widgets-reticle-view"].firstMatch
+        XCTAssertTrue(addWidgets.waitForExistence(timeout: 5)); addWidgets.tap()
+        Thread.sleep(forTimeInterval: 2)
+        rnWidgetEvidence(home, "rn-widget-lock-picker-" + run)
+        let app = home.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "Mindwtr Native Dev")).allElementsBoundByIndex.first { $0.isHittable }
+        if app == nil { home.swipeUp(); Thread.sleep(forTimeInterval: 1) }
+        let target = app ?? home.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "Mindwtr Native Dev")).allElementsBoundByIndex.first { $0.isHittable }
+        XCTAssertNotNil(target); target?.tap()
+        Thread.sleep(forTimeInterval: 2)
+        rnWidgetEvidence(home, "rn-widget-lock-app-" + run)
+        for card in cards {
+            for family in ["Rectangular", "Circular"] {
+                let preview = home.buttons.matching(NSPredicate(format: "label == %@ AND value CONTAINS %@",
+                    "Mindwtr Native Dev, " + card, family)).firstMatch
+                let row = home.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Mindwtr Native Dev, ")).firstMatch
+                if !preview.isHittable, row.exists {
+                    row.swipeLeft()
+                    Thread.sleep(forTimeInterval: 1)
+                    rnWidgetEvidence(home, "rn-widget-lock-page-" + card + "-" + run)
+                }
+                if preview.exists, preview.isHittable { preview.tap(); Thread.sleep(forTimeInterval: 2) }
+            }
+        }
+        rnWidgetEvidence(home, "rn-widget-lock-added-" + run)
+        let close = home.buttons.matching(NSPredicate(format: "label IN %@", ["close", "Close", "Dismiss"])).allElementsBoundByIndex.first { $0.isHittable }
+        if let close { close.tap() } else { home.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.2)).tap() }
+        Thread.sleep(forTimeInterval: 2)
+        if !home.buttons["editing-done"].isHittable {
+            home.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.47)).press(forDuration: 0.1, thenDragTo:
+                home.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.98)))
+            Thread.sleep(forTimeInterval: 2)
+        }
+        let quickAction = home.buttons["Add Quick Action"]
+        if quickAction.waitForExistence(timeout: 3) {
+            quickAction.tap(); Thread.sleep(forTimeInterval: 2)
+            rnWidgetEvidence(home, "rn-widget-lock-controls-" + run)
+            let search = home.searchFields.firstMatch
+            if search.waitForExistence(timeout: 3) { search.tap(); search.typeText("Add Task"); Thread.sleep(forTimeInterval: 2) }
+            rnWidgetEvidence(home, "rn-widget-lock-controls-search-" + run)
+            let control = home.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Add Task")).allElementsBoundByIndex.first {
+                $0.isHittable && $0.elementType != .searchField
+            }
+            control?.tap(); Thread.sleep(forTimeInterval: 2)
+            rnWidgetEvidence(home, "rn-widget-lock-control-added-" + run)
+        }
+        let done = home.buttons["editing-done"]
+        if done.waitForExistence(timeout: 3) { done.tap(); Thread.sleep(forTimeInterval: 2) }
+        rnWidgetEvidence(home, "rn-widget-lock-final-" + run)
+        XCUIDevice.shared.press(.home)
+        Thread.sleep(forTimeInterval: 2)
+        XCUIDevice.shared.perform(NSSelectorFromString("pressLockButton"))
+        Thread.sleep(forTimeInterval: 2)
+        XCUIDevice.shared.press(.home)
+        Thread.sleep(forTimeInterval: 4)
+        rnWidgetEvidence(home, "rn-widget-lock-screen-" + run)
+        XCUIDevice.shared.press(.home)
+    }
+}
+
+
+extension FoundationUITests {
+    private func rnWidgetConfirmOpen(_ home: XCUIApplication, _ name: String) {
+        Thread.sleep(forTimeInterval: 3)
+        rnWidgetEvidence(home, name)
+        let alert = home.alerts.firstMatch
+        if alert.exists, alert.label == "Open in “Mindwtr Native Dev”?", alert.buttons["Open"].exists { alert.buttons["Open"].tap() }
+    }
+
+    func testRNWidgetLinksOpenNativeDev() throws {
+        let (run, environment) = try rnWidgetRun()
+        let task = try XCTUnwrap(environment["MINDWTR_RN_WIDGET_TASK_URL"].flatMap(URL.init(string:)))
+        let capture = try XCTUnwrap(URL(string: "mindwtr-native-dev:///capture-quick?mode=text"))
+        let native = XCUIApplication(bundleIdentifier: "tech.dongdongbh.mindwtr.native.dev")
+        let rn = XCUIApplication(bundleIdentifier: "tech.dongdongbh.mindwtr")
+        let home = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        defer { native.terminate(); XCUIDevice.shared.press(.home) }
+        native.terminate()
+        native.open(capture)
+        rnWidgetConfirmOpen(home, "rn-widget-link-capture-opened-" + run)
+        let input = native.textViews["capture-input"]
+        XCTAssertTrue(input.waitForExistence(timeout: 40))
+        XCTAssertEqual(native.state, .runningForeground)
+        XCTAssertNotEqual(rn.state, .runningForeground)
+        rnWidgetEvidence(native, "rn-widget-link-capture-" + run)
+        native.buttons["capture-close"].tap()
+        XCTAssertTrue(input.waitForNonExistence(timeout: 20))
+        native.open(task)
+        rnWidgetConfirmOpen(home, "rn-widget-link-task-opened-" + run)
+        boardEnabled(native.buttons["task-view-close"], timeout: 30)
+        XCTAssertEqual(native.state, .runningForeground)
+        XCTAssertNotEqual(rn.state, .runningForeground)
+        rnWidgetEvidence(native, "rn-widget-link-task-" + run)
+        boardTap(native, "task-view-close")
+    }
+}
