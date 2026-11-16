@@ -3048,7 +3048,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     @ObservationIgnored private var previewGeneration = 0
     private var previewedText = ""
     private var captureID = UUID().uuidString {
-        didSet { if captureID != oldValue { retireCaptureCopilot(clearApplied: true) } }
+        didSet { if captureID != oldValue { captureLinkTags = []; retireCaptureCopilot(clearApplied: true) } }
     }
     private var capturePending = false
     private enum CaptureSubmissionKind {
@@ -3116,6 +3116,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     private(set) var captureCopilotWorking = false
     private(set) var captureCopilotError: String?
     private var captureCopilotApplied: CoreObject = ["tags": [String]()]
+    private var captureLinkTags: [String] = []
     private var captureCopilotSuggestion: CoreObject?
     private var captureCopilotQuestion: CoreObject?
     private var captureCopilotLanguage = ""
@@ -8906,7 +8907,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
             guard current() else { return false }
             morePresented = false
             capture = view; captureID = captureId.isEmpty ? UUID().uuidString : captureId
-            captureCopilotApplied = ["tags": tags]
+            captureLinkTags = tags; captureCopilotApplied = ["tags": tags]
             draft = text; noteDraft = note; contextQuery = ""; contextPickerPresented = false; previewedText = "\u{0}"
             notice = nil
             capturePresented = true
@@ -44478,7 +44479,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         captureCopilotWorking = false
         captureCopilotSuggestion = nil; captureCopilotQuestion = nil
         captureCopilotView = [:]; captureCopilotOptions = [:]; captureCopilotError = nil
-        if clearApplied { captureCopilotApplied = ["tags": [String]()] }
+        if clearApplied { captureCopilotApplied = ["tags": captureLinkTags] }
     }
 
     func cancelCaptureCopilot() {

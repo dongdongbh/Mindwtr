@@ -1609,6 +1609,32 @@ final class FoundationUITests: XCTestCase {
         XCTAssertFalse(app.buttons["persistence-retry"].exists)
     }
 
+    func testNativeCaptureLinkTagsSurviveTitleEditAndSave() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication(), library = UUID().uuidString.lowercased()
+        app.launchArguments = ["--native-ui-test-library", library, "-AppleLanguages", "(en-US)", "-AppleLocale", "en_US"]
+        app.launch(); defer { app.terminate() }
+        boardEnabled(app.buttons["capture-open"], timeout: 40)
+        app.open(URL(string: "mindwtr-native-dev:///capture?title=Link%20tags&tags=errand,two%20words")!)
+        let input = app.textViews["capture-input"]
+        let prefilled = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in (input.value as? String) == "Link tags" }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [prefilled], timeout: 30), .completed)
+        input.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)).tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 10))
+        input.typeText(" edited")
+        boardTap(app, "capture-save")
+        let row = app.buttons["Link tags edited"]
+        boardEnabled(row, timeout: 30)
+        row.tap()
+        boardTap(app, "task-mode-edit")
+        if !app.textFields["task-editor-tags"].exists { boardTap(app, "task-editor-section-organization") }
+        let tags = app.textFields["task-editor-tags"]
+        XCTAssertTrue(tags.waitForExistence(timeout: 15))
+        let value = tags.value as? String ?? ""
+        XCTAssertTrue(value.contains("#errand") && value.contains("#two words"), value)
+        XCTAssertFalse(app.buttons["persistence-retry"].exists)
+    }
+
     private func task454InboxFallback(_ suffix: String, identifier: String) throws {
         let app = try task454App(suffix)
         try task454Open(app, "mindwtr-native-dev://open?task=" + identifier); defer { app.terminate() }
