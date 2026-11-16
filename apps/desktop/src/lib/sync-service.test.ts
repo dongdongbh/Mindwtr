@@ -392,6 +392,7 @@ describe('sync-service test utils', () => {
             markLocalWrite: vi.fn(),
         });
         setPendingExternalSyncChangeForTests();
+        useTaskStore.setState((state) => ({ settings: { ...state.settings, lastSyncAt: '2000-01-01T00:00:00.000Z' } }));
         const unsubscribe = useTaskStore.subscribe((state, previous) => {
             if (state.settings?.lastSyncAt !== previous.settings?.lastSyncAt) storeState.lastDataChangeAt = 2_000;
         });
