@@ -45,7 +45,9 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.absolutePadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.selection.selectable
@@ -110,6 +112,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.zIndex
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.fragment.app.FragmentActivity
@@ -238,43 +241,57 @@ class MainActivity : FragmentActivity() {
 
                                 Text(error.orEmpty(), color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("boot-failure").padding(24.dp))
                             } else {
-
-
-                                val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
-
-                                val quick = screen == Screen.Projects && menu.quickView != "projects"
-                                if ((screen != Screen.Projects || openProjectId == null || quick) && !landscape) TopBar(model, t(if (screen == Screen.Projects) menu.quickLabel else screen.label))
-
-                                error?.let { message ->
-                                    FailureBanner(message) {
-                                        if (failedAction == null) RetryButton({ refresh() }, !busy, "read-retry")
-                                        else OwedRetry(model)
-                                    }
-                                }
+                                val adaptive = rememberAdaptiveWindow()
+                                val railed = adaptive.isExpanded
+                                val navigation = with(LocalDensity.current) { WindowInsets.navigationBars.getBottom(this).toDp() }
+                                val sheetFrame = moreSheetFrame(adaptive, tabBarHeight(navigation).value)?.let { it.copy(left = it.left - adaptive.insets.left) }
                                 Box(Modifier.weight(1f)) {
-                                    Column(Modifier.fillMaxSize()) {
+                                    Row(Modifier.fillMaxSize()) {
+                                        if (railed) TabRail(model, adaptive)
+                                        Column(Modifier.weight(1f)) {
+                                            val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
 
-                                        Box(Modifier.weight(1f).fillMaxWidth().background(c.bg).clipToBounds()) {
-                                            when (screen) {
-                                                Screen.Inbox -> InboxList(model, Modifier.fillMaxSize())
-                                                Screen.Focus -> FocusList(model, Modifier.fillMaxSize())
-                                                Screen.Projects -> if (quick) QuickList(model, Modifier.fillMaxSize()) else ProjectsTab(model, Modifier.fillMaxSize())
+                                            val quick = screen == Screen.Projects && menu.quickView != "projects"
+                                            if ((screen != Screen.Projects || openProjectId == null || quick) && (!landscape || railed)) TopBar(model, t(if (screen == Screen.Projects) menu.quickLabel else screen.label))
+
+                                            error?.let { message ->
+                                                FailureBanner(message) {
+                                                    if (failedAction == null) RetryButton({ refresh() }, !busy, "read-retry")
+                                                    else OwedRetry(model)
+                                                }
                                             }
+                                            Box(Modifier.weight(1f)) {
+                                                Column(Modifier.fillMaxSize()) {
 
-                                            if (menu.sheet) MoreSheet(model)
+                                                    Box(Modifier.weight(1f).fillMaxWidth().background(c.bg).clipToBounds()) {
+                                                        when (screen) {
+                                                            Screen.Inbox -> InboxList(model, Modifier.fillMaxSize())
+                                                            Screen.Focus -> FocusList(model, Modifier.fillMaxSize())
+                                                            Screen.Projects -> if (quick) QuickList(model, Modifier.fillMaxSize()) else ProjectsTab(model, Modifier.fillMaxSize())
+                                                        }
+
+                                                        if (menu.sheet && !railed) CompositionLocalProvider(LocalMoreSheetFrame provides sheetFrame) { MoreSheet(model) }
+                                                    }
+                                                    if (!railed) Box(adaptive.foregroundFrame.takeIf { adaptive.activeFeature?.vertical == true }
+                                                        ?.let { pane -> Modifier.absolutePadding(left = (pane.x - adaptive.insets.left).dp).width(pane.width.dp) } ?: Modifier) { TabBar(model) }
+                                                }
+
+                                                Box(Modifier.fillMaxSize().navigationBarsPadding()) {
+
+                                                    if (capture == null && !railed) ToastCard(model, Modifier.align(Alignment.BottomCenter).padding(bottom = tabToastBottomAboveNavigationBar(railed)))
+                                                    capture?.let { CapturePopup(model, it) }
+                                                    if (areaSheet) AreaSheet(model)
+
+                                                    if (quick || screen == Screen.Inbox) MenuDialogs(model)
+                                                    if (screen == Screen.Focus) FocusDialogs(model)
+                                                    StatusMenu(model)
+                                                }
+                                            }
                                         }
-                                        TabBar(model)
                                     }
-
-                                    Box(Modifier.fillMaxSize().navigationBarsPadding()) {
-
-                                        if (capture == null) ToastCard(model, Modifier.align(Alignment.BottomCenter).padding(bottom = tabToastBottomAboveNavigationBar()))
-                                        capture?.let { CapturePopup(model, it) }
-                                        if (areaSheet) AreaSheet(model)
-
-                                        if (quick || screen == Screen.Inbox) MenuDialogs(model)
-                                        if (screen == Screen.Focus) FocusDialogs(model)
-                                        StatusMenu(model)
+                                    if (menu.sheet && railed) CompositionLocalProvider(LocalMoreSheetFrame provides sheetFrame) { MoreSheet(model) }
+                                    if (capture == null && railed) Box(Modifier.fillMaxSize().navigationBarsPadding()) {
+                                        ToastCard(model, Modifier.align(Alignment.BottomCenter).padding(bottom = tabToastBottomAboveNavigationBar(railed)))
                                     }
                                 }
                             }
@@ -442,14 +459,16 @@ fun OwedRetry(model: InboxViewModel) {
 
 
 @Composable
-private fun tabToastBottomAboveNavigationBar(): Dp {
+private fun tabToastBottomAboveNavigationBar(railed: Boolean): Dp {
     val navigation = with(LocalDensity.current) { WindowInsets.navigationBars.getBottom(this).toDp() }
-    return rnTabToastBottom(navigation) - navigation
+    return (if (railed) rnToastBottom(navigation) else rnTabToastBottom(navigation)) - navigation
 }
 
 internal fun tabBarHeight(navigation: Dp): Dp = 66.dp + if (navigation >= 20.dp) navigation - 12.dp else 0.dp
 
 internal fun rnTabToastBottom(navigation: Dp): Dp = tabBarHeight(navigation) + 12.dp
+
+private fun quickIcon(quick: String) = when (quick) { "review" -> Lucide.ClipboardCheck; "contexts" -> Lucide.Circle; "calendar" -> Lucide.Calendar; else -> Lucide.Folder }
 
 @Composable
 private fun TabBar(model: InboxViewModel) {
@@ -463,9 +482,38 @@ private fun TabBar(model: InboxViewModel) {
         TabItem(model, Screen.Focus, Lucide.Target)
         TabItem(model, Screen.Inbox, Lucide.Inbox)
         CaptureButton(model)
-        TabItem(model, Screen.Projects, when (quick) { "review" -> Lucide.ClipboardCheck; "contexts" -> Lucide.Circle; "calendar" -> Lucide.Calendar; else -> Lucide.Folder }, model.menu.quickLabel)
+        TabItem(model, Screen.Projects, quickIcon(quick), model.menu.quickLabel)
         MenuTab(model)
     }
+}
+
+
+@Composable
+private fun TabRail(model: InboxViewModel, adaptive: AdaptiveWindow) {
+    val c = LocalTheme.current.colors
+    val navigation = with(LocalDensity.current) { WindowInsets.navigationBars.getBottom(this).toDp() }
+    val pane = adaptive.navigationFrame.takeIf { adaptive.activeFeature?.vertical == false }
+    Column(Modifier.width(adaptive.navigationWidth.dp)
+        .then(pane?.let { Modifier.padding(top = (it.y - adaptive.insets.top).dp).height(it.height.dp) } ?: Modifier.fillMaxHeight())
+        .background(c.cardBg).railEdge(c.border).padding(start = 8.dp, end = 8.dp, bottom = 16.dp + if (pane == null) navigation else 0.dp)
+        .testTag("tab-rail"), verticalArrangement = Arrangement.Bottom) {
+        RailSlot(2.dp) { TabItem(model, Screen.Focus, Lucide.Target) }
+        RailSlot(2.dp) { TabItem(model, Screen.Inbox, Lucide.Inbox) }
+        RailSlot(6.dp) { CaptureButton(model) }
+        RailSlot(2.dp) { TabItem(model, Screen.Projects, quickIcon(model.menu.quickView), model.menu.quickLabel) }
+        RailSlot(2.dp) { MenuTab(model) }
+    }
+}
+
+
+@Composable
+private fun RailSlot(barLift: Dp, item: @Composable RowScope.() -> Unit) {
+    Row(Modifier.fillMaxWidth().height(64.dp).offset(y = barLift), verticalAlignment = Alignment.CenterVertically, content = item)
+}
+
+
+private fun Modifier.railEdge(color: Color) = drawBehind {
+    drawRect(color, Offset(if (layoutDirection == LayoutDirection.Ltr) size.width - 1f else 0f, 0f), Size(1f, size.height))
 }
 
 

@@ -11,6 +11,7 @@ import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.absolutePadding
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -37,6 +38,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.AbsoluteAlignment
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -121,9 +123,11 @@ fun MoreSheet(model: InboxViewModel) = with(model.menu) {
     Box(Modifier.fillMaxSize().testTag("more-sheet")) {
         val close = t("common.close")
         Box(Modifier.fillMaxSize().background(theme.sheetScrim).clickable(role = Role.Button) { dismiss() }.semantics { contentDescription = close })
-        val shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
+        val frame = LocalMoreSheetFrame.current
+        val shape = if (frame == null) RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp) else RoundedCornerShape(24.dp)
         Column(
-            Modifier.align(Alignment.BottomCenter).fillMaxWidth().heightIn(max = (height * 0.82f).dp)
+            (if (frame == null) Modifier.align(Alignment.BottomCenter).fillMaxWidth().heightIn(max = (height * 0.82f).dp)
+            else Modifier.align(AbsoluteAlignment.BottomLeft).absolutePadding(left = frame.left.dp, bottom = frame.bottom.dp).width(frame.width.dp).heightIn(max = frame.maxHeight.dp))
                 .offset { IntOffset(0, offset.value.roundToInt()) }
                 .draggable(
                     state = rememberDraggableState { delta -> scope.launch { offset.snapTo((offset.value + delta).coerceAtLeast(0f)) } },

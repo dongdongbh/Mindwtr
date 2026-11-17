@@ -281,6 +281,7 @@ dependencies {
     implementation("androidx.biometric:biometric:1.2.0-alpha04")
 
     implementation("androidx.fragment:fragment:1.8.9")
+    implementation("androidx.window:window:1.5.1")
 
     implementation("androidx.work:work-runtime:2.9.1")
 

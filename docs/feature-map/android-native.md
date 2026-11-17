@@ -24,7 +24,8 @@ The native client is a Kotlin and Jetpack Compose app in `apps/android-native`. 
 - Selectors: `task-row`, `swipe-done`, `read-retry`
 - Code: `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/InboxScreen.kt`, `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/InboxViewModel.kt`, `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/TaskRowView.kt`
 - Checks: `apps/android-native/scripts/check-toolbars-device.mjs`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/RowStatusControlTest.kt`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/ListViewStateTest.kt`
-- Notes: Every list shows 50 rows first, and **More** loads the next 50. A row has no Done button, as in RN: completion is the swipe tray's Done or the status menu.
+- Notes: These lists read 50 rows at a time from core and load the next 50 by themselves when the end comes into view (a spinner shows; no More button), so they scroll on like RN's: Inbox, Waiting For, Someday/Maybe, Reference, History (Done and Archived), Contexts, Trash, Review, the Weekly and Daily Review lists, saved searches, and widget lists. These still show a **More** button: Focus sections, a project's task list, Board columns, and the More chips in pickers and filter collections. Selection and Select all cover the whole list, loaded or not. A row has no Done button, as in RN: completion is the swipe tray's Done or the status menu.
+- Checks (windows): `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/WindowLoadTest.kt`, `apps/android-native/scripts/check-list-window-device.mjs` (Benchmark build, 5k library; a row tapped in selection mode while a window loads keeps that window); selector `list-next-window`.
 
 ## Task row swipe actions
 
@@ -211,6 +212,15 @@ The native client is a Kotlin and Jetpack Compose app in `apps/android-native`. 
 - Code: `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/MoreSheet.kt`, `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/MenuModel.kt`, `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/MenuWidgets.kt`
 - Checks: `apps/android-native/scripts/check-menu-device.mjs`
 - Notes: The quick-access tab (Review by default) moves Projects into the sheet. A Menu screen opens full screen over the tabs; Back returns to the tabs.
+
+## Tablet and foldable layout
+
+- Reach: Open the app in a window 840 dp or wider (a tablet, an unfolded foldable in landscape, or `adb shell wm density 200` on the S23, then `wm density reset`). The bottom tabs move to a side rail on the start edge, as in RN.
+- Shortcuts: The rail has the same five items in the same order as the tab bar (Focus, Inbox, +, quick-access tab, Menu), at the bottom of the rail. Menu opens the More sheet as a card beside the rail, at most 420 dp wide.
+- Selectors: `tab-rail`, `more-sheet`
+- Code: `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/AdaptiveWindow.kt`, `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/MainActivity.kt`, `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/MoreSheet.kt`
+- Checks: `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/AdaptiveWindowTest.kt`
+- Notes: The rules are RN's `apps/mobile/lib/adaptive-window.ts`: the rail needs a window 840 dp wide, 480 dp of usable height, and 600 dp left for content (more at a large font). The rail is 88 dp (104 dp above 1.15x font). A separating hinge read through `androidx.window` keeps the bottom bar on one side of a book-posture fold and the rail in the larger pane of a tabletop fold. In RTL the rail sits on the right.
 
 ## Waiting For
 

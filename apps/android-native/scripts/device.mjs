@@ -528,14 +528,17 @@ export function connect({ serial, pkg, uiFile, adb = process.env.ADB ?? DEFAULT_
             for (let step = 0; step < swipes && !inList(nodes, text); step += 1) {
                 let next = await swipe(nodes, towardTop ? 'up' : 'down');
                 if (signature(next) === signature(nodes)) {
-
-                    const more = towardTop ? undefined : button(next, 'More');
-                    if (!more || more.enabled !== 'true') break;
-                    requireAppFront();
-                    const [l, t, r, b] = box(more);
-                    sh(`input tap ${Math.round((l + r) / 2)} ${Math.round((t + b) / 2)}`);
-                    await sleep(1500);
-                    next = await screen();
+                    const loading = !towardTop && tagged(next, 'list-next-window');
+                    const more = towardTop || loading ? undefined : button(next, 'More');
+                    if (loading) next = await waitFor('the next window of the list', (current) => !tagged(current, 'list-next-window'), 30_000);
+                    else {
+                        if (!more || more.enabled !== 'true') break;
+                        requireAppFront();
+                        const [l, t, r, b] = box(more);
+                        sh(`input tap ${Math.round((l + r) / 2)} ${Math.round((t + b) / 2)}`);
+                        await sleep(1500);
+                        next = await screen();
+                    }
                 }
                 nodes = next;
             }

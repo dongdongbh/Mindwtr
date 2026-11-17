@@ -38,6 +38,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -952,7 +953,9 @@ internal fun DialogCard(model: InboxViewModel, dismissible: Boolean, content: @C
 
 @Composable
 fun MoreRow(model: InboxViewModel) {
-    Box(Modifier.fillMaxWidth().padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
-        PillButton(t("common.more"), onClick = model.menu::loadMore, enabled = model.menu.idle)
+    val menu = model.menu
+    LaunchedEffect(menu.page, model.busy, model.failedAction) { menu.loadMore() }
+    Box(Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag("list-next-window"), contentAlignment = Alignment.Center) {
+        CircularProgressIndicator(Modifier.size(20.dp), color = LocalTheme.current.colors.secondaryText, strokeWidth = 2.dp)
     }
 }

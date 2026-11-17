@@ -756,6 +756,21 @@ const moreUi = source('MoreSheet.kt');
 
 assert.match(moreUi, /Box\(Modifier\.align\(Alignment\.TopEnd\)\.offset\(x = 7\.dp, y = \(-2\)\.dp\)\.size\(7\.dp\)\.fade\(0\.85f\)\.clip\(CircleShape\)\.background\(dot\)/);
 const menuUi = source('MenuWidgets.kt');
+{
+    const moreRow = menuUi.slice(menuUi.indexOf('fun MoreRow('));
+    assert.match(moreRow, /LaunchedEffect\(menu\.page, model\.busy, model\.failedAction\) \{ menu\.loadMore\(\) \}/, 'a long list loads its next window by itself when its end comes into view');
+    assert.doesNotMatch(moreRow, /common\.more|PillButton/, 'no More button under a long list');
+    const loadMore = menuModel.slice(menuModel.indexOf('fun loadMore() {'), menuModel.indexOf('override fun loadCollection('));
+    assert.match(loadMore, /if \(shown\.items\.size >= shown\.total \|\| !nextWindow\.begin\(shown\)\) return/, 'a window load in flight is not started twice');
+    assert.match(menuModel, /private fun readDepth\(shown: MenuPage\?\): Int = maxOf\(PAGE, shown\?\.items\?\.size \?: 0\) \+ if \(shown != null && nextWindow\.loading\(shown\)\) PAGE else 0/,
+        'a read issued while a window loads counts that window, so it never shrinks the list back');
+    assert.equal(menuModel.match(/val depth = readDepth\(shown\)/g)?.length, 3, 'reload, refresh and loadCollection size their reads with readDepth');
+    assert.doesNotMatch(menuModel, /val depth = maxOf\(PAGE, shown\?\.items\?\.size \?: 0\)/);
+    assert.match(readFileSync(resolve(app, 'scripts/device.mjs'), 'utf8'), /const loading = !towardTop && tagged\(next, 'list-next-window'\);/, 'reveal waits for a loading window instead of taking the spinner for the list end');
+    assert.match(loadMore, /shell\.background\(listOf\(Part\.Menu\)/, 'the next window is a read: it never dims the rows or drops a tap');
+    assert.doesNotMatch(loadMore, /shell\.perform/);
+    assert.match(loadMore, /always = \{ nextWindow\.end\(shown\) \}\) \{ next, mine ->\s+if \(nextWindow\.lands\(shown, page, moved = [^\n]*\) && shell\.fresh\(mine, Part\.Menu\)\) show\(list, next\)/, 'a window lands only on the page it grew from');
+}
 const waitingUi = source('WaitingScreen.kt');
 const somedayUi = source('SomedayScreen.kt');
 const statusListUi = source('StatusListScreen.kt');
@@ -928,7 +943,10 @@ assert.match(weeklyUi, /private fun PromptButton[\s\S]{0,800}?\.padding\(horizon
 assert.match(menuUi, /drawBehind \{ if \(headerStrip\) drawRect\(c\.cardBg, size = Size\(size\.width, statusBar\.toFloat\(\)\)\) \}\.systemBarsPadding\(\)/, 'a menu screen paints its status-bar strip in the header color, as RN does');
 assert.match(editorUi, /"destination" -> PickerDialog\(t\("task\.destination"\), \{ picker = null \}, search = \{/, 'the editor\'s Destination picker has RN\'s search field');
 assert.match(editorUi, /internal fun PickerHeading\(text: String\) \{\s+Text\(text, style = rnText\(16, 700\), color = LocalTheme\.current\.colors\.secondaryText\)/, 'picker headings sit at the list\'s left edge, as RN\'s do');
-assert.match(activity, /if \(capture == null\) ToastCard\(model, Modifier\.align\(Alignment\.BottomCenter\)\.padding\(bottom = tabToastBottomAboveNavigationBar\(\)\)\)/, 'a tab toast sits 12 dp above the tab bar from the screen bottom, as RN\'s overlay does');
+assert.match(activity, /if \(capture == null && !railed\) ToastCard\(model, Modifier\.align\(Alignment\.BottomCenter\)\.padding\(bottom = tabToastBottomAboveNavigationBar\(railed\)\)\)/, 'a tab toast sits 12 dp above the tab bar from the screen bottom, as RN\'s overlay does');
+assert.match(activity, /if \(menu\.sheet && railed\) CompositionLocalProvider\(LocalMoreSheetFrame provides sheetFrame\) \{ MoreSheet\(model\) \}\s+if \(capture == null && railed\) Box\(Modifier\.fillMaxSize\(\)\.navigationBarsPadding\(\)\) \{\s+ToastCard\(model, Modifier\.align\(Alignment\.BottomCenter\)\.padding\(bottom = tabToastBottomAboveNavigationBar\(railed\)\)\)/, 'beside the rail the toast draws above the More card, as RN\'s does');
+assert.match(activity, /quick\) && \(!landscape \|\| railed\)\) TopBar\(/, 'a window with the rail keeps the top bar in landscape, as RN always shows its header');
+assert.match(activity, /return \(if \(railed\) rnToastBottom\(navigation\) else rnTabToastBottom\(navigation\)\) - navigation/, 'beside the rail a tab toast sits where RN\'s overlay puts it with no tab bar');
 assert.match(activity, /internal fun tabBarHeight\(navigation: Dp\): Dp = 66\.dp \+ if \(navigation >= 20\.dp\) navigation - 12\.dp else 0\.dp[\s\S]{0,2000}?val inset = if \(navigation >= 20\.dp\) navigation - 12\.dp else 0\.dp\s+Row\(Modifier\.fillMaxWidth\(\)\.height\(66\.dp \+ inset\)/, 'the toast reads the tab bar\'s own height rule');
 assert.match(menuUi, /ToastCard\(model, Modifier\.align\(Alignment\.BottomCenter\)\.padding\(bottom = toastBottomAboveNavigationBar\(\)\)\)/, 'a menu screen toast sits where RN\'s overlay puts it');
 assert.match(editorUi, /internal fun PickerDialog[\s\S]{0,400}?windowScrim\(theme\.pickerScrim\)[^\n]*\.padding\(WindowInsets\.ime\.asPaddingValues\(\)\)/, 'a centered picker pads by the whole keyboard height, so its card never sits under the keyboard on 3-button navigation');
@@ -2285,9 +2303,18 @@ assert.match(activity, /CaptureButton\(model\)[\s\S]*?combinedClickable\(role = 
 assert.match(activity, /capture\?\.let \{ CapturePopup\(model, it\) \}/);
 assert.doesNotMatch(code(activity + model), /CaptureSheet|createInboxTask|showCapture/, 'the pass-1 capture sheet is gone');
 
-const tabBar = activity.slice(activity.indexOf('private fun TabBar('), activity.indexOf('private fun RowScope.TabItem('));
-assert.deepEqual([...tabBar.matchAll(/TabItem\(model, Screen\.(\w+)|CaptureButton\(model\)|MenuTab\(model\)/g)]
-    .map(([whole, tab]) => tab ?? (whole.startsWith('Capture') ? 'capture' : 'menu')), ['Focus', 'Inbox', 'capture', 'Projects', 'menu']);
+const tabBar = activity.slice(activity.indexOf('private fun TabBar('), activity.indexOf('private fun TabRail('));
+const tabRail = activity.slice(activity.indexOf('private fun TabRail('), activity.indexOf('private fun RowScope.TabItem('));
+for (const bar of [tabBar, tabRail]) {
+    assert.deepEqual([...bar.matchAll(/TabItem\(model, Screen\.(\w+)|CaptureButton\(model\)|MenuTab\(model\)/g)]
+        .map(([whole, tab]) => tab ?? (whole.startsWith('Capture') ? 'capture' : 'menu')), ['Focus', 'Inbox', 'capture', 'Projects', 'menu']);
+}
+assert.match(activity, /if \(railed\) TabRail\(model, adaptive\)[\s\S]*?if \(!railed\) Box\([\s\S]*?\{ TabBar\(model\) \}[\s\S]*?if \(menu\.sheet && railed\) CompositionLocalProvider\(LocalMoreSheetFrame provides sheetFrame\) \{ MoreSheet\(model\) \}/,
+    'a window 840 dp or wider swaps the bottom tabs for RN\'s side rail, and the More sheet floats over it');
+assert.match(tabRail, /Column\(Modifier\.width\(adaptive\.navigationWidth\.dp\)[\s\S]*?\.padding\(start = 8\.dp, end = 8\.dp, bottom = 16\.dp \+ if \(pane == null\) navigation else 0\.dp\)[\s\S]*?verticalArrangement = Arrangement\.Bottom/, 'RN\'s rail: 8 dp sides, 16 dp bottom, items at the bottom');
+assert.match(activity, /Row\(Modifier\.fillMaxWidth\(\)\.height\(64\.dp\)\.offset\(y = barLift\)/, 'RN\'s rail items are 64 dp tall');
+assert.match(source('AdaptiveWindow.kt'), /const val EXPANDED_NAV_MIN_WIDTH = 840f\nconst val EXPANDED_NAV_MIN_USABLE_HEIGHT = 480f\nconst val EXPANDED_CONTENT_MIN_WIDTH = 600f/, 'RN\'s adaptive-window breakpoints');
+assert.match(source('MoreSheet.kt'), /\(if \(frame == null\) Modifier\.align\(Alignment\.BottomCenter\)\.fillMaxWidth\(\)\.heightIn\(max = \(height \* 0\.82f\)\.dp\)/, 'below 840 dp the More sheet stays full width');
 
 
 const banner = activity.slice(activity.indexOf('class FailureBannerSlot'), activity.indexOf('private fun TabBar('));
@@ -2819,7 +2846,7 @@ for (const [name, text] of Object.entries({ menuModel, ...menuScreens })) {
 assert.equal(moreUi.match(/\.clearAndSetSemantics \{\s+contentDescription = label; role = Role\.Button\s+if \(enabled\) onClick \{ model\.menu\.openTile\(id\); true \} else disabled\(\)\s+\}\s+\.clickable\(enabled = enabled\) \{ model\.menu\.openTile\(id\) \}/g)?.length, 2, "an unbuilt tile is disabled and dimmed on its labelled node; a built one is dimmed only while a command runs or a retry is owed");
 assert.equal(moreUi.match(/\.fade\(if \(enabled\) 1f else 0\.45f\)/g)?.length, 2, 'both tile kinds dim at 45% while disabled');
 assert.match(menuModel, /fun opens\(id: String\) = id in setOf\("waiting", "someday", "reference", "history", "projects", "review", "contexts", "trash", "calendar", "board", "settings"\)/);
-assert.match(activity, /if \(menu\.sheet\) MoreSheet\(model\)/);
+assert.match(activity, /if \(menu\.sheet && !railed\) CompositionLocalProvider\(LocalMoreSheetFrame provides sheetFrame\) \{ MoreSheet\(model\) \}/);
 assert.match(activity, /else if \(listed != null && writable\) MenuScreenHost\(model, listed\)/);
 
 for (const key of ['menuSheet', 'menuScreen', 'historyTab', 'menuState', 'menuDialog', 'quickAccess', 'reviewFrom']) assert.match(menuModel, new RegExp(`saved(\\.get<\\w+>\\("${key}"\\)|\\["${key}"\\])`), `${key} rides the Bundle`);
@@ -2943,7 +2970,9 @@ assert.match(weeklyUi, /prefs\.edit\(\)\.remove\(view\.getString\("storageKey"\)
 assert.match(menuModel, /runtime\.menuRead\("weeklyList", JSONObject\(page\.params\.toString\(\)\)\.put\("list", name\.substringBefore\(':'\)\)[\s\S]{0,160}?\.put\("revision", page\.revision\)/);
 
 assert.match(menuModel, /val quickView: String get\(\) = quickAccess\?\.takeIf \{ it == "review" \|\| it == "contexts" \|\| it == "calendar" \} \?: "projects"/);
-assert.match(activity, /TabItem\(model, Screen\.Projects, when \(quick\) \{ "review" -> Lucide\.ClipboardCheck; "contexts" -> Lucide\.Circle; "calendar" -> Lucide\.Calendar; else -> Lucide\.Folder \}, model\.menu\.quickLabel\)/);
+assert.match(activity, /private fun quickIcon\(quick: String\) = when \(quick\) \{ "review" -> Lucide\.ClipboardCheck; "contexts" -> Lucide\.Circle; "calendar" -> Lucide\.Calendar; else -> Lucide\.Folder \}/);
+assert.match(tabBar, /TabItem\(model, Screen\.Projects, quickIcon\(quick\), model\.menu\.quickLabel\)/);
+assert.match(tabRail, /TabItem\(model, Screen\.Projects, quickIcon\(model\.menu\.quickView\), model\.menu\.quickLabel\)/);
 assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.getOrNull\(\)/, 'the quick-access view is read on the boot thread, before the first frame');
 
 

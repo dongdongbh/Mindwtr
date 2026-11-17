@@ -12,6 +12,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import tech.dongdongbh.mindwtr.pilot.InboxViewModel.Part
 import tech.dongdongbh.mindwtr.pilot.core.CoreHost
+import tech.dongdongbh.mindwtr.pilot.core.debugProperty
 import java.io.File
 import java.io.FileOutputStream
 import java.util.UUID
@@ -642,7 +643,7 @@ class MenuModel(internal val shell: InboxViewModel, private val saved: SavedStat
         }
 
         val shown = page.takeUnless { fresh }
-        val depth = maxOf(PAGE, shown?.items?.size ?: 0)
+        val depth = readDepth(shown)
         val deep = shown?.deep.orEmpty()
         val mine = shell.issue()
         shell.perform { runtime ->
@@ -666,7 +667,7 @@ class MenuModel(internal val shell: InboxViewModel, private val saved: SavedStat
         val params = params(list)
         val bulk = bulkInput(list)
         val shown = page
-        val depth = maxOf(PAGE, shown?.items?.size ?: 0)
+        val depth = readDepth(shown)
         val deep = shown?.deep.orEmpty()
         shell.background(listOf(Part.Menu), { runtime -> read(runtime, list, params, depth, deep, bulk = bulk) }, done) { next, mine ->
             if (shell.fresh(mine, Part.Menu)) show(list, next)
@@ -701,14 +702,19 @@ class MenuModel(internal val shell: InboxViewModel, private val saved: SavedStat
     }
 
 
+    private val nextWindow = WindowLoad<MenuPage>()
+
+    private fun readDepth(shown: MenuPage?): Int = maxOf(PAGE, shown?.items?.size ?: 0) + if (shown != null && nextWindow.loading(shown)) PAGE else 0
+
     fun loadMore() {
         val shown = page ?: return
         val list = list ?: return
+        if (shown.items.size >= shown.total || !nextWindow.begin(shown)) return
         val params = params(list)
         val bulk = bulkInput(list)
-        val mine = shell.issue()
-        shell.perform { runtime ->
-            val next = try {
+        shell.background(listOf(Part.Menu), { runtime ->
+            debugProperty("window_delay_ms").toLongOrNull()?.let(Thread::sleep)
+            try {
                 val window = runtime.menuRead(list, JSONObject(shown.params.toString()).put("offset", shown.items.size).put("limit", PAGE)
                     .put("revision", shown.revision).toString())
                 shown.appended(window.menuItems())
@@ -716,7 +722,8 @@ class MenuModel(internal val shell: InboxViewModel, private val saved: SavedStat
                 if (failure.message?.startsWith("STALE_REVISION") != true) throw failure
                 read(runtime, list, params, shown.items.size + PAGE, shown.deep, bulk = bulk)
             }
-            shell.ui { if (shell.fresh(mine, Part.Menu)) show(list, next) }
+        }, always = { nextWindow.end(shown) }) { next, mine ->
+            if (nextWindow.lands(shown, page, moved = next.items.size > shown.items.size || next.revision != shown.revision) && shell.fresh(mine, Part.Menu)) show(list, next)
         }
     }
 
@@ -728,13 +735,15 @@ class MenuModel(internal val shell: InboxViewModel, private val saved: SavedStat
         val want = shown.collection(name).size + WINDOW
         val params = if (sheetPage) JSONObject() else params(list)
         val bulk = if (sheetPage) null else bulkInput(list)
+        val depth = readDepth(shown)
         val mine = shell.issue()
         shell.perform { runtime ->
             val next = try {
-                collectionTo(runtime, list, shown, name, want)
+                if (depth > maxOf(PAGE, shown.items.size)) read(runtime, list, params, depth, shown.deep + (name to want), bulk = bulk)
+                else collectionTo(runtime, list, shown, name, want)
             } catch (failure: Exception) {
                 if (failure.message?.startsWith("STALE_REVISION") != true) throw failure
-                read(runtime, list, params, shown.items.size, shown.deep + (name to want), bulk = bulk)
+                read(runtime, list, params, depth, shown.deep + (name to want), bulk = bulk)
             }
             shell.ui {
                 if (sheetPage) { if (shell.fresh(mine, Part.More)) keepMore(next) } else if (shell.fresh(mine, Part.Menu)) show(list, next)
