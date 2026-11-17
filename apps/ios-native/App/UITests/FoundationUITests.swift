@@ -23221,7 +23221,7 @@ final class FoundationUITests: XCTestCase {
 
     func testGtdInboxConsumerAfterRestart() {
         continueAfterFailure = false
-        let app = XCUIApplication(); app.launchArguments = ["--native-ui-test-library", "7e14057b-e506-490c-a87f-8bdd6222797f"]
+        let app = XCUIApplication(); app.launchArguments = ["--native-ui-test-library", UUID().uuidString.lowercased()]
         func process(_ changed: Bool) {
             boardEnabled(app.buttons["tab-inbox"], timeout: 30); boardTap(app, "tab-inbox")
             boardTap(app, "inbox-process-primary"); boardEnabled(app.buttons["process-inbox-close"])
@@ -23248,7 +23248,13 @@ final class FoundationUITests: XCTestCase {
             XCTAssertEqual(app.buttons["process-inbox-date-dueDate"].exists, changed)
             boardTap(app, "process-inbox-close"); boardEnabled(app.buttons["tab-menu"])
         }
-        app.launch(); process(false); task105Open(app)
+        app.launch()
+        boardEnabled(app.buttons["capture-open"], timeout: 30)
+        boardTap(app, "capture-open")
+        app.textViews["capture-input"].typeText("GTD inbox consumer")
+        boardTap(app, "capture-save")
+        XCTAssertTrue(app.textViews["capture-input"].waitForNonExistence(timeout: 15))
+        process(false); task105Open(app)
         for (type, on) in [("inboxTwoMinute", false), ("inboxProjectFirst", true), ("inboxContextStep", false), ("inboxSchedule", true)] {
             task105Toggle(app, type, on: on)
         }
