@@ -1,15 +1,16 @@
 import { execFileSync } from 'node:child_process';
-import { createHash, randomInt, randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomInt, randomUUID } from 'node:crypto';
 import { copyFileSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { bootFailure, box, button, check, connect, draftText, evidenced, fail, field, hasText, Stopped, inboxCount, tab, tagged, withDescription } from './device.mjs';
-import { serveWebdav, webdavDocument } from './sync-harness.mjs';
+import { bootFailure, box, button, check, connect, draftText, evidenced, fail, field, hasText, isOn, Stopped, inboxCount, tab, tagged, withDescription } from './device.mjs';
+import { serveWebdav, startCloud, webdavDocument } from './sync-harness.mjs';
+import { remoteArtifacts } from './encryption-harness.mjs';
 import { serveDropbox } from './dropbox-harness.mjs';
 import { PUBLISHED, REFRESHED, WIDGET_PREFS, WIDGET_LIST_PREFS, widgetSelections, corePublication, count, firstDifference, isRnPayloadPrefsWrite, publicationContext, widgetPrefs } from './widget-payload.mjs';
 
-const SCENARIOS = ['1', '4', '2', '4b', '2b', '3', '3b', '5', '5b', '6', '6b', '7', '8', '9', '9b', '9c', '10', '11', '12'];
+const SCENARIOS = ['1', '4', '2', '4b', '2b', '3', '3b', '5', '5b', '6', '6b', '7', '8', '9', '9b', '9c', '10', '11', '12', '13', '14', '15'];
 const USAGE = `usage: node check-upgrade-device.mjs <adb-serial> [--only=${SCENARIOS.join(',')}] [--keep]`;
 const args = process.argv.slice(2);
 const serials = args.filter((arg) => !arg.startsWith('--'));
@@ -1174,6 +1175,255 @@ const scenarioDropbox = async () => {
 };
 
 
+const sqlText = (value) => `'${value.replaceAll("'", "''")}'`;
+const seedAsyncStorage = (name, entries) => rewriteAsyncStorage(name, `INSERT OR REPLACE INTO catalystLocalStorage (key, value) VALUES ${
+    Object.entries(entries).map(([key, value]) => `(${sqlText(key)}, ${sqlText(value)})`).join(', ')};`);
+const sealedByRn = (name, secret) => {
+    const prefs = runAs('cat shared_prefs/SecureStore.xml 2>/dev/null || true');
+    return prefs.includes(`name="key_v1-${name}"`) && !prefs.includes(secret);
+};
+const plainNowhere = (label, keys, secrets) => {
+    const holders = [...keys].filter(([, value]) => secrets.some((secret) => value.includes(secret))).map(([key]) => key);
+    check(holders.length === 0, `(${label}) RKStorage holds no plain copy (${holders.join(', ') || 'none'})`);
+};
+const neverLogged = (label, secrets) => {
+    const text = device.logs(pid(), TAG);
+    check(!secrets.some((secret) => text.includes(secret)), `(${label}) the native log holds none of the seeded secrets`);
+};
+const masked = (secret) => '•'.repeat(secret.length);
+
+const rnFirstStart = async () => {
+    fresh();
+    device.launch(RN_ACTIVITY);
+    let first = [];
+    for (const deadline = Date.now() + 20_000; Date.now() < deadline && !first.some((node) => node.text === RN_SKIP_ONBOARDING); await sleep(1_000)) {
+        first = await screen();
+    }
+    const skip = first.find((node) => node.text === RN_SKIP_ONBOARDING);
+    if (skip) await tap(skip);
+    await until('RN to create its AsyncStorage', () => runAs('ls databases').split(/\s+/).includes('RKStorage'), 30_000);
+    await sleep(2_000);
+    await stopApp();
+};
+
+const openNativeSettings = async (...rows) => {
+    let nodes = await screen();
+    await tap(tab(nodes, en['tab.menu']) ?? fail('no Menu tab'));
+    nodes = await waitFor('the More sheet', (current) => Boolean(tagged(current, 'more-sheet')), 10_000);
+    await tap(withDescription(nodes, en['nav.settings']) ?? fail('no Settings tile'));
+    await waitFor('native Settings', (current) => Boolean(tagged(current, 'settings-main')), 20_000);
+    for (const label of rows) {
+        await tap(await device.revealNode((current) => current.find((node) => (node['content-desc'] ?? '').startsWith(`${label}. `)), `${label} row`));
+        await sleep(1_500);
+    }
+};
+const revealTag = (tag) => device.revealNode((current) => tagged(current, tag), tag);
+const unfoldTag = async (card, shows) => {
+    if (!tagged(await screen(), shows)) await tap(await revealTag(card));
+};
+const syncNow = async () => {
+    const before = tagged(await screen(), 'sync-status')?.text;
+    await tap(await revealTag('sync-now'));
+    const nodes = await waitFor('the native Sync now to finish', (current) => current.some((node) => node.text === en['settings.syncCompleted'])
+        || (Boolean(tagged(current, 'sync-status')?.text) && tagged(current, 'sync-status').text !== before), 60_000);
+    return { nodes, failed: nodes.some((node) => node.text === en['settings.syncCompleted']) ? null : tagged(nodes, 'sync-error')?.text ?? '' };
+};
+const asksPassphrase = (nodes) => nodes.some((node) => node.text === en['settings.syncEncryptionUnlock'] || node['content-desc'] === en['settings.syncEncryptionUnlock']);
+
+const CLOUD_PORT = Number(process.env.MINDWTR_UPGRADE_CLOUD_PORT ?? 18775);
+const scenarioCloudToken = async () => {
+    console.log('\n# 13 RN self-hosted cloud token');
+    const token = `rncloud${run}token`;
+    const url = `http://127.0.0.1:${CLOUD_PORT}`;
+    const titles = { server: `13 server ${run}`, later: `13 later ${run}` };
+    const cloud = await startCloud({ repo: resolve(app, '../..'), port: CLOUD_PORT, token, dataDir: resolve(work, '13-cloud') });
+    const putTask = async (title) => {
+        const at = new Date().toISOString();
+        const response = await fetch(`${url}/v1/data`, { method: 'PUT', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ tasks: [{ id: randomUUID(), title, status: 'inbox', contexts: [], tags: [], createdAt: at, updatedAt: at }], projects: [], sections: [], areas: [], settings: {} }) });
+        if (!response.ok) fail(`(13) the host could not add a task on the server (${response.status})`);
+    };
+    const titlesIn = (name) => rows(pullDatabase(name), 'SELECT title FROM tasks').map((task) => task.title);
+    adbRaw('reverse', `tcp:${CLOUD_PORT}`, `tcp:${CLOUD_PORT}`);
+    try {
+        await rnFirstStart();
+        await putTask(titles.server);
+        seedAsyncStorage('13-rkstorage', { '@mindwtr_sync_backend': 'cloud', '@mindwtr_cloud_provider': 'selfhosted', '@mindwtr_cloud_url': url,
+            '@mindwtr_cloud_allow_insecure_http': 'true', '@mindwtr_cloud_token': token });
+        console.log('INJECTED (13): RN\'s self-hosted backend and URL in RKStorage, the token under RN\'s pre-SecureStore key; RN moves it into its secret store');
+
+        device.launch(RN_ACTIVITY);
+        await until('RN to pull the server task with the token', () => titlesIn('13-rn-poll').includes(titles.server), 90_000);
+        await until('RN to seal the token', () => sealedByRn('mindwtr_cloud_token', token), 30_000);
+        await stopApp();
+        const rnKeys = asyncStorage('13-rn-rkstorage');
+        check(rnKeys.get('@mindwtr_sync_backend') === 'cloud' && rnKeys.get('@mindwtr_cloud_provider') === 'selfhosted' && rnKeys.get('@mindwtr_cloud_url') === url,
+            '(13) RN synced with its self-hosted server and kept backend, provider and URL in RKStorage');
+        check(!rnKeys.has('@mindwtr_cloud_token') && sealedByRn('mindwtr_cloud_token', token), '(13) RN sealed the token in its secret store as key_v1-mindwtr_cloud_token');
+        plainNowhere('13', rnKeys, [token]);
+        await putTask(titles.later);
+
+        install(APKS.native153, true);
+        device.launch(NATIVE_ACTIVITY);
+        await nativeScreen();
+        await openNativeSettings(en['settings.sync']);
+        const nodes = await waitFor('native Settings > Sync with RN\'s self-hosted form', (current) => Boolean(tagged(current, 'sync-token')), 30_000);
+        check(isOn(tagged(nodes, 'sync-backend-selfhosted')), '(13) the native Sync screen shows RN\'s backend (Self-hosted chosen)');
+        check(tagged(nodes, 'sync-url')?.text === url, `(13) it shows RN's server URL (${tagged(nodes, 'sync-url')?.text})`);
+        check(tagged(nodes, 'sync-token')?.text === masked(token), `(13) the token field holds a stored token of RN's token length (${token.length} characters, masked)`);
+        const done = await syncNow();
+        check(done.failed === null, `(13) native Sync now completed with no new sign-in${done.failed ? `: ${done.failed}` : ''}`);
+        neverLogged('13', [token]);
+        await stopApp();
+        check(titlesIn('13-native-db').includes(titles.later), '(13) the native app synced with RN\'s token from RN\'s secret store (a task added on the server later arrived)');
+        check(sealedByRn('mindwtr_cloud_token', token), '(13) the token stays sealed in RN\'s secret store');
+        plainNowhere('13', asyncStorage('13-native-rkstorage'), [token]);
+    } finally {
+        try { adbRaw('reverse', '--remove', `tcp:${CLOUD_PORT}`); } catch { }
+        await cloud.stop();
+    }
+};
+
+const encryptionTool = (op, input, secret) => JSON.parse(execFileSync('bun', ['-e', `
+    import { readFileSync, writeFileSync } from 'node:fs';
+    import { decryptLegacySyncArtifactForUpgrade, deriveSyncKeyMaterial, encryptSyncArtifact, inspectSyncArtifact } from '${coreSrc}/sync-crypto.ts';
+    import { buildSyncLocationScope } from '${coreSrc}/sync-encryption.ts';
+    const input = JSON.parse(process.env.TOOL_INPUT);
+    const salt = Uint8Array.from(Buffer.from(input.salt, 'hex'));
+    if (process.env.TOOL_OP === 'material') {
+        const material = await deriveSyncKeyMaterial(process.env.TOOL_SECRET, salt, input.params);
+        console.log(JSON.stringify({ key: Buffer.from(material.key).toString('base64'),
+            scope: buildSyncLocationScope({ backend: 'webdav', webdavUrl: input.url, webdavUsername: input.username }) }));
+    } else {
+        const key = Uint8Array.from(Buffer.from(process.env.TOOL_SECRET, 'base64'));
+        const bytes = new Uint8Array(readFileSync(input.from));
+        const header = inspectSyncArtifact(bytes);
+        const doc = JSON.parse(new TextDecoder().decode(await decryptLegacySyncArtifactForUpgrade(bytes, key)));
+        doc.tasks.push(input.task);
+        writeFileSync(input.to, await encryptSyncArtifact(new TextEncoder().encode(JSON.stringify(doc)), { key, salt, params: input.params }, undefined, { kind: 'document' }));
+        console.log(JSON.stringify({ formatVersion: header.formatVersion, salt: Buffer.from(header.salt).toString('hex'), titles: doc.tasks.map((task) => task.title) }));
+    }
+`], { encoding: 'utf8', env: { ...process.env, TOOL_OP: op, TOOL_INPUT: JSON.stringify(input), TOOL_SECRET: secret } }).trim().split('\n').pop());
+
+const ENC_PORT = Number(process.env.MINDWTR_UPGRADE_ENC_PORT ?? 18776);
+const scenarioEncryptionKey = async () => {
+    console.log('\n# 14 RN sync encryption key');
+    const folder = `/dav/mindwtr-upgrade-enc-${run}`;
+    const user = `rnenc${run}`;
+    const password = `rnencpw${run}secret`;
+    const passphrase = `rnphrase${run}secret`;
+    const url = `http://127.0.0.1:${ENC_PORT}${folder}`;
+    const params = { mKib: 19456, t: 2, p: 1 };
+    const salt = randomBytes(16).toString('hex');
+    const later = `14 later ${run}`;
+    const { key, scope } = encryptionTool('material', { salt, params, url, username: user }, passphrase);
+    const dav = await serveWebdav({ port: ENC_PORT, username: user, password });
+    const encryptedDocument = () => remoteArtifacts(dav, folder).encrypted.find((file) => basename(file.path) === 'data.json.enc');
+    const plainDocument = () => remoteArtifacts(dav, folder).plain.find((file) => basename(file.path) === 'data.json');
+    adbRaw('reverse', `tcp:${ENC_PORT}`, `tcp:${ENC_PORT}`);
+    try {
+        await rnFirstStart();
+        seedAsyncStorage('14-rkstorage', { '@mindwtr_sync_backend': 'webdav', '@mindwtr_webdav_url': url, '@mindwtr_webdav_username': user,
+            '@mindwtr_webdav_allow_insecure_http': 'true', '@mindwtr_webdav_password': password,
+            '@mindwtr_sync_encryption_state_v1': JSON.stringify({ state: 'enabled', discoveredSalt: salt, discoveredParams: params, discoveredScope: scope }),
+            '@mindwtr_sync_encryption_key_v1': key });
+        console.log('INJECTED (14): RN\'s encrypted WebDAV setup: state (salt, Argon2id parameters, location) in RKStorage, the derived key and password under RN\'s pre-SecureStore keys');
+
+        device.launch(RN_ACTIVITY);
+        await until('RN to write its encrypted library', () => Boolean(encryptedDocument()), 90_000)
+            .catch((error) => fail(`${error.message} (WebDAV requests: ${dav.state.requests.slice(-8).join(', ') || 'none'})`));
+        await until('RN to seal the key', () => sealedByRn('mindwtr_sync_encryption_key_v1', key), 30_000);
+        await stopApp();
+        const rnKeys = asyncStorage('14-rn-rkstorage');
+        check(!rnKeys.has('@mindwtr_sync_encryption_key_v1') && sealedByRn('mindwtr_sync_encryption_key_v1', key),
+            '(14) RN sealed the derived key in its secret store as key_v1-mindwtr_sync_encryption_key_v1');
+        check(!rnKeys.has('@mindwtr_webdav_password') && sealedByRn('mindwtr_webdav_password', password), '(14) RN sealed the WebDAV password in its secret store');
+        check(JSON.parse(rnKeys.get('@mindwtr_sync_encryption_state_v1') ?? '{}').state === 'enabled', '(14) RN kept its encryption state (enabled) in RKStorage');
+        plainNowhere('14', rnKeys, [key, password, passphrase]);
+        check(!plainDocument(), '(14) the WebDAV folder holds no plaintext data.json');
+
+        install(APKS.native153, true);
+        device.launch(NATIVE_ACTIVITY);
+        await nativeScreen();
+        await openNativeSettings(en['settings.sync']);
+        await waitFor('native Settings > Sync with RN\'s WebDAV form', (current) => Boolean(tagged(current, 'sync-url')), 30_000);
+        const legacy = await syncNow();
+        check((legacy.failed ?? '').includes('SYNC_ENCRYPTION_LEGACY') && !asksPassphrase(legacy.nodes),
+            `(14) on RN's format-1 library native stops with the one-time format upgrade error, not a passphrase request (${legacy.failed})`);
+
+        const rnDocument = resolve(work, '14-rn-data.json.enc');
+        const nextDocument = resolve(work, '14-next-data.json.enc');
+        writeFileSync(rnDocument, encryptedDocument().body);
+        const at = new Date().toISOString();
+        const opened = encryptionTool('reseal', { salt, params, from: rnDocument, to: nextDocument,
+            task: { id: randomUUID(), title: later, status: 'inbox', contexts: [], tags: [], createdAt: at, updatedAt: at } }, key);
+        check(opened.formatVersion === 1 && opened.salt === salt, `(14) RN encrypted its library with the seeded key (format ${opened.formatVersion}, the seeded salt)`);
+        dav.state.files.set(encryptedDocument().path, { body: readFileSync(nextDocument), etag: `"host-${run}"` });
+        console.log('INJECTED (14): the library re-encrypted in format 2 with the same key and one more task, as after another device ran the v1.3.9 upgrade');
+
+        const done = await syncNow();
+        check(done.failed === null && !asksPassphrase(done.nodes), `(14) native Sync now completed with no passphrase request${done.failed ? `: ${done.failed}` : ''}`);
+        neverLogged('14', [key, password, passphrase]);
+        await stopApp();
+        check(rows(pullDatabase('14-native-db'), 'SELECT title FROM tasks').some((task) => task.title === later),
+            '(14) the native app decrypted the library with RN\'s key from RN\'s secret store (the re-encrypted task arrived)');
+        check(Boolean(encryptedDocument()) && !plainDocument(), '(14) the library stays encrypted after the native sync');
+        check(sealedByRn('mindwtr_sync_encryption_key_v1', key), '(14) the key stays sealed in RN\'s secret store');
+        plainNowhere('14', asyncStorage('14-native-rkstorage'), [key, password, passphrase]);
+    } finally {
+        try { adbRaw('reverse', '--remove', `tcp:${ENC_PORT}`); } catch { }
+        await dav.close();
+    }
+};
+
+const RN_AI_CARD = 'AI assistant';
+const RN_ANTHROPIC = 'Anthropic (Claude)';
+const scenarioAIKeys = async () => {
+    console.log('\n# 15 RN AI provider keys');
+    const keys = { openai: `sk-rn${run}openai`, gemini: `AIzarn${run}gemini00`, anthropic: `sk-ant-rn${run}anthropic0000` };
+    const allSealed = () => Object.entries(keys).every(([provider, value]) => sealedByRn(`mindwtr-ai-key_${provider}`, value));
+    await rnFirstStart();
+    seedAsyncStorage('15-rkstorage', Object.fromEntries(Object.entries(keys).map(([provider, value]) => [`mindwtr-ai-key:${provider}`, value])));
+    console.log('INJECTED (15): OpenAI, Gemini and Anthropic keys under RN\'s pre-SecureStore keys; RN moves each into its secret store when it loads it');
+
+    device.launch(RN_ACTIVITY);
+    await sleep(3_000);
+    openLink('mindwtr-upgradetest://settings?settingsScreen=ai');
+    const folded = await waitFor('RN Settings > AI', (current) => current.filter((node) => node.text === RN_AI_CARD).length === 2, 60_000);
+    await tap(folded.filter((node) => node.text === RN_AI_CARD).at(-1));
+    const nodes = await waitFor('RN\'s AI assistant card open', (current) => current.some((node) => node.text === RN_ANTHROPIC), 20_000);
+    await tap(nodes.find((node) => node.text === RN_ANTHROPIC));
+    await until('RN to seal all three keys', allSealed, 30_000);
+    await stopApp();
+    const rnKeys = asyncStorage('15-rn-rkstorage');
+    check(Object.keys(keys).every((provider) => !rnKeys.has(`mindwtr-ai-key:${provider}`)) && allSealed(),
+        '(15) RN sealed each key in its secret store as key_v1-mindwtr-ai-key_<provider> (openai, gemini, anthropic)');
+    plainNowhere('15', rnKeys, Object.values(keys));
+
+    install(APKS.native153, true);
+    device.launch(NATIVE_ACTIVITY);
+    await nativeScreen();
+    await openNativeSettings(en['settings.advanced'], en['settings.ai']);
+    await unfoldTag('ai-assistant-card', 'ai-enabled');
+    for (const provider of ['anthropic', 'openai', 'gemini']) {
+        const chip = await revealTag(`ai-provider-${provider}`);
+        if (!isOn(chip)) await tap(chip);
+        await waitFor(`${provider} chosen`, (current) => isOn(tagged(current, `ai-provider-${provider}`)), 20_000);
+        const keyField = await revealTag('ai-assistant-key');
+        check(keyField.text === masked(keys[provider]), `(15) native AI settings show RN's ${provider} key as stored (${keys[provider].length} characters, masked)`);
+    }
+    await unfoldTag('ai-speech-card', 'ai-speech-enabled');
+    const speech = await revealTag('ai-speech-provider-gemini');
+    if (!isOn(speech)) await tap(speech);
+    const speechField = await revealTag('ai-speech-key');
+    check(speechField.text === masked(keys.gemini), `(15) native speech-to-text settings show RN's gemini key as stored (${keys.gemini.length} characters, masked)`);
+    neverLogged('15', Object.values(keys));
+    await stopApp();
+    check(allSealed(), '(15) the keys stay sealed in RN\'s secret store');
+    plainNowhere('15', asyncStorage('15-native-rkstorage'), Object.values(keys));
+};
+
+
 const RN_FILE = 'File';
 const RN_SELECT_FOLDER = 'Select Folder';
 
@@ -1824,6 +2074,9 @@ try {
     if (want('10')) await scenarioRecoverySnapshots();
     if (want('11')) await scenarioFileSync();
     if (want('12')) await scenarioCalendarPush();
+    if (want('13')) await scenarioCloudToken();
+    if (want('14')) await scenarioEncryptionKey();
+    if (want('15')) await scenarioAIKeys();
     console.log(`\nUpgrade device check passed${blocked4 ? '; scenario 4 BLOCKED (see above)' : ''}`);
 } catch (error) {
     evidenced(error);
