@@ -7,6 +7,7 @@ final class NativeWidgetCompletionHostTests: XCTestCase {
     private var database: URL { root.appendingPathComponent("core.sqlite") }
     private var journal: URL { database.appendingPathExtension("pending.json") }
     private let taskID = "widget-completion-fixture"
+    private let devNamespace = "tech.dongdongbh.mindwtr.native.dev"
     private let tap = Date(timeIntervalSince1970: 1_793_188_800)
 
     override func setUpWithError() throws {
@@ -72,31 +73,20 @@ final class NativeWidgetCompletionHostTests: XCTestCase {
              recurring ? "2026-11-01" as Any : NSNull(), recurrence,
              "2026-10-01T00:00:00.000Z", "2026-10-01T00:00:00.000Z"])
     }
-    private func action(_ core: CoreHost) async throws -> (NativeWidgetActionStore, NativeWidgetPendingAction) {
-        let snapshot = try await core.widgetNextActionSnapshot()
-        guard let index = snapshot.snapshot.items.firstIndex(where: { $0.id == taskID }) else {
-            let stored = try execute("SELECT id,status,startTime,dueDate,reviewAt,recurrence,isFocusedToday,deletedAt,purgedAt FROM tasks WHERE id=?", [taskID])
-            let search = try await core.call("iosSearchSnapshot")
-            throw HostFailure("Synthetic fixture missing from canonical Next: snapshot=" + String(snapshot.snapshot.json.prefix(4_096))
-                + "; stored=" + String(stored.prefix(4_096)) + "; search=" + String(search.prefix(4_096)))
-        }
-        let token = try XCTUnwrap(snapshot.tokens[index])
-        let selection = NativeLaunchSelection.standard(databaseURL: database, containerURL: root, namespace: NativeWidgetNextCache.namespace)
-        let identifier = try await NativeSearchIndex.identifier(taskID: taskID, selection: selection)
-        let store = NativeWidgetActionStore(directory: root.appendingPathComponent("NativeWidgets/Actions", isDirectory: true))
-        try store.enqueue(identifier: identifier, token: token, now: tap)
-        let claimed = try XCTUnwrap(store.claimReady(now: tap.addingTimeInterval(3)).first)
-        XCTAssertTrue(claimed.claimed); XCTAssertEqual(claimed.createdAt, tap.timeIntervalSince1970 * 1_000)
-        return (store, claimed)
+    private func productionSource() throws -> NativeProductionWidgetCompletionSource {
+        let row = try task(taskID)
+        let token = try json([taskID, XCTUnwrap(row["rev"] as? Int), XCTUnwrap(row["updatedAt"] as? String), XCTUnwrap(row["status"] as? String)])
+        return try NativeProductionWidgetCompletionSource(queueID: "ABCDEFAB-CDEF-4ABC-8DEF-ABCDEFABCDEF",
+            taskID: taskID, token: token, createdAt: tap.timeIntervalSince1970 * 1_000)
     }
-    private func submit(_ core: CoreHost, _ action: NativeWidgetPendingAction) async throws -> String {
-        try await core.submitWidgetCompletion(action: action, lease: NativeTaskAIEditorLease(), readmit: { true })
+    private func submit(_ core: CoreHost, _ source: NativeProductionWidgetCompletionSource) async throws -> String {
+        try await core.submitWidgetCompletion(source: source, lease: NativeTaskAIEditorLease(), readmit: { true })
     }
-    private func assertResult(_ raw: String, _ action: NativeWidgetPendingAction, _ outcome: String,
+    private func assertResult(_ raw: String, _ source: NativeProductionWidgetCompletionSource, _ outcome: String,
                               file: StaticString = #filePath, line: UInt = #line) throws {
         let value = try object(raw)
         XCTAssertEqual(Set(value.keys), ["actionId", "outcome"], file: file, line: line)
-        XCTAssertEqual(value["actionId"] as? String, action.id, file: file, line: line)
+        XCTAssertEqual(value["actionId"] as? String, source.receiptID, file: file, line: line)
         XCTAssertEqual(value["outcome"] as? String, outcome, file: file, line: line)
     }
     private func refused(_ work: () async throws -> Void, file: StaticString = #filePath, line: UInt = #line) async {
@@ -106,11 +96,11 @@ final class NativeWidgetCompletionHostTests: XCTestCase {
         _ = try execute("UPDATE tasks SET title='Later retained edit',status='next',completedAt=NULL,updatedAt='2026-10-31T12:00:00.000Z',rev=rev+1 WHERE id=?", [taskID])
     }
 
-    func testCanonicalTapTimeAndFluidRecurrenceThroughActualClaimedOutbox() async throws {
+    func testCanonicalTapTimeAndFluidRecurrenceThroughProductionSource() async throws {
         try await seed(recurring: true)
         let core = host(); _ = try await core.start()
-        let (store, action) = try await action(core)
-        try assertResult(await submit(core, action), action, "completed")
+        let source = try productionSource()
+        try assertResult(await submit(core, source), source, "completed")
         let completed = try task(taskID)
         XCTAssertEqual(completed["status"] as? String, "done")
         XCTAssertEqual(completed["completedAt"] as? String, "2026-10-28T12:00:00.000Z")
@@ -122,56 +112,16 @@ final class NativeWidgetCompletionHostTests: XCTestCase {
         let recurrence = try object(XCTUnwrap(child["recurrence"] as? String))
         XCTAssertEqual(recurrence["seriesId"] as? String, "widget-fixture-series")
         XCTAssertEqual(recurrence["completedOccurrences"] as? Int, 1)
-        XCTAssertEqual(try store.pendingActions().map(\.id), [action.id])
-        try store.acknowledge(id: action.id); XCTAssertTrue(try store.pendingActions().isEmpty)
         XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
-    }
-
-    func testSaveFailureRetriesSameActionWithoutDuplicateTaskOrReceipt() async throws {
-        try await seed(recurring: true)
-        let faults = HostIOFaults(), core = host(faults); _ = try await core.start()
-        let (_, action) = try await action(core), before = try rows("tasks")
-        var failedCommits = 0
-        faults.beforeSQL = { if $0 == "COMMIT" { failedCommits += 1; throw HostFailure("Injected widget save failure") } }
-        await refused { _ = try await self.submit(core, action) }
-        XCTAssertGreaterThan(failedCommits, 0); XCTAssertEqual(try rows("tasks"), before)
-        XCTAssertEqual(try execute("SELECT request_id FROM native_request_receipts"), "[]")
-        XCTAssertTrue(FileManager.default.fileExists(atPath: journal.path))
-        faults.beforeSQL = nil
-        let recovered = try await submit(core, action)
-        try assertResult(recovered, action, "completed")
-        let saved = try rows("tasks"), receipts = try rows("native_request_receipts")
-        try assertResult(await submit(core, action), action, "completed")
-        XCTAssertEqual(try rows("tasks"), saved); XCTAssertEqual(try rows("native_request_receipts"), receipts)
-        XCTAssertEqual(try tasks().count, 2); XCTAssertEqual(try receiptCount(), 1)
-        XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
-    }
-
-    func testColdSavedReceiptSurvivesLaterTaskReopenWithoutCompletingItAgain() async throws {
-        try await seed(recurring: true)
-        let core = host(); _ = try await core.start()
-        let (_, action) = try await action(core)
-        let original = try await submit(core, action)
-        await core.close(); try laterEdit()
-        let before = try rows("tasks"), receipts = try rows("native_request_receipts")
-        let faults = HostIOFaults(); var writes = 0
-        faults.beforeSQL = { if self.taskWrite($0) { writes += 1 } }
-        let reopened = host(faults); _ = try await reopened.start()
-        let repeated = try await submit(reopened, action)
-        XCTAssertEqual(try json(object(repeated)), try json(object(original)))
-        try assertResult(repeated, action, "completed")
-        XCTAssertEqual(try rows("tasks"), before); XCTAssertEqual(try rows("native_request_receipts"), receipts)
-        XCTAssertEqual(writes, 0); XCTAssertEqual(try task(taskID)["status"] as? String, "next")
-        XCTAssertEqual(try tasks().count, 2); XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
     }
 
     func testPostSavePreClearJournalUsesColdReceiptProofBeforeLaterTaskState() async throws {
         try await seed(recurring: true)
         let faults = HostIOFaults(), core = host(faults); _ = try await core.start()
-        let (_, action) = try await action(core)
+        let source = try productionSource()
         var journalWrites = 0
         faults.journalWrite = { journalWrites += 1; if journalWrites == 2 { throw HostFailure("Injected widget lost acknowledgment") } }
-        await refused { _ = try await self.submit(core, action) }
+        await refused { _ = try await self.submit(core, source) }
         XCTAssertEqual(journalWrites, 2)
         XCTAssertEqual(try task(taskID)["status"] as? String, "done"); XCTAssertEqual(try tasks().count, 2)
         XCTAssertTrue(FileManager.default.fileExists(atPath: journal.path))
@@ -181,49 +131,12 @@ final class NativeWidgetCompletionHostTests: XCTestCase {
         let replay = HostIOFaults(); var writes = 0
         replay.beforeSQL = { if self.taskWrite($0) { writes += 1 } }
         let reopened = host(replay); _ = try await reopened.start()
-        try assertResult(await submit(reopened, action), action, "completed")
+        try assertResult(await submit(reopened, source), source, "completed")
         XCTAssertEqual(writes, 0); XCTAssertEqual(try rows("tasks"), before)
         XCTAssertEqual(try rows("native_request_receipts"), receipts)
         XCTAssertEqual(try task(taskID)["title"] as? String, "Later retained edit")
         XCTAssertEqual(try task(taskID)["status"] as? String, "next")
         XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
-    }
-
-    func testChangedSourceIsDiscardedWithoutWritingAnyTask() async throws {
-        try await seed()
-        let core = host(); _ = try await core.start()
-        let (_, action) = try await action(core)
-        await core.close(); try laterEdit()
-        let before = try rows("tasks"), faults = HostIOFaults(); var writes = 0
-        faults.beforeSQL = { if self.taskWrite($0) { writes += 1 } }
-        let reopened = host(faults); _ = try await reopened.start()
-        try assertResult(await submit(reopened, action), action, "discarded")
-        XCTAssertEqual(writes, 0); XCTAssertEqual(try rows("tasks"), before)
-        XCTAssertEqual(try tasks().count, 1); XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
-    }
-
-    func testInvalidLeaseReadmissionAndGenericPrivateFacadesNeverCreateJournal() async throws {
-        try await seed()
-        let faults = HostIOFaults(), core = host(faults); _ = try await core.start()
-        let (store, action) = try await action(core), before = try rows("tasks")
-        var journalWrites = 0, statements = 0
-        faults.journalWrite = { journalWrites += 1 }; faults.beforeSQL = { _ in statements += 1 }
-        let expired = NativeTaskAIEditorLease(); expired.invalidate()
-        await refused { _ = try await core.submitWidgetCompletion(action: action, lease: expired, readmit: { true }) }
-        await refused { _ = try await core.submitWidgetCompletion(action: action, lease: NativeTaskAIEditorLease(), readmit: { false }) }
-        for name in ["widgetCompletionSubmit", "iosWidgetCompletionPrepare", "iosWidgetCompletionValidate", "iosWidgetCompletionCommit", "iosWidgetCompletionOutcome"] {
-            await refused { _ = try await core.call(name, argumentsJSON: "[\"{}\"]") }
-        }
-        XCTAssertEqual(statements, 0); XCTAssertEqual(journalWrites, 0)
-        XCTAssertEqual(try rows("tasks"), before); XCTAssertEqual(try store.pendingActions().map(\.id), [action.id])
-        XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
-    }
-
-    private func productionSource(_ core: CoreHost) async throws -> NativeProductionWidgetCompletionSource {
-        let snapshot = try await core.widgetNextActionSnapshot()
-        let index = try XCTUnwrap(snapshot.snapshot.items.firstIndex(where: { $0.id == taskID }))
-        return try NativeProductionWidgetCompletionSource(queueID: "ABCDEFAB-CDEF-4ABC-8DEF-ABCDEFABCDEF",
-            taskID: taskID, token: XCTUnwrap(snapshot.tokens[index]), createdAt: tap.timeIntervalSince1970 * 1_000)
     }
 
     func testProductionAdapterRetainsOriginalQueueIDAndClosedRawUnicodeSource() async throws {
@@ -246,9 +159,9 @@ final class NativeWidgetCompletionHostTests: XCTestCase {
         }
         XCTAssertThrowsError(try NativeProductionWidgetCompletionSource(queueID: queueID,
             taskID: rawID.precomposedStringWithCanonicalMapping, token: token, createdAt: 100))
-        let selection = NativeLaunchSelection.standard(databaseURL: database, containerURL: root, namespace: NativeWidgetNextCache.namespace)
+        let selection = NativeLaunchSelection.standard(databaseURL: database, containerURL: root, namespace: devNamespace)
         let scoped = try await NativeSearchIndex.identifier(taskID: rawID, selection: selection)
-        let edits: [[String: Any]] = [["extra": true], ["namespace": NativeWidgetActionStore.namespace],
+        let edits: [[String: Any]] = [["extra": true], ["namespace": devNamespace],
             ["identifier": scoped], ["actionId": queueID], ["createdAt": true], ["namespace": "foreign.app"],
             ["token": try json([rawID, true, "updated", "next"])], ["token": try json([rawID, 3, "updated", "unknown"])]]
         for edit in edits {
@@ -257,14 +170,14 @@ final class NativeWidgetCompletionHostTests: XCTestCase {
             XCTAssertThrowsError(try NativeWidgetCompletionJSON.source(json(changed)))
         }
         var dev = value
-        dev["namespace"] = NativeWidgetActionStore.namespace; dev["identifier"] = scoped
+        dev["namespace"] = devNamespace; dev["identifier"] = scoped
         XCTAssertNoThrow(try NativeWidgetCompletionJSON.source(json(dev)))
     }
 
     func testProductionSourceSaveFailureThenColdReceiptNeverCompletesRecurringTaskTwice() async throws {
         try await seed(recurring: true)
         let faults = HostIOFaults(), core = host(faults); _ = try await core.start()
-        let source = try await productionSource(core), before = try rows("tasks")
+        let source = try productionSource(), before = try rows("tasks")
         var failures = 0
         faults.beforeSQL = { if $0 == "COMMIT" { failures += 1; throw HostFailure("Injected production widget save failure") } }
         await refused { _ = try await core.submitWidgetCompletion(source: source, lease: NativeTaskAIEditorLease(), readmit: { true }) }
@@ -294,7 +207,7 @@ final class NativeWidgetCompletionHostTests: XCTestCase {
         XCTAssertEqual(try rows("native_request_receipts"), receiptsBefore)
         XCTAssertEqual(try task(taskID)["status"] as? String, "next"); XCTAssertEqual(try tasks().count, 2)
         XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
-        let changed = try await productionSource(cold)
+        let changed = try productionSource()
         await refused { _ = try await cold.submitWidgetCompletion(source: changed, lease: NativeTaskAIEditorLease(), readmit: { true }) }
         XCTAssertEqual(try rows("tasks"), tasksBefore); XCTAssertEqual(try rows("native_request_receipts"), receiptsBefore)
     }
@@ -302,7 +215,7 @@ final class NativeWidgetCompletionHostTests: XCTestCase {
     func testProductionChangedTokenDiscardSurvivesColdReopenWithoutTaskWrite() async throws {
         try await seed()
         let core = host(); _ = try await core.start()
-        let source = try await productionSource(core)
+        let source = try productionSource()
         await core.close(); try laterEdit()
         let faults = HostIOFaults(); var writes = 0
         faults.beforeSQL = { if self.taskWrite($0) { writes += 1 } }
@@ -323,7 +236,7 @@ final class NativeWidgetCompletionHostTests: XCTestCase {
     func testProductionOverloadRefusesExpiredLeaseReadmissionRestrictedHostAndGenericFacades() async throws {
         try await seed()
         let faults = HostIOFaults(), core = host(faults); _ = try await core.start()
-        let source = try await productionSource(core), before = try rows("tasks")
+        let source = try productionSource(), before = try rows("tasks")
         var statements = 0, journals = 0
         faults.beforeSQL = { _ in statements += 1 }; faults.journalWrite = { journals += 1 }
         let expired = NativeTaskAIEditorLease(); expired.invalidate()

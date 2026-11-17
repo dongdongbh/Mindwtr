@@ -28,7 +28,7 @@ beforeAll(async () => {
             tasks: s._allTasks, projects: s._allProjects, sections: s._allSections, areas: s._allAreas, settings: s.settings }; };
         globalThis.fixture = { state: useTaskStore.getState, set: useTaskStore.setState,
             focusFilter: setFocusWidgetFilter, currentFocusFilter: getFocusWidgetFilter,
-            canonical, shared: (language = 'en', systemLocale) => createWidgetPayloadProjection(canonical(), language, { listIds: ['next'], systemLocale, focusFilter: getFocusWidgetFilter() }).build(IOS_WIDGET_FAMILY_CACHE_ITEMS.medium),
+            canonical,
             familyShared: (language = 'en', systemLocale, systemColorScheme = 'light') => {
                 const projection = createPublishedWidgetProjection(createWidgetPayloadProjection(canonical(), language,
                     iosWidgetProjectionOptions({ systemLocale, systemColorScheme, focusFilter: getFocusWidgetFilter() })), language);
@@ -94,16 +94,11 @@ const fixture = () => {
         state.fixture.install(seed); writes.length = 0; lines.length = 0; logText = '';
     };
     const f = { state, database, writes, lines, poll, boot,
-        snapshot: (...args: unknown[]) => poll(state.MindwtrHost.iosWidgetNextSnapshot(...args)),
-        actionSnapshot: (...args: unknown[]) => poll(state.MindwtrHost.iosWidgetNextActionSnapshot(...args)),
         familySnapshot: (...args: unknown[]) => poll(state.MindwtrHost.iosWidgetFamilySnapshot(...args)),
         failLog: () => { failLog = true; }, logText: () => logText };
     fixtures.push(f); return f;
 };
 
-const projected = (payload: any) => ({ version: 1, title: payload.lists.next.title, emptyMessage: payload.emptyMessage,
-    totalCount: payload.lists.next.totalCount, items: payload.lists.next.items.map(({ id, title, contextLabel, dueLabel, dueTone }: any) =>
-        ({ id, title, contextLabel, dueLabel, dueTone })) });
 const readonly = async (f: ReturnType<typeof fixture>, before: any) => {
     await f.state.fixture.flush();
     const after = f.state.fixture.canonical();
@@ -111,90 +106,7 @@ const readonly = async (f: ReturnType<typeof fixture>, before: any) => {
     expect(f.writes).toEqual([]);
 };
 
-describe('actual exported canonical iOS Next widget snapshot', () => {
-    it('keeps canonical Next order/count/cap and a Next task also present in the flattened Focus snapshot', async () => {
-        const tasks = Array.from({ length: 17 }, (_, i) => task(`next-${i}`, { status: 'next', title: `Next ${i}`,
-            projectId: 'live', order: i, description: 'PRIVATE note', tags: ['PRIVATE tag'] }));
-        tasks.push(task('deleted-parent', { status: 'next', projectId: 'deleted' }),
-            task('archived-parent', { status: 'next', projectId: 'archived' }), task('done', { status: 'done' }),
-            task('tombstone', { status: 'next', deletedAt: at }));
-        const f = fixture(); await f.boot(data(tasks, [project('live'), project('deleted', { deletedAt: at }),
-            project('archived', { status: 'archived' })]));
-        const before = f.state.fixture.canonical(), canonical = projected(f.state.fixture.shared());
-        const answer = await f.snapshot(); expect(answer).toEqual({ ok: true, value: canonical });
-        expect(canonical.totalCount).toBe(17); expect(canonical.items).toHaveLength(13);
-        expect(canonical.items.map((row: any) => row.id)).not.toContain('deleted-parent');
-        expect(canonical.items[0].contextLabel).toBe('PRIVATE live');
-        const search = await f.poll(f.state.MindwtrHost.iosSearchSnapshot());
-        expect(Object.keys(search.value)).toEqual(['items']);
-        const overlap = search.value.items.find((row: any) => row.list === 'focus' && canonical.items.some((next: any) => next.id === row.id));
-        expect(overlap).toBeDefined();
-        expect(answer.value.items.map((row: any) => row.id)).toContain(overlap.id);
-        for (const row of answer.value.items) expect(Object.keys(row).sort()).toEqual(['contextLabel', 'dueLabel', 'dueTone', 'id', 'title']);
-        expect(Object.keys(answer.value).sort()).toEqual(['emptyMessage', 'items', 'title', 'totalCount', 'version']);
-        expect(JSON.stringify(answer.value)).not.toContain('PRIVATE note');
-        expect(JSON.stringify(answer.value)).not.toContain('PRIVATE tag');
-        await readonly(f, before);
-    });
-
-    it('uses current runtime language/locale and canonical area, sequencing and empty text', async () => {
-        const f = fixture(); await f.boot(data([task('first', { status: 'next', projectId: 'seq', order: 0 }),
-            task('blocked', { status: 'next', projectId: 'seq', order: 1 }),
-            task('future', { status: 'next', startTime: '2099-01-01' }),
-            task('hidden-area', { status: 'next', areaId: 'hidden' })], [project('seq', { isSequential: true })], {
-                areas: [{ id: 'hidden', name: 'Hidden', color: '#123456', order: 0, createdAt: at, updatedAt: at }],
-                settings: { filters: { areaId: '__none__' } },
-            }));
-        expect(await f.poll(f.state.MindwtrHost.language('de', 'de-DE'))).toMatchObject({ ok: true });
-        const filtered = await f.snapshot();
-        expect(filtered).toEqual({ ok: true, value: projected(f.state.fixture.shared('de', 'de-DE')) });
-        expect(filtered.value.items.map((row: any) => row.id)).toEqual(['first']);
-        f.state.fixture.install(data());
-        const empty = await f.snapshot();
-        expect(empty).toEqual({ ok: true, value: projected(f.state.fixture.shared('de', 'de-DE')) });
-        expect(empty.value.totalCount).toBe(0); expect(empty.value.items).toEqual([]);
-        expect(empty.value.title).not.toBe('Next Actions'); expect(empty.value.emptyMessage.length).toBeGreaterThan(0);
-        expect(f.writes).toEqual([]);
-    });
-
-    it.each(['menuRead', 'focus'])('caches successful %s controls, advances observation on filter/sort only, and leaves durable rows unchanged', async (route) => {
-        const seed = data([task('a', { status: 'next', title: 'A', contexts: ['@home'], priority: 'low' }),
-            task('z', { status: 'next', title: 'Z', contexts: ['@home'], priority: 'high' }),
-            task('drop', { status: 'next', contexts: ['@office'] })]);
-        const f = fixture(); await f.boot(seed);
-        await f.state.fixture.adapter().saveData(seed);
-        const durable = () => f.database.query("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
-            .all().map((row: any) => [row.name, f.database.query(`SELECT * FROM "${row.name.replaceAll('"', '""')}"`).all()]);
-        const saved = durable(), before = f.state.fixture.canonical();
-        expect(saved.some(([, rows]: any) => rows.some((row: any) => row.id === 'a'))).toBe(true);
-        f.writes.length = 0;
-        const observe = () => JSON.parse(f.state.MindwtrHost.iosSearchObservation());
-        const read = async (controls?: any, controlEdit?: any) => {
-            const answer = await f.poll(route === 'menuRead'
-                ? f.state.MindwtrHost.menuRead('focus', JSON.stringify({ limit: 1, controls, controlEdit }))
-                : f.state.MindwtrHost.focus(1, controls ? JSON.stringify(controls) : '', controlEdit ? JSON.stringify(controlEdit) : ''));
-            expect(answer.ok).toBe(true);
-            return answer.value;
-        };
-        const base = await read({});
-        const first = observe(); expect(Object.keys(first).sort()).toEqual(['nextAt', 'ready', 'revision']);
-        expect(first.ready).toBe(true);
-        const filtered = await read(base.controls.state, { type: 'filter', edit: { type: 'toggleToken', value: '@home' } });
-        const second = observe(); expect(second.revision).toBe(first.revision + 1);
-        expect(f.state.fixture.currentFocusFilter()).toEqual({ ...filtered.controls.widgetFilter, sortOrder: undefined });
-        const filteredNext = await f.snapshot();
-        expect(filteredNext).toEqual({ ok: true, value: projected(f.state.fixture.shared()) });
-        expect(filteredNext.value.items.map((row: any) => row.id).sort()).toEqual(['a', 'z']);
-        const sorted = await read(filtered.controls.state, { type: 'sort', sortBy: 'priority' });
-        const third = observe(); expect(third.revision).toBe(second.revision + 1);
-        expect(f.state.fixture.currentFocusFilter()).toEqual({ ...sorted.controls.widgetFilter, sortOrder: undefined });
-        expect(await f.snapshot()).toEqual({ ok: true, value: projected(f.state.fixture.shared()) });
-        await read(sorted.controls.state); expect(observe()).toEqual(third);
-        const rejected = await f.poll(f.state.MindwtrHost.menuRead('focus', JSON.stringify({ limit: 0 })));
-        expect(rejected.ok).toBe(false); expect(observe()).toEqual(third);
-        expect(durable()).toEqual(saved); await readonly(f, before);
-    });
-
+describe('Android menuRead beside the iOS widget reads', () => {
     it('does not change Android menuRead filter-cache behavior', async () => {
         const f = fixture(); await f.boot(data([task('one', { status: 'next', contexts: ['@home'] })]));
         f.state.__mindwtrHostPlatform = 'android';
@@ -202,127 +114,6 @@ describe('actual exported canonical iOS Next widget snapshot', () => {
         const answer = await f.poll(f.state.MindwtrHost.menuRead('focus', JSON.stringify({ limit: 1,
             controlEdit: { type: 'filter', edit: { type: 'toggleToken', value: '@home' } } })));
         expect(answer.ok).toBe(true); expect(f.state.fixture.currentFocusFilter()).toBe(filter);
-        expect(f.writes).toEqual([]);
-    });
-
-    it('uses the existing cached Focus criteria/sort and refuses a filter replacement or in-place change during read', async () => {
-        const f = fixture(); await f.boot(data([task('a', { status: 'next', title: 'A', tags: ['keep'] }),
-            task('z', { status: 'next', title: 'Z', tags: ['keep'] }), task('drop', { status: 'next', tags: ['drop'] })]));
-        f.state.fixture.focusFilter({ criteria: { tags: ['keep'] }, sortBy: 'title', sortOrder: 'desc' });
-        const answer = await f.snapshot();
-        expect(answer).toEqual({ ok: true, value: projected(f.state.fixture.shared()) });
-        expect(answer.value.items.map((row: any) => row.id)).toEqual(['z', 'a']);
-        for (const mode of ['replace', 'mutate']) {
-            const row = task('private', { status: 'next' });
-            f.state.fixture.install(data([row]));
-            f.state.fixture.focusFilter({ criteria: {}, sortBy: 'default' });
-            let changed = false;
-            Object.defineProperty(row, 'title', { get() {
-                if (!changed) {
-                    changed = true;
-                    if (mode === 'replace') f.state.fixture.focusFilter({ criteria: { tags: ['none'] }, sortBy: 'default' });
-                    else f.state.fixture.currentFocusFilter().criteria.tags = ['none'];
-                }
-                return 'Private';
-            } });
-            expect(await f.snapshot()).toMatchObject({ ok: false, error: expect.stringContaining('NOT_READY:') });
-        }
-        expect(f.writes).toEqual([]);
-    });
-
-    it.each(['boot', 'platform', 'sandbox', 'transition', 'adapter', 'loading', 'load-error', 'failed'])('refuses %s without output, writes or success marker', async (guard) => {
-        const f = fixture(); if (guard !== 'boot') await f.boot(data([task('private', { status: 'next' })]));
-        if (guard === 'platform') f.state.__mindwtrHostPlatform = 'android';
-        if (guard === 'sandbox') f.state.fixture.sandbox();
-        if (guard === 'transition') f.state.fixture.transition();
-        if (guard === 'adapter') f.state.fixture.replaceAdapter({});
-        if (guard === 'loading') f.state.fixture.set({ isLoading: true });
-        if (guard === 'load-error') f.state.fixture.set({ error: 'Failed to fetch data: private storage failure' });
-        if (guard === 'failed') f.state.fixture.set({ persistenceFailure: { message: 'private failure' } });
-        const answer = await f.snapshot(); expect(answer.ok).toBe(false);
-        expect(answer.error).toStartWith(guard === 'failed' ? 'SAVE_FAILED:' : 'NOT_READY:');
-        expect(f.writes).toEqual([]); expect(f.logText()).toBe('');
-    });
-
-    it('holds an owed save instead of flushing or publishing it', async () => {
-        const f = fixture(); await f.boot();
-        await f.state.fixture.state().addTask('private new task');
-        expect(f.state.fixture.persistence().queued).toBeGreaterThan(0);
-        expect(await f.snapshot()).toMatchObject({ ok: false, error: expect.stringContaining('NOT_READY:') });
-        expect(f.state.fixture.persistence().queued).toBeGreaterThan(0);
-        expect(f.writes).toEqual([]); expect(f.logText()).toBe('');
-        await f.state.fixture.flush(); f.writes.length = 0;
-        expect(await f.snapshot()).toMatchObject({ ok: true }); expect(f.writes).toEqual([]);
-    });
-
-    it.each(['_allTasks', '_allProjects', '_allSections', '_allAreas', 'settings', 'adapter'])('refuses a synchronous %s replacement during projection', async (field) => {
-        const row = task('private', { status: 'next' }), f = fixture(); await f.boot(data([row]));
-        let changed = false;
-        Object.defineProperty(row, 'title', { get() {
-            if (!changed) {
-                changed = true;
-                if (field === 'adapter') f.state.fixture.replaceAdapter({});
-                else f.state.fixture.set({ [field]: field === 'settings' ? {} : f.state.fixture.state()[field].slice() });
-            }
-            return 'PRIVATE title';
-        } });
-        expect(await f.snapshot()).toMatchObject({ ok: false, error: expect.stringContaining('NOT_READY:') });
-        expect(f.writes).toEqual([]); expect(f.logText()).toBe('');
-    });
-
-    it.each([null, 'private', 1, {}, []].map((argument) => ({ argument })))('rejects extra arguments %#', async ({ argument }) => {
-        const f = fixture(); await f.boot();
-        expect(await f.snapshot(argument)).toEqual({ ok: false, error: 'INVALID_INPUT: Widget Next snapshot takes no arguments' });
-        expect(f.writes).toEqual([]); expect(f.logText()).toBe('');
-    });
-
-    it('refuses malformed canonical fields and the whole 1MiB byte overflow instead of a false empty list', async () => {
-        const f = fixture(); await f.boot(data([task('x'.repeat(501), { status: 'next' })]));
-        expect(await f.snapshot()).toEqual({ ok: false, error: 'INVALID_INPUT: Native iOS widget Next snapshot is invalid' });
-        const projects = Array.from({ length: 13 }, (_, i) => project(`p${i}`, { title: '漢'.repeat(16_384) }));
-        f.state.fixture.install(data(projects.map((p) => task(p.id, { status: 'next', projectId: p.id, title: '漢'.repeat(16_384) })), projects));
-        expect(new TextEncoder().encode(JSON.stringify(projected(f.state.fixture.shared()))).byteLength).toBeGreaterThan(1024 * 1024);
-        expect(await f.snapshot()).toEqual({ ok: false, error: 'INVALID_INPUT: Native iOS widget Next snapshot is invalid' });
-        expect(f.writes).toEqual([]); expect(f.logText()).toBe('');
-    });
-
-    it('records only the successful bounded count and tolerates a failed diagnostic sink', async () => {
-        const f = fixture(); await f.boot(data([task('PRIVATE-id', { status: 'next' })]));
-        expect(await f.snapshot()).toMatchObject({ ok: true });
-        expect(f.logText().trim().split('\n').map((line) => JSON.parse(line))).toEqual([
-            { ts: expect.any(String), level: 'info', scope: 'native-ios', message: 'Native iOS Next widget snapshot',
-                context: { releaseCheck: 'v1.3.9/ios-widget-next-snapshot', count: '1' } },
-        ]);
-        expect(f.logText()).not.toContain('PRIVATE');
-        f.failLog(); expect(await f.snapshot()).toMatchObject({ ok: true }); expect(f.writes).toEqual([]);
-    });
-});
-
-
-describe('private iOS Next widget completion capabilities', () => {
-    it('binds original tokens and translated labels to the same canonical ordered snapshot without writes', async () => {
-        const f = fixture(); await f.boot(data([task('e\u0301', { status: 'next', rev: 7 }),
-            task('é', { status: 'next', rev: 8 }), task('\ufeffedge', { status: 'next', rev: 9 })]));
-        expect(await f.poll(f.state.MindwtrHost.language('de', 'de-DE'))).toMatchObject({ ok: true });
-        const before = f.state.fixture.canonical(), shared = f.state.fixture.shared('de', 'de-DE');
-        const answer = await f.actionSnapshot();
-        expect(answer.ok).toBe(true);
-        expect(Object.keys(answer.value).sort()).toEqual(['completeLabel', 'snapshot', 'tokens', 'undoLabel']);
-        expect(JSON.parse(answer.value.snapshot)).toEqual(projected(shared));
-        expect(answer.value.tokens).toEqual(shared.lists.next.items.map((row: any) => row.completionToken ?? null));
-        expect(answer.value.completeLabel).toBe(shared.completeLabel); expect(answer.value.undoLabel).toBe(shared.undoLabel);
-        expect(answer.value.tokens.map((token: string) => JSON.parse(token)[0])).toEqual(shared.lists.next.items.map((row: any) => row.id));
-        expect(await f.snapshot()).toEqual({ ok: true, value: projected(shared) });
-        await readonly(f, before);
-    });
-    it('returns a bounded empty capability list', async () => {
-        const f = fixture(); await f.boot(); const answer = await f.actionSnapshot();
-        expect(answer.ok).toBe(true); expect(answer.value.tokens).toEqual([]);
-        expect(JSON.parse(answer.value.snapshot).items).toEqual([]);
-    });
-    it('refuses arguments and non-iOS ownership', async () => {
-        const f = fixture(); await f.boot(); expect((await f.actionSnapshot('extra')).ok).toBe(false);
-        f.state.__mindwtrHostPlatform = 'android'; expect((await f.actionSnapshot()).ok).toBe(false);
         expect(f.writes).toEqual([]);
     });
 });

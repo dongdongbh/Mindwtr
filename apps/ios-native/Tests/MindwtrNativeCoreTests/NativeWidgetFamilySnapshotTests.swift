@@ -160,7 +160,7 @@ final class NativeWidgetFamilySnapshotTests: XCTestCase {
         reject(try json(amplified))
     }
 
-    func testActualJSCFacadeReturnsAllFamiliesWithoutChangingSavedRowsOrNextShapes() async throws {
+    func testActualJSCFacadeReturnsAllFamiliesWithoutChangingSavedRows() async throws {
         try await seed()
         let core = try host(); _ = try await core.start()
         _ = try await core.call("language", argumentsJSON: json(["de", "de-DE"]))
@@ -175,10 +175,6 @@ final class NativeWidgetFamilySnapshotTests: XCTestCase {
             let next = try XCTUnwrap(lists["next"] as? [String: Any])
             XCTAssertEqual((next["items"] as? [Any])?.count, count)
         }
-        let next = try await core.widgetNextSnapshot()
-        XCTAssertEqual(Set(try object(next.json).keys), ["version", "title", "emptyMessage", "totalCount", "items"])
-        let actions = try object(await core.call("iosWidgetNextActionSnapshot"))
-        XCTAssertEqual(Set(actions.keys), ["snapshot", "tokens", "completeLabel", "undoLabel"])
         XCTAssertEqual(try rows(), before)
     }
 

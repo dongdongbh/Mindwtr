@@ -2854,76 +2854,6 @@ const iosSearchSavedState = () => {
         || !contract.getDataSettings().ok) throw iosSearchUnavailable();
     return { adapter, generation: status.generation, state: useTaskStore.getState() };
 };
-const readIOSWidgetNext = (includeActions: boolean) => {
-    const unavailable = () => new Error('NOT_READY: Native iOS widget Next snapshot is unavailable');
-    const adapter = bootAdapter;
-    const assertReady = () => {
-        if (globalThis.__mindwtrHostPlatform !== 'ios' || !adapter || bootAdapter !== adapter
-            || getStorageAdapter() !== adapter || isSandboxMode() || isWorkspaceTransitionActive()) throw unavailable();
-        requireSaved();
-        const status = getPersistenceStatus();
-        if (status.failed || status.queued || status.inFlight || status.immediate || status.retrying
-            || !contract.getDataSettings().ok) throw unavailable();
-        return status;
-    };
-    const before = assertReady(), state = useTaskStore.getState();
-    const data = { tasks: state._allTasks, projects: state._allProjects, sections: state._allSections,
-        areas: state._allAreas, settings: state.settings };
-    const language = unwrap(contract.getStrings({ keys: [] })).language, locale = iosVoiceSystemLocale;
-    const focusFilter = getFocusWidgetFilter();
-    let focusFilterKey: string;
-    type Item = { id: string; title: string; contextLabel: string | null; dueLabel: string | null;
-        dueTone: 'overdue' | 'today' | 'normal' };
-    let actions: { tokens: (string | null)[]; completeLabel: string; undoLabel: string } | null = null;
-    let result: { version: 1; title: string; emptyMessage: string; totalCount: number; items: Item[] };
-    try {
-        focusFilterKey = focusWidgetFilterKey(focusFilter);
-        const payload = createWidgetPayloadProjection(data, language,
-            { listIds: ['next'], systemLocale: locale ?? undefined, focusFilter }).build(IOS_WIDGET_FAMILY_CACHE_ITEMS.medium);
-        const next = payload.lists.next;
-        const text = (value: unknown, limit: number, nonempty = false) =>
-            typeof value === 'string' && value.length <= limit && (!nonempty || value.length > 0);
-        if (!next || !text(next.title, 16_384) || !text(payload.emptyMessage, 16_384)
-            || !Array.isArray(next.items) || next.items.length > IOS_WIDGET_FAMILY_CACHE_ITEMS.medium
-            || !Number.isSafeInteger(next.totalCount) || next.totalCount < next.items.length) throw new Error();
-        const identities = new Set<string>();
-        const items = next.items.map((row): Item => {
-            if (!text(row.id, 500, true) || identities.has(row.id) || !text(row.title, 16_384)
-                || (row.contextLabel !== null && !text(row.contextLabel, 16_384))
-                || (row.dueLabel !== null && !text(row.dueLabel, 100))
-                || !['overdue', 'today', 'normal'].includes(row.dueTone)) throw new Error();
-            identities.add(row.id);
-            return { id: row.id, title: row.title, contextLabel: row.contextLabel,
-                dueLabel: row.dueLabel, dueTone: row.dueTone };
-        });
-        result = { version: 1, title: next.title, emptyMessage: payload.emptyMessage, totalCount: next.totalCount, items };
-        if (includeActions) {
-            if (!text(payload.completeLabel, 16_384, true) || !text(payload.undoLabel, 16_384, true)) throw new Error();
-            const tokens = next.items.map((row) => {
-                if (row.completionToken === undefined) return null;
-                if (typeof row.completionToken !== 'string'
-                    || new TextEncoder().encode(row.completionToken).byteLength > 8192) throw new Error();
-                const token: unknown = JSON.parse(row.completionToken);
-                if (!Array.isArray(token) || token.length !== 4 || token[0] !== row.id) throw new Error();
-                return row.completionToken;
-            });
-            actions = { tokens, completeLabel: payload.completeLabel, undoLabel: payload.undoLabel };
-        }
-        if (new TextEncoder().encode(JSON.stringify(result)).byteLength > 1024 * 1024) throw new Error();
-    } catch { throw new Error('INVALID_INPUT: Native iOS widget Next snapshot is invalid'); }
-    const after = assertReady(), current = useTaskStore.getState();
-    let sameFilter = false;
-    try { sameFilter = focusWidgetFilterKey(getFocusWidgetFilter()) === focusFilterKey; } catch { }
-    if (!sameFilter || before.generation !== after.generation || current._allTasks !== data.tasks || current._allProjects !== data.projects
-        || current._allSections !== data.sections || current._allAreas !== data.areas || current.settings !== data.settings
-        || unwrap(contract.getStrings({ keys: [] })).language !== language || iosVoiceSystemLocale !== locale) throw unavailable();
-    try {
-        logInfo('Native iOS Next widget snapshot', { scope: 'native-ios', force: true,
-            context: { releaseCheck: 'v1.3.9/ios-widget-next-snapshot', count: String(result.items.length) } });
-    } catch { }
-    return actions ? { snapshot: JSON.stringify(result), ...actions } : result;
-};
-
 
 type IOSWidgetFamilySnapshot = { version: 1; payloads: Record<keyof typeof IOS_WIDGET_FAMILY_CACHE_ITEMS, string> };
 const readIOSWidgetFamilies = (json: string): IOSWidgetFamilySnapshot => {
@@ -3819,25 +3749,11 @@ globalThis.MindwtrHost = {
             return readIOSWidgetFamilies(json);
         });
     },
-    iosWidgetNextSnapshot(): string {
-        const count = arguments.length;
-        return submit(async () => {
-            if (count !== 0) throw new Error('INVALID_INPUT: Widget Next snapshot takes no arguments');
-            return readIOSWidgetNext(false);
-        });
-    },
     iosWatchSnapshot(): string {
         const count = arguments.length;
         return submit(async () => {
             if (count !== 0) throw new Error('INVALID_INPUT: Watch snapshot takes no arguments');
             return readIOSWatchSnapshot();
-        });
-    },
-    iosWidgetNextActionSnapshot(): string {
-        const count = arguments.length;
-        return submit(async () => {
-            if (count !== 0) throw new Error('INVALID_INPUT: Widget Next actions snapshot takes no arguments');
-            return readIOSWidgetNext(true);
         });
     },
     iosSearchSnapshot(): string {

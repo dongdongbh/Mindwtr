@@ -2564,12 +2564,8 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     private var searchObservationClaim = UUID()
     private var searchLastObservation: NativeSearchObservation?
     private var searchLastSnapshot: NativeSearchSnapshot?
-    private var widgetNextLastObservation: NativeSearchObservation?
-    private var widgetNextForceSnapshot = true
     private var widgetCompletionLease: NativeTaskAIEditorLease?
-    private var widgetNextActionDeadline: Double?
     private var productionWidgetActionDeadline: Double?
-    @ObservationIgnored private weak var widgetNextPublishedHost: CoreHost?
     private var widgetFamilySystemColorScheme: NativeWidgetFamilySnapshot.SystemColorScheme?
     private var widgetFamilyLastObservation: NativeSearchObservation?
     private var shortcutsSnapshotLastObservation: NativeSearchObservation?
@@ -2624,10 +2620,6 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
             }
         }
         var isSearch: Bool { if case .searchTask = self { return true }; return false }
-        var widgetURL: URL? {
-            guard case let .url(value) = self, let url = URL(string: value), NativeWidgetTaskLink.isCandidate(url) else { return nil }
-            return url
-        }
     }
     private struct EntityLinkDelivery {
         let token: UInt64
@@ -8787,9 +8779,6 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         case .production, .standard, .isolated: break
         case .rehearsal: return
         }
-        if NativeWidgetTaskLink.isCandidate(url) {
-            guard let selection = trustedSearchSelection, NativeWidgetTaskLink.taskID(for: url, selection: selection) != nil else { return }
-        }
         let value = url.absoluteString
         guard value.utf16.count <= 16_000 else { return }
         guard let event = try? NativePersonalIntakeEvent.url(value) else { return }
@@ -8959,11 +8948,6 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
             try json(["releaseCheck": "v1.3.9/ios-context-automation", "outcome": outcome]),
         ]))
         return true
-    }
-
-    private func widgetTaskID(_ url: URL, host original: CoreHost) -> String? {
-        guard original.workspaceMode == .personal, let selection = trustedSearchSelection else { return nil }
-        return NativeWidgetTaskLink.taskID(for: url, selection: selection)
     }
 
     private func receiveEntityInput(_ input: EntityLinkInput, event: NativePersonalIntakeEvent) {
@@ -9375,14 +9359,8 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
                     guard let original = owner.current, let event = original.event, event.kind == original.kind,
                           event.id == original.id, event.receivedAtMs == original.receivedAtMs,
                           self.navigationReplayCurrent(owner), self.navigationReplayContextClean(owner) else { throw NavigationReplayFailure.held }
-                    let widgetURL = original.kind == .url ? event.text.flatMap(URL.init(string:)).flatMap {
-                        NativeWidgetTaskLink.isCandidate($0) ? $0 : nil
-                    } : nil
                     let searchTask: String?
-                    if let widgetURL {
-                        guard owner.host.workspaceMode == .personal else { throw NavigationReplayFailure.held }
-                        searchTask = self.widgetTaskID(widgetURL, host: owner.host)
-                    } else if original.kind == .spotlight {
+                    if original.kind == .spotlight {
                         guard self.searchPolicyAdmitted, let selection = self.trustedSearchSelection, let text = event.text else {
                             throw NavigationReplayFailure.held
                         }
@@ -9403,21 +9381,20 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
                         }
                     }
                     guard self.navigationReplayCurrent(owner), self.navigationReplayContextClean(owner) else { throw NavigationReplayFailure.held }
-                    if (original.kind == .spotlight || widgetURL != nil) && searchTask == nil {
+                    if original.kind == .spotlight && searchTask == nil {
                         owner.outcome = .ignored
                     } else {
                         self.navigationReplayPhase = "reading"
                         self.busy = true; self.navigationReplayBusyOwner = owner
                         let route: CoreObject
                         do {
-                            route = try self.decode(try await owner.host.call(original.kind == .spotlight || widgetURL != nil ? "iosSearchOpen" : self.entityOpenMethod(host: owner.host),
+                            route = try self.decode(try await owner.host.call(original.kind == .spotlight ? "iosSearchOpen" : self.entityOpenMethod(host: owner.host),
                                 argumentsJSON: self.json([searchTask ?? event.text ?? ""])))
                         } catch { self.releaseNavigationReplayBusy(owner); throw error }
                         self.releaseNavigationReplayBusy(owner)
-                        guard self.navigationReplayCurrent(owner), self.navigationReplayContextClean(owner),
-                              widgetURL.map({ self.widgetTaskID($0, host: owner.host) == searchTask }) ?? true else { throw NavigationReplayFailure.held }
+                        guard self.navigationReplayCurrent(owner), self.navigationReplayContextClean(owner) else { throw NavigationReplayFailure.held }
                         let type = route.text("type"), identifier = route.text("type") == "task" ? "taskId" : "projectId"
-                        let allowed = original.kind == .spotlight || widgetURL != nil ? ["task", "inbox"]
+                        let allowed = original.kind == .spotlight ? ["task", "inbox"]
                             : ["none", "task", "project", "inbox"] + CoreModel.routeDestinations + CoreModel.silentRouteDestinations
                         guard self.entityRouteShapeValid(route, allowed: allowed) else {
                             throw NavigationReplayFailure.held
@@ -9443,15 +9420,8 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
                                 else { owner.renderWaiter = continuation }
                             }
                             guard entered, owner.rendered, owner.contentGuard?() == true,
-                                  self.navigationReplayTicketCurrent(ticket),
-                                  widgetURL.map({ self.widgetTaskID($0, host: owner.host) == searchTask }) ?? true else { throw NavigationReplayFailure.held }
+                                  self.navigationReplayTicketCurrent(ticket) else { throw NavigationReplayFailure.held }
                             owner.outcome = .completed
-                            if widgetURL != nil, type == "task" {
-                                _ = try? await owner.host.call("logLine", argumentsJSON: self.json([
-                                    "Native iOS Next widget task opened",
-                                    #"{"releaseCheck":"v1.3.9/ios-widget-next-open","outcome":"opened"}"#,
-                                ]))
-                            }
                         }
                     }
                     try await self.finishNavigationReplayItem(owner)
@@ -9660,7 +9630,6 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
             && !settingsSyncRestartRequired && !appLockRecoveryPending && !Task.isCancelled
             && notificationResponseForeground
             && (!owner.delivery.input.isSearch || searchPolicyAdmitted)
-            && (owner.delivery.input.widgetURL.map { widgetTaskID($0, host: owner.host) != nil } ?? true)
     }
 
     private func releaseEntityLinkBusy(_ id: UUID, settling: Bool = true) {
@@ -9684,7 +9653,6 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
               let currentHost = host, startupSyncCompletedHost === currentHost,
               let startupToken = completedStartupToken else { return }
         guard !delivery.input.isSearch || searchPolicyAdmitted else { return }
-        if let url = delivery.input.widgetURL { guard widgetTaskID(url, host: currentHost) != nil else { return } }
         let owner = EntityLinkOwner(id: UUID(), host: currentHost, startupToken: startupToken, delivery: delivery)
         #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
         if workspaceRetirementFixtureEnabled { workspaceRetirementIntentDispatches += 1 }
@@ -9720,17 +9688,13 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
                 #endif
                 let command: String, value: String
                 switch delivery.input {
-                case .url(let url):
-                    if let widgetURL = delivery.input.widgetURL {
-                        guard let taskID = self.widgetTaskID(widgetURL, host: owner.host) else { return }
-                        command = "iosSearchOpen"; value = taskID
-                    } else { command = self.entityOpenMethod(host: owner.host); value = url }
+                case .url(let url): command = self.entityOpenMethod(host: owner.host); value = url
                 case .searchTask(let taskID): command = "iosSearchOpen"; value = taskID
                 }
                 let route = try self.decode(try await owner.host.call(command, argumentsJSON: self.json([value])))
                 guard self.entityLinkCurrent(owner), self.notificationResponseContextClean else { return }
                 let type = route.text("type")
-                let types = delivery.input.isSearch || delivery.input.widgetURL != nil ? ["inbox", "task"]
+                let types = delivery.input.isSearch ? ["inbox", "task"]
                     : ["none", "inbox", "task", "project"] + CoreModel.routeDestinations + CoreModel.silentRouteDestinations
                 guard self.entityRouteShapeValid(route, allowed: types) else {
                     self.entityLinkPending = nil
@@ -9844,13 +9808,6 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
             _ = try? await owner.host.call("logLine", argumentsJSON: json([
                 "Native iOS widget route opened",
                 try json(["releaseCheck": "v1.3.9/ios-widget-routes", "destination": kind, "outcome": "opened"]),
-            ]))
-            return
-        }
-        if owner.delivery.input.widgetURL != nil, kind == "task", outcome == "opened" {
-            _ = try? await owner.host.call("logLine", argumentsJSON: json([
-                "Native iOS Next widget task opened",
-                #"{"releaseCheck":"v1.3.9/ios-widget-next-open","outcome":"opened"}"#,
             ]))
             return
         }
@@ -10866,7 +10823,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         guard active, UIApplication.shared.applicationState == .active else { cancelSearchLifecycle(); return }
         if !searchSceneActive || force {
             searchWakeTicket &+= 1
-            searchForceSnapshot = true; widgetNextForceSnapshot = true; widgetFamilyForceSnapshot = true
+            searchForceSnapshot = true; widgetFamilyForceSnapshot = true
             searchIndex?.retry()
         }
         searchSceneActive = true
@@ -10901,11 +10858,6 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     }
 
     private func retireSearchHost(_ previous: CoreHost?) {
-        if widgetNextLiveSelection != nil, previous?.workspaceMode == .personal || widgetNextPublishedHost != nil {
-            if let cache = NativeWidgetNextCache.live() { try? cache.invalidate() }
-            WidgetCenter.shared.reloadTimelines(ofKind: NativeWidgetNextCache.kind)
-        }
-        widgetNextLastObservation = nil; widgetNextPublishedHost = nil
         if let publishedHost = widgetFamilyPublishedHost, (previous ?? host) === publishedHost,
            let publisher = widgetFamilyPublisher {
             try? publisher.invalidate { WidgetCenter.shared.reloadTimelines(ofKind: $0) }
@@ -10923,7 +10875,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         searchConsentKnown = false; searchConsentEnabled = false
         searchConsentPending = nil; searchConsentBusy = false; searchConsentError = nil
         searchWakeTicket &+= 1; searchAttemptedTicket = searchWakeTicket
-        searchForceSnapshot = true; widgetNextForceSnapshot = true; widgetFamilyForceSnapshot = true
+        searchForceSnapshot = true; widgetFamilyForceSnapshot = true
         if let previous, observed === previous { Task { try? await previous.setSearchObservationHandler(nil) } }
     }
 
@@ -10931,7 +10883,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         guard workspaceAdmissionsOpen else { return }
         searchDeadlineTask?.cancel(); searchDeadlineTask = nil
         searchWakeTicket &+= 1
-        searchForceSnapshot = true; widgetNextForceSnapshot = true; widgetFamilyForceSnapshot = true
+        searchForceSnapshot = true; widgetFamilyForceSnapshot = true
         admitSearchLifecycle()
     }
 
@@ -10956,16 +10908,10 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     private var watchLifecycleLease: NativeTaskAIEditorLease?
     private var watchAudioRetries: [String: (body: String, after: Date)] = [:]
 
-    private var widgetNextLiveSelection: NativeLaunchSelection? {
-        guard Bundle.main.bundleIdentifier == NativeWidgetNextCache.namespace,
-              let selection = trustedSearchSelection,
-              case let .standard(_, _, namespace) = selection,
-              namespace == NativeWidgetNextCache.namespace else { return nil }
-        return selection
-    }
-
-    private var widgetNextEligible: Bool {
-        workspaceAdmissionsOpen && widgetNextLiveSelection != nil && host?.workspaceMode == .personal
+    private var watchSelectionAdmitted: Bool {
+        guard Bundle.main.bundleIdentifier == NativeWidgetFamilyPublisher.devNamespace,
+              case let .standard(_, _, namespace)? = trustedSearchSelection else { return false }
+        return namespace == NativeWidgetFamilyPublisher.devNamespace
     }
 
     private var productionWidgetFamilySelection: NativeLaunchSelection? {
@@ -10991,22 +10937,9 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         return operationContextIsClean() && shareCaptureOwner == nil && !reviewFinishPending
     }
 
-    private func widgetNextPublicationCurrent(_ owner: SearchLifecycleOwner) -> Bool {
-        guard widgetNextEligible, searchOwnerCurrent(owner) else { return false }
-        guard !busy else {
-            searchWakeTicket &+= 1
-            return false
-        }
-        return true
-    }
-
-    private func widgetCompletionCurrent(_ owner: SearchLifecycleOwner) -> Bool {
-        widgetNextEligible && searchOwnerCurrent(owner) && operationContextIsClean()
-            && shareCaptureOwner == nil && !reviewFinishPending
-    }
-
     private var watchEligible: Bool {
-        widgetNextEligible && !appLock.concealed && !appLockActive && !appLockRecoveryPending
+        workspaceAdmissionsOpen && watchSelectionAdmitted && host?.workspaceMode == .personal
+            && !appLock.concealed && !appLockActive && !appLockRecoveryPending
             && MindwtrWatchConnectivityReceiver.shared.isAvailable
     }
 
@@ -11016,7 +10949,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     }
 
     private func refreshWatchIfCurrent(_ owner: SearchLifecycleOwner) async {
-        guard watchEligible, widgetCompletionCurrent(owner), !busy else { return }
+        guard watchIntakeCurrent(owner), !busy else { return }
         let receiver = MindwtrWatchConnectivityReceiver.shared
         let lease = NativeTaskAIEditorLease(); watchLifecycleLease = lease
         busy = true
@@ -11029,7 +10962,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         do {
             receiver.activateAtLaunch()
             let sources = try await receiver.pendingCommands()
-            guard watchEligible, widgetCompletionCurrent(owner), lease.isCurrent else { return }
+            guard watchIntakeCurrent(owner), lease.isCurrent else { return }
             let names = Set(sources.map(\.name))
             watchAudioRetries = watchAudioRetries.filter { names.contains($0.key) }
             let ordered = try NativeWatchBatch.orderedSources(sources.map { (name: $0.name, body: $0.body) }).filter {
@@ -11079,13 +11012,13 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
                         try await receiver.retirePendingCommand(source, checklistOutcome: outcomes[source.name])
                     }
                 }
-                searchWakeTicket &+= 1; widgetNextForceSnapshot = true
-                guard watchEligible, widgetCompletionCurrent(owner), lease.isCurrent else { return }
+                searchWakeTicket &+= 1
+                guard watchIntakeCurrent(owner), lease.isCurrent else { return }
                 try await readSelectedSurface()
             }
-            guard watchEligible, widgetCompletionCurrent(owner), lease.isCurrent else { return }
+            guard watchIntakeCurrent(owner), lease.isCurrent else { return }
             let snapshot = try await owner.host.watchSnapshot()
-            guard watchEligible, widgetCompletionCurrent(owner), lease.isCurrent else { return }
+            guard watchIntakeCurrent(owner), lease.isCurrent else { return }
             try await receiver.updateApplicationContext(snapshot.applicationContext(), isCurrent: { lease.isCurrent })
             _ = try? await owner.host.call("logLine", argumentsJSON: json([
                 "Native iOS Watch context published", try json([
@@ -11099,84 +11032,15 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     }
 
     private func watchIntakeCurrent(_ owner: SearchLifecycleOwner) -> Bool {
-        watchEligible && widgetCompletionCurrent(owner)
+        watchEligible && searchOwnerCurrent(owner) && operationContextIsClean()
+            && shareCaptureOwner == nil && !reviewFinishPending
     }
 
-    private func drainNextWidgetActions(_ owner: SearchLifecycleOwner) async -> [String] {
-        guard widgetCompletionCurrent(owner), !busy else { widgetNextActionDeadline = nil; return [] }
-        var dispatched = false
-        do {
-            let store = try NativeWidgetActionStore.live()
-            widgetNextActionDeadline = try store.nextReadyAt()
-            let actions = try store.claimReady()
-            widgetNextActionDeadline = try store.nextReadyAt()
-            guard !actions.isEmpty else { return [] }
-            busy = true
-            let lease = NativeTaskAIEditorLease(); widgetCompletionLease = lease
-            defer {
-                lease.invalidate()
-                if widgetCompletionLease === lease { widgetCompletionLease = nil }
-                if host === owner.host { finishOperation(wakeWidget: false) }
-            }
-            var settled: [String] = []
-            for action in actions {
-                guard widgetCompletionCurrent(owner), widgetCompletionLease === lease else { break }
-                dispatched = true
-                let raw = try await owner.host.submitWidgetCompletion(action: action, lease: lease, readmit: { [weak self] in
-                    guard let self else { return false }
-                    return await self.widgetCompletionCurrent(owner)
-                })
-                let result = try decode(raw)
-                guard result.text("actionId") == action.id, ["completed", "discarded"].contains(result.text("outcome")) else {
-                    throw CocoaError(.coderReadCorrupt)
-                }
-                dispatched = false
-                settled.append(action.id); widgetNextForceSnapshot = true
-            }
-            if !settled.isEmpty, widgetCompletionCurrent(owner) { try await readSelectedSurface() }
-            return settled
-        } catch {
-            if dispatched, host === owner.host, !isDefiniteRejection(error) {
-                retryNeeded = true; self.error = error.localizedDescription
-            }
-            return []
-        }
-    }
-
-    private func publishNextWidgetIfCurrent(_ owner: SearchLifecycleOwner) async {
-        guard widgetNextPublicationCurrent(owner) else { return }
-        let settled = await drainNextWidgetActions(owner)
-        guard widgetNextPublicationCurrent(owner) else { return }
-        do {
-            let observation = try await owner.host.searchObservation()
-            guard widgetNextPublicationCurrent(owner), observation.ready else { return }
-            installSearchDeadline(observation.nextAt, owner: owner)
-            guard widgetNextForceSnapshot || !sameSearchObservation(widgetNextLastObservation, observation) else { return }
-            let actions = try await owner.host.widgetNextActionSnapshot()
-            let snapshot = actions.snapshot
-            guard widgetNextPublicationCurrent(owner) else { return }
-            let after = try await owner.host.searchObservation()
-            guard widgetNextPublicationCurrent(owner), after.ready,
-                  sameSearchObservation(observation, after), let selection = widgetNextLiveSelection,
-                  let cache = NativeWidgetNextCache.live() else { return }
-            let now = floor(Date().timeIntervalSince1970 * 1_000)
-            let expires = floor(min(observation.nextAt ?? now + 86_400_000, now + 86_400_000))
-            guard expires > now else { return }
-            let identifiers = try snapshot.items.map { try NativeSearchIndex.identifier(taskID: $0.id, selection: selection) }
-            guard widgetNextPublicationCurrent(owner) else { return }
-            try cache.publish(actions, identifiers: identifiers, publishedAtMs: now, expiresAtMs: expires)
-            widgetNextLastObservation = observation; widgetNextPublishedHost = owner.host; widgetNextForceSnapshot = false
-            if !settled.isEmpty {
-                let store = try NativeWidgetActionStore.live()
-                for id in settled { try store.acknowledge(id: id) }
-            }
-            WidgetCenter.shared.reloadTimelines(ofKind: NativeWidgetNextCache.kind)
-            _ = try? await owner.host.call("logLine", argumentsJSON: json([
-                "Native iOS Next widget published", try json([
-                    "releaseCheck": "v1.3.9/ios-widget-next-publication", "count": snapshot.items.count]),
-            ]))
-        } catch {
-        }
+    private func scheduleWatchRefreshIfCurrent(_ owner: SearchLifecycleOwner) async {
+        guard watchEligible, searchOwnerCurrent(owner) else { return }
+        guard !busy else { searchWakeTicket &+= 1; return }
+        guard let observation = try? await owner.host.searchObservation(), searchOwnerCurrent(owner), observation.ready else { return }
+        installSearchDeadline(observation.nextAt, owner: owner)
     }
 
     private func drainProductionWidgetActions(_ owner: SearchLifecycleOwner,
@@ -11272,14 +11136,14 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     private func installSearchDeadline(_ deadline: Double?, owner: SearchLifecycleOwner) {
         searchDeadlineTask?.cancel(); searchDeadlineTask = nil
         let watchDeadline = watchEligible ? (floor(Date().timeIntervalSince1970 / 60) + 1) * 60_000 : nil
-        let deadline = [deadline, widgetNextEligible ? widgetNextActionDeadline : nil,
-                        productionWidgetFamilyEligible ? productionWidgetActionDeadline : nil, watchDeadline].compactMap { $0 }.min()
-        guard let deadline, searchPolicyAdmitted || widgetNextEligible || productionWidgetFamilyEligible
+        let deadline = [deadline, productionWidgetFamilyEligible ? productionWidgetActionDeadline : nil,
+                        watchDeadline].compactMap { $0 }.min()
+        guard let deadline, searchPolicyAdmitted || watchEligible || productionWidgetFamilyEligible
                 || appIconBadgeEligible else { return }
         searchDeadlineTask = Task { [weak self] in
             do { try await Task.sleep(for: .seconds(max(0, (deadline - Date().timeIntervalSince1970 * 1000) / 1000))) }
             catch { return }
-            guard let self, self.searchOwnerCurrent(owner), self.searchPolicyAdmitted || self.widgetNextEligible
+            guard let self, self.searchOwnerCurrent(owner), self.searchPolicyAdmitted || self.watchEligible
                     || self.productionWidgetFamilyEligible || self.appIconBadgeEligible else { return }
             self.searchDeadlineTask = nil
             self.searchClockChanged()
@@ -11321,7 +11185,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
                     guard self.searchOwnerCurrent(owner) else { return }
                 }
                 await self.refreshWatchIfCurrent(owner)
-                await self.publishNextWidgetIfCurrent(owner)
+                await self.scheduleWatchRefreshIfCurrent(owner)
                 await self.publishProductionWidgetFamiliesIfCurrent(owner)
                 await self.publishAppIconBadgeIfCurrent(owner)
                 await self.drainShortcutCapturesIfCurrent(owner)
@@ -48900,7 +48764,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
             refreshRequested = false
             return
         }
-        if wakeWidget && (widgetNextEligible || productionWidgetFamilyEligible) { searchWakeTicket &+= 1 }
+        if wakeWidget && (watchEligible || productionWidgetFamilyEligible) { searchWakeTicket &+= 1 }
         resumeVoiceSpeechWaiter()
         if projectFileAvailabilityPending {
             retryNeeded = true
@@ -49104,7 +48968,7 @@ extension CoreModel {
             })
             dispatched = false
             for entry in batch.entries where completed.contains(entry.name) { try queue.retire(name: entry.name, body: entry.body) }
-            searchWakeTicket &+= 1; widgetNextForceSnapshot = true; widgetFamilyForceSnapshot = true
+            searchWakeTicket &+= 1; widgetFamilyForceSnapshot = true
             guard shortcutIntakeCurrent(owner), lease.isCurrent else { return }
             try await readSelectedSurface()
         } catch {

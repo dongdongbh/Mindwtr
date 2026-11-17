@@ -1,4 +1,5 @@
 import CoreFoundation
+import CryptoKit
 import Foundation
 
 public struct NativeProductionWidgetCompletionSource: Sendable {
@@ -30,11 +31,6 @@ enum NativeWidgetCompletionJSON {
               let value = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [String: Any] else { throw invalid }
         return value
     }
-    static func source(_ action: NativeWidgetPendingAction) throws -> String {
-        let raw = try encoded(["namespace": NativeWidgetActionStore.namespace, "actionId": action.id,
-            "identifier": action.identifier, "token": action.token, "createdAt": action.createdAt])
-        _ = try source(raw); return raw
-    }
     static func source(_ raw: String) throws -> [String: Any] {
         let value = try object(raw, limit: 65_536)
         guard Set(value.keys) == ["namespace", "actionId", "identifier", "token", "createdAt"],
@@ -46,15 +42,18 @@ enum NativeWidgetCompletionJSON {
               at.doubleValue.isFinite, at.doubleValue >= 0, at.doubleValue <= 8_640_000_000_000_000 else { throw invalid }
         return value
     }
+    private static let devScope = SHA256.hash(data: Data(NativeWidgetFamilyPublisher.devNamespace.utf8))
+        .map { String(format: "%02x", $0) }.joined()
+    private static func devIdentifier(_ taskID: String) -> String {
+        devScope + "." + Data(taskID.utf8).base64EncodedString().replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "")
+    }
     private static func validOperation(namespace: String, identifier: String, token: String) -> Bool {
-        if namespace == NativeWidgetActionStore.namespace {
-            return NativeWidgetActionStore.validOperation(identifier, token)
-        }
-        guard namespace == NativeLaunchSelection.productionNamespace,
+        guard [NativeLaunchSelection.productionNamespace, NativeWidgetFamilyPublisher.devNamespace].contains(namespace),
               identifier.utf8.count <= 4_096, token.utf8.count <= 8_192,
               let values = try? NativeJSON.jsonObject(with: Data(token.utf8)) as? [Any], values.count == 4,
               let taskID = values[0] as? String, !taskID.isEmpty, taskID.utf16.count <= 500,
-              Data(identifier.utf8) == Data(taskID.utf8),
+              Data(identifier.utf8) == Data((namespace == NativeWidgetFamilyPublisher.devNamespace ? devIdentifier(taskID) : taskID).utf8),
               let revision = values[1] as? NSNumber, CFGetTypeID(revision) != CFBooleanGetTypeID(),
               revision.doubleValue.isFinite, revision.doubleValue >= 0, revision.doubleValue <= 9_007_199_254_740_991,
               revision.doubleValue.rounded() == revision.doubleValue,

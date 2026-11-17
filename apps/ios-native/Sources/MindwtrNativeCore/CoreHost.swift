@@ -1949,24 +1949,12 @@ public final class CoreHost: @unchecked Sendable {
         return try NativeWatchSnapshot(json: await perform { try $0.call("iosWatchSnapshot", argumentsJSON: "[]") })
     }
 
-    public func widgetNextSnapshot() async throws -> NativeWidgetNextSnapshot {
-        try beginOuterAdmission()
-        defer { finishOuterAdmission() }
-        return try NativeWidgetNextSnapshot(json: await perform { try $0.call("iosWidgetNextSnapshot", argumentsJSON: "[]") })
-    }
-
     public func widgetFamilySnapshot(systemColorScheme: NativeWidgetFamilySnapshot.SystemColorScheme) async throws -> NativeWidgetFamilySnapshot {
         try beginOuterAdmission()
         defer { finishOuterAdmission() }
         let input = String(decoding: try JSONSerialization.data(withJSONObject: ["systemColorScheme": systemColorScheme.rawValue], options: [.sortedKeys]), as: UTF8.self)
         let arguments = String(decoding: try JSONSerialization.data(withJSONObject: [input]), as: UTF8.self)
         return try NativeWidgetFamilySnapshot(json: await perform { try $0.call("iosWidgetFamilySnapshot", argumentsJSON: arguments) })
-    }
-
-    public func widgetNextActionSnapshot() async throws -> NativeWidgetNextActionSnapshot {
-        try beginOuterAdmission()
-        defer { finishOuterAdmission() }
-        return try NativeWidgetNextActionSnapshot(json: await perform { try $0.call("iosWidgetNextActionSnapshot", argumentsJSON: "[]") })
     }
 
     public func searchSnapshot() async throws -> NativeSearchSnapshot {
@@ -2082,22 +2070,6 @@ public final class CoreHost: @unchecked Sendable {
     #if DEBUG
     var beforeReviewAIApplyEngine: (@Sendable () -> Void)?
     #endif
-    public func submitWidgetCompletion(action: NativeWidgetPendingAction, lease: NativeTaskAIEditorLease,
-                                       readmit: @escaping @Sendable () async -> Bool) async throws -> String {
-        let entry = ShortWriteEntry()
-        do {
-            try beginOuterAdmission(); defer { finishOuterAdmission() }
-            let source = try NativeWidgetCompletionJSON.source(action)
-            guard await readmit(), lease.isCurrent, !Task.isCancelled else { throw CoreHostRejection(message: "STALE_REVISION: Widget completion changed") }
-            return try await perform { engine in
-                entry.mark(); return try engine.submitWidgetCompletion(source, lease: lease)
-            }
-        } catch {
-            if !entry.value, !(error is CoreHostRejection) { throw CoreHostRejection(message: "INVALID_INPUT: Widget completion was not admitted") }
-            throw error
-        }
-    }
-
     public func submitWidgetCompletion(source: NativeProductionWidgetCompletionSource, lease: NativeTaskAIEditorLease,
                                        readmit: @escaping @Sendable () async -> Bool) async throws -> String {
         let entry = ShortWriteEntry()
@@ -26934,13 +26906,6 @@ private final class Engine: @unchecked Sendable {
         case "Native iOS personal intake capture confirmed":
             valid = Self.equalJSON(context, ["releaseCheck": "v1.3.9/ios-personal-intake",
                                             "operation": "capture", "outcome": "confirmed"])
-        case "Native iOS Next widget published":
-            valid = Set(context.keys) == ["releaseCheck", "count"]
-                && context["releaseCheck"] as? String == "v1.3.9/ios-widget-next-publication"
-                && Self.isInteger(context["count"])
-                && (context["count"] as? NSNumber).map({ (0.0...13.0).contains($0.doubleValue) }) == true
-        case "Native iOS Next widget task opened":
-            valid = Self.equalJSON(context, ["releaseCheck": "v1.3.9/ios-widget-next-open", "outcome": "opened"])
         case "Native iOS shortcut capture opened":
             valid = Set(context.keys) == Set(["releaseCheck", "outcome"])
                 && context["releaseCheck"] as? String == "v1.3.9/ios-shortcut-capture"
@@ -27148,9 +27113,6 @@ private final class Engine: @unchecked Sendable {
         }
         if method == "iosWatchSnapshot", json.utf8.count > 2_048 {
             throw HostFailure("INVALID_INPUT: Watch snapshot request is too large")
-        }
-        if method == "iosWidgetNextSnapshot", json.utf8.count > 2_048 {
-            throw HostFailure("INVALID_INPUT: Widget Next snapshot request is too large")
         }
         if ["iosSearchSnapshot", "iosSearchObservation"].contains(method), json.utf8.count > 2_048 {
             throw HostFailure("INVALID_INPUT: Search snapshot request is too large")

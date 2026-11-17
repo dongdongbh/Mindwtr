@@ -882,7 +882,7 @@ final class NativeNotificationDelegate: NSObject, UIApplicationDelegate, UNUserN
         }
         guard let selection = try? NativeAppLaunch.selection.get() else { return true }
         if case let .standard(_, _, namespace) = selection,
-           namespace == NativeWidgetNextCache.namespace, Bundle.main.bundleIdentifier == namespace {
+           namespace == NativeWidgetFamilyPublisher.devNamespace, Bundle.main.bundleIdentifier == namespace {
             MindwtrWatchConnectivityReceiver.shared.activateAtLaunch()
         }
         switch selection {
