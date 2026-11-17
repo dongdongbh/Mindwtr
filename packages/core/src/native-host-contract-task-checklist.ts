@@ -1222,7 +1222,7 @@ const readChecklistPrepared = (
         if (isSave(request)) {
             const after = planned.effect.tasks.find((row) => row.after.id === request.id)?.after;
             if (!after || !isHistoryRowRequest(request) && !frozenRowSelection(selection)
-                && !validNativeTaskDraftScheduleEffect(witness.source, draftRequest(request), after, validateField)) return null;
+                && !validNativeTaskDraftScheduleEffect(witness.source, draftRequest(request), after, validateField, 'store')) return null;
         }
         return same(planned.effect, prepared.effect) && same(planned.result, prepared.result)
             && (!selection || validOwnedChecklistRawBefore(raw.rawBefore, planned.effect, witness.preparedAt,
@@ -1486,7 +1486,7 @@ const readRowDates = (value: unknown, validateField: (field: TaskDraftField, val
         || referenceContainerReadOnly(source, proof.witness.lists) || taskRevisionOf(source) !== request.taskRevision
         || !same(proof.request, rowDatesSaveRequest(source, request, readDraft)) || !same(proof.rawBefore, p.rawBefore)
         || proof.effect.tasks.length !== 1 || proof.effect.projects.length || proof.effect.sections.length
-        || !validNativeTaskDraftScheduleEffect(source, proof.request, proof.effect.tasks[0].after, validateField)
+        || !validNativeTaskDraftScheduleEffect(source, proof.request, proof.effect.tasks[0].after, validateField, 'store')
         || proof.witness.ids.length || proof.witness.recurrenceProjection !== null
         || !same(proof.result, { id: request.id }) || !same(p.result, proof.result)) return null;
     return { request, prepared: { version: 2, kind: 'rowDates', request, rawBefore: proof.rawBefore, checklist: proof, result: { id: request.id } } };

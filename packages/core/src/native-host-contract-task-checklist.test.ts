@@ -765,6 +765,20 @@ describe('prepared native checklist Save and Reset', () => {
             .toEqual([undefined, undefined, undefined, undefined]);
     });
 
+    it('saves a description edit on a dated Reference task and clears its dates like the store does', async () => {
+        const original = source({ status: 'reference', dueDate: '2026-09-30', reviewAt: '2026-10-02', description: 'Old' });
+        const { host } = await open(original);
+        const request = { id: original.id, requestId: id, base: { description: 'Old' }, patch: { description: 'New' },
+            scheduleBase: { ...scheduleBase, dueDate: '2026-09-30', reviewAt: '2026-10-02' },
+            checklist: { base: original.checklist!, value: original.checklist! } };
+        const plan = unwrap(host.prepareTaskChecklistSave(request));
+        expect(plan.kind).toBe('prepared');
+        if (plan.kind !== 'prepared') return;
+        unwrap(await host.commitPreparedTaskChecklistWrite({ request, prepared: plan.prepared }));
+        expect(savedTask()).toMatchObject({ status: 'reference', description: 'New', rev: 4 });
+        expect([savedTask().dueDate, savedTask().reviewAt]).toEqual([undefined, undefined]);
+    });
+
     it('writes a nonempty already-open Reset and returns an empty saved-list no-write result', async () => {
         const { host, saves } = await open();
         const request = { id: 'checklist-task', requestId: id, checklistBase: savedTask().checklist };

@@ -455,6 +455,16 @@ describe('prepared native task draft save', () => {
             .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
     });
 
+    it('saves a description edit on a dated Reference task and keeps its stored dates', async () => {
+        await seed({ status: 'reference', description: 'Old note', dueDate: '2026-10-03', reviewAt: '2026-10-04' });
+        const input = request({ description: 'New note' });
+        const plan = await host.prepareTaskDraftSaveV2(input);
+        expect(plan).toMatchObject({ ok: true, value: { kind: 'prepared' } });
+        if (!plan.ok || plan.value.kind !== 'prepared') return;
+        expect(await host.commitPreparedTaskDraftSave({ request: input, prepared: plan.value.prepared })).toMatchObject({ ok: true });
+        expect(saved()).toMatchObject({ status: 'reference', description: 'New note', dueDate: '2026-10-03', reviewAt: '2026-10-04' });
+    });
+
     it('refuses a forged title-only v2 plan that clears unrelated Focus metadata', async () => {
         await seed({ isFocusedToday: true, focusOrder: 9 });
         const input = request({ title: 'Changed' });

@@ -3,7 +3,7 @@ import type { PreparedTaskEdit } from './store-types';
 import type { Area, Attachment, Project, Section, Task } from './types';
 import { getPersistenceStatus, getStorageAdapter, useTaskStore } from './store';
 import { applyTaskUpdates, createProjectOrderReserver, ensureDeviceId, findTaskProjectReactivationTarget,
-    getNextProjectOrder, nextRevision, normalizeTaskUpdate } from './store-helpers';
+    getNextProjectOrder, getReferenceTaskFieldClears, nextRevision, normalizeTaskUpdate } from './store-helpers';
 import { applyPreparedTaskEditChanges, buildPreparedTaskEditChanges, prepareTaskUpdatesForStore } from './store-tasks';
 import { taskEditValuesEqual } from './json-value-equality';
 import { createTaskDraft, resolveTaskDraftTitle, taskDraftToUpdatePatch, type TaskDraft, type TaskDraftField } from './task-draft';
@@ -200,10 +200,12 @@ export const validNativeTaskDraftBases = (before: Task, request: NativeTaskDraft
 };
 
 
+export type NativeTaskDraftWriter = 'store' | 'rawOwnedFields';
 export const validNativeTaskDraftScheduleEffect = (before: Task, request: NativeTaskDraftSaveRequest, after: Task,
-    validateField: (field: TaskDraftField, value: unknown) => boolean): boolean => {
-    if ((own(request.patch, 'status') ? request.patch.status : before.status) === 'reference') {
-        return !after.startTime && !after.dueDate && !after.reviewAt && after.relativeStartOffset == null;
+    validateField: (field: TaskDraftField, value: unknown) => boolean, writer: NativeTaskDraftWriter): boolean => {
+    if (writer === 'store' && (own(request.patch, 'status') ? request.patch.status : before.status) === 'reference') {
+        const referenceClears = getReferenceTaskFieldClears();
+        return SCHEDULE.every((field) => taskEditValuesEqual(after[field], referenceClears[field]));
     }
     for (const field of ['dueDate', 'reviewAt'] as const) {
         const expected = own(request.patch, field) ? request.patch[field] || undefined : before[field];
@@ -441,7 +443,7 @@ function createTaskDraftSaveFactory(deps: NativeTaskDraftSaveDependencies, strat
             && (!preserveRaw || recurrenceFlagEdited(request) || recurrenceRuleEdited(request))
             ? recurrenceUpdates.showFutureRecurrence : before.showFutureRecurrence;
         if (!taskEditValuesEqual(after.recurrence, recurrence) || !taskEditValuesEqual(after.showFutureRecurrence, showFutureRecurrence)) return false;
-        if (!validNativeTaskDraftScheduleEffect(before, request, after, deps.validateField)) return false;
+        if (!validNativeTaskDraftScheduleEffect(before, request, after, deps.validateField, preserveRaw ? 'rawOwnedFields' : 'store')) return false;
         const moves = ASSOCIATIONS.some((field) => own(request.patch, field));
         const projectId = moves ? request.patch.projectId || undefined : before.projectId;
         const sectionId = moves ? (projectId ? request.patch.sectionId || undefined : undefined) : before.sectionId;
