@@ -26873,6 +26873,8 @@ private final class Engine: @unchecked Sendable {
                 && ["cancelled", "saved", "deleted"].contains(context["outcome"] as? String ?? "")
         case "Native iOS calendar push lifecycle completed":
             valid = Self.equalJSON(context, ["releaseCheck": "v1.3.5/ios-calendar-push-lifecycle", "outcome": "confirmed"])
+        case "Native iOS calendar push observer released after cancel":
+            valid = Self.equalJSON(context, ["releaseCheck": "v1.3.9/ios-calendar-push-observer-release", "outcome": "released"])
         case "Native iOS calendar feed view published":
             valid = Set(context.keys) == Set(["releaseCheck", "outcome"])
                 && context["releaseCheck"] as? String == "v1.3.5/ios-calendar-feed"

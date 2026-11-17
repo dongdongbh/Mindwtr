@@ -38429,4 +38429,12 @@ extension FoundationUITests {
         XCTAssertEqual(XCTWaiter.wait(for: [moved], timeout: 10), .completed, "Dragging the handle reorders the checklist, as in RN")
         XCTAssertEqual(app.textFields["task-checklist-input-2"].value as? String, "Alpha")
     }
+
+    func testUIBatchExternalCalendarShowsNoErrorOnFirstOpen() {
+        let app = uiBatchApp()
+        app.launch(); defer { app.terminate() }
+        task496OpenSettings(app)
+        XCTAssertEqual(app.switches["calendar-push-enabled"].value as? String, "0")
+        XCTAssertFalse(app.staticTexts["calendar-push-lifecycle-error"].waitForExistence(timeout: 15))
+    }
 }

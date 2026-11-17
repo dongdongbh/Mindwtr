@@ -10456,7 +10456,14 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
             }
         }
         guard host === observed, completedStartupToken == token, calendarPushObservationClaim == claim, !Task.isCancelled else {
-            try? await observed.removeCalendarPushObserver(registration); throw CancellationError()
+            let released = await Task { (try? await observed.removeCalendarPushObserver(registration)) != nil }.value
+            if released {
+                _ = try? await observed.call("logLine", argumentsJSON: json([
+                    "Native iOS calendar push observer released after cancel",
+                    #"{"releaseCheck":"v1.3.9/ios-calendar-push-observer-release","outcome":"released"}"#,
+                ]))
+            }
+            throw CancellationError()
         }
         calendarPushObservationID = registration
         #if DEBUG && targetEnvironment(simulator)

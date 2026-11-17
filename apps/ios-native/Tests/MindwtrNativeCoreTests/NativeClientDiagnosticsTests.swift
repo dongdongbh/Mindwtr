@@ -54,6 +54,7 @@ final class NativeClientDiagnosticsTests: XCTestCase {
             ("Native iOS launch selection admitted", ["releaseCheck": "v1.3.5/ios-launch-selection", "outcome": "confirmed"]),
             ("Native iOS reminder lifecycle reconciled", ["releaseCheck": "v1.3.5/ios-reminder-lifecycle", "outcome": "confirmed"]),
             ("Native iOS foreground activation refreshed", ["releaseCheck": "v1.3.5/ios-foreground-activation", "outcome": "refreshed"]),
+            ("Native iOS calendar push observer released after cancel", ["releaseCheck": "v1.3.9/ios-calendar-push-observer-release", "outcome": "released"]),
             ("Native iOS personal intake reopened after container relocation", ["releaseCheck": "v1.3.9/ios-intake-same-tree-reopen", "operation": "same-tree-reopen", "outcome": "confirmed"]),
         ]
         for outcome in ["notified", "quiet", "failed"] {
