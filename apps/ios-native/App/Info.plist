@@ -60,13 +60,19 @@
     <string>Mindwtr needs calendar access to show your events alongside tasks.</string>
     <key>NSCalendarsFullAccessUsageDescription</key>
     <string>Mindwtr needs calendar access to show your events alongside tasks.</string>
+    <key>UIFileSharingEnabled</key>
+    <true/>
+    <key>LSSupportsOpeningDocumentsInPlace</key>
+    <true/>
+    <key>CADisableMinimumFrameDurationOnPhone</key>
+    <true/>
     <key>NSAppTransportSecurity</key>
     <dict>
         <key>NSAllowsLocalNetworking</key>
         <true/>
     </dict>
 	<key>NSFaceIDUsageDescription</key>
-	<string>Use Face ID to unlock Mindwtr.</string>
+	<string>Mindwtr uses Face ID to unlock the app when app lock is enabled.</string>
 	<key>CFBundleLocalizations</key>
 	<array>
 		<string>en</string>
