@@ -17,7 +17,10 @@ CLOUDKIT_OUTPUT = "MindwtrNativeDevCloudKit.generated.xcodeproj"
 WATCH_OUTPUT = "MindwtrNativeDevWatch.generated.xcodeproj"
 WATCH_CLOUDKIT_OUTPUT = "MindwtrNativeDevCloudKitWatch.generated.xcodeproj"
 CLOUDKIT_CONTAINER = "iCloud." + APP
-PRODUCTION_DEVICE_SETTINGS = ("CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*]", "MINDWTR_CLOUDKIT_CONTAINER[sdk=iphoneos*]")
+PRODUCTION_DEVICE_SETTINGS = ("CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*]", "MINDWTR_CLOUDKIT_CONTAINER[sdk=iphoneos*]",
+                              "CODE_SIGN_STYLE", "PROVISIONING_PROFILE_SPECIFIER[sdk=iphoneos*]")
+PRODUCTION_EXTENSIONS = {"MindwtrWidgets": "tech.dongdongbh.mindwtr.MindwtrWidgets"}
+WIDGET_INFO = "../mobile/widgets-ios/Info.plist"
 WATCH_ROOT = "../mobile/targets/watch"
 WATCH_GROUP = GROUP + ".watch"
 WATCH_ICON_SOURCE_SHA256 = "eea612902042cf79ebe1faf68fef668c9454a62400bd498273578e2cda9f953a"
@@ -60,7 +63,7 @@ def read_project(path):
 
 def asset_locales(native_root):
     required = (*SHARE_SOURCES, *WIDGET_SOURCES, "App/NativeCaptureIntents.swift",
-                "ShareExtension/Info.plist", "CaptureWidget/Info.plist")
+                "ShareExtension/Info.plist", WIDGET_INFO)
     for relative in required:
         require((native_root / relative).is_file(), "Missing maintained asset: " + relative)
     physical = {"com.apple.security.application-groups": [GROUP]}
@@ -78,22 +81,53 @@ def asset_locales(native_root):
         require(plistlib.loads((native_root / relative).read_bytes()) == expected,
                 "Unexpected dev entitlement claims: " + relative)
     result = {}
-    for directory, point in [("ShareExtension", "com.apple.share-services"),
-                             ("CaptureWidget", "com.apple.widgetkit-extension")]:
-        info = plistlib.loads((native_root / directory / "Info.plist").read_bytes())
+    for directory, info_path, point in [("ShareExtension", "ShareExtension/Info.plist", "com.apple.share-services"),
+                                        ("CaptureWidget", WIDGET_INFO, "com.apple.widgetkit-extension")]:
+        info = plistlib.loads((native_root / info_path).read_bytes())
         require(info["NSExtension"]["NSExtensionPointIdentifier"] == point, "Unexpected extension point")
-        locales = sorted(path.parent.stem for path in (native_root / directory).glob("*.lproj/Localizable.strings"))
-        require("en" in locales, "Missing English extension resources: " + directory)
-        result[directory] = locales
+        result[directory] = sorted(path.parent.stem for path in (native_root / directory).glob("*.lproj/Localizable.strings"))
+    require("en" in result["ShareExtension"], "Missing English extension resources: ShareExtension")
     return result
+
+
+def strip_production_extensions(project):
+    objects = project["objects"]
+    root = objects[project["rootObject"]]
+    stripped = set()
+    for key in list(root["targets"]):
+        target = objects[key]
+        expected = PRODUCTION_EXTENSIONS.get(target.get("name"))
+        if expected is None:
+            continue
+        identities = {objects[config]["buildSettings"].get("PRODUCT_BUNDLE_IDENTIFIER")
+                      for config in objects[target["buildConfigurationList"]]["buildConfigurations"]}
+        require(identities == {expected}, "Unexpected production extension identity: " + target["name"])
+        root["targets"].remove(key)
+        root.get("attributes", {}).get("TargetAttributes", {}).pop(key, None)
+        stripped.add(key)
+        product = target["productReference"]
+        objects[root["productRefGroup"]]["children"].remove(product)
+        for item in objects.values():
+            if item.get("isa") == "PBXNativeTarget":
+                item["dependencies"] = [dependency for dependency in item["dependencies"]
+                                        if objects[dependency].get("target") not in stripped]
+                for phase_key in list(item["buildPhases"]):
+                    phase = objects[phase_key]
+                    if phase["isa"] == "PBXCopyFilesBuildPhase":
+                        phase["files"] = [build for build in phase["files"] if objects[build].get("fileRef") != product]
+                        if not phase["files"]:
+                            item["buildPhases"].remove(phase_key)
+        del objects[key], objects[product]
+    require(stripped or not PRODUCTION_EXTENSIONS, "Production extension targets are missing")
 
 
 def overlay(project, locales):
     value = copy.deepcopy(project)
     objects = value["objects"]
     root = objects[value["rootObject"]]
+    strip_production_extensions(value)
     targets = [(key, objects[key]) for key in root["targets"]]
-    require(len(targets) == 2, "Expected the maintained App and UI-test targets only")
+    require(len(targets) == 2, "Expected the maintained App, UI-test and production extension targets only")
     app_id, app = next((key, item) for key, item in targets if item.get("name") == "MindwtrNative")
     _, tests = next((key, item) for key, item in targets if item.get("name") == "MindwtrNativeUITests")
     require(app["productType"] == "com.apple.product-type.application"
@@ -153,10 +187,12 @@ def overlay(project, locales):
             translations.append(add(name + ":locale:" + language, {"isa": "PBXFileReference", "name": language,
                 "lastKnownFileType": "text.plist.strings", "path": directory + "/" + language + ".lproj/Localizable.strings",
                 "sourceTree": "SOURCE_ROOT"}))
-        strings = add(name + ":strings", {"isa": "PBXVariantGroup", "children": translations,
-                                         "name": "Localizable.strings", "sourceTree": "<group>"})
-        children.append(strings)
-        strings_build = add(name + ":strings-build", {"isa": "PBXBuildFile", "fileRef": strings})
+        resource_builds = []
+        if translations:
+            strings = add(name + ":strings", {"isa": "PBXVariantGroup", "children": translations,
+                                             "name": "Localizable.strings", "sourceTree": "<group>"})
+            children.append(strings)
+            resource_builds.append(add(name + ":strings-build", {"isa": "PBXBuildFile", "fileRef": strings}))
         group = add(name + ":group", {"isa": "PBXGroup", "children": children, "name": directory, "sourceTree": "<group>"})
         objects[root["mainGroup"]]["children"].append(group)
         product = add(name + ":product", {"isa": "PBXFileReference", "explicitFileType": "wrapper.app-extension",
@@ -168,7 +204,7 @@ def overlay(project, locales):
                 "APPLICATION_EXTENSION_API_ONLY": "YES", "SKIP_INSTALL": "YES", "PRODUCT_BUNDLE_IDENTIFIER": APP + suffix,
                 "PRODUCT_NAME": name, "SWIFT_VERSION": "5.0", "IPHONEOS_DEPLOYMENT_TARGET": deployment,
                 "SUPPORTED_PLATFORMS": "iphoneos iphonesimulator", "TARGETED_DEVICE_FAMILY": "1,2", "SUPPORTS_MACCATALYST": "NO",
-                "GENERATE_INFOPLIST_FILE": "NO", "INFOPLIST_FILE": directory + "/Info.plist",
+                "GENERATE_INFOPLIST_FILE": "NO", "INFOPLIST_FILE": WIDGET_INFO if directory == "CaptureWidget" else directory + "/Info.plist",
                 "CODE_SIGNING_ALLOWED[sdk=iphonesimulator*]": "YES", "CODE_SIGN_IDENTITY[sdk=iphonesimulator*]": "-",
                 "LD_RUNPATH_SEARCH_PATHS": ["$(inherited)", "@executable_path/Frameworks", "@executable_path/../../Frameworks"],
             }
@@ -189,7 +225,7 @@ def overlay(project, locales):
                                              "defaultConfigurationIsVisible": 0, "defaultConfigurationName": "Debug"})
         target = add(name + ":target", {"isa": "PBXNativeTarget", "buildConfigurationList": config_list,
             "buildPhases": [phase(name + ":sources", "Sources", builds), phase(name + ":frameworks", "Frameworks", []),
-                            phase(name + ":resources", "Resources", [strings_build])],
+                            phase(name + ":resources", "Resources", resource_builds)],
             "buildRules": [], "dependencies": [], "packageProductDependencies": [], "name": name,
             "productName": name, "productReference": product, "productType": "com.apple.product-type.app-extension"})
         root["targets"].append(target)

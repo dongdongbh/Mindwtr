@@ -53,6 +53,28 @@ def base_project():
             objects[identifier] = {"isa": "XCBuildConfiguration", "name": name, "buildSettings": settings}
             configs.append(identifier)
         objects[scope + "-configs"] = {"isa": "XCConfigurationList", "buildConfigurations": configs}
+    objects["app-Release"]["buildSettings"].update({"CODE_SIGN_STYLE": "Manual",
+                                                    "PROVISIONING_PROFILE_SPECIFIER[sdk=iphoneos*]": "Mindwtr_iOS_AppStore"})
+    embeds = []
+    for name, bundle in generator.PRODUCTION_EXTENSIONS.items():
+        configs = []
+        for config in ["Debug", "Release"]:
+            objects[name + "-" + config] = {"isa": "XCBuildConfiguration", "name": config,
+                                            "buildSettings": {"PRODUCT_BUNDLE_IDENTIFIER": bundle}}
+            configs.append(name + "-" + config)
+        objects[name + "-configs"] = {"isa": "XCConfigurationList", "buildConfigurations": configs}
+        objects[name + "-product"] = {"isa": "PBXFileReference", "path": name + ".appex", "sourceTree": "BUILT_PRODUCTS_DIR"}
+        objects["products"]["children"].append(name + "-product")
+        objects[name] = {"isa": "PBXNativeTarget", "name": name, "productType": "com.apple.product-type.app-extension",
+                         "buildConfigurationList": name + "-configs", "buildPhases": [], "dependencies": [],
+                         "productReference": name + "-product"}
+        objects["project"]["targets"].append(name)
+        objects[name + "-dependency"] = {"isa": "PBXTargetDependency", "target": name}
+        objects["app"]["dependencies"].append(name + "-dependency")
+        objects[name + "-embed"] = {"isa": "PBXBuildFile", "fileRef": name + "-product"}
+        embeds.append(name + "-embed")
+    objects["production-embed"] = {"isa": "PBXCopyFilesBuildPhase", "files": embeds, "dstSubfolderSpec": 13}
+    objects["app"]["buildPhases"].append("production-embed")
     return {"archiveVersion": "1", "objectVersion": "54", "objects": objects, "rootObject": "project"}
 
 
@@ -61,7 +83,8 @@ class DevProjectTests(unittest.TestCase):
         claims = plistlib.loads((HERE.parent / "App/Mindwtr.entitlements").read_bytes())
         self.assertEqual(claims, {"com.apple.developer.icloud-services": ["CloudKit"],
                                   "com.apple.developer.icloud-container-identifiers": ["iCloud.tech.dongdongbh.mindwtr"],
-                                  "aps-environment": "production"})
+                                  "aps-environment": "production",
+                                  "com.apple.security.application-groups": ["group.tech.dongdongbh.mindwtr"]})
         plugin = (HERE.parent.parent / "mobile/plugins/ios-cloudkit-sync.js").read_text()
         self.assertIn("const CLOUDKIT_CONTAINER = 'iCloud.tech.dongdongbh.mindwtr';", plugin)
         self.assertIn("entitlements['com.apple.developer.icloud-services'] = ['CloudKit'];", plugin)
@@ -106,6 +129,15 @@ class DevProjectTests(unittest.TestCase):
         self.assertEqual(objects["project-Debug"], saved["objects"]["project-Debug"])
         self.assertEqual(objects["app-sources"], saved["objects"]["app-sources"])
         self.assertEqual(objects["tests"]["dependencies"], ["test-app-dependency"])
+        self.assertNotIn("production-embed", objects["app"]["buildPhases"])
+        for name in generator.PRODUCTION_EXTENSIONS:
+            self.assertNotIn(name, objects["project"]["targets"])
+            self.assertNotIn(name + "-product", objects["products"]["children"])
+            self.assertNotIn(name + "-dependency", objects["app"]["dependencies"])
+        foreign = copy.deepcopy(original)
+        foreign["objects"]["MindwtrWidgets-Release"]["buildSettings"]["PRODUCT_BUNDLE_IDENTIFIER"] = "foreign.widget"
+        with self.assertRaisesRegex(ValueError, "Unexpected production extension identity"):
+            generator.overlay(foreign, locales)
         self.assertEqual(objects["app-Debug"]["buildSettings"]["SWIFT_ACTIVE_COMPILATION_CONDITIONS"],
                          ["$(inherited)", "KEEP_ME", "NATIVE_DEVICE_TEST", "MINDWTR_NATIVE_DEV"])
         self.assertEqual(objects["app-Release"]["buildSettings"]["SWIFT_ACTIVE_COMPILATION_CONDITIONS"],
@@ -124,7 +156,7 @@ class DevProjectTests(unittest.TestCase):
             self.assertEqual(target["packageProductDependencies"], [])
             resources = [objects[objects[build]["fileRef"]] for phase in target["buildPhases"]
                          if objects[phase]["isa"] == "PBXResourcesBuildPhase" for build in objects[phase]["files"]]
-            self.assertEqual({objects[child]["name"] for child in resources[0]["children"]}, set(locales[directory]))
+            self.assertEqual({objects[child]["name"] for resource in resources for child in resource["children"]}, set(locales[directory]))
             for config in objects[target["buildConfigurationList"]]["buildConfigurations"]:
                 settings = objects[config]["buildSettings"]
                 self.assertEqual(settings["PRODUCT_BUNDLE_IDENTIFIER"], generator.APP + suffix)
@@ -161,7 +193,7 @@ class DevProjectTests(unittest.TestCase):
         scratch.mkdir(exist_ok=True)
         with tempfile.TemporaryDirectory(prefix="dev-project-test-", dir=scratch) as directory:
             native = Path(directory) / "ios-native"
-            for name in [*generator.SHARE_SOURCES, *generator.WIDGET_SOURCES, "App/NativeCaptureIntents.swift",
+            for name in [*generator.SHARE_SOURCES, *generator.WIDGET_SOURCES, generator.WIDGET_INFO, "App/NativeCaptureIntents.swift",
                          "App/NativeShareDev.entitlements", "App/NativeShareDevSimulator.entitlements"]:
                 target = native / name
                 target.parent.mkdir(parents=True, exist_ok=True)
@@ -204,7 +236,7 @@ class DevProjectTests(unittest.TestCase):
         scratch.mkdir(exist_ok=True)
         with tempfile.TemporaryDirectory(prefix="dev-cloudkit-project-test-", dir=scratch) as directory:
             native = Path(directory) / "ios-native"
-            for name in [*generator.SHARE_SOURCES, *generator.WIDGET_SOURCES, "App/NativeCaptureIntents.swift",
+            for name in [*generator.SHARE_SOURCES, *generator.WIDGET_SOURCES, generator.WIDGET_INFO, "App/NativeCaptureIntents.swift",
                          "App/Info.plist", "App/NativeShareDev.entitlements", "App/NativeShareDevSimulator.entitlements"]:
                 target = native / name
                 target.parent.mkdir(parents=True, exist_ok=True)
@@ -309,7 +341,7 @@ class DevProjectTests(unittest.TestCase):
         scratch.mkdir(exist_ok=True)
         with tempfile.TemporaryDirectory(prefix="dev-watch-project-test-", dir=scratch) as directory:
             native = Path(directory) / "apps/ios-native"
-            for name in [*generator.SHARE_SOURCES, *generator.WIDGET_SOURCES, "App/NativeCaptureIntents.swift",
+            for name in [*generator.SHARE_SOURCES, *generator.WIDGET_SOURCES, generator.WIDGET_INFO, "App/NativeCaptureIntents.swift",
                          "App/Info.plist", "App/NativeShareDev.entitlements", "App/NativeShareDevSimulator.entitlements"]:
                 target = native / name
                 target.parent.mkdir(parents=True, exist_ok=True)
