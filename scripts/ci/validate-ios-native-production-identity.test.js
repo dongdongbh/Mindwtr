@@ -119,3 +119,38 @@ test("each production extension keeps RN's identity, profile, App Group, sources
     expect(configurations(target).Release.MINDWTR_DISPLAY_NAME ?? "Mindwtr").toBe("Mindwtr");
   }
 });
+
+test("the production Watch app and its widgets keep RN's identities, profiles, group and embedding", () => {
+  const watchGroup = "group.tech.dongdongbh.mindwtr.watch";
+  expect(read(".github/workflows/release-ios-appstore.yml")).toContain(`EXPECTED_WATCH_APP_GROUP: ${watchGroup}`);
+  const generator = read("apps/ios-native/scripts/create-dev-project.py");
+  const resources = "../mobile/targets/watch/Resources/";
+  const watchSources = (folder) => [folder, "Shared"].flatMap((name) =>
+    readdirSync(path.join(repo, "apps/mobile/targets/watch", name)).filter((file) => file.endsWith(".swift"))
+      .map((file) => `../mobile/targets/watch/${name}/${file}`));
+  const expected = {
+    MindwtrWatch: { bundle: "tech.dongdongbh.mindwtr.watchkitapp", profile: "Mindwtr Watch App Store", kind: "Watch", folder: "App",
+      parent: "MindwtrNative", subfolder: "16", destination: "$(CONTENTS_FOLDER_PATH)/Watch" },
+    MindwtrWatchWidgets: { bundle: "tech.dongdongbh.mindwtr.watchkitapp.widgets", profile: "Mindwtr Watch Widgets App Store", kind: "Widgets",
+      folder: "Widgets", parent: "MindwtrWatch", subfolder: "13", destination: "" },
+  };
+  for (const [name, item] of Object.entries(expected)) {
+    const target = targets[name];
+    for (const settings of Object.values(configurations(target))) {
+      expect(settings.PRODUCT_BUNDLE_IDENTIFIER).toBe(item.bundle);
+      expect(settings.MINDWTR_HOST_BUNDLE_IDENTIFIER).toBe("tech.dongdongbh.mindwtr");
+      expect(settings.MINDWTR_WATCH_APP_GROUP).toBe(watchGroup);
+      expect(settings.INFOPLIST_FILE).toBe(`${resources}${item.kind}-Info.plist`);
+      expect(settings.CODE_SIGN_ENTITLEMENTS).toBe(`${resources}${item.kind}.entitlements`);
+    }
+    expect(configurations(target).Release["PROVISIONING_PROFILE_SPECIFIER[sdk=watchos*]"]).toBe(item.profile);
+    expect(new Set(sources(target))).toEqual(new Set(watchSources(item.folder)));
+    const parent = targets[item.parent];
+    expect(parent.dependencies.map((key) => objects[key].target)).toContain(target.key);
+    const embed = parent.buildPhases.map((key) => objects[key])
+      .find((phase) => phase.isa === "PBXCopyFilesBuildPhase" && phase.files.some((build) => objects[build].fileRef === target.productReference));
+    expect([embed.dstSubfolderSpec, embed.dstPath]).toEqual([item.subfolder, item.destination]);
+    expect(generator).toContain(`"${name}": "${item.bundle}"`);
+  }
+  expect(read("apps/ios-native/App/Info.plist")).toMatch(/<key>MindwtrWatchEnabled<\/key>\s*<true\/>/);
+});

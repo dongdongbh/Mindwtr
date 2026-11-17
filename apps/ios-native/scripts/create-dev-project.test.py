@@ -194,11 +194,11 @@ class DevProjectTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="dev-project-test-", dir=scratch) as directory:
             native = Path(directory) / "ios-native"
             for name in [*generator.SHARE_SOURCES, *generator.WIDGET_SOURCES, generator.WIDGET_INFO, "App/NativeCaptureIntents.swift",
-                         "App/NativeShareDev.entitlements", "App/NativeShareDevSimulator.entitlements"]:
+                         "App/Info.plist", "App/NativeShareDev.entitlements", "App/NativeShareDevSimulator.entitlements"]:
                 target = native / name
                 target.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(HERE.parent / name, target)
-            for name in ["ShareExtension", "CaptureWidget"]:
+            for name in ["ShareExtension", "CaptureWidget", "Watch"]:
                 shutil.copytree(HERE.parent / name, native / name, dirs_exist_ok=True)
             extra = native / "CaptureWidget/xx.lproj/Localizable.strings"
             extra.parent.mkdir(); extra.write_text('"Add Task" = "Example";\n')
@@ -241,7 +241,7 @@ class DevProjectTests(unittest.TestCase):
                 target = native / name
                 target.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(HERE.parent / name, target)
-            for name in ["ShareExtension", "CaptureWidget"]:
+            for name in ["ShareExtension", "CaptureWidget", "Watch"]:
                 shutil.copytree(HERE.parent / name, native / name, dirs_exist_ok=True)
             project = native / generator.BASE
             scheme = project / "xcshareddata/xcschemes/MindwtrNative.xcscheme"
@@ -278,7 +278,7 @@ class DevProjectTests(unittest.TestCase):
                 self.assertEqual(plistlib.loads((output / "CloudKit" / copied).read_bytes()), {**original, **claims})
             info = plistlib.loads(originals[Path("App/Info.plist")])
             self.assertEqual(plistlib.loads((output / "CloudKit/Info.plist").read_bytes()),
-                             {**info, "NativeCloudKitContainer": container})
+                             {**info, "NativeCloudKitContainer": container, "MindwtrWatchEnabled": False})
             self.assertEqual(info["NativeCloudKitContainer"], "$(MINDWTR_CLOUDKIT_CONTAINER)")
             self.assertEqual(info["UIBackgroundModes"], ["processing", "remote-notification"])
             self.assertFalse((normal / "CloudKit").exists())
@@ -289,6 +289,7 @@ class DevProjectTests(unittest.TestCase):
                 relative = "CloudKit/Info.plist" if enabled_cloudkit else "Dropbox/Info.plist"
                 configured_info = plistlib.loads((configured / relative).read_bytes())
                 self.assertEqual(configured_info, {**info, **({"NativeCloudKitContainer": container} if enabled_cloudkit else {}),
+                                                  "MindwtrWatchEnabled": False,
                                                   "MindwtrDropboxAppKey": "synthetic123",
                                                   "MindwtrDropboxRedirectURI": "mindwtr-native-dev://redirect"})
                 graph = plistlib.loads((configured / "project.pbxproj").read_bytes())
@@ -346,7 +347,7 @@ class DevProjectTests(unittest.TestCase):
                 target = native / name
                 target.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(HERE.parent / name, target)
-            for name in ["ShareExtension", "CaptureWidget"]:
+            for name in ["ShareExtension", "CaptureWidget", "Watch"]:
                 shutil.copytree(HERE.parent / name, native / name, dirs_exist_ok=True)
             maintained = HERE.parent.parent / "mobile/targets/watch"
             shutil.copytree(maintained, native.parent / "mobile/targets/watch")
@@ -389,7 +390,7 @@ class DevProjectTests(unittest.TestCase):
                     expected_resources = [generator.WATCH_ROOT + "/Resources/Localizable.xcstrings",
                                           generator.WATCH_ROOT + "/Resources/PrivacyInfo.xcprivacy"]
                     if not widget:
-                        expected_resources.append(output_name + "/Watch/Assets.xcassets")
+                        expected_resources.append(generator.WATCH_ASSETS)
                     self.assertEqual(paths["PBXResourcesBuildPhase"], expected_resources)
                     for config in objects[target["buildConfigurationList"]]["buildConfigurations"]:
                         settings = objects[config]["buildSettings"]
@@ -427,9 +428,8 @@ class DevProjectTests(unittest.TestCase):
                 source_info = plistlib.loads(originals[native / "App/Info.plist"])
                 self.assertEqual(info, {**source_info, "MindwtrWatchEnabled": True,
                                  **({"NativeCloudKitContainer": generator.CLOUDKIT_CONTAINER} if cloudkit else {})})
-                self.assertFalse(source_info.get("MindwtrWatchEnabled", False))
-                icon = (output / "Watch/Assets.xcassets/AppIcon.appiconset/AppIcon.png").read_bytes()
-                self.assertEqual(icon, (HERE / "create-dev-project-assets/WatchAppIcon.png").read_bytes())
+                self.assertIs(source_info["MindwtrWatchEnabled"], True)
+                icon = (native / generator.WATCH_ASSETS / "AppIcon.appiconset/AppIcon.png").read_bytes()
                 self.assertEqual(struct.unpack(">IIBBBBB", icon[16:29]), (1024, 1024, 8, 2, 0, 0, 0))
                 for item in objects.values():
                     if item.get("isa") == "PBXFileReference" and item.get("sourceTree") == "SOURCE_ROOT":

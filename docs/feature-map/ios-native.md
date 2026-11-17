@@ -24,7 +24,7 @@ Almost every UI test lives in one file, `apps/ios-native/App/UITests/FoundationU
 
 ## Not in this client
 
-App Intents and Siri and the Watch app belong to the RN app. They are not in `apps/ios-native`. The widgets are shared (see Widgets below), and this client has its own share extension (see Share sheet below).
+App Intents and Siri belong to the RN app. They are not in `apps/ios-native`. The widgets and the Watch app are shared (see Widgets and Watch app below), and this client has its own share extension (see Share sheet below).
 
 - App Intents and Siri: `apps/mobile/ios-app-intents` and `apps/mobile/modules/ios-siri-actions`. This client has its own foreground intents (see Shortcuts and Siri below).
 - RN's Share Extension: the `expo-share-intent` plugin in `apps/mobile/app.json`.
@@ -46,6 +46,13 @@ App Intents and Siri and the Watch app belong to the RN app. They are not in `ap
 - Code: `apps/ios-native/ShareExtension/ShareViewController.swift`, `apps/ios-native/Sources/MindwtrNativeCore/NativeShareMailbox.swift`, `apps/ios-native/Sources/MindwtrNativeCore/NativeShareEnvelope.swift`, `apps/ios-native/ShareExtension/Info.plist`, `apps/ios-native/ShareExtension/Mindwtr.entitlements`
 - Checks: `scripts/ci/validate-ios-native-production-identity.test.js`, `apps/ios-native/scripts/create-dev-project.test.py`
 - Notes: The production project embeds the ShareExtension target with RN's share extension ID `tech.dongdongbh.mindwtr.share-extension`, App Group `group.tech.dongdongbh.mindwtr` and Release profile Mindwtr_ShareExtension_AppStore, so it replaces RN's share sheet entry on upgrade. The development build signs it as `tech.dongdongbh.mindwtr.native.dev.share` and shows "Mindwtr Native Dev". RN's extension also accepted up to 6 images, videos or files; this one accepts only text and one web link, because the native app does not save shared files yet.
+
+## Watch app
+
+- Reach: the Watch app and its complications, installed with the iPhone app.
+- Code: `apps/mobile/targets/watch/App`, `apps/mobile/targets/watch/Widgets`, `apps/mobile/targets/watch/Shared`, `apps/ios-native/Watch/Assets.xcassets`, `apps/ios-native/App/Info.plist`
+- Checks: `scripts/ci/validate-ios-native-production-identity.test.js`, `apps/ios-native/scripts/create-dev-project.test.py`
+- Notes: The production project embeds RN's Watch app (MindwtrWatch, `tech.dongdongbh.mindwtr.watchkitapp`, Release profile "Mindwtr Watch App Store") and its widgets (MindwtrWatchWidgets, `tech.dongdongbh.mindwtr.watchkitapp.widgets`, "Mindwtr Watch Widgets App Store"), built from RN's source with RN's Watch App Group `group.tech.dongdongbh.mindwtr.watch`. The app's Info.plist turns the Watch receiver on (MindwtrWatchEnabled). The dev generator strips these targets; only `--watch` adds the native.dev Watch targets, and every other dev variant turns the receiver off.
 
 ## Widgets
 

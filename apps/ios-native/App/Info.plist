@@ -20,6 +20,8 @@
         <array><string>$(MINDWTR_URL_SCHEME)</string></array>
       </dict>
     </array>
+    <key>MindwtrWatchEnabled</key>
+    <true/>
     <key>MindwtrFeedbackEndpointURL</key>
     <string>https://feedback.mindwtr.app</string>
     <key>CFBundleSpokenName</key>

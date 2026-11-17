@@ -20,10 +20,13 @@ CLOUDKIT_CONTAINER = "iCloud." + APP
 PRODUCTION_DEVICE_SETTINGS = ("CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*]", "MINDWTR_CLOUDKIT_CONTAINER[sdk=iphoneos*]",
                               "CODE_SIGN_STYLE", "PROVISIONING_PROFILE_SPECIFIER[sdk=iphoneos*]")
 PRODUCTION_EXTENSIONS = {"MindwtrWidgets": "tech.dongdongbh.mindwtr.MindwtrWidgets",
-                         "ShareExtension": "tech.dongdongbh.mindwtr.share-extension"}
+                         "ShareExtension": "tech.dongdongbh.mindwtr.share-extension",
+                         "MindwtrWatch": "tech.dongdongbh.mindwtr.watchkitapp",
+                         "MindwtrWatchWidgets": "tech.dongdongbh.mindwtr.watchkitapp.widgets"}
 WIDGET_INFO = "../mobile/widgets-ios/Info.plist"
 WATCH_ROOT = "../mobile/targets/watch"
 WATCH_GROUP = GROUP + ".watch"
+WATCH_ASSETS = "Watch/Assets.xcassets"
 WATCH_ICON_SOURCE_SHA256 = "eea612902042cf79ebe1faf68fef668c9454a62400bd498273578e2cda9f953a"
 SHARE_SOURCES = (
     "ShareExtension/ShareViewController.swift",
@@ -267,11 +270,9 @@ def watch_overlay(project, native_root, output, generated_files):
     require(json.loads(icon_contents)["images"] == [{"filename": "AppIcon.png", "idiom": "universal",
             "platform": "watchos", "size": "1024x1024"}], "Unexpected maintained Watch icon catalog")
     require(hashlib.sha256((native_root / "../mobile/assets/images/icon.png").read_bytes()).hexdigest()
-            == WATCH_ICON_SOURCE_SHA256, "Watch icon source changed; regenerate scripts/create-dev-project-assets/WatchAppIcon.png")
-    generated_files["Watch/Assets.xcassets/Contents.json"] = b'{"info":{"author":"xcode","version":1}}\n'
-    generated_files["Watch/Assets.xcassets/AppIcon.appiconset/Contents.json"] = icon_contents
-    generated_files["Watch/Assets.xcassets/AppIcon.appiconset/AppIcon.png"] = (
-        Path(__file__).parent / "create-dev-project-assets/WatchAppIcon.png").read_bytes()
+            == WATCH_ICON_SOURCE_SHA256, "Watch icon source changed; regenerate " + WATCH_ASSETS + "/AppIcon.appiconset/AppIcon.png")
+    require((native_root / WATCH_ASSETS / "AppIcon.appiconset/Contents.json").read_bytes() == icon_contents
+            and (native_root / WATCH_ASSETS / "AppIcon.appiconset/AppIcon.png").is_file(), "Watch asset catalog drifted from RN's")
     objects = project["objects"]
     root = objects[project["rootObject"]]
     app_id, app = next((key, item) for key, item in objects.items()
@@ -302,7 +303,7 @@ def watch_overlay(project, native_root, output, generated_files):
             require((resources / resource).is_file(), "Missing maintained Watch resource: " + resource)
             files.append((WATCH_ROOT + "/Resources/" + resource, kind, "Resources"))
         if not widget:
-            files.append((output.name + "/Watch/Assets.xcassets", "folder.assetcatalog", "Resources"))
+            files.append((WATCH_ASSETS, "folder.assetcatalog", "Resources"))
         children, builds = [], {"Sources": [], "Resources": []}
         for path, kind, build_phase in files:
             ref = add(name + ":file:" + path, {"isa": "PBXFileReference", "lastKnownFileType": kind,
@@ -428,6 +429,17 @@ def generate(native_root, output, *, cloudkit=False, cloudkit_push=False, watch=
                    for item in info.get("CFBundleURLTypes", []) for scheme in item.get("CFBundleURLSchemes", [])]
         require("mindwtr-native-dev" in schemes, "Existing dev callback scheme is missing")
         info.update(MindwtrDropboxAppKey=dropbox_app_key, MindwtrDropboxRedirectURI=dropbox_redirect_uri)
+        generated_files[info_path] = plistlib.dumps(info, sort_keys=False)
+        objects = project["objects"]
+        app = next(item for item in objects.values()
+                   if item.get("isa") == "PBXNativeTarget" and item.get("name") == "MindwtrNative")
+        for configuration in objects[app["buildConfigurationList"]]["buildConfigurations"]:
+            objects[configuration]["buildSettings"]["INFOPLIST_FILE"] = output.name + "/" + info_path
+    if not watch:
+        info_path = "CloudKit/Info.plist" if cloudkit else "Dropbox/Info.plist" if dropbox else "Phone/Info.plist"
+        info = plistlib.loads(generated_files[info_path] if info_path in generated_files
+                             else (native_root / "App/Info.plist").read_bytes())
+        info["MindwtrWatchEnabled"] = False
         generated_files[info_path] = plistlib.dumps(info, sort_keys=False)
         objects = project["objects"]
         app = next(item for item in objects.values()
