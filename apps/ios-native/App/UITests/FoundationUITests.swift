@@ -6733,19 +6733,18 @@ final class FoundationUITests: XCTestCase {
         waitForExpectations(timeout: 10)
     }
 
-    func testProcessInboxUndoNormalPublicDecisionsAndColdRead() throws {
-        try processInboxUndoPublicDecisions("NORMAL", largest: false)
+    func testProcessInboxUndoNormalPublicDecisionsAndColdRead() {
+        processInboxUndoPublicDecisions(largest: false)
     }
 
-    func testProcessInboxUndoLargestPublicDecisionsAndColdRead() throws {
-        try processInboxUndoPublicDecisions("LARGEST", largest: true)
+    func testProcessInboxUndoLargestPublicDecisionsAndColdRead() {
+        processInboxUndoPublicDecisions(largest: true)
     }
 
-    private func processInboxUndoPublicDecisions(_ role: String, largest: Bool) throws {
+    private func processInboxUndoPublicDecisions(largest: Bool) {
         continueAfterFailure = false
         let app = XCUIApplication()
-        let library = try task371Library(role, prefix: "MINDWTR_PROCESS_UNDO_UI_")
-        app.launchArguments = ["--native-ui-test-library", library,
+        app.launchArguments = ["--native-ui-test-library", UUID().uuidString.lowercased(),
             "-AppleLanguages", "(en-US)", "-AppleLocale", "en_US", "-AppleInterfaceStyle", "Light"]
         if largest {
             app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
@@ -6762,7 +6761,7 @@ final class FoundationUITests: XCTestCase {
         }
         boardTap(app, "inbox-process-primary")
         boardTap(app, "process-inbox-mode")
-        let title = app.textViews["process-inbox-title"]
+        let title = app.descendants(matching: .any).matching(identifier: "process-inbox-title").firstMatch
         let scroll = app.scrollViews["process-inbox-scroll"]
         for (index, choice) in ["reference", "done", "trash"].enumerated() {
             boardEnabled(title)
@@ -6823,13 +6822,13 @@ final class FoundationUITests: XCTestCase {
         }
         boardTap(app, "inbox-process-primary")
         let scroll = app.scrollViews["process-inbox-scroll"]
-        let title = app.textViews["process-inbox-title"]
+        let title = app.descendants(matching: .any).matching(identifier: "process-inbox-title").firstMatch
         func processTap(_ id: String) {
             revealPagedElement(app, app.buttons[id], in: scroll)
             boardTap(app, id)
         }
         func processText(_ id: String, _ value: String) {
-            let field = ["process-inbox-title", "process-inbox-notes"].contains(id) ? app.textViews[id] : app.textFields[id]
+            let field = ["process-inbox-title", "process-inbox-notes"].contains(id) ? app.descendants(matching: .any).matching(identifier: id).firstMatch : app.textFields[id]
             revealPagedElement(app, field, in: scroll)
             replaceTextView(field, with: value)
         }
@@ -6869,7 +6868,7 @@ final class FoundationUITests: XCTestCase {
         XCTAssertEqual(title.value as? String, "Process edited final")
         XCTAssertEqual(app.staticTexts["process-inbox-progress"].label, "0/4 tasks")
         processTap("process-inbox-notes-toggle")
-        XCTAssertEqual(app.textViews["process-inbox-notes"].value as? String, "Saved notes final")
+        XCTAssertEqual(app.descendants(matching: .any).matching(identifier: "process-inbox-notes").firstMatch.value as? String, "Saved notes final")
         processText("process-inbox-title", "Unsaved close draft")
         boardTap(app, "process-inbox-close")
         boardEnabled(app.buttons["inbox-process-primary"])
