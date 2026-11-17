@@ -284,7 +284,8 @@ export function insertMarkdownReferenceAtQuery(
     reference: MarkdownReference,
 ): MarkdownToolbarResult {
     const before = value.slice(0, activeQuery.start);
-    const after = value.slice(activeQuery.end);
+    const textAfterQuery = value.slice(activeQuery.end);
+    const after = textAfterQuery.startsWith(']]') ? textAfterQuery.slice(2) : textAfterQuery;
     const token = serializeMarkdownReference(reference);
     const nextValue = `${before}${token}${after}`;
     const cursor = before.length + token.length;

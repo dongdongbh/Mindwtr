@@ -16,6 +16,7 @@ Changes collected since the latest stable release.
 - Desktop: a project's Review date uses the same date field as Start and Due. It is empty until you set it, follows your date format, and closes when you click elsewhere. (#1556)
 - Desktop: project task titles use the shared task-row typography. The Area selector summarizes the active scope and provides a direct reset to all areas. (#1532, #1525)
 - Quick add: on a library with no projects, a `+name` made of letters a-f and digits, such as `+cafe1234`, now creates a project with that name. Before, the task got a project link that pointed nowhere. A `!name` or `/area:name` that matches no area now stays in the task title instead of linking to a missing area.
+- Task notes: when you type `[[` and pick a task or project from the suggestions, the link now ends with one `]]`. Before, the closing brackets that typing `[[` adds stayed behind, so the link ended with `]]]]`.
 
 - Desktop Local API and MCP: reopen ordinary done/archived tasks with optional stale-write protection, and create or restore areas by name without duplicates. Reopening reactivates the parent while leaving finished siblings finished; recurring history requires the app. (#1506)
 - Bun Local API helper: add task-list versions, stale-write protection for PATCH and completion/archive, durable retry-safe creates, and unchanged-PATCH detection. (#1506)

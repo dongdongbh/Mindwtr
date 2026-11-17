@@ -194,6 +194,32 @@ describe('markdown references', () => {
         });
     });
 
+    it('consumes an auto-paired ]] closer when inserting a reference', () => {
+        const value = 'see [[Bu]] later';
+        const caret = 'see [[Bu'.length;
+        const activeQuery = getActiveMarkdownReferenceQuery(value, { start: caret, end: caret });
+        expect(activeQuery).not.toBeNull();
+        const next = insertMarkdownReferenceAtQuery(value, activeQuery!, {
+            entityType: 'task',
+            id: 'x',
+            label: 'Buy milk',
+        });
+        expect(next.value).toBe('see [[task:x|Buy milk]] later');
+        const cursor = 'see [[task:x|Buy milk]]'.length;
+        expect(next.selection).toEqual({ start: cursor, end: cursor });
+    });
+
+    it('keeps a lone ] after the caret when inserting a reference', () => {
+        const value = 'see [[Bu] later';
+        const caret = 'see [[Bu'.length;
+        const next = insertMarkdownReferenceAtQuery(value, { start: 4, end: caret, query: 'Bu' }, {
+            entityType: 'task',
+            id: 'x',
+            label: 'Buy milk',
+        });
+        expect(next.value).toBe('see [[task:x|Buy milk]]] later');
+    });
+
     it('searches tasks and projects by name for markdown references', () => {
         const moreRecentProject: Project = {
             ...baseProject,
