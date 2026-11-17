@@ -1,4 +1,5 @@
 import XCTest
+import UniformTypeIdentifiers
 import Darwin
 @testable import MindwtrNativeCore
 
@@ -215,6 +216,79 @@ final class NativeShareFilesTests: XCTestCase {
         XCTAssertEqual(changed[0], uris[0]); XCTAssertNil(changed[1], "A different file at the managed name is never overwritten")
         XCTAssertEqual(try Data(contentsOf: targets[1]), Data("changed".utf8))
         await core.close()
+    }
+
+    func testPublishDropsAStagedFileTheEnvelopeDoesNotList() async throws {
+        let box = try mailbox(), id = UUID()
+        let files = try staged(box, id: id, files: [("kept.png", Data([1, 2]), "image/png"), ("orphan.png", Data([3]), "image/png")])
+        let envelope = try NativeShareEnvelope(id: id, subject: nil, text: nil, webUrl: nil, files: [files[0]], skippedFiles: 1)
+        try await box.publish(envelope)
+        XCTAssertEqual(entries(filesDirectory().appendingPathComponent(envelope.id)), [files[0].id])
+        let page = try await box.pendingPage(); XCTAssertEqual(page.items.map(\.envelope), [envelope])
+    }
+
+    func testFailedShareCommitRecoversFromItsJournalWithTheAttachmentsOnce() async throws {
+        guard let path = ProcessInfo.processInfo.environment["MINDWTR_CORE_BUNDLE"] else { throw XCTSkip("MINDWTR_CORE_BUNDLE required") }
+        let box = try mailbox(), id = UUID()
+        let files = try staged(box, id: id, files: [("Scan.pdf", Data("%PDF-1.4 synthetic".utf8), "application/pdf")])
+        let envelope = try NativeShareEnvelope(id: id, receivedAt: Date(timeIntervalSince1970: 1_800_000_000), subject: "Invoice", text: nil, webUrl: nil, files: files)
+        try await box.publish(envelope)
+        let database = home.appendingPathComponent("share-journal.sqlite"), journal = database.appendingPathExtension("pending.json")
+        let faults = HostIOFaults(), fired = DispatchSemaphore(value: 0), inserted = DispatchSemaphore(value: 0)
+        let core = CoreHost(databaseURL: database, bundleURL: URL(fileURLWithPath: path), faults: faults)
+        _ = try await core.start()
+        let uris = try await core.materializeShareFiles(envelope) { box.payloadURL(envelope, file: $0) }
+        let shared: [String: Any] = ["subject": "Invoice", "text": NSNull(), "webUrl": NSNull(), "skippedFiles": 0, "receivedAt": "2027-01-15T08:00:00.000Z",
+            "files": [["id": files[0].id, "name": files[0].name, "mimeType": files[0].mimeType, "size": files[0].size, "sha256": files[0].sha256, "uri": try XCTUnwrap(uris[0])]]]
+        let draftJSON = try await core.call("iosShareCaptureDraft", argumentsJSON: json([json(shared)]))
+        let draft = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(draftJSON.utf8)) as? [String: Any])
+        let attachments = try XCTUnwrap(draft["attachments"] as? [[String: Any]])
+        let openedJSON = try await core.call("captureOpen")
+        let opened = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(openedJSON.utf8)) as? [String: Any])
+        var options = try XCTUnwrap(opened["options"] as? [String: Any]); options["addAnother"] = false
+        let request = try json(["text": "Invoice", "options": options, "captureId": envelope.id, "openAfterSave": false])
+        faults.beforeSQL = { sql in
+            if sql.hasPrefix("INSERT INTO native_request_receipts") { inserted.signal() }
+            if sql == "COMMIT", FileManager.default.fileExists(atPath: journal.path), inserted.wait(timeout: .now()) == .success {
+                fired.signal(); throw NSError(domain: "injected", code: 1)
+            }
+        }
+        do { _ = try await core.submitShareCapture(source: envelope, method: "captureSubmit", requestJSON: request, attachmentsJSON: json(attachments),
+            lease: NativeTaskAIEditorLease(), readmit: { true }); XCTFail("COMMIT failure must refuse") } catch {}
+        XCTAssertEqual(fired.wait(timeout: .now()), .success)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: journal.path))
+        faults.beforeSQL = nil
+        let recovered = try await core.retryPending(); XCTAssertNotNil(recovered)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
+        let sqlite = try SQLiteBridge(url: database)
+        let rows = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(sqlite.execute("SELECT id, attachments FROM tasks").utf8)) as? [[String: Any]])
+        let receipts = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(sqlite.execute("SELECT request_id FROM native_request_receipts").utf8)) as? [[String: Any]])
+        sqlite.close()
+        XCTAssertEqual(rows.count, 1); XCTAssertEqual(receipts.count, 1)
+        let stored = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(XCTUnwrap(rows[0]["attachments"] as? String).utf8)) as? [[String: Any]])
+        XCTAssertEqual(stored.map { $0["id"] as? String }, [files[0].id])
+        XCTAssertEqual(stored.first?["uri"] as? String, uris[0])
+        await core.close()
+    }
+
+    func testSharedItemTypeChoiceAndNameFollowRNsOrder() throws {
+        XCTAssertEqual(NativeSharedFileRule.fileType(["public.heic", "public.file-url"])?.identifier, "public.heic")
+        XCTAssertEqual(NativeSharedFileRule.fileType(["com.apple.quicktime-movie"])?.identifier, "com.apple.quicktime-movie")
+        XCTAssertEqual(NativeSharedFileRule.fileType(["public.url", "public.file-url"])?.identifier, "public.file-url",
+                       "A file URL is a file, never a web link")
+        XCTAssertEqual(NativeSharedFileRule.fileType(["public.url", "com.adobe.pdf"])?.identifier, "com.adobe.pdf")
+        XCTAssertNil(NativeSharedFileRule.fileType(["public.url"]))
+        XCTAssertNil(NativeSharedFileRule.fileType(["public.plain-text"]))
+        XCTAssertEqual(NativeSharedFileRule.fileType(["org.openxmlformats.wordprocessingml.document"])?.identifier,
+                       "org.openxmlformats.wordprocessingml.document")
+        let heic = try XCTUnwrap(UTType("public.heic")), fileURL = UTType.fileURL
+        let photo = NativeSharedFileRule.name(original: URL(fileURLWithPath: "/tmp/x/7F3A.heic"), suggested: "IMG_0001", type: heic)
+        XCTAssertEqual(photo.name, "IMG_0001.heic"); XCTAssertEqual(photo.mimeType, "image/heic")
+        let file = NativeSharedFileRule.name(original: URL(fileURLWithPath: "/tmp/x/Scan.pdf"), suggested: "Other", type: fileURL)
+        XCTAssertEqual(file.name, "Scan.pdf"); XCTAssertEqual(file.mimeType, "application/pdf")
+        let odd = NativeSharedFileRule.name(original: URL(fileURLWithPath: "/tmp/x/a.zzq"), suggested: "a/b\u{7}c", type: try XCTUnwrap(UTType("public.data")))
+        XCTAssertEqual(odd.name, "a-bc.zzq"); XCTAssertEqual(odd.mimeType, "application/octet-stream")
+        XCTAssertNoThrow(try NativeShareEnvelope.File(name: odd.name, mimeType: odd.mimeType, size: 1, sha256: sha))
     }
 }
 

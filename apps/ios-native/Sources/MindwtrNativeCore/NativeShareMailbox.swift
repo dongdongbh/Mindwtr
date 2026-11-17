@@ -228,7 +228,11 @@ public actor NativeShareMailbox {
         }
         let payload = try NativeSharePayloadDirectory.open(files, name: envelope.id); defer { Darwin.close(payload) }
         let expected = Dictionary(uniqueKeysWithValues: envelope.sharedFiles.map { ($0.id, $0.size) })
-        guard try NativeSharePayloadDirectory.entries(payload).sorted() == expected.keys.sorted() else { throw NativeShareError.changedSource }
+        for name in try NativeSharePayloadDirectory.entries(payload) where expected[name] == nil {
+            guard fstatat(payload, name, &info, AT_SYMLINK_NOFOLLOW) == 0, info.st_mode & S_IFMT == S_IFREG,
+                  unlinkat(payload, name, 0) == 0 else { throw NativeShareError.changedSource }
+        }
+        guard fsync(payload) == 0, try NativeSharePayloadDirectory.entries(payload).sorted() == expected.keys.sorted() else { throw NativeShareError.changedSource }
         for (name, size) in expected {
             guard fstatat(payload, name, &info, AT_SYMLINK_NOFOLLOW) == 0, Self.regular(info), info.st_size == size else {
                 throw NativeShareError.changedSource

@@ -158,14 +158,7 @@ final class ShareViewController: UIViewController {
         defer { try? FileManager.default.removeItem(at: temporary) }
         return (try writer.copy(from: temporary, checkCancellation: check), temporary)
     }
-    private func fileType(_ provider: NSItemProvider) -> UTType? {
-        let types = provider.registeredTypeIdentifiers.compactMap { UTType($0) }
-        for target in [UTType.image, .movie, .fileURL, .pdf] {
-            if let match = types.first(where: { $0.conforms(to: target) }) { return match }
-        }
-        guard !types.contains(where: { $0.conforms(to: .url) || $0.conforms(to: .plainText) }) else { return nil }
-        return types.first { $0.conforms(to: .data) }
-    }
+    private func fileType(_ provider: NSItemProvider) -> UTType? { NativeSharedFileRule.fileType(provider.registeredTypeIdentifiers) }
     private func copy(_ provider: NSItemProvider, type: UTType, into writer: NativeSharePayloadWriter) async throws -> NativeShareEnvelope.File {
         let check = cancellation.check
         let suggested = provider.suggestedName.flatMap { $0.isEmpty ? nil : $0 }
@@ -186,15 +179,8 @@ final class ShareViewController: UIViewController {
                 }
             }
         }
-        let fileExtension = original.pathExtension.isEmpty ? type.preferredFilenameExtension ?? "" : original.pathExtension
-        var name = original.lastPathComponent
-        if let suggested, !type.conforms(to: .fileURL) {
-            name = (suggested as NSString).pathExtension.isEmpty && !fileExtension.isEmpty ? suggested + "." + fileExtension : suggested
-        }
-        name = name.replacingOccurrences(of: "/", with: "-")
-        let mimeType = UTType(filenameExtension: (name as NSString).pathExtension)?.preferredMIMEType
-            ?? type.preferredMIMEType ?? "application/octet-stream"
-        return try NativeShareEnvelope.File(id: copied.id, name: String(name.prefix(255)), mimeType: mimeType, size: copied.size, sha256: copied.sha256)
+        let named = NativeSharedFileRule.name(original: original, suggested: suggested, type: type)
+        return try NativeShareEnvelope.File(id: copied.id, name: named.name, mimeType: named.mimeType, size: copied.size, sha256: copied.sha256)
     }
     private func load(_ provider: NSItemProvider, type: String) async throws -> NSSecureCoding {
         try await withCheckedThrowingContinuation { continuation in

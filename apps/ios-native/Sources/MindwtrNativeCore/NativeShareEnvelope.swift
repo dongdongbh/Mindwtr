@@ -1,4 +1,5 @@
 import Foundation
+import UniformTypeIdentifiers
 
 public enum NativeShareError: Error, Sendable { case unavailable, invalidInput, changedSource, full }
 
@@ -96,5 +97,30 @@ public struct NativeShareEnvelope: Codable, Equatable, Sendable {
         try value.validate()
         guard try value.encoded() == bytes else { throw NativeShareError.invalidInput }
         return value
+    }
+}
+
+public enum NativeSharedFileRule {
+    public static func fileType(_ registered: [String]) -> UTType? {
+        let types = registered.compactMap { UTType($0) }
+        for target in [UTType.image, .movie, .fileURL, .pdf] {
+            if let match = types.first(where: { $0.conforms(to: target) }) { return match }
+        }
+        guard !types.contains(where: { $0.conforms(to: .url) || $0.conforms(to: .plainText) }) else { return nil }
+        return types.first { $0.conforms(to: .data) }
+    }
+    public static func name(original: URL, suggested: String?, type: UTType) -> (name: String, mimeType: String) {
+        let fileExtension = original.pathExtension.isEmpty ? type.preferredFilenameExtension ?? "" : original.pathExtension
+        var name = original.lastPathComponent
+        if let suggested, !suggested.isEmpty, !type.conforms(to: .fileURL) {
+            name = (suggested as NSString).pathExtension.isEmpty && !fileExtension.isEmpty ? suggested + "." + fileExtension : suggested
+        }
+        var scalars = String.UnicodeScalarView()
+        scalars.append(contentsOf: name.replacingOccurrences(of: "/", with: "-").unicodeScalars.filter { $0.value >= 32 && $0.value != 127 }.prefix(255))
+        name = String(scalars)
+        if name.isEmpty { name = "Shared file" + (fileExtension.isEmpty ? "" : "." + fileExtension) }
+        let mimeType = UTType(filenameExtension: (name as NSString).pathExtension)?.preferredMIMEType
+            ?? type.preferredMIMEType ?? "application/octet-stream"
+        return (name, mimeType)
     }
 }
