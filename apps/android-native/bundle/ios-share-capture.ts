@@ -1,5 +1,8 @@
 import { buildShareCaptureDraft } from '../../../packages/core/src/entry-points';
-import { buildShareIntentFileCaptureParams, getManagedAttachmentFileName, logInfo, SHARE_INTENT_MAX_FILES, type Attachment } from '@mindwtr/core';
+import { extractExtension } from '../../../packages/core/src/attachment-paths';
+import { buildShareIntentFileCaptureParams, SHARE_INTENT_MAX_FILES } from '../../../packages/core/src/share-capture-files';
+import type { Attachment } from '../../../packages/core/src/types';
+import { logInfo } from '@mindwtr/core';
 
 type SharedFile = { id: string; name: string; mimeType: string; size: number; sha256: string; uri: string | null };
 type Draft = { title: string; note: string } | null;
@@ -19,7 +22,7 @@ const readFile = (value: unknown): SharedFile | null => {
         || typeof size !== 'number' || !Number.isSafeInteger(size) || size < 0
         || typeof sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(sha256)
         || (uri !== null && (typeof uri !== 'string' || uri.length > 16_384 || !uri.startsWith('file:///')
-            || !uri.endsWith('/' + getManagedAttachmentFileName({ id, title: name, uri: '' }))))) return null;
+            || !uri.endsWith('/' + id + extractExtension(name))))) return null;
     return { id, name, mimeType, size, sha256, uri };
 };
 
