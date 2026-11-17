@@ -10035,8 +10035,10 @@ final class FoundationUITests: XCTestCase {
             expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: element)
             waitForExpectations(timeout: timeout)
         }
+        let list = app.scrollViews["contexts-scroll"]
         func tap(_ id: String) {
-            let element = app.buttons.matching(identifier: id).firstMatch
+            let row = list.buttons.matching(identifier: id).firstMatch
+            let element = row.exists ? row : app.buttons.matching(identifier: id).firstMatch
             enabled(element)
             element.tap()
         }
@@ -10065,11 +10067,11 @@ final class FoundationUITests: XCTestCase {
         searchChips(first)
         tap("contexts-chip-" + first)
         selected("contexts-chip-" + first)
-        enabled(app.buttons[title])
-        let id = String(app.buttons[title].identifier.dropFirst("task-title-".count))
+        enabled(list.buttons[title])
+        let id = String(list.buttons[title].identifier.dropFirst("task-title-".count))
         searchChips("missing-" + suffix)
 
-        enabled(app.buttons[title])
+        enabled(list.buttons[title])
         XCTAssertTrue(app.buttons["contexts-chip-" + first].exists)
         XCTAssertFalse(app.buttons["contexts-chip-" + second].exists)
         searchChips(second)
@@ -10089,14 +10091,14 @@ final class FoundationUITests: XCTestCase {
         selected("contexts-chip-all")
         tap("contexts-chip-" + first)
         selected("contexts-chip-" + first)
-        enabled(app.buttons[title])
-        app.buttons[title].tap()
+        enabled(list.buttons[title])
+        list.buttons[title].tap()
         tap("task-mode-edit")
         let titleInput = app.descendants(matching: .any).matching(identifier: "task-editor-title").firstMatch
         titleInput.coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: 0.8)).tap()
         titleInput.typeText(" changed")
         tap("task-editor-save")
-        enabled(app.buttons[title + " changed"])
+        enabled(list.buttons[title + " changed"])
         XCTAssertEqual(query.value as? String, first)
         selected("contexts-chip-" + first)
         tap("search-open")
@@ -10106,7 +10108,7 @@ final class FoundationUITests: XCTestCase {
         globalQuery.typeText(title)
         enabled(app.buttons["search-task-" + id])
         tap("search-close")
-        enabled(app.buttons[title + " changed"])
+        enabled(list.buttons[title + " changed"])
         XCTAssertEqual(query.value as? String, first)
         selected("contexts-chip-" + first)
         tap("contexts-back")
@@ -10121,11 +10123,11 @@ final class FoundationUITests: XCTestCase {
         searchChips(first)
         tap("contexts-chip-" + first)
         selected("contexts-chip-" + first)
-        enabled(app.buttons[title + " changed"])
+        enabled(list.buttons[title + " changed"])
         tap("task-status-" + id)
         tap("task-complete")
         XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "contexts-empty").firstMatch.waitForExistence(timeout: 10))
-        XCTAssertFalse(app.buttons[title + " changed"].exists)
+        XCTAssertFalse(list.buttons[title + " changed"].exists)
         tap("contexts-back")
     }
 
