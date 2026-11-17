@@ -77,6 +77,17 @@ final class NativePomodoroHostTests: XCTestCase {
         let args = try XCTUnwrap(NativeJSON.jsonObject(with: Data(XCTUnwrap(saved["argumentsJSON"] as? String).utf8)) as? [String])
         return try object(XCTUnwrap(args.first))
     }
+    private func storedSession() throws -> [String: Any] {
+        try XCTUnwrap(object(XCTUnwrap(rows("SELECT state_json FROM native_pomodoro_session").first?["state_json"] as? String))["session"] as? [String: Any])
+    }
+    private func startSettlement() throws -> [String: Any]? {
+        try rows("SELECT method FROM native_request_receipts").compactMap { row -> [String: Any]? in
+            guard let method = row["method"] as? String, let entry = try NativeJSON.jsonObject(with: Data(method.utf8)) as? [Any],
+                  entry.first as? String == "pomodoroTransition", let plan = entry.last as? [String: Any],
+                  (plan["request"] as? [String: Any])?["action"] as? String == "reconcile" else { return nil }
+            return plan["result"] as? [String: Any]
+        }.first
+    }
     private func credited(_ expected: Int = 29) throws {
         XCTAssertEqual(try rows("SELECT timeSpentMinutes FROM tasks WHERE id='task'").first?["timeSpentMinutes"] as? Int, expected)
     }
@@ -177,11 +188,39 @@ final class NativePomodoroHostTests: XCTestCase {
             if mode == "archived" { try rows("UPDATE tasks SET status='archived' WHERE id='task'") }
             if mode == "deleted" { try rows("UPDATE tasks SET deletedAt=? WHERE id='task'", [at]) }
             let core = host(); _ = try await core.start()
-            let reply = try object(await core.writePomodoroTransition(requestJSON: request())), result = try XCTUnwrap(reply["result"] as? [String: Any])
+            let reply = try object(await core.writePomodoroTransition(requestJSON: request()))
+            let settledAtStart = ["done", "archived", "deleted"].contains(mode)
+            XCTAssertEqual(reply["kind"] as? String, settledAtStart ? "noop" : "confirmed", mode)
+            let result = try XCTUnwrap(settledAtStart ? startSettlement() : reply["result"] as? [String: Any], mode)
             XCTAssertEqual(result["creditDisposition"] as? String, mode == "done" ? "credited" : mode == "unlinked" ? "unlinked" : mode == "capped" ? "capped" : "unavailable", mode)
             XCTAssertEqual(result["creditedMinutes"] as? Int, mode == "done" ? 25 : 0, mode)
+            if mode == "done" { try credited() }
+            if settledAtStart {
+                let session = try storedSession()
+                XCTAssertEqual((session["timerState"] as? [String: Any])?["isRunning"] as? Bool, false, mode); XCTAssertNil(session["selectedTaskId"], mode)
+            }
             await core.close(); root = prior
         }
+    }
+
+    func testCompletingLinkedTaskMidFocusCreditsWholeMinutesStopsTimerAndUndoKeepsCredit() async throws {
+        try await seed()
+        let formatter = ISO8601DateFormatter(); formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        var state = try object(XCTUnwrap(rows("SELECT state_json FROM native_pomodoro_session").first?["state_json"] as? String))
+        var session = try XCTUnwrap(state["session"] as? [String: Any])
+        session["phaseEndsAt"] = formatter.string(from: Date().addingTimeInterval(1170)); state["session"] = session
+        try rows("UPDATE native_pomodoro_session SET state_json=?", [json(state)])
+        let core = host(); _ = try await core.start()
+        let editor = try object(await core.call("editorModel", argumentsJSON: json(["task"])))
+        let completion: [String: Any] = ["id": "task", "requestId": UUID().uuidString.lowercased(), "taskRevision": try XCTUnwrap(editor["taskRevision"])]
+        _ = try await core.call("taskCompletion", argumentsJSON: json([json(completion)]))
+        XCTAssertEqual(try rows("SELECT status FROM tasks WHERE id='task'").first?["status"] as? String, "done"); try credited(9)
+        let stopped = try storedSession()
+        XCTAssertEqual((stopped["timerState"] as? [String: Any])?["isRunning"] as? Bool, false); XCTAssertNil(stopped["selectedTaskId"])
+        let leftover = try XCTUnwrap((stopped["workSecondsByTaskId"] as? [String: Any])?["task"] as? Int); XCTAssertTrue((1..<60).contains(leftover))
+        let undo: [String: Any] = ["requestId": UUID().uuidString.lowercased(), "completionRequestId": try XCTUnwrap(completion["requestId"])]
+        _ = try await core.call("taskCompletionUndo", argumentsJSON: json([json(undo)]))
+        XCTAssertEqual(try rows("SELECT status FROM tasks WHERE id='task'").first?["status"] as? String, "next"); try credited(9)
     }
 
     func testIntentWriteFailureAndOverlappingUUIDRetainOnlyExactOriginal() async throws {
