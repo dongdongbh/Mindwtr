@@ -455,14 +455,60 @@ describe('prepared native task draft save', () => {
             .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
     });
 
-    it('saves a description edit on a dated Reference task and keeps its stored dates', async () => {
-        await seed({ status: 'reference', description: 'Old note', dueDate: '2026-10-03', reviewAt: '2026-10-04' });
+    it('saves a description edit on a dated recurring Reference task exactly as the store does', async () => {
+        const dated = { status: 'reference' as const, description: 'Old note', dueDate: '2026-10-03', startTime: '2026-10-02',
+            reviewAt: '2026-10-04', recurrence: { rule: 'daily' as const, strategy: 'strict' as const }, showFutureRecurrence: true,
+            isFocusedToday: true, focusOrder: 2, boardOrder: 5, pushCount: 3, dueReminderLeadMinutes: 60, repeatReminderMinutes: 15,
+            suppressMindwtrReminders: true };
+        await seed(dated);
+        expect(await useTaskStore.getState().updateTask('edit', { description: 'New note' })).toMatchObject({ success: true });
+        await flushPendingSave();
+        const storeRow = saved();
+        await seed(dated);
         const input = request({ description: 'New note' });
         const plan = await host.prepareTaskDraftSaveV2(input);
         expect(plan).toMatchObject({ ok: true, value: { kind: 'prepared' } });
         if (!plan.ok || plan.value.kind !== 'prepared') return;
         expect(await host.commitPreparedTaskDraftSave({ request: input, prepared: plan.value.prepared })).toMatchObject({ ok: true });
-        expect(saved()).toMatchObject({ status: 'reference', description: 'New note', dueDate: '2026-10-03', reviewAt: '2026-10-04' });
+        expect(saved()).toEqual(storeRow);
+        expect(saved()).toMatchObject({ status: 'reference', description: 'New note', isFocusedToday: false, pushCount: 0 });
+        expect([saved().dueDate, saved().startTime, saved().reviewAt, saved().recurrence, saved().priority, saved().focusOrder])
+            .toEqual([undefined, undefined, undefined, undefined, undefined, undefined]);
+    });
+
+    it.each([
+        ['keeps the due date', (after: Task) => { after.dueDate = '2026-10-03'; }],
+        ['keeps the recurrence', (after: Task) => { after.recurrence = { rule: 'daily', strategy: 'strict' }; }],
+        ['writes a new push count', (after: Task) => { after.pushCount = 4; }],
+        ['writes a priority', (after: Task) => { after.priority = 'low'; }],
+        ['keeps Focus', (after: Task) => { after.isFocusedToday = true; }],
+        ['clears an energy level', (after: Task) => { delete after.energyLevel; }],
+    ])('refuses a forged Reference description plan that %s', async (_label, forge) => {
+        await seed({ status: 'reference', dueDate: '2026-10-03', recurrence: { rule: 'daily', strategy: 'strict' },
+            pushCount: 3, isFocusedToday: true });
+        const input = request({ description: 'New note' });
+        const plan = await host.prepareTaskDraftSaveV2(input);
+        if (!plan.ok || plan.value.kind !== 'prepared') throw new Error(JSON.stringify(plan));
+        const prepared = json(plan.value.prepared);
+        forge(prepared.effect.task.after);
+        expect(host.validatePreparedTaskDraftSave({ request: input, prepared }))
+            .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+        expect(await host.commitPreparedTaskDraftSave({ request: input, prepared }))
+            .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+        expect(saveData).not.toHaveBeenCalled();
+    });
+
+    it('refuses a forged title plan on a dated Next task that applies the Reference clears', async () => {
+        await seed({ dueDate: '2026-10-03', pushCount: 3 });
+        const input = request({ title: 'Changed' });
+        const plan = await host.prepareTaskDraftSaveV2(input);
+        if (!plan.ok || plan.value.kind !== 'prepared') throw new Error(JSON.stringify(plan));
+        const prepared = json(plan.value.prepared);
+        delete prepared.effect.task.after.dueDate;
+        prepared.effect.task.after.pushCount = 0;
+        expect(host.validatePreparedTaskDraftSave({ request: input, prepared }))
+            .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+        expect(saveData).not.toHaveBeenCalled();
     });
 
     it('refuses a forged title-only v2 plan that clears unrelated Focus metadata', async () => {

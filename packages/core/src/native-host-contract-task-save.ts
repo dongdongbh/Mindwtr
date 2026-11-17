@@ -96,6 +96,8 @@ const REFERENCE_FIELDS = new Set<SaveField>(['title', 'description', 'location',
 const referenceEditable = (request: NativeTaskDraftSaveRequest): boolean => Object.keys(request.patch)
     .every((field) => REFERENCE_FIELDS.has(field as SaveField)
         || (field === 'priority' || field === 'timeEstimate') && request.patch[field] === '');
+const REFERENCE_CLEARED_FIELDS: readonly string[] = Object.keys(getReferenceTaskFieldClears());
+const referenceClearedFields = (before: Task): readonly string[] => before.status === 'reference' ? REFERENCE_CLEARED_FIELDS : [];
 const recurrenceRuleEdited = (request: NativeTaskDraftSaveRequest): boolean =>
     (['recurrence', 'preserveChecklistOnRepeat', 'recurrenceStrategy', 'recurrenceRRule'] as const)
         .some((field) => own(request.patch, field) && !taskEditValuesEqual(request.patch[field], request.base[field]));
@@ -364,6 +366,7 @@ const draftSaveEffect = (before: Task, request: NativeTaskDraftSaveRequest,
         'isFocusedToday', 'focusOrder', 'pushCount', 'boardOrder'].forEach((field) => owned.add(field));
     if (moves) ['projectId', 'sectionId', 'areaId', 'order', 'orderNum'].forEach((field) => owned.add(field));
     if (own(request.patch, 'reminderPolicy')) owned.add('suppressMindwtrReminders');
+    referenceClearedFields(before).forEach((field) => owned.add(field));
     const unstamped = { ...before } as Task;
     for (const field of owned) {
         const value = applied.updatedTask[field as keyof Task];
@@ -408,11 +411,17 @@ function createTaskDraftSaveFactory(deps: NativeTaskDraftSaveDependencies, strat
                 ...(preserveRaw ? ['reference'] : [])].includes(before.status)
             || before.deletedAt || before.purgedAt || !validBases(before, request, preserveRaw)) return false;
         const policyEdited = own(request.patch, 'reminderPolicy');
+        const referenceCleared = preserveRaw ? referenceClearedFields(before) : [];
+        const clearedForReference = (field: string): boolean => referenceCleared.includes(field);
         if (Object.keys(changes).some((field) => !(STORED_FIELDS as readonly string[]).includes(field)
             && !EFFECTS.includes(field) && !(allowAttachments && field === 'attachments')
-            && !(policyEdited && field === 'suppressMindwtrReminders'))) return false;
+            && !(policyEdited && field === 'suppressMindwtrReminders') && !clearedForReference(field))) return false;
         const after = applyPreparedTaskEditChanges(prepared);
         if (!taskEditValuesEqual(changes, buildPreparedTaskEditChanges(before, after))) return false;
+        if (referenceCleared.length > 0) {
+            const storeReference = applyTaskUpdates(before, {}, after.updatedAt).updatedTask;
+            if (!referenceCleared.every((field) => taskEditValuesEqual(after[field as keyof Task], storeReference[field as keyof Task]))) return false;
+        }
         const direct = serializedDirect(before, request);
         if (!direct) return false;
         if (allowAttachments) {
@@ -421,7 +430,7 @@ function createTaskDraftSaveFactory(deps: NativeTaskDraftSaveDependencies, strat
             if (attachments === null || !taskEditValuesEqual(after.attachments ?? [], attachments ?? [])) return false;
         }
         for (const field of FIELDS) {
-            if (field === 'status') continue;
+            if (field === 'status' || clearedForReference(field)) continue;
             if ((SCHEDULE as readonly string[]).includes(field) || (ASSOCIATIONS as readonly string[]).includes(field)
                 || (RECURRENCE as readonly string[]).includes(field)) continue;
             if (own(changes, field) && !own(request.patch, field)) return false;
@@ -442,8 +451,10 @@ function createTaskDraftSaveFactory(deps: NativeTaskDraftSaveDependencies, strat
         const showFutureRecurrence = recurrenceUpdates && own(recurrenceUpdates, 'showFutureRecurrence')
             && (!preserveRaw || recurrenceFlagEdited(request) || recurrenceRuleEdited(request))
             ? recurrenceUpdates.showFutureRecurrence : before.showFutureRecurrence;
-        if (!taskEditValuesEqual(after.recurrence, recurrence) || !taskEditValuesEqual(after.showFutureRecurrence, showFutureRecurrence)) return false;
-        if (!validNativeTaskDraftScheduleEffect(before, request, after, deps.validateField, preserveRaw ? 'rawOwnedFields' : 'store')) return false;
+        if (!clearedForReference('recurrence') && !taskEditValuesEqual(after.recurrence, recurrence)
+            || !clearedForReference('showFutureRecurrence') && !taskEditValuesEqual(after.showFutureRecurrence, showFutureRecurrence)) return false;
+        if (!validNativeTaskDraftScheduleEffect(before, request, after, deps.validateField,
+            preserveRaw && before.status !== 'reference' ? 'rawOwnedFields' : 'store')) return false;
         const moves = ASSOCIATIONS.some((field) => own(request.patch, field));
         const projectId = moves ? request.patch.projectId || undefined : before.projectId;
         const sectionId = moves ? (projectId ? request.patch.sectionId || undefined : undefined) : before.sectionId;
@@ -454,7 +465,7 @@ function createTaskDraftSaveFactory(deps: NativeTaskDraftSaveDependencies, strat
         if (after.status !== (promotes ? 'next' : before.status)) return false;
         if (own(changes, 'isFocusedToday') && after.isFocusedToday !== false) return false;
         if (own(changes, 'focusOrder') && after.focusOrder !== undefined) return false;
-        if (own(changes, 'boardOrder') && (after.boardOrder !== undefined || after.status === before.status)) return false;
+        if (own(changes, 'boardOrder') && !clearedForReference('boardOrder') && (after.boardOrder !== undefined || after.status === before.status)) return false;
         if (['done', 'archived'].includes(after.status) && (!preserveRaw || before.status !== after.status
             || SCHEDULE.some((field) => own(request.patch, field)) || RECURRENCE.some((field) => own(request.patch, field)))
             && (after.isFocusedToday !== false || after.focusOrder !== undefined)) return false;
@@ -464,7 +475,7 @@ function createTaskDraftSaveFactory(deps: NativeTaskDraftSaveDependencies, strat
                 ? typeof after[field] !== 'number' || !Number.isFinite(after[field]) || !taskEditValuesEqual(after.order, after.orderNum)
                 : after[field] !== undefined)) return false;
         }
-        if (own(changes, 'pushCount') && (!own(request.patch, 'dueDate') || after.pushCount !== (before.pushCount ?? 0) + 1)) return false;
+        if (own(changes, 'pushCount') && !clearedForReference('pushCount') && (!own(request.patch, 'dueDate') || after.pushCount !== (before.pushCount ?? 0) + 1)) return false;
         const cancelledAt = preserveRaw ? before.cancelledAt
             : after.status === 'archived' ? normalizeCancellationTimestamp(before.cancelledAt) : undefined;
         if (!taskEditValuesEqual(after.cancelledAt, cancelledAt)) return false;
@@ -548,6 +559,7 @@ function createTaskDraftSaveFactory(deps: NativeTaskDraftSaveDependencies, strat
             if (own(request.patch, 'dueDate')) allowed.add('pushCount');
             if (request.attachments) allowed.add('attachments');
             if (own(request.patch, 'reminderPolicy')) allowed.add('suppressMindwtrReminders');
+            referenceClearedFields(before).forEach((field) => allowed.add(field));
             const changedKeys = [...new Set([...Object.keys(before), ...Object.keys(after)])]
                 .filter((field) => !['rev', 'revBy', 'updatedAt'].includes(field)
                     && !sameSectionDeleteJson(before[field as keyof Task], after[field as keyof Task]));
