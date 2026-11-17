@@ -26926,6 +26926,10 @@ private final class Engine: @unchecked Sendable {
                 && context["outcome"] as? String == "opened"
         case "Native iOS Add Task shortcut presented":
             valid = Self.equalJSON(context, ["releaseCheck": "v1.3.9/ios-quick-capture-intent", "outcome": "presented"])
+        case "Native iOS Share protected publication imported":
+            valid = Self.equalJSON(context, ["releaseCheck": "v1.3.9/ios-share-protection", "operation": "share-import", "outcome": "confirmed"])
+        case "Native iOS production Share route admitted":
+            valid = Self.equalJSON(context, ["releaseCheck": "v1.3.9/ios-production-share-route", "operation": "import", "outcome": "ready"])
         case "Native iOS share intake confirmed":
             valid = Self.equalJSON(context, ["releaseCheck": "v1.3.9/ios-share-text-url",
                                             "operation": "share-import", "outcome": "confirmed"])

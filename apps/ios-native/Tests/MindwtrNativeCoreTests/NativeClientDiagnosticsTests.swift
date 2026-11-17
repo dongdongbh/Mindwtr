@@ -56,6 +56,8 @@ final class NativeClientDiagnosticsTests: XCTestCase {
             ("Native iOS foreground activation refreshed", ["releaseCheck": "v1.3.5/ios-foreground-activation", "outcome": "refreshed"]),
             ("Native iOS calendar push observer released after cancel", ["releaseCheck": "v1.3.9/ios-calendar-push-observer-release", "outcome": "released"]),
             ("Native iOS personal intake reopened after container relocation", ["releaseCheck": "v1.3.9/ios-intake-same-tree-reopen", "operation": "same-tree-reopen", "outcome": "confirmed"]),
+            ("Native iOS Share protected publication imported", ["releaseCheck": "v1.3.9/ios-share-protection", "operation": "share-import", "outcome": "confirmed"]),
+            ("Native iOS production Share route admitted", ["releaseCheck": "v1.3.9/ios-production-share-route", "operation": "import", "outcome": "ready"]),
         ]
         for outcome in ["notified", "quiet", "failed"] {
             result.append(("Native iOS context automation handled", ["releaseCheck": "v1.3.9/ios-context-automation", "outcome": outcome]))
