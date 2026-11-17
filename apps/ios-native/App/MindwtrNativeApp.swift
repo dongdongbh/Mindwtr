@@ -881,8 +881,7 @@ final class NativeNotificationDelegate: NSObject, UIApplicationDelegate, UNUserN
             Task { @MainActor in NativeAppModel.shared.receiveBackgroundSync(run) }
         }
         guard let selection = try? NativeAppLaunch.selection.get() else { return true }
-        if case let .standard(_, _, namespace) = selection,
-           namespace == NativeWidgetFamilyPublisher.devNamespace, Bundle.main.bundleIdentifier == namespace {
+        if NativeWatchSelection.admits(selection, bundleIdentifier: Bundle.main.bundleIdentifier) {
             MindwtrWatchConnectivityReceiver.shared.activateAtLaunch()
         }
         switch selection {

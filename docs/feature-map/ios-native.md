@@ -52,8 +52,8 @@ App Intents and Siri belong to the RN app. They are not in `apps/ios-native`. Th
 
 - Reach: the Watch app and its complications, installed with the iPhone app.
 - Code: `apps/mobile/targets/watch/App`, `apps/mobile/targets/watch/Widgets`, `apps/mobile/targets/watch/Shared`, `apps/ios-native/Watch/Assets.xcassets`, `apps/ios-native/App/Info.plist`
-- Checks: `scripts/ci/validate-ios-native-production-identity.test.js`, `apps/ios-native/scripts/create-dev-project.test.py`
-- Notes: The production project embeds RN's Watch app (MindwtrWatch, `tech.dongdongbh.mindwtr.watchkitapp`, Release profile "Mindwtr Watch App Store") and its widgets (MindwtrWatchWidgets, `tech.dongdongbh.mindwtr.watchkitapp.widgets`, "Mindwtr Watch Widgets App Store"), built from RN's source with RN's Watch App Group `group.tech.dongdongbh.mindwtr.watch`. The app's Info.plist turns the Watch receiver on (MindwtrWatchEnabled). The dev generator strips these targets; only `--watch` adds the native.dev Watch targets, and every other dev variant turns the receiver off.
+- Checks: `scripts/ci/validate-ios-native-production-identity.test.js`, `apps/ios-native/scripts/create-dev-project.test.py`, `apps/ios-native/Tests/MindwtrNativeCoreTests/NativeWatchSelectionTests.swift`
+- Notes: The production project embeds RN's Watch app (MindwtrWatch, `tech.dongdongbh.mindwtr.watchkitapp`, Release profile "Mindwtr Watch App Store") and its widgets (MindwtrWatchWidgets, `tech.dongdongbh.mindwtr.watchkitapp.widgets`, "Mindwtr Watch Widgets App Store"), built from RN's source with RN's Watch App Group `group.tech.dongdongbh.mindwtr.watch`. The app's Info.plist turns the Watch receiver on (MindwtrWatchEnabled). The dev generator strips these targets; only `--watch` adds the native.dev Watch targets, and every other dev variant turns the receiver off. The phone side talks to the Watch only from the production app with its own library or the native.dev app with the standard dev library (`NativeWatchSelection`); isolated UI-test libraries and rehearsals never do. While the app is open and unlocked it publishes the Watch snapshot and saves the Watch's queued captures and commands.
 
 ## Widgets
 

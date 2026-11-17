@@ -261,7 +261,7 @@ The v1.3.6 task-editor correction is confirmed by the visible disappearance of t
 
 - **`v1.3.9/ios-watch-pomodoro`** — `apps/ios-native/Sources/MindwtrNativeCore/CoreHost.swift`. `Native iOS Watch timer command confirmed`, fixed `outcome=confirmed`, proves the exact source command has a committed timer receipt and the native projection is ready. Source retirement and paired delivery follow separately. No timer linkage, task text, source IDs or paths are logged.
 
-- **`v1.3.9/ios-watch-publication`** — `apps/ios-native/App/CoreModel.swift`. `Native iOS Watch context published`, fixed `outcome=submitted`, confirms WatchConnectivity accepted a validated snapshot after the foreground owner check. This does not prove paired Watch delivery. No task content, IDs or paths are logged.
+- **`v1.3.9/ios-watch-publication`** — `apps/ios-native/App/CoreModel.swift`. `Native iOS Watch context published`, fixed `outcome=submitted`, confirms WatchConnectivity accepted a validated snapshot after the foreground owner check. Since the Watch production fix it also appears in the production app (`tech.dongdongbh.mindwtr`), not only in the native.dev Watch build; a production tester with a paired Watch must see it after opening the app. This does not prove paired Watch delivery. No task content, IDs or paths are logged.
 
 - **`v1.3.9/ios-watch-ingest`** — `apps/android-native/bundle/host-entry.ts`. `Native iOS Watch command batch saved`, fixed `operation=ingest` and `outcome=saved`, confirms the immutable batch completed shared task persistence and ordering-record writes. Native journal completion, source queue retirement, and checklist delivery acknowledgement follow separately. No task text, identifiers or paths are logged.
 

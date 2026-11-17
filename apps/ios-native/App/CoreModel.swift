@@ -10908,12 +10908,6 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     private var watchLifecycleLease: NativeTaskAIEditorLease?
     private var watchAudioRetries: [String: (body: String, after: Date)] = [:]
 
-    private var watchSelectionAdmitted: Bool {
-        guard Bundle.main.bundleIdentifier == NativeWidgetFamilyPublisher.devNamespace,
-              case let .standard(_, _, namespace)? = trustedSearchSelection else { return false }
-        return namespace == NativeWidgetFamilyPublisher.devNamespace
-    }
-
     private var productionWidgetFamilySelection: NativeLaunchSelection? {
         guard let selection = trustedSearchSelection,
               NativeWidgetFamilyPublisher.group(selection: selection, bundleIdentifier: Bundle.main.bundleIdentifier) != nil else { return nil }
@@ -10938,7 +10932,8 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     }
 
     private var watchEligible: Bool {
-        workspaceAdmissionsOpen && watchSelectionAdmitted && host?.workspaceMode == .personal
+        workspaceAdmissionsOpen && NativeWatchSelection.admits(trustedSearchSelection, bundleIdentifier: Bundle.main.bundleIdentifier)
+            && host?.workspaceMode == .personal
             && !appLock.concealed && !appLockActive && !appLockRecoveryPending
             && MindwtrWatchConnectivityReceiver.shared.isAvailable
     }
