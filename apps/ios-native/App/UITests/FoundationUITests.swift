@@ -6847,7 +6847,7 @@ final class FoundationUITests: XCTestCase {
         waitForExpectations(timeout: 15)
         boardTap(app, "process-inbox-mode")
         processTap("process-inbox-choice-project")
-        processTap("process-inbox-choice-project")
+        if !app.textFields["process-inbox-next-action"].waitForExistence(timeout: 3) { processTap("process-inbox-choice-project") }
         processText("process-inbox-next-action", "Project next final")
         processTap("process-inbox-add-action")
         processText("process-inbox-extra-0", "Project extra one final")
