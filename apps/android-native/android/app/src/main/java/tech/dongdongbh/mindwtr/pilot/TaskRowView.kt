@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -147,6 +148,8 @@ fun TaskRowItem(
 
     val editCompleted = if (canEdit && !selecting && meta.parts.any { it.kind == "completed" }) { { completedAt.open(task, "edit") } } else null
     val onTap = { if (selecting) actions?.select?.invoke() else openEditor(task.id) }
+    val longPress = actions?.longPress ?: actions?.select
+    val currentLongPress by rememberUpdatedState(longPress)
     val shape = RoundedCornerShape(theme.rowRadius)
     val strip = theme.priority(meta.priority)
     val showStar = star != RowStar.Hidden && meta.canFocus
@@ -162,8 +165,8 @@ fun TaskRowItem(
                     .rnBorder(if (highlighted || selecting) 2.dp else 1.dp,
                         if (highlighted || picked) c.tint else if (available && !selecting) theme.availableBorder else c.border, shape)
 
-                    .pointerInput(canEdit, selecting) {
-                        detectTapGestures(onLongPress = actions?.select?.let { select -> { _: Offset -> if (canEdit) select() } }) { if (canEdit) onTap() }
+                    .pointerInput(canEdit, selecting, longPress != null) {
+                        detectTapGestures(onLongPress = longPress?.let { { _: Offset -> if (canEdit) currentLongPress?.invoke() } }) { if (canEdit) onTap() }
                     }
                     .drawBehind {
 
@@ -186,7 +189,7 @@ fun TaskRowItem(
                             textAlign = if (meta.rtl) TextAlign.Right else TextAlign.Left,
                             modifier = Modifier.weight(1f).testTag("task-row")
                                 .combinedClickable(enabled = canEdit, onClickLabel = t(if (!selecting) "common.edit" else if (picked) "task.deselect" else "task.select"),
-                                    onLongClick = actions?.select) { onTap() }
+                                    onLongClickLabel = actions?.longPressLabel, onLongClick = longPress) { onTap() }
                                 .semantics {
                                     contentDescription = meta.accessibilityLabel
                                     if (selecting) selected = picked
@@ -242,6 +245,7 @@ fun TaskRowItem(
 class RowActions(
     val status: ((String) -> Unit)? = null, val delete: (() -> Unit)? = null, val selecting: Boolean = false, val selected: Boolean = false,
     val select: (() -> Unit)? = null, val footer: (@Composable () -> Unit)? = null,
+    val longPress: (() -> Unit)? = null, val longPressLabel: String? = null,
 )
 
 

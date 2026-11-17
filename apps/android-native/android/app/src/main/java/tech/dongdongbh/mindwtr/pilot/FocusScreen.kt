@@ -22,6 +22,10 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -109,6 +113,12 @@ fun FocusList(model: InboxViewModel, modifier: Modifier) {
                 delay(60_000)
             }
         }
+    }
+    var rowMenu by remember { mutableStateOf<FocusRowMenu?>(null) }
+    var rowMenus by remember { mutableStateOf<FocusRowMenus?>(null) }
+    val menuIds = remember(model.focus) { focusMenuIds(model.focus) }
+    LaunchedEffect(menuIds, model.busy, model.failedAction) {
+        if (!model.busy && model.failedAction == null) model.readFocusRowMenus(menuIds) { rowMenus = it }
     }
     with(model) {
         val c = LocalTheme.current.colors
@@ -203,7 +213,7 @@ fun FocusList(model: InboxViewModel, modifier: Modifier) {
                             Box(Modifier.padding(bottom = 8.dp)) { GroupedRow(grouped) {
                                 TaskRowItem(model, task, status = if (section.key == "reviewDue") RowStatus.Badge else RowStatus.Hidden,
                                     star = RowStar.Shown, starBlocked = task.focusBlockedLabel, focusHighlight = section.key != "focus",
-                                    details = focusView.showDetails)
+                                    details = focusView.showDetails, actions = focusRowActions(rowMenus, task, section.key == "reviewDue") { rowMenu = it })
                             } }
                         }
                     }
@@ -228,6 +238,7 @@ fun FocusList(model: InboxViewModel, modifier: Modifier) {
                 }
             }
         }
+        rowMenu?.let { open -> FocusRowMenuDialog(model, open) { next -> rowMenu = next } }
     }
 }
 

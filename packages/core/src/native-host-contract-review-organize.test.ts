@@ -140,10 +140,31 @@ describe('native host contract: Review rows and Review\'s Organize sheet', () =>
             const action = taskItems(everything(contract.host))
                 .find((item) => item.row.id === id)!.review![advance ? 'advance' : 'markReviewed'].action;
             expect(value(await run(contract.host, action))).toEqual({
-                changed: true, toast: { tone: 'success', title: null, message: t('review.markReviewedDone'), undo: null }, createdId: null,
+                changed: true, createdId: null, toast: {
+                    tone: 'success', title: before.title, message: t(advance ? 'review.advanceWeekDone' : 'review.markReviewedDone'),
+                    undo: { label: t('common.undo'), action: { type: 'restoreTaskReview', taskId: id, reviewAt: before.reviewAt ?? null,
+                        expectedReviewAt: task(id).reviewAt ?? null } },
+                },
             });
             expect({ tasks: tasksNow(), log: contract.recorder.log }).toEqual(expected);
             if (advance) expect(task(id).reviewAt).toBe(id === 'n-launch' ? '2026-09-30T09:30' : '2026-09-30');
+        });
+
+        it('Undo puts the review date back, as RN\'s toast does; a date changed since is refused', async () => {
+            freezeClock();
+            const { host } = await openHost();
+            const before = task('w-alice').reviewAt;
+            const marked = value(await run(host, markAction('w-alice', true)));
+            expect(task('w-alice').reviewAt).not.toBe(before);
+            const undo = marked.toast!.undo!.action;
+            expect(value(await run(host, undo)).changed).toBe(true);
+            expect(task('w-alice').reviewAt).toBe(before);
+            expect(value(await run(host, undo)).changed).toBe(false);
+
+            const cleared = value(await run(host, markAction('s-piano', false))).toast!.undo!.action;
+            await useTaskStore.getState().updateTask('s-piano', { reviewAt: '2026-12-01' });
+            expect(await run(host, cleared)).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+            expect(task('s-piano').reviewAt).toBe('2026-12-01');
         });
 
         it('retries exactly after a failed save: one write, and the retry only saves', async () => {
@@ -156,7 +177,7 @@ describe('native host contract: Review rows and Review\'s Organize sheet', () =>
             expect(recorder.log).toEqual([['updateTask', 'w-alice', { reviewAt: '2026-09-30' }]]);
             saveData.mockResolvedValue(undefined);
             const retried = value(await host.runReviewAction(input));
-            expect(retried).toMatchObject({ changed: true, toast: { message: t('review.markReviewedDone') } });
+            expect(retried).toMatchObject({ changed: true, toast: { message: t('review.advanceWeekDone') } });
             expect(recorder.log).toHaveLength(1);
             const saved = saveData.mock.lastCall?.[0] as { tasks: Task[] };
             expect(saved.tasks.find((entry) => entry.id === 'w-alice')?.reviewAt).toBe('2026-09-30');

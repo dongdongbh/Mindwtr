@@ -145,6 +145,8 @@ export type NativeReviewAction =
 
     | { type: 'markTaskReviewed'; taskId: string; advance: boolean; taskRevision: string }
 
+    | { type: 'restoreTaskReview'; taskId: string; reviewAt: string | null; expectedReviewAt: string | null }
+
     | { type: 'addProjectTask'; projectId: string; title: string }
 
 
@@ -1076,10 +1078,25 @@ export function createReviewViewMethods(deps: ReviewViewDeps) {
 
                 if (!isTaskDueForReview(task, now)) return unchanged();
 
+                const reviewAt = action.advance ? getAdvancedReviewDate(task.reviewAt, now) : undefined;
                 return refuseStaleTask(task.id, action.taskRevision) ?? written(
-                    () => store.updateTask(task.id, { reviewAt: action.advance ? getAdvancedReviewDate(task.reviewAt, now) : undefined }),
-                    { tone: 'success', title: null, message: t('review.markReviewedDone'), undo: null },
+                    () => store.updateTask(task.id, { reviewAt }),
+                    { tone: 'success', title: task.title, message: t(action.advance ? 'review.advanceWeekDone' : 'review.markReviewedDone'), undo: {
+                        label: tFallback(t, 'common.undo', 'Undo'),
+                        action: { type: 'restoreTaskReview', taskId: task.id, reviewAt: task.reviewAt ?? null, expectedReviewAt: reviewAt ?? null },
+                    } },
                 );
+            }
+            case 'restoreTaskReview': {
+                const optional = (text: unknown) => text === null || isText(text, 100);
+                if (!optional(action.reviewAt) || !optional(action.expectedReviewAt)) {
+                    return fail('INVALID_INPUT', 'A task, its earlier review date and the review date the change wrote are required');
+                }
+                const task = liveTask(action.taskId);
+                if (!task) return fail('TASK_NOT_FOUND', 'Task not found');
+                if ((task.reviewAt ?? null) === action.reviewAt) return unchanged();
+                if ((task.reviewAt ?? null) !== action.expectedReviewAt) return fail('STALE_REVISION', 'The task\'s review date changed since');
+                return written(() => store.updateTask(task.id, { reviewAt: action.reviewAt ?? undefined }));
             }
             case 'addProjectTask': {
                 const project = isText(action.projectId) ? store._projectsById.get(action.projectId) : undefined;

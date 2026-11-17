@@ -30,6 +30,23 @@ private const val IMPORT_BYTES = 400_004
 private val TILE_ROUTES = setOf("review", "calendar", "contexts", "board", "trash", "history", "settings")
 
 
+private val SETTINGS_SCREENS = setOf("general", "notifications", "ai", "calendar", "advanced", "gtd", "gtd-archive", "gtd-capture", "gtd-inbox",
+    "gtd-pomodoro", "gtd-review", "gtd-task-editor", "manage", "sync", "data", "about")
+
+
+data class SettingsLink(val screen: String, val onboardingHandoff: Boolean)
+
+
+internal fun settingsLinkOf(url: String?): SettingsLink? {
+    val query = url?.let { runCatching { java.net.URI(it).rawQuery }.getOrNull() } ?: return null
+    val params = query.split('&').mapNotNull { part ->
+        part.split('=', limit = 2).takeIf { it.size == 2 }?.let { it[0] to java.net.URLDecoder.decode(it[1], "UTF-8") }
+    }.toMap()
+    val screen = params["settingsScreen"]?.let { if (it == "gtd-time-estimates") "gtd" else it }?.takeIf { it in SETTINGS_SCREENS } ?: return null
+    return SettingsLink(screen, params["onboardingHandoff"] == "1")
+}
+
+
 fun Intent.entryInput(): JSONObject? = runCatching {
     fun JSONObject.extra(name: String, value: String?) = put(name, value ?: JSONObject.NULL)
 
@@ -267,7 +284,7 @@ class EntryRouter(private val shell: InboxViewModel, dir: File, private val stag
             if (editor != null) anyTime({ it.logLine("Native Android task editor dismissed on navigation releaseCheck=v1.3.8/native-editor-navigation", JSONObject().put("releaseCheck", "v1.3.8/native-editor-navigation").put("outcome", "closed-clean")) }, {})
             closeEditor()
         }
-        reply.menuText("route")?.let { go(it, reply) }
+        reply.menuText("route")?.let { go(it, reply, url) }
         reply.optJSONObject("captureModal")?.let { captureModal.opened(it.getJSONObject("params"), view ?: return) }
         val capture = reply.optJSONObject("capture") ?: return
 
@@ -290,7 +307,7 @@ class EntryRouter(private val shell: InboxViewModel, dir: File, private val stag
     }
 
 
-    private fun go(route: String, reply: JSONObject): Unit = with(shell) {
+    private fun go(route: String, reply: JSONObject, url: String? = null): Unit = with(shell) {
         if (route != "/global-search") closeSearch()
         menu.closeSheet()
         val name = route.removePrefix("/")
@@ -316,6 +333,7 @@ class EntryRouter(private val shell: InboxViewModel, dir: File, private val stag
             name.endsWith("-tab") && name.removeSuffix("-tab") in TILE_ROUTES -> name.removeSuffix("-tab").let { view ->
                 if (menu.quickView == view) { menu.toTabs(); show(Screen.Projects) } else menu.openTile(view)
             }
+            name == "settings" && settingsLinkOf(url) != null -> settingsLinkOf(url)!!.let { link -> menu.openSettingsScreen(link.screen, link.onboardingHandoff) }
             name in TILE_ROUTES -> menu.openTile(name)
 
             route.startsWith("/widget-list/") -> menu.openWidgetList(Uri.decode(route.removePrefix("/widget-list/")))

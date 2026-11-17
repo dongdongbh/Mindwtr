@@ -38,7 +38,10 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -97,6 +100,8 @@ fun WeeklyReview(model: InboxViewModel) = with(model.menu) {
             }
         }
     }
+    var sharing by remember { mutableStateOf<ShareCardState?>(null) }
+    sharing?.let { card -> return@with ShareCardSheet(model, card) { sharing = null } }
     val covered = dialog?.optString("kind") == WEEKLY_COMPLETE_DIALOG
     Column(Modifier.fillMaxSize().background(c.bg).then(if (covered) Modifier.clearAndSetSemantics { testTag = "weekly-review" } else Modifier.testTag("weekly-review"))) {
         val current = view?.optJSONObject("step")
@@ -138,8 +143,9 @@ fun WeeklyReview(model: InboxViewModel) = with(model.menu) {
             if (finish != null) {
 
                 val shape = RoundedCornerShape(12.dp)
-                Row(Modifier.fade(0.45f).padding(end = 12.dp).weight(1f, fill = false).heightIn(min = 48.dp).clip(shape).rnBorder(1.dp, c.border, shape)
-                    .semantics { contentDescription = finish.getString("shareLabel"); disabled() }.padding(horizontal = 14.dp),
+                Row(Modifier.padding(end = 12.dp).weight(1f, fill = false).heightIn(min = 48.dp).clip(shape).rnBorder(1.dp, c.border, shape)
+                    .clickable(enabled = model.failedAction == null, role = Role.Button) { sharing = ShareCardState() }
+                    .semantics { contentDescription = finish.getString("shareLabel") }.testTag("review-share-card-button").padding(horizontal = 14.dp),
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Icon(Lucide.Share2, null, tint = c.text, modifier = Modifier.size(18.dp))
                     Text(finish.getString("shareLabel"), style = rnText(15, 600), color = c.text, textAlign = TextAlign.Center, maxLines = 2)

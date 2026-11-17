@@ -136,3 +136,70 @@ describe('native host contract: swipe tray', () => {
             .toEqual({ startTime: '2030-05-01T09:30', dueDate: '' });
     });
 });
+
+describe('native host contract: Focus row Start Date menu (RN focus.tsx openDeferMenu)', () => {
+    const offset = (days: number) => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), d.getDate() + days); };
+    const pp = (d: Date) => new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric' }).format(d);
+
+    it('offers RN\'s choices only to starred or Next tasks that can start tomorrow, with RN\'s toast words', async () => {
+        const host = await openHost({ tasks: [
+            task('free', 'waiting', { isFocusedToday: true }),
+            task('soon', 'next', { dueDate: dayOf(offset(3)) }),
+            task('today', 'next', { startTime: dayOf(offset(0)) }),
+            task('due', 'next', { dueDate: dayOf(offset(0)) }),
+            task('plain', 'waiting'),
+        ] });
+        const { defer: menus } = value(host.getFocusRowMenus({ deferIds: ['free', 'soon', 'today', 'due', 'plain', 'gone'], reviewIds: [] }));
+        expect(Object.keys(menus).sort()).toEqual(['free', 'soon', 'today']);
+        expect(menus.free).toMatchObject({ title: 'Start Date', message: 'Title free', cancel: 'Cancel',
+            custom: { label: 'Custom…', min: dayOf(offset(1)), max: null } });
+        expect(menus.free.options).toEqual([
+            { id: 'today', label: 'Today', draft: { startTime: dayOf(offset(0)), dueDate: '' }, refocus: false, toast: { title: 'Title free', message: 'Start Date: Today' } },
+            { id: 'tomorrow', label: 'Tomorrow', draft: { startTime: dayOf(offset(1)), dueDate: '' }, refocus: true, toast: { title: 'Title free', message: `Defer until ${pp(offset(1))}` } },
+            { id: 'nextWeek', label: 'Next week', draft: { startTime: dayOf(offset(7)), dueDate: '' }, refocus: true, toast: { title: 'Title free', message: `Defer until ${pp(offset(7))}` } },
+        ]);
+        expect(menus.soon.options.map((o) => [o.id, o.refocus])).toEqual([['today', false], ['tomorrow', false]]);
+        expect(menus.soon.custom.max).toBe(dayOf(offset(3)));
+        expect(menus.today.options.map((o) => o.id)).toEqual(['tomorrow', 'nextWeek']);
+    });
+
+    it('a Review Due row with a review date gets RN\'s Mark reviewed menu with core\'s actions; one without falls back to Start Date', async () => {
+        const host = await openHost({ tasks: [task('r', 'waiting', { reviewAt: dayOf(offset(-1)) }), task('n', 'next')] });
+        const { review, defer } = value(host.getFocusRowMenus({ deferIds: [], reviewIds: ['r', 'n'] }));
+        expect(review).toEqual({ r: { title: 'Title r', cancel: 'Cancel', options: [
+            { label: 'Mark reviewed', action: { type: 'markTaskReviewed', taskId: 'r', advance: false, taskRevision: taskRevisionOf(stored('r')) } },
+            { label: 'Review in 1 week', action: { type: 'markTaskReviewed', taskId: 'r', advance: true, taskRevision: taskRevisionOf(stored('r')) } },
+        ] } });
+        expect(Object.keys(defer)).toEqual(['n']);
+    });
+
+    it('Custom checks one picked day: a past day moves to tomorrow, a day after the due date is refused with RN\'s words', async () => {
+        const host = await openHost({ tasks: [task('soon', 'next', { dueDate: dayOf(offset(3)) })] });
+        expect(value(host.getFocusRowMenus({ deferIds: ['soon'], reviewIds: [], day: dayOf(offset(-2)) })).pick)
+            .toMatchObject({ option: { id: 'custom', draft: { startTime: dayOf(offset(1)), dueDate: dayOf(offset(3)) } }, issue: '' });
+        expect(value(host.getFocusRowMenus({ deferIds: ['soon'], reviewIds: [], day: dayOf(offset(5)) })).pick)
+            .toEqual({ option: null, issue: 'Starts after due date' });
+        const bad = host.getFocusRowMenus({ deferIds: ['soon', 'x'], reviewIds: [], day: dayOf(offset(1)) });
+        expect(bad.ok ? '' : bad.error.code).toBe('INVALID_INPUT');
+    });
+
+    it('a defer writes only the start date and unstars as RN (the store drops a relative start, as for RN); Undo with refocus stars it again', async () => {
+        const host = await openHost({ tasks: [task('w', 'waiting', { isFocusedToday: true, startTime: dayOf(offset(0)),
+            dueDate: dayOf(offset(20)), relativeStartOffset: { amount: -3, unit: 'day' } })] });
+        const menu = value(host.getFocusRowMenus({ deferIds: ['w'], reviewIds: [] })).defer.w;
+        const tomorrow = menu.options.find((o) => o.id === 'tomorrow')!;
+        const draft = tomorrow.draft;
+        expect(value(await host.saveTaskDates({ requestId: generateUUID(), taskId: 'w', base: menu.base, draft, defer: { refocus: false } })))
+            .toEqual({ id: 'w', changed: true });
+        expect(stored('w')).toMatchObject({ startTime: dayOf(offset(1)), isFocusedToday: false });
+        expect(stored('w').relativeStartOffset).toBeUndefined();
+        expect(value(await host.saveTaskDates({ requestId: generateUUID(), taskId: 'w', base: draft, draft: menu.base, defer: { refocus: tomorrow.refocus } })))
+            .toEqual({ id: 'w', changed: true });
+        expect(stored('w')).toMatchObject({ startTime: dayOf(offset(0)), isFocusedToday: true });
+        for (const defer of [{ refocus: 'yes' }, { refocus: true, extra: 1 }, null]) {
+            const refused = await host.saveTaskDates({ requestId: generateUUID(), taskId: 'w', base: menu.base, draft, defer } as never);
+            expect(refused.ok ? '' : refused.error.code).toBe('INVALID_INPUT');
+        }
+    });
+});
+

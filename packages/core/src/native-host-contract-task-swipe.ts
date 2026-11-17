@@ -2,12 +2,13 @@ import { getFocusStarBlockedText } from './focus-star';
 import { normalizeFocusTaskLimit } from './focus-utils';
 import type { DateFormatter } from './date';
 import { normalizeClockTimeInput, safeParseDate } from './date';
+import { isTodayScheduleCandidate } from './focus-sections';
 import { tFallback } from './i18n';
 import type { NativeHostResult } from './native-host-contract';
 import { fail, isObjectRecord } from './native-host-contract-menu-views';
 import { createNativeRequestReceipts, runStoreWrite, settleWrite, taskRevisionOf } from './native-request-receipts';
 import { useTaskStore } from './store';
-import { getTaskEditorDateIssueLabel } from './task-date-coherence';
+import { getTaskEditorDateIssueLabel, isTaskDateCoherent } from './task-date-coherence';
 import { createTaskDraft, setTaskDraftField, taskDraftToChangedUpdatePatch, type TaskDraft, type TaskDraftField } from './task-draft';
 import {
     formatTaskEditorDate,
@@ -24,6 +25,30 @@ const STATUSES: readonly TaskStatus[] = ['inbox', 'next', 'waiting', 'someday', 
 const DATE_FIELDS = ['startTime', 'dueDate'] as const;
 type DateField = typeof DATE_FIELDS[number];
 export type NativeTaskDates = Record<DateField, string>;
+
+export type NativeTaskDeferOption = {
+    id: 'today' | 'tomorrow' | 'nextWeek' | 'custom';
+    label: string;
+    draft: NativeTaskDates;
+    refocus: boolean;
+    toast: { title: string; message: string };
+};
+
+export type NativeTaskDeferMenu = {
+    taskId: string;
+    title: string;
+    message: string;
+    cancel: string;
+    base: NativeTaskDates;
+    options: NativeTaskDeferOption[];
+    custom: { label: string; min: string; max: string | null };
+};
+
+export type NativeTaskReviewMenu = {
+    title: string;
+    cancel: string;
+    options: Array<{ label: string; action: { type: 'markTaskReviewed'; taskId: string; advance: boolean; taskRevision: string } }>;
+};
 
 export type NativeTaskDatesSheet = {
     taskId: string;
@@ -60,6 +85,18 @@ const editedDraft = (task: Task, base: NativeTaskDates, dates: NativeTaskDates):
     dates[field] === base[field] ? draft : Object.entries(getTaskDraftDateEdit(field, dates[field])).reduce(
         (next, [key, fieldValue]) => setTaskDraftField(next, key as TaskDraftField, fieldValue as never), draft)
 ), createTaskDraft(task));
+
+const deferPatch = (task: Task, startTime: string, refocus: boolean): Partial<Task> | null => {
+    const start = safeParseDate(startTime);
+    const now = new Date();
+    const startsToday = !start || start.getTime() <= new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const patch: Partial<Task> = {
+        ...(startTime === (task.startTime ?? '') ? {} : { startTime: startTime || undefined }),
+        ...(refocus && task.isFocusedToday !== true ? { isFocusedToday: true } : {}),
+        ...(!refocus && !startsToday && task.status !== 'next' && task.isFocusedToday === true ? { isFocusedToday: false } : {}),
+    };
+    return Object.keys(patch).length ? patch : null;
+};
 
 const localDay = (day: unknown): Date | null => {
     if (typeof day !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(day)) return null;
@@ -152,14 +189,90 @@ export function createTaskSwipeMethods(deps: {
             } } };
         },
 
-        async saveTaskDates(input: { requestId: string; taskId: string; base: NativeTaskDates; draft: NativeTaskDates }):
+        getFocusRowMenus(input: { deferIds: string[]; reviewIds: string[]; day?: string }): NativeHostResult<{
+            defer: Record<string, NativeTaskDeferMenu>; review: Record<string, NativeTaskReviewMenu>;
+            pick: { option: NativeTaskDeferOption | null; issue: string } | null;
+        }> {
+            const ready = deps.readiness();
+            if (!ready.ok) return ready;
+            const ids = (list: unknown): list is string[] => Array.isArray(list) && list.length <= 500 && list.every(id);
+            if (!isObjectRecord(input) || !ids(input.deferIds) || !ids(input.reviewIds)
+                || (input.day !== undefined && (input.deferIds.length !== 1 || input.reviewIds.length !== 0 || !localDay(input.day)))) {
+                return fail('INVALID_INPUT', 'Up to 500 row ids per kind, or one deferred task and a local day, are required');
+            }
+            const t = deps.t();
+            const formatDate = deps.formatDate();
+            const now = new Date();
+            const dayFrom = (days: number) => new Date(now.getFullYear(), now.getMonth(), now.getDate() + days);
+            const dayText = (day: Date) => formatDate(day, 'yyyy-MM-dd');
+            const today = dayFrom(0);
+            const canStartOn = (task: Task, day: Date) => isTaskDateCoherent({ dueDate: task.dueDate, startTime: dayText(day) });
+            const option = (task: Task, optionId: NativeTaskDeferOption['id'], label: string, day: Date): NativeTaskDeferOption => {
+                const startsToday = day.getTime() <= today.getTime();
+                return {
+                    id: optionId, label, draft: { ...datesOf(createTaskDraft(task)), startTime: dayText(day) },
+                    refocus: !startsToday && task.status !== 'next' && task.isFocusedToday === true,
+                    toast: { title: task.title, message: startsToday
+                        ? `${tFallback(t, 'taskEdit.startDateLabel', 'Start Date')}: ${tFallback(t, 'quickDate.today', 'Today')}`
+                        : `${tFallback(t, 'review.startTime', 'Defer until')} ${formatDate(day, 'PP')}` },
+                };
+            };
+            const review: Record<string, NativeTaskReviewMenu> = {};
+            const deferIds = [...input.deferIds];
+            for (const taskId of input.reviewIds) {
+                const task = liveTask(taskId);
+                if (!task) continue;
+                if (!task.reviewAt) { deferIds.push(taskId); continue; }
+                const mark = (advance: boolean) => ({ type: 'markTaskReviewed' as const, taskId, advance, taskRevision: taskRevisionOf(task) });
+                review[taskId] = {
+                    title: task.title,
+                    cancel: tFallback(t, 'common.cancel', 'Cancel'),
+                    options: [
+                        { label: tFallback(t, 'review.markReviewed', 'Mark reviewed'), action: mark(false) },
+                        { label: tFallback(t, 'review.advanceWeek', 'Review in 1 week'), action: mark(true) },
+                    ],
+                };
+            }
+            const menus: Record<string, NativeTaskDeferMenu> = {};
+            for (const taskId of deferIds) {
+                const task = liveTask(taskId);
+                if (!task || !(task.isFocusedToday === true || task.status === 'next') || !canStartOn(task, dayFrom(1))) continue;
+                const due = safeParseDate(task.dueDate);
+                menus[taskId] = {
+                    taskId,
+                    title: tFallback(t, 'taskEdit.startDateLabel', 'Start Date'),
+                    message: task.title,
+                    cancel: tFallback(t, 'common.cancel', 'Cancel'),
+                    base: datesOf(createTaskDraft(task)),
+                    options: [
+                        ...(isTodayScheduleCandidate(task, now) ? [] : [option(task, 'today', tFallback(t, 'quickDate.today', 'Today'), today)]),
+                        option(task, 'tomorrow', tFallback(t, 'quickDate.tomorrow', 'Tomorrow'), dayFrom(1)),
+                        ...(canStartOn(task, dayFrom(7)) ? [option(task, 'nextWeek', tFallback(t, 'quickDate.nextWeek', 'Next week'), dayFrom(7))] : []),
+                    ],
+                    custom: { label: tFallback(t, 'recurrence.custom', 'Custom...'), min: dayText(dayFrom(1)), max: due ? dayText(due) : null },
+                };
+            }
+            if (input.day === undefined) return { ok: true, value: { defer: menus, review, pick: null } };
+            const task = menus[input.deferIds[0]] ? liveTask(input.deferIds[0]) : null;
+            const picked = localDay(input.day)!;
+            const day = picked < dayFrom(1) ? dayFrom(1) : picked;
+            if (!task) return { ok: true, value: { defer: menus, review, pick: { option: null, issue: tFallback(t, 'task.updateFailed', 'Could not update task.') } } };
+            return { ok: true, value: { defer: menus, review, pick: canStartOn(task, day)
+                ? { option: option(task, 'custom', dayText(day), day), issue: '' }
+                : { option: null, issue: tFallback(t, 'task.dateIssue.startAfterDue', 'Starts after due date') } } };
+        },
+
+        async saveTaskDates(input: { requestId: string; taskId: string; base: NativeTaskDates; draft: NativeTaskDates; defer?: { refocus: boolean } }):
             Promise<NativeHostResult<{ id: string; changed: boolean }>> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
             const base = isObjectRecord(input) ? readDates(input.base) : null;
             const dates = isObjectRecord(input) ? readDraftDates(input.draft) : null;
+            const defer = isObjectRecord(input) ? input.defer : undefined;
             if (!isObjectRecord(input) || typeof input.requestId !== 'string' || !deps.requestIdPattern.test(input.requestId)
-                || !id(input.taskId) || !base || !dates) {
+                || !id(input.taskId) || !base || !dates
+                || (defer !== undefined && (!isObjectRecord(defer) || Object.keys(defer).join() !== 'refocus' || typeof defer.refocus !== 'boolean'
+                    || dates.dueDate !== base.dueDate))) {
                 return fail('INVALID_INPUT', 'A request UUID, a task and its base and new dates are required');
             }
             const { requestId, ...rest } = input;
@@ -167,7 +280,7 @@ export function createTaskSwipeMethods(deps: {
                 const task = liveTask(input.taskId);
                 if (!task) return fail('TASK_NOT_FOUND', 'Task not found');
                 if (!sameDates(datesOf(createTaskDraft(task)), base)) return fail('STALE_REVISION', 'The task\'s dates changed since the sheet opened');
-                const patch = taskDraftToChangedUpdatePatch(editedDraft(task, base, dates), task);
+                const patch = defer ? deferPatch(task, dates.startTime, defer.refocus) : taskDraftToChangedUpdatePatch(editedDraft(task, base, dates), task);
                 if (!patch || Object.keys(patch).length === 0) return { ok: true, value: { id: task.id, changed: false } };
                 const written = await runStoreWrite(() => useTaskStore.getState().updateTask(task.id, patch));
                 return settleWrite(written, { id: task.id, changed: true });
