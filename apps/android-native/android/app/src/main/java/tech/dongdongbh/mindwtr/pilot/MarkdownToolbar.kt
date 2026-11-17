@@ -46,6 +46,30 @@ import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.semantics.testTagsAsResourceId
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntRect
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupPositionProvider
+import androidx.compose.ui.window.PopupProperties
+import tech.dongdongbh.mindwtr.pilot.core.CoreHost
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
 import org.json.JSONObject
 import kotlin.math.roundToInt
 
@@ -74,6 +98,11 @@ internal class MarkdownDraft(text: String) {
         field = next
     }
 
+    fun rewrite(next: TextFieldValue, store: (String) -> Unit) {
+        field = next
+        store(next.text)
+    }
+
     fun undo(store: (String) -> Unit) {
         val last = undo.removeLastOrNull() ?: return
         canUndo = undo.isNotEmpty()
@@ -88,18 +117,188 @@ internal class MarkdownDraft(text: String) {
 }
 
 
+internal data class MarkdownReference(val id: String, val title: String, val meta: String, val token: String)
+
+internal data class MarkdownReferences(val text: String, val selection: TextRange, val start: Int, val end: Int, val items: List<MarkdownReference>) {
+    fun insert(reference: MarkdownReference): TextFieldValue {
+        val after = text.substring(end).removePrefix("]]")
+        return TextFieldValue(text.substring(0, start) + reference.token + after, TextRange(start + reference.token.length))
+    }
+}
+
+
+internal fun TextFieldValue.sameEdit(other: TextFieldValue) = text == other.text && selection == other.selection
+
+
+internal class AssistGate {
+    var closed = false
+        private set
+
+    fun close() { closed = true }
+
+    fun lands(now: TextFieldValue, typed: TextFieldValue) = !closed && now.sameEdit(typed)
+}
+
+
+internal data class ReferenceCard(val below: Boolean, val maxHeight: Int)
+
+
+internal fun referenceCard(lineTop: Int, lineBottom: Int, visibleTop: Int, visibleBottom: Int, gap: Int, wanted: Int): ReferenceCard {
+    val below = visibleBottom - lineBottom - gap
+    val above = lineTop - visibleTop - gap
+    val underLine = below >= wanted || (above < wanted && below >= above)
+    return ReferenceCard(underLine, (if (underLine) below else above).coerceIn(0, wanted))
+}
+
+
+internal fun typedLine(cursorTop: Float, cursorBottom: Float, textHeight: Int, boxHeight: Int): Pair<Float, Float> {
+    val hidden = (textHeight - boxHeight).coerceAtLeast(0)
+    return (cursorTop - hidden).coerceIn(0f, boxHeight.toFloat()) to cursorBottom.coerceIn(0f, boxHeight.toFloat())
+}
+
+
+@Stable
+internal class MarkdownAssist(private val model: InboxViewModel, private val pairs: Boolean, private val taskId: String?) {
+    var references by mutableStateOf<MarkdownReferences?>(null)
+        private set
+    private val gate = AssistGate()
+    private var field: () -> TextFieldValue = { TextFieldValue() }
+    private var searching = false
+    private var searchAgain = false
+    private var layout: TextLayoutResult? = null
+    private var box: LayoutCoordinates? = null
+    val textBox = Modifier.onGloballyPositioned { box = it }
+    val textLayout = { result: TextLayoutResult -> layout = result }
+
+
+    fun close() = gate.close()
+
+    fun changed(before: TextFieldValue, typed: TextFieldValue, current: () -> TextFieldValue, apply: (TextFieldValue) -> Unit) {
+        if (typed.sameEdit(before)) return
+        field = current
+        if (typed.text == before.text) return search(typed)
+        model.background(emptyList(), { runtime -> rewrite(runtime, before, typed) }) { rewritten, _ ->
+            if (!gate.lands(current(), typed)) return@background
+            rewritten?.let(apply)
+            search(rewritten ?: typed)
+        }
+    }
+
+    fun choose(reference: MarkdownReference, apply: (TextFieldValue) -> Unit) {
+        val shown = references?.takeUnless { gate.closed } ?: return
+        references = null
+        apply(shown.insert(reference))
+    }
+
+
+    fun lineInWindow(offset: Int): Pair<Int, Int>? {
+        val coordinates = box?.takeIf { it.isAttached } ?: return null
+        val text = layout ?: return null
+        val cursor = text.getCursorRect(offset.coerceIn(0, text.layoutInput.text.length))
+        val (top, bottom) = typedLine(cursor.top, cursor.bottom, text.size.height, coordinates.size.height)
+        val origin = coordinates.positionInWindow().y
+        return (origin + top).roundToInt() to (origin + bottom).roundToInt()
+    }
+
+
+    private fun search(value: TextFieldValue) {
+        if (!value.selection.collapsed || !value.text.contains("[[")) {
+            searchAgain = false
+            references = null
+            return
+        }
+        if (searching) return run { searchAgain = true }
+        searching = true
+        model.background(emptyList(), { runtime -> find(runtime, value) }, always = {
+            searching = false
+            if (searchAgain && !gate.closed) { searchAgain = false; search(field()) }
+        }) { found, _ -> if (gate.lands(field(), value)) references = found }
+    }
+
+
+    private fun rewrite(runtime: CoreHost, before: TextFieldValue, typed: TextFieldValue): TextFieldValue? =
+        runtime.menuRead("markdownTextChange", JSONObject().put("previous", before.text).put("next", typed.text)
+            .put("start", before.selection.min).put("end", before.selection.max).put("pairs", pairs).toString())
+            .takeIf { it.getBoolean("changed") }?.let { TextFieldValue(it.getString("value"), TextRange(it.getInt("start"), it.getInt("end"))) }
+
+
+    private fun find(runtime: CoreHost, value: TextFieldValue): MarkdownReferences? {
+        val reply = runtime.menuRead("markdownReferences", JSONObject().put("value", value.text).put("start", value.selection.start)
+            .put("end", value.selection.end).put("taskId", taskId ?: JSONObject.NULL).toString())
+        val list = reply.getJSONArray("suggestions")
+        val items = (0 until list.length()).map { list.getJSONObject(it).run { MarkdownReference(getString("id"), getString("title"), getString("meta"), getString("token")) } }
+        return MarkdownReferences(value.text, value.selection, reply.getInt("start"), reply.getInt("end"), items).takeIf { items.isNotEmpty() }
+    }
+}
+
+
+@Composable
+internal fun rememberMarkdownAssist(model: InboxViewModel, pairs: Boolean, taskId: String?): MarkdownAssist {
+    val assist = remember(model, pairs, taskId) { MarkdownAssist(model, pairs, taskId) }
+    DisposableEffect(assist) { onDispose { assist.close() } }
+    return assist
+}
+
+
+@Composable
+internal fun MarkdownReferenceList(assist: MarkdownAssist, field: TextFieldValue, focused: Boolean, apply: (TextFieldValue) -> Unit) {
+    val shown = assist.references?.takeIf { focused && it.text == field.text && it.selection == field.selection } ?: return
+    val c = LocalTheme.current.colors
+    val focusManager = LocalFocusManager.current
+    val density = LocalDensity.current
+    val view = LocalView.current
+    val frame = android.graphics.Rect().also { view.getWindowVisibleDisplayFrame(it) }
+    val windowTop = IntArray(2).also { view.rootView.getLocationOnScreen(it) }[1]
+    val gap = with(density) { 8.dp.roundToPx() }
+    val (lineTop, lineBottom) = assist.lineInWindow(field.selection.start) ?: (frame.top - windowTop to frame.top - windowTop)
+    val wanted = with(density) { minOf(320.dp, 20.dp + 60.dp * shown.items.size).roundToPx() }
+    val card = referenceCard(lineTop, lineBottom, frame.top - windowTop + gap, frame.bottom - windowTop - gap, gap, wanted)
+    val bottom = frame.bottom - windowTop - gap
+    val position = remember(card, lineTop, bottom, gap) {
+        object : PopupPositionProvider {
+            override fun calculatePosition(anchorBounds: IntRect, windowSize: IntSize, layoutDirection: LayoutDirection, popupContentSize: IntSize) =
+                IntOffset((windowSize.width - popupContentSize.width) / 2,
+                    if (card.below) bottom - popupContentSize.height else lineTop - gap - popupContentSize.height)
+        }
+    }
+    Popup(position, onDismissRequest = { focusManager.clearFocus() }, properties = PopupProperties(focusable = false)) {
+        val shape = RoundedCornerShape(18.dp)
+        Column(Modifier.padding(horizontal = 12.dp).fillMaxWidth().heightIn(max = with(density) { card.maxHeight.toDp() }).shadow(12.dp, shape).clip(shape).background(c.cardBg)
+            .border(Dp.Hairline, c.border, shape).semantics { testTagsAsResourceId = true }.testTag("markdown-reference-suggestions")) {
+            Box(Modifier.padding(top = 10.dp, bottom = 6.dp).align(Alignment.CenterHorizontally).size(36.dp, 4.dp).clip(RoundedCornerShape(999.dp)).background(c.border))
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                shown.items.forEachIndexed { index, item ->
+                    Column(Modifier.fillMaxWidth().clickable { assist.choose(item, apply) }
+                        .then(if (index < shown.items.lastIndex) Modifier.rnBorderBottom(c.border) else Modifier)
+                        .padding(horizontal = 14.dp, vertical = 10.dp).testTag("markdown-reference-${item.id}")) {
+                        Text(item.title, style = rnText(14, 600), color = c.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(item.meta, style = rnText(12, 400), color = c.secondaryText, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(top = 2.dp))
+                    }
+                }
+            }
+        }
+    }
+}
+
+
 @Composable
 internal fun MarkdownInput(draft: MarkdownDraft, store: (String) -> Unit, enabled: Boolean, placeholder: String, description: String, style: TextStyle,
-                           modifier: Modifier, decoration: @Composable (@Composable () -> Unit) -> Unit, onBlur: () -> Unit = {}) {
+                           modifier: Modifier, decoration: @Composable (@Composable () -> Unit) -> Unit, onBlur: () -> Unit = {}, assist: MarkdownAssist? = null) {
     val c = LocalTheme.current.colors
     val keyboard = LocalSoftwareKeyboardController.current
     LaunchedEffect(draft, enabled) { if (enabled) { draft.focus.requestFocus(); keyboard?.show() } }
-    BasicTextField(draft.field, { draft.change(it, store) }, enabled = enabled, textStyle = style, cursorBrush = SolidColor(c.tint),
+    assist?.let { MarkdownReferenceList(it, draft.field, draft.focused) { next -> draft.change(next, store) } }
+    BasicTextField(draft.field, { typed ->
+        val before = draft.field
+        draft.change(typed, store)
+        assist?.changed(before, typed, { draft.field }) { next -> draft.rewrite(next, store) }
+    }, enabled = enabled, textStyle = style, cursorBrush = SolidColor(c.tint), onTextLayout = { assist?.textLayout?.invoke(it) },
         modifier = modifier.focusRequester(draft.focus).semantics { contentDescription = description }.onFocusChanged {
             if (draft.focused && !it.isFocused) onBlur()
             draft.focused = it.isFocused
         },
-        decorationBox = { field -> decoration { Box { if (draft.field.text.isEmpty()) Text(placeholder, style = style, color = c.secondaryText); field() } } })
+        decorationBox = { field -> decoration { Box(assist?.textBox ?: Modifier) { if (draft.field.text.isEmpty()) Text(placeholder, style = style, color = c.secondaryText); field() } } })
 }
 
 

@@ -99,11 +99,13 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextLinkStyles
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
@@ -1228,8 +1230,18 @@ private fun NotesField(model: InboxViewModel, modifier: Modifier, shape: Rounded
     val reveal = remember { BringIntoViewRequester() }
     val keyboard = WindowInsets.isImeVisible
     LaunchedEffect(focused, keyboard, value.length) { if (focused) { delay(150); reveal.bringIntoView() } }
-    BasicTextField(value, { notesDraft = it }, enabled = raw != null && !model.busy && model.failedAction == null,
-        textStyle = rnText(size, 400, if (size == 16) 24 else null).copy(color = c.text), cursorBrush = SolidColor(c.tint),
+    var field by remember { mutableStateOf(TextFieldValue(value, TextRange(value.length))) }
+    if (field.text != value) field = TextFieldValue(value, TextRange(value.length))
+    val assist = rememberMarkdownAssist(model, pairs = false, null)
+    val rewrite = { next: TextFieldValue -> field = next; notesDraft = next.text }
+    MarkdownReferenceList(assist, field, focused, rewrite)
+    BasicTextField(field, { typed ->
+        val before = field
+        field = typed
+        if (typed.text != value) notesDraft = typed.text
+        assist.changed(before, typed, { field }, rewrite)
+    }, enabled = raw != null && !model.busy && model.failedAction == null,
+        textStyle = rnText(size, 400, if (size == 16) 24 else null).copy(color = c.text), cursorBrush = SolidColor(c.tint), onTextLayout = assist.textLayout,
         modifier = modifier.bringIntoViewRequester(reveal).semantics { contentDescription = t("project.notes") }.testTag("project-notes-input").onFocusChanged { state ->
 
             if (focused && !state.isFocused && storeOnBlur()) commitNotes()
@@ -1238,7 +1250,7 @@ private fun NotesField(model: InboxViewModel, modifier: Modifier, shape: Rounded
         decorationBox = { field ->
             Box(Modifier.clip(shape).background(c.inputBg).rnBorder(1.dp, c.border, shape).padding(inner.dp)) {
                 if (value.isEmpty()) Text(placeholder, style = rnText(size, 400), color = c.secondaryText)
-                field()
+                Box(assist.textBox) { field() }
             }
         })
 }
@@ -1273,7 +1285,7 @@ private fun NotesFullscreen(model: InboxViewModel, title: String, follow: (JSONO
                 MarkdownInput(draft, store, raw != null && !model.busy && model.failedAction == null, t("projects.notesPlaceholder"), t("project.notes"),
                     rnText(16, 400, 24).copy(color = c.text), Modifier.padding(16.dp).fillMaxWidth().weight(1f).testTag("project-notes-input"),
                     { field -> Box(Modifier.fillMaxSize().clip(shape).background(c.inputBg).rnBorder(1.dp, c.border, shape).padding(16.dp)) { field() } },
-                    onBlur = { if (editing && notesFullscreen) commitNotes() })
+                    onBlur = { if (editing && notesFullscreen) commitNotes() }, assist = rememberMarkdownAssist(model, pairs = true, null))
                 MarkdownToolbar(model, draft, store)
             }
             else {

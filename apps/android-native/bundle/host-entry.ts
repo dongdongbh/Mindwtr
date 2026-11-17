@@ -179,6 +179,7 @@ import { syncPassphraseBytes } from '../../../packages/core/src/sync-crypto';
 import { createIOSStartupPromptHost, createNativeAbout } from './host-about';
 import { readShareCard } from './host-share-card';
 import { createNativeAppSearch, type AppSearchCall } from './host-app-search';
+import { readMarkdownReferences } from './host-markdown-references';
 import { createNativeAI } from './host-ai';
 import { createIOSTaskAI } from './host-ios-task-ai';
 import { createIOSInboxAI } from './host-ios-inbox-ai';
@@ -1620,6 +1621,10 @@ const MENU_READS: Record<string, (input: never) => Reply> = {
     markdownToolbarActions: () => contract.getMarkdownToolbarActions(),
     markdownToolbarApply: (input) => contract.applyMarkdownToolbar(input),
     markdownTextChange: (input) => contract.applyMarkdownTextChange(input),
+    markdownReferences: (input) => readMarkdownReferences(input, useTaskStore.getState(), (keys) => {
+        const read = contract.getStrings({ keys });
+        return read.ok ? read.value.strings : {};
+    }),
 
     shareCard: (input) => readShareCard(input, contract),
     focusRowMenus: (input) => contract.getFocusRowMenus(input),

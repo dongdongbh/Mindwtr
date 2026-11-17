@@ -58,6 +58,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Rect
@@ -454,6 +458,11 @@ private val STATUS_ICONS = mapOf("inbox" to Lucide.Inbox, "next" to Lucide.Arrow
 private val ENERGY_ICONS = mapOf("low" to Lucide.BatteryLow, "medium" to Lucide.BatteryMedium, "high" to Lucide.BatteryFull)
 
 
+internal fun editorPage(tab: String) = if (tab == "view") 1 else 0
+
+internal fun editorPageTab(page: Int) = if (page == 1) "view" else "task"
+
+
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalComposeUiApi::class)
 @Composable
 fun TaskEditorScreen(model: InboxViewModel, editor: TaskEditor) = with(model) {
@@ -475,6 +484,7 @@ fun TaskEditorScreen(model: InboxViewModel, editor: TaskEditor) = with(model) {
     val checklistFormScroll = rememberScrollState()
     var checklistFormBounds by remember { mutableStateOf(Rect.Zero) }
     var checklistDragging by remember { mutableStateOf(false) }
+    var formFocused by remember { mutableStateOf(false) }
 
     var pickDate by rememberSaveable { mutableStateOf<String?>(null) }
     var pickTime by rememberSaveable { mutableStateOf<String?>(null) }
@@ -548,10 +558,10 @@ fun TaskEditorScreen(model: InboxViewModel, editor: TaskEditor) = with(model) {
         }
 
         if (!editor.readOnly) EditorTabs(model, editor)
-        if (editor.readOnly || editor.tab == "view") TaskViewTab(model, editor, locked, { picker = "status" }, follow, Modifier.weight(1f))
-        else Column(Modifier.weight(1f).imePadding().onSizeChanged { formViewport = it.height }
+        val viewPage = @Composable { page: Modifier -> TaskViewTab(model, editor, locked, { picker = "status" }, follow, page) }
+        val formPage = @Composable { page: Modifier -> Column(page.imePadding().onSizeChanged { formViewport = it.height }
             .onGloballyPositioned { checklistFormBounds = it.boundsInWindow() }
-            .verticalScroll(checklistFormScroll, enabled = !checklistDragging).padding(20.dp)) {
+            .verticalScroll(checklistFormScroll, enabled = !checklistDragging).onFocusChanged { formFocused = it.hasFocus }.padding(20.dp)) {
             CompositionLocalProvider(LocalFormViewport provides formViewport,
                 LocalChecklistFormScroll provides ChecklistFormScroll(checklistFormScroll, checklistFormBounds) { checklistDragging = it }) {
                 if (editor.readOnly) Text(t("projects.archivedReadOnlyHint"), style = rnText(14, 400), color = c.secondaryText,
@@ -601,6 +611,26 @@ fun TaskEditorScreen(model: InboxViewModel, editor: TaskEditor) = with(model) {
                 }
                 Spacer(Modifier.heightIn(min = 100.dp))
             }
+        } }
+        if (editor.readOnly) viewPage(Modifier.weight(1f))
+        else {
+            val pages = rememberPagerState(editorPage(editor.tab)) { 2 }
+            val dragged by pages.interactionSource.collectIsDraggedAsState()
+            var paging by remember { mutableStateOf(false) }
+            LaunchedEffect(dragged) { if (dragged) paging = false }
+            LaunchedEffect(editor.tab) {
+                if (dragged) return@LaunchedEffect
+                paging = true
+                pages.animateScrollToPage(editorPage(editor.tab))
+                paging = false
+            }
+            LaunchedEffect(pages) {
+                snapshotFlow { pages.currentPage.takeUnless { paging } }.collect { page ->
+                    page?.let(::editorPageTab)?.takeIf { it != model.editor?.tab }?.let { editorTab(it) }
+                }
+            }
+            HorizontalPager(pages, Modifier.weight(1f).testTag("task-editor-pages"), userScrollEnabled = !formFocused && !checklistDragging,
+                beyondViewportPageCount = 0) { page -> if (page == 1) viewPage(Modifier.fillMaxSize()) else formPage(Modifier.fillMaxSize()) }
         }
     }
 
@@ -868,7 +898,7 @@ private fun EditorField(model: InboxViewModel, editor: TaskEditor, id: String, l
             }
             if (previewing) DescriptionPreview(model, editor, follow, Modifier.fillMaxWidth())
             else EditorInput(editor.text("description"), { editText("description", it) }, t("taskEdit.descriptionPlaceholder"), !locked,
-                singleLine = false, minHeight = 100, description = t("taskEdit.descriptionLabel"))
+                singleLine = false, minHeight = 100, description = t("taskEdit.descriptionLabel"), assist = rememberMarkdownAssist(model, pairs = true, editor.id))
         }
         "dueDate", "startTime", "reviewAt" -> FormGroup {
             val part = editor.view.fields.dates.getValue(id)
@@ -1274,7 +1304,8 @@ private fun DescriptionFullscreen(model: InboxViewModel, editor: TaskEditor, loc
                 val shape = RoundedCornerShape(10.dp)
                 MarkdownInput(draft, store, !locked, t("taskEdit.descriptionPlaceholder"), t("taskEdit.descriptionLabel"),
                     rnText(16, 400).copy(color = if (!locked) c.text else c.secondaryText), Modifier.fillMaxWidth().heightIn(min = 240.dp),
-                    { field -> Box(Modifier.fillMaxWidth().heightIn(min = 240.dp).clip(shape).background(c.inputBg).rnBorder(1.dp, c.border, shape).padding(12.dp)) { field() } })
+                    { field -> Box(Modifier.fillMaxWidth().heightIn(min = 240.dp).clip(shape).background(c.inputBg).rnBorder(1.dp, c.border, shape).padding(12.dp)) { field() } },
+                    assist = rememberMarkdownAssist(model, pairs = true, editor.id))
             } else Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp)) {
                 DescriptionPreview(model, editor, follow, Modifier.fillMaxWidth().heightIn(min = 120.dp))
             }
@@ -1286,7 +1317,8 @@ private fun DescriptionFullscreen(model: InboxViewModel, editor: TaskEditor, loc
 
 @Composable
 private fun EditorInput(value: String, onChange: (String) -> Unit, placeholder: String?, enabled: Boolean, singleLine: Boolean = false,
-                        minHeight: Int = 0, description: String? = null, tag: String? = null, commit: (() -> Unit)? = null, number: Boolean = false) {
+                        minHeight: Int = 0, description: String? = null, tag: String? = null, commit: (() -> Unit)? = null, number: Boolean = false,
+                        assist: MarkdownAssist? = null) {
     val c = LocalTheme.current.colors
     val focusManager = LocalFocusManager.current
     val shape = RoundedCornerShape(10.dp)
@@ -1303,7 +1335,15 @@ private fun EditorInput(value: String, onChange: (String) -> Unit, placeholder: 
 
     var field by remember { mutableStateOf(TextFieldValue(value, TextRange(value.length))) }
     if (field.text != value) field = TextFieldValue(value, TextRange(value.length))
-    BasicTextField(field, { typed -> field = typed; if (typed.text != value) onChange(typed.text) }, enabled = enabled, singleLine = singleLine, textStyle = rnText(16, 400).copy(color = if (enabled) c.text else c.secondaryText),
+    val rewrite = { next: TextFieldValue -> field = next; onChange(next.text) }
+    assist?.let { MarkdownReferenceList(it, field, focused, rewrite) }
+    BasicTextField(field, { typed ->
+        val before = field
+        field = typed
+        if (typed.text != value) onChange(typed.text)
+        assist?.changed(before, typed, { field }, rewrite)
+    }, enabled = enabled, singleLine = singleLine, textStyle = rnText(16, 400).copy(color = if (enabled) c.text else c.secondaryText),
+        onTextLayout = { assist?.textLayout?.invoke(it) },
         cursorBrush = SolidColor(c.tint),
         keyboardOptions = KeyboardOptions(keyboardType = if (number) KeyboardType.Number else KeyboardType.Unspecified,
             imeAction = if (commit != null) ImeAction.Done else ImeAction.Unspecified),
@@ -1312,7 +1352,7 @@ private fun EditorInput(value: String, onChange: (String) -> Unit, placeholder: 
             .then(if (tag != null) Modifier.testTag(tag) else Modifier)
             .then(if (description != null) Modifier.semantics { contentDescription = description } else Modifier),
         decorationBox = { inner ->
-            Box(Modifier.padding(12.dp)) {
+            Box(Modifier.padding(12.dp).then(assist?.textBox ?: Modifier)) {
                 if (value.isEmpty() && placeholder != null) Text(placeholder, style = rnText(16, 400), color = c.secondaryText)
                 inner()
             }

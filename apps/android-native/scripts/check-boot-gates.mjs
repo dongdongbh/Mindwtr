@@ -1050,13 +1050,13 @@ assert.match(editorUi, /val leave = \{ if \(editor\.readOnly \|\| \(!editor\.dir
 assert.match(model, /if \(current\.waiting \|\| editsPending\) \{ saveQueued = true; return \}/);
 assert.match(model, /if \(saveQueued && !resolved\.waiting && !editsPending\) \{ saveQueued = false; saveEditor\(\) \}/);
 
-assert.match(editorUi, /if \(field\.text != value\) field = TextFieldValue\(value, TextRange\(value\.length\)\)\s+BasicTextField\(field, \{ typed -> field = typed;/);
+assert.match(editorUi, /if \(field\.text != value\) field = TextFieldValue\(value, TextRange\(value\.length\)\)\s+val rewrite = \{ next: TextFieldValue -> field = next; onChange\(next\.text\) \}\s+assist\?\.let \{ MarkdownReferenceList\(it, field, focused, rewrite\) \}\s+BasicTextField\(field, \{ typed ->\s+val before = field\s+field = typed\s+if \(typed\.text != value\) onChange\(typed\.text\)\s+assist\?\.changed\(before, typed, \{ field \}, rewrite\)/);
 
 
 assert.match(editorUi, /LaunchedEffect\(focused, viewport\) \{\s+if \(focused && viewport > 0\) reveal\.bringIntoView\(Rect\(0f, 0f, size\.width\.toFloat\(\), focusRevealBottom\(size\.height, viewport\)\)\)/);
 assert.match(editorUi, /modifier = Modifier\.bringIntoViewRequester\(reveal\)\.onSizeChanged \{ size = it \}\.onFocusChanged \{ if \(focused && !it\.isFocused\) commit\?\.invoke\(\); focused = it\.isFocused \}/);
 assert.match(editorUi, /val checklistFormScroll = rememberScrollState\(\)/);
-assert.match(editorUi, /\.imePadding\(\)\.onSizeChanged \{ formViewport = it\.height \}\s+\.onGloballyPositioned \{ checklistFormBounds = it\.boundsInWindow\(\) \}\s+\.verticalScroll\(checklistFormScroll, enabled = !checklistDragging\)/);
+assert.match(editorUi, /\.imePadding\(\)\.onSizeChanged \{ formViewport = it\.height \}\s+\.onGloballyPositioned \{ checklistFormBounds = it\.boundsInWindow\(\) \}\s+\.verticalScroll\(checklistFormScroll, enabled = !checklistDragging\)\.onFocusChanged \{ formFocused = it\.hasFocus \}/);
 
 
 assert.match(editorUi, /keyboardOptions = KeyboardOptions\(keyboardType = if \(number\) KeyboardType\.Number else KeyboardType\.Unspecified,\s+imeAction = if \(commit != null\) ImeAction\.Done else ImeAction\.Unspecified\),\s+keyboardActions = KeyboardActions\(onDone = \{ focusManager\.clearFocus\(\) \}\)/);
@@ -3367,7 +3367,9 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     assert.match(model, /menu\.whenIdle \{ openEditor\(taskId, "task"\) \}/);
     assert.match(source('BoardModel.kt'), /shell\.openEditor\(open\.getString\("taskId"\), "task"\)/);
     assert.match(menuModel, /shell\.openEditor\(id, "task"\)/);
-    assert.match(editorUi, /if \(editor\.readOnly \|\| editor\.tab == "view"\) TaskViewTab\(/);
+    assert.match(editorUi, /val viewPage = @Composable \{ page: Modifier -> TaskViewTab\(model, editor, locked, \{ picker = "status" \}, follow, page\) \}/);
+    assert.match(editorUi, /if \(editor\.readOnly\) viewPage\(Modifier\.weight\(1f\)\)\s+else \{\s+val pages = rememberPagerState\(editorPage\(editor\.tab\)\) \{ 2 \}/);
+    assert.match(editorUi, /HorizontalPager\(pages, Modifier\.weight\(1f\)\.testTag\("task-editor-pages"\), userScrollEnabled = !formFocused && !checklistDragging,/, 'the form and View pages swipe as RN\'s paged ScrollView, never while typing or dragging a checklist row');
     assert.match(editorUi, /\.put\("checklist", checklist \?: JSONObject\.NULL\)\.put\("tab", tab\)/, 'the open tab and the checklist ride the draft file');
 
     const checklistKinds = [...(/export type TaskChecklistEdit =([\s\S]*?);\n\n/.exec(coreFile('task-checklist-model.ts'))?.[1] ?? '').matchAll(/kind: '(\w+)'/g)].map(([, kind]) => kind);
@@ -10382,6 +10384,15 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     assert.match(toolbarKt, /LaunchedEffect\(draft, enabled\) \{ if \(enabled\) \{ draft\.focus\.requestFocus\(\); keyboard\?\.show\(\) \} \}/);
     assert.match(toolbarKt, /runtime\.menuRead\("markdownToolbarActions", "\{\}"\)/);
     assert.match(toolbarKt, /runtime\.menuRead\("markdownToolbarApply", input\.toString\(\)\)/);
+    assert.match(toolbarKt, /runtime\.menuRead\("markdownTextChange", JSONObject\(\)\.put\("previous", before\.text\)\.put\("next", typed\.text\)/);
+    assert.match(toolbarKt, /runtime\.menuRead\("markdownReferences", /);
+    assert.match(toolbarKt, /if \(!gate\.lands\(current\(\), typed\)\) return@background/, 'a typing-help rewrite lands only on the open editor and the edit it was computed for');
+    assert.match(toolbarKt, /DisposableEffect\(assist\) \{ onDispose \{ assist\.close\(\) \} \}/, 'a closed editor drops late typing-help results');
+    assert.match(toolbarKt, /if \(searching\) return run \{ searchAgain = true \}/, 'one [[ search in flight; the newest text runs next');
+    assert.match(editorUi, /LaunchedEffect\(editor\.tab\) \{\s+if \(dragged\) return@LaunchedEffect\s+paging = true\s+pages\.animateScrollToPage\(editorPage\(editor\.tab\)\)/, 'every tab tap animates to its page, so two quick taps end snapped on the second');
+    assert.match(editorUi, /description = t\("taskEdit\.descriptionLabel"\), assist = rememberMarkdownAssist\(model, pairs = true, editor\.id\)\)/);
+    assert.match(source('ProjectDetails.kt'), /val assist = rememberMarkdownAssist\(model, pairs = false, null\)/, 'inline project notes only continue lists, as RN\'s do');
+    assert.match(hostEntry, /markdownTextChange: \(input\) => contract\.applyMarkdownTextChange\(input\),\s+markdownReferences: \(input\) => readMarkdownReferences\(input, /);
     assert.match(toolbarKt, /if \(shown == null \|\| !draft\.focused \|\| !WindowInsets\.isImeVisible\) return/);
     assert.match(toolbarKt, /Icon\(Ionicons\.ArrowUndoOutline, null/);
     assert.match(editorUi, /if \(editing\) MarkdownToolbar\(model, draft, store\)/);
