@@ -51,3 +51,44 @@ describe('iOS raw share canonical title/note projection', () => {
         await expect(cold.port.iosShareCaptureDraft(raw)).rejects.toThrow('NOT_READY');
     });
 });
+
+describe('iOS shared files follow RN\'s file capture rule', () => {
+    const AT = '2026-11-17T10:00:00.000Z', DIR = 'file:///private/var/mobile/Containers/Data/Application/A/Library/attachments/';
+    const file = (id: string, name: string, extra: Record<string, unknown> = {}) => {
+        const extension = /\.[A-Za-z0-9]{1,8}$/.exec(name)?.[0]?.toLowerCase() ?? '';
+        return { id, name, mimeType: 'image/jpeg', size: 1000, sha256: 'a'.repeat(64), uri: DIR + id + extension, ...extra };
+    };
+    const ids = ['00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000002', '00000000-0000-4000-8000-000000000003'];
+    const read = (input: Record<string, unknown>) => readIOSShareCaptureDraft(JSON.stringify({ subject: null, text: null, webUrl: null,
+        skippedFiles: 0, receivedAt: AT, ...input }));
+    it('titles a photo-only share by its first file name without the extension and attaches each file', async () => {
+        const result = await read({ files: [file(ids[0], 'IMG_0001.HEIC'), file(ids[1], 'Scan.pdf', { mimeType: 'application/pdf' })] });
+        expect(result).toEqual({ draft: { title: 'IMG_0001', note: '' }, skipped: 0, attachments: [
+            { id: ids[0], kind: 'file', title: 'IMG_0001.HEIC', uri: DIR + ids[0] + '.heic', mimeType: 'image/jpeg', size: 1000,
+                fileHash: 'a'.repeat(64), createdAt: AT, updatedAt: AT, localStatus: 'available' },
+            { id: ids[1], kind: 'file', title: 'Scan.pdf', uri: DIR + ids[1] + '.pdf', mimeType: 'application/pdf', size: 1000,
+                fileHash: 'a'.repeat(64), createdAt: AT, updatedAt: AT, localStatus: 'available' }] });
+    });
+    it('prefers the subject, keeps the text as the note only beside a subject, and ignores the web URL', async () => {
+        expect((await read({ subject: 'Trip', text: 'Look', webUrl: 'https://example.com', files: [file(ids[0], 'a.jpg')] })).draft)
+            .toEqual({ title: 'Trip', note: 'Look' });
+        expect((await read({ text: 'Look', webUrl: 'https://example.com', files: [file(ids[0], 'a.jpg')] })).draft).toEqual({ title: 'Look', note: '' });
+    });
+    it('counts blocked, oversized, uncopied and extension-skipped files, and falls back to the text when none attached', async () => {
+        const result = await read({ text: 'Read this', skippedFiles: 1, files: [file(ids[0], 'run.exe', { mimeType: 'application/x-msdownload' }),
+            file(ids[1], 'big.mov', { size: 60 * 1024 * 1024 }), file(ids[2], 'gone.png', { uri: null })] });
+        expect(result).toEqual({ draft: { title: 'Read this', note: '' }, attachments: [], skipped: 4 });
+        expect(await read({ skippedFiles: 0, files: [file(ids[0], 'gone.png', { uri: null })] })).toEqual({ draft: null, attachments: [], skipped: 1 });
+    });
+    it.each([
+        { files: [file(ids[0], 'a.jpg', { uri: DIR + 'other.jpg' })] },
+        { files: [file(ids[0], 'a.jpg'), file(ids[0], 'b.jpg')] },
+        { files: Array.from({ length: 7 }, (_, n) => file(`00000000-0000-4000-8000-00000000001${n}`, 'a.jpg')) },
+        { files: [{ ...file(ids[0], 'a.jpg'), extra: 1 }] },
+        { files: [file(ids[0], 'a.jpg')], receivedAt: 'yesterday' },
+        { files: [file(ids[0], 'a.jpg')], skippedFiles: -1 },
+    ].map(input => [input] as const))('refuses a malformed file list: %j', async input => {
+        expect(() => read(input)).toThrow();
+    });
+});
+

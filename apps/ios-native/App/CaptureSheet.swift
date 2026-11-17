@@ -198,6 +198,20 @@ struct CaptureSheet: View {
                 .padding(.top, 8).accessibilityIdentifier("capture-preview")
             }
 
+            let sharedTitles = model.captureSharedAttachmentTitles
+            if !sharedTitles.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(model.label("attachments.title")).rnFont(12, .semibold).foregroundStyle(palette.secondary)
+                    ForEach(Array(sharedTitles.enumerated()), id: \.offset) { _, title in
+                        HStack(spacing: 6) {
+                            Image(systemName: "paperclip").font(.system(size: 13)).foregroundStyle(palette.secondary).accessibilityHidden(true)
+                            Text(title).rnFont(14).foregroundStyle(palette.text).lineLimit(1)
+                        }
+                    }
+                }
+                .padding(.top, 10).accessibilityElement(children: .combine).accessibilityIdentifier("capture-shared-attachments")
+            }
+
             captureCopilot
 
             Button { model.openCaptureDestinationPicker() } label: {

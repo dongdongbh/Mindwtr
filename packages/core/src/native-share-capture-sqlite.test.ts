@@ -93,4 +93,21 @@ describe('native share actual atomic SQLite source receipts', () => {
         await expect(cold.methods.outcome({ ...source, fingerprint: 'd'.repeat(64) })).rejects.toThrow('SAVE_FAILED');
         expect(rows(cold.database)).toEqual(edited); expect(receipts(cold.database)).toHaveLength(1);
     });
+    it('saves the shared files as the task\'s attachments in the same atomic write, and refuses a malformed file list', async () => {
+        const env = await open(newPath(), true);
+        const file = { id: '00000000-0000-4000-8000-000000000732', kind: 'file', title: 'Scan.pdf',
+            uri: 'file:///var/mobile/attachments/00000000-0000-4000-8000-000000000732.pdf', mimeType: 'application/pdf', size: 12,
+            fileHash: 'c'.repeat(64), createdAt: AT, updatedAt: AT, localStatus: 'available' };
+        for (const attachments of [[], [{ ...file, kind: 'link' }], [{ ...file, id: ID }], [file, file], [{ ...file, extra: true }],
+            Array.from({ length: 7 }, (_, n) => ({ ...file, id: `00000000-0000-4000-8000-00000000074${n}` }))]) {
+            await expect(env.methods.prepare({ ...env.input, attachments })).rejects.toThrow('INVALID_INPUT');
+        }
+        const prepared = await env.methods.prepare({ ...env.input, attachments: [file] });
+        if (prepared.kind !== 'prepared') throw new Error('Expected prepared share');
+        expect(await env.methods.commit(prepared.prepared)).toMatchObject({ kind: 'saved', taskId: ID });
+        const task = useTaskStore.getState()._allTasks.find(entry => entry.id === ID);
+        expect(task?.attachments).toEqual([file]);
+        expect(JSON.parse((rows(env.database).find((row: any) => row.id === ID) as { attachments: string }).attachments)).toEqual([file]);
+        expect(receipts(env.database)).toHaveLength(1);
+    });
 });

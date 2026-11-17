@@ -1,5 +1,6 @@
 import Foundation
 import Darwin
+import CryptoKit
 
 public actor NativeShareMailbox {
     public static let appIdentifier = "tech.dongdongbh.mindwtr.native.dev"
@@ -191,6 +192,7 @@ public actor NativeShareMailbox {
     public func publish(_ envelope: NativeShareEnvelope) throws {
         try envelope.validate(); let bytes = try envelope.encoded(), name = envelope.id + ".json"
         try acquire(); defer { _ = flock(lockFD, LOCK_UN) }
+        if !envelope.sharedFiles.isEmpty { try promotePayload(envelope) }
         if let (existing, _) = try read(name) {
             guard existing == bytes else { throw NativeShareError.changedSource }
             let published = openat(directory, name, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
@@ -207,6 +209,58 @@ public actor NativeShareMailbox {
         try afterPublication?()
         #endif
         guard try read(name)?.0 == bytes else { throw NativeShareError.changedSource }; try check()
+    }
+    public nonisolated func payloadWriter(for envelopeID: UUID) throws -> NativeSharePayloadWriter {
+        let files = try NativeSharePayloadDirectory.open(descriptors[1], create: true); defer { Darwin.close(files) }
+        return try NativeSharePayloadWriter(files: files, id: envelopeID.uuidString.lowercased())
+    }
+    public nonisolated func payloadURL(_ envelope: NativeShareEnvelope, file: NativeShareEnvelope.File) -> URL {
+        root.appendingPathComponent("NativeShare/files", isDirectory: true)
+            .appendingPathComponent(envelope.id, isDirectory: true).appendingPathComponent(file.id, isDirectory: false)
+    }
+    private func promotePayload(_ envelope: NativeShareEnvelope) throws {
+        let files = try NativeSharePayloadDirectory.open(descriptors[1], create: true); defer { Darwin.close(files) }
+        let staging = NativeSharePayloadDirectory.stagingName(envelope.id)
+        var info = stat()
+        if fstatat(files, envelope.id, &info, AT_SYMLINK_NOFOLLOW) != 0 {
+            guard errno == ENOENT, renameatx_np(files, staging, files, envelope.id, UInt32(RENAME_EXCL)) == 0,
+                  fsync(files) == 0 else { throw NativeShareError.unavailable }
+        }
+        let payload = try NativeSharePayloadDirectory.open(files, name: envelope.id); defer { Darwin.close(payload) }
+        let expected = Dictionary(uniqueKeysWithValues: envelope.sharedFiles.map { ($0.id, $0.size) })
+        guard try NativeSharePayloadDirectory.entries(payload).sorted() == expected.keys.sorted() else { throw NativeShareError.changedSource }
+        for (name, size) in expected {
+            guard fstatat(payload, name, &info, AT_SYMLINK_NOFOLLOW) == 0, Self.regular(info), info.st_size == size else {
+                throw NativeShareError.changedSource
+            }
+        }
+    }
+    public func removePayload(_ envelopeID: String, unlessPublished: Bool = false) throws {
+        guard NativeSharePayloadDirectory.uuid(envelopeID) else { throw NativeShareError.invalidInput }
+        try acquire(); defer { _ = flock(lockFD, LOCK_UN) }
+        if unlessPublished, try read(envelopeID + ".json") != nil { return }
+        guard let files = try NativeSharePayloadDirectory.openIfPresent(descriptors[1]) else { return }
+        defer { Darwin.close(files) }
+        for name in [envelopeID, NativeSharePayloadDirectory.stagingName(envelopeID)] { try NativeSharePayloadDirectory.remove(name, in: files) }
+        guard fsync(files) == 0 else { throw NativeShareError.unavailable }; try check()
+    }
+    public func sweepPayloads(keeping retained: Set<String>, stagingOlderThan age: TimeInterval = 86_400, now: Date = Date()) throws -> Int {
+        try acquire(); defer { _ = flock(lockFD, LOCK_UN) }
+        guard let files = try NativeSharePayloadDirectory.openIfPresent(descriptors[1]) else { return 0 }
+        defer { Darwin.close(files) }
+        let pending = Set(try names().map { String($0.dropLast(5)) })
+        var removed = 0
+        for name in try NativeSharePayloadDirectory.entries(files) {
+            let staged = name.hasPrefix(NativeSharePayloadDirectory.stagingPrefix)
+            let id = staged ? String(name.dropFirst(NativeSharePayloadDirectory.stagingPrefix.count)) : name
+            guard NativeSharePayloadDirectory.uuid(id), !pending.contains(id), !retained.contains(id) else { continue }
+            var info = stat()
+            guard fstatat(files, name, &info, AT_SYMLINK_NOFOLLOW) == 0 else { continue }
+            if staged, now.timeIntervalSince1970 - Double(info.st_mtimespec.tv_sec) < age { continue }
+            try NativeSharePayloadDirectory.remove(name, in: files); removed += 1
+        }
+        guard fsync(files) == 0 else { throw NativeShareError.unavailable }; try check()
+        return removed
     }
     public func pendingPage(after cursor: String? = nil) throws -> Page {
         if let cursor { guard cursor.hasSuffix(".json"), UUID(uuidString: String(cursor.dropLast(5)))?.uuidString.lowercased() == String(cursor.dropLast(5)) else { throw NativeShareError.invalidInput } }
@@ -289,5 +343,107 @@ public actor NativeShareMailbox {
             guard unlinkat(directory, name, 0) == 0 else { throw NativeShareError.unavailable }
         }
         guard fsync(directory) == 0 else { throw NativeShareError.unavailable }; try check()
+    }
+}
+
+enum NativeSharePayloadDirectory {
+    static let stagingPrefix = ".staging-"
+    static func uuid(_ value: String) -> Bool { UUID(uuidString: value)?.uuidString.lowercased() == value }
+    static func stagingName(_ id: String) -> String { stagingPrefix + id }
+    static func open(_ parent: Int32, create: Bool) throws -> Int32 {
+        if create, mkdirat(parent, "files", 0o700) != 0, errno != EEXIST { throw NativeShareError.unavailable }
+        if create { guard fsync(parent) == 0 else { throw NativeShareError.unavailable } }
+        return try open(parent, name: "files")
+    }
+    static func openIfPresent(_ parent: Int32) throws -> Int32? {
+        var info = stat()
+        if fstatat(parent, "files", &info, AT_SYMLINK_NOFOLLOW) != 0 {
+            guard errno == ENOENT else { throw NativeShareError.unavailable }; return nil
+        }
+        return try open(parent, name: "files")
+    }
+    static func open(_ parent: Int32, name: String) throws -> Int32 {
+        let fd = openat(parent, name, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+        guard fd >= 0 else { throw NativeShareError.unavailable }
+        return fd
+    }
+    static func entries(_ directory: Int32) throws -> [String] {
+        let copy = openat(directory, ".", O_RDONLY | O_DIRECTORY | O_CLOEXEC)
+        guard copy >= 0, let stream = fdopendir(copy) else { if copy >= 0 { Darwin.close(copy) }; throw NativeShareError.unavailable }
+        defer { closedir(stream) }
+        var names: [String] = []
+        while true {
+            errno = 0
+            guard let entry = readdir(stream) else { guard errno == 0 else { throw NativeShareError.unavailable }; break }
+            let name = withUnsafePointer(to: &entry.pointee.d_name) {
+                $0.withMemoryRebound(to: CChar.self, capacity: Int(entry.pointee.d_namlen) + 1) { String(cString: $0) }
+            }
+            if name == "." || name == ".." { continue }
+            names.append(name); guard names.count <= 4096 else { throw NativeShareError.full }
+        }
+        return names
+    }
+    static func remove(_ name: String, in parent: Int32) throws {
+        var info = stat()
+        if fstatat(parent, name, &info, AT_SYMLINK_NOFOLLOW) != 0 { guard errno == ENOENT else { throw NativeShareError.unavailable }; return }
+        guard info.st_mode & S_IFMT == S_IFDIR else { throw NativeShareError.changedSource }
+        let directory = try open(parent, name: name); defer { Darwin.close(directory) }
+        for child in try entries(directory) {
+            var item = stat()
+            guard fstatat(directory, child, &item, AT_SYMLINK_NOFOLLOW) == 0, item.st_mode & S_IFMT == S_IFREG,
+                  unlinkat(directory, child, 0) == 0 else { throw NativeShareError.unavailable }
+        }
+        guard unlinkat(parent, name, AT_REMOVEDIR) == 0 else { throw NativeShareError.unavailable }
+    }
+}
+
+public final class NativeSharePayloadWriter: @unchecked Sendable {
+    private let directory: Int32
+    private let lock = NSLock()
+    fileprivate init(files: Int32, id: String) throws {
+        let name = NativeSharePayloadDirectory.stagingName(id)
+        guard mkdirat(files, name, 0o700) == 0 || errno == EEXIST else { throw NativeShareError.unavailable }
+        directory = try NativeSharePayloadDirectory.open(files, name: name)
+        guard fsync(files) == 0 else { Darwin.close(directory); throw NativeShareError.unavailable }
+    }
+    deinit { Darwin.close(directory) }
+
+    public func copy(from source: URL, id: UUID = UUID(), limit: Int64 = NativeShareEnvelope.File.maximumBytes,
+                     checkCancellation: () throws -> Void = {}) throws -> (id: UUID, size: Int64, sha256: String) {
+        lock.lock(); defer { lock.unlock() }
+        let input = Darwin.open(source.path, O_RDONLY | O_CLOEXEC)
+        guard input >= 0 else { throw NativeShareError.invalidInput }
+        defer { Darwin.close(input) }
+        var info = stat()
+        guard fstat(input, &info) == 0, info.st_mode & S_IFMT == S_IFREG else { throw NativeShareError.invalidInput }
+        guard info.st_size <= limit else { throw NativeShareError.full }
+        let name = id.uuidString.lowercased()
+        let output = openat(directory, name, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600)
+        guard output >= 0 else { throw NativeShareError.unavailable }
+        var complete = false
+        defer { Darwin.close(output); if !complete { _ = unlinkat(directory, name, 0) } }
+        var digest = SHA256(), size: Int64 = 0
+        let capacity = 64 * 1024
+        let buffer = UnsafeMutableRawPointer.allocate(byteCount: capacity, alignment: 16)
+        defer { buffer.deallocate() }
+        while true {
+            try checkCancellation()
+            let count = Darwin.read(input, buffer, capacity)
+            if count < 0 && errno == EINTR { continue }
+            guard count >= 0 else { throw NativeShareError.invalidInput }
+            if count == 0 { break }
+            size += Int64(count); guard size <= limit else { throw NativeShareError.full }
+            digest.update(bufferPointer: UnsafeRawBufferPointer(start: buffer, count: count))
+            var offset = 0
+            while offset < count {
+                let written = Darwin.write(output, buffer.advanced(by: offset), count - offset)
+                if written < 0 && errno == EINTR { continue }
+                guard written > 0 else { throw NativeShareError.unavailable }
+                offset += written
+            }
+        }
+        guard fsync(output) == 0, fcntl(output, F_FULLFSYNC) == 0, fsync(directory) == 0 else { throw NativeShareError.unavailable }
+        complete = true
+        return (id, size, digest.finalize().map { String(format: "%02x", $0) }.joined())
     }
 }

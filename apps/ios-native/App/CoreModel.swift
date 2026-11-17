@@ -3076,6 +3076,10 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         var diagnostic: NativePersonalIntake.Diagnostic?
         var diagnosticTransferred = false
         var requiresRetry = false
+        var materializedFiles: [String?]?
+        var attachmentsJSON: String?
+        var attachmentTitles: [String] = []
+        var attachmentURIs: [String] = []
         init(host: CoreHost, startup: UUID, storage: NativeNotificationResponses.ShareCaptureStorage,
              item: NativePersonalIntake.Item, source: NativeShareEnvelope) {
             self.host = host; self.startup = startup; self.storage = storage; self.item = item; self.source = source
@@ -43131,6 +43135,14 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         showVoiceNotice(nil)
     }
 
+    var captureSharedAttachmentTitles: [String] {
+        guard capturePresented, let owner = shareCaptureOwner, owner.presentationID == capturePresentationID else { return [] }
+        return owner.attachmentTitles
+    }
+    private static func shareReceivedAt(_ milliseconds: Int64) -> String {
+        let format = ISO8601DateFormatter(); format.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return format.string(from: Date(timeIntervalSince1970: Double(milliseconds) / 1000))
+    }
     private var shareCaptureRouteAvailable: Bool {
         guard let selection = try? NativeAppLaunch.selection.get(),
               let intakeRoute = try? NativeAppLaunch.reminderRoute.get(),
@@ -43215,7 +43227,10 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
                             self.shareCaptureOwner = ShareCaptureOwner(host: original, startup: startup, storage: storage, item: item, source: source)
                             break
                         }
-                        guard let next = page.next else { return }
+                        guard let next = page.next else {
+                            _ = try? await NativeShareMailbox.current().sweepPayloads(keeping: [])
+                            return
+                        }
                         page = try await storage.writer.pendingPage(after: next)
                     }
                 }
@@ -43241,11 +43256,29 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
                 }
                 guard self.shareCaptureReadCurrent(owner.host, startup: owner.startup) else { self.shareCaptureWakePending = true; return }
                 self.busy = true; self.shareCaptureBusyOwner = owner.id
-                let raw = try await self.query("iosShareCaptureDraft", [try self.json([
-                    "subject": owner.source.subject as Any? ?? NSNull(), "text": owner.source.text as Any? ?? NSNull(),
-                    "webUrl": owner.source.webUrl as Any? ?? NSNull()])], beforeDispatch: {
+                var shared: [String: Any] = ["subject": owner.source.subject as Any? ?? NSNull(), "text": owner.source.text as Any? ?? NSNull(),
+                    "webUrl": owner.source.webUrl as Any? ?? NSNull()]
+                if owner.source.files != nil {
+                    if owner.materializedFiles == nil {
+                        let mailbox = try NativeShareMailbox.current(), source = owner.source
+                        owner.materializedFiles = try await owner.host.materializeShareFiles(source) { mailbox.payloadURL(source, file: $0) }
+                        guard self.shareCaptureReadCurrent(owner.host, startup: owner.startup, ownBusy: true) else { self.shareCaptureWakePending = true; return }
+                    }
+                    shared["files"] = zip(owner.source.sharedFiles, owner.materializedFiles ?? []).map { file, uri in
+                        ["id": file.id, "name": file.name, "mimeType": file.mimeType, "size": file.size, "sha256": file.sha256, "uri": uri as Any? ?? NSNull()] as [String: Any]
+                    }
+                    shared["skippedFiles"] = owner.source.skippedFiles ?? 0
+                    shared["receivedAt"] = Self.shareReceivedAt(owner.source.receivedAtMs)
+                }
+                let raw = try await self.query("iosShareCaptureDraft", [try self.json(shared)], beforeDispatch: {
                         self.shareCaptureReadCurrent(owner.host, startup: owner.startup, ownBusy: true)
                     })
+                let attachments = raw.objects("attachments"), skipped = raw.number("skipped")
+                owner.attachmentsJSON = attachments.isEmpty ? nil : try self.json(attachments)
+                owner.attachmentTitles = attachments.map { $0.text("title") }
+                owner.attachmentURIs = attachments.map { $0.text("uri") }
+                let unattached = (owner.materializedFiles ?? []).compactMap { $0 }.filter { !owner.attachmentURIs.contains($0) }
+                if !unattached.isEmpty { try? await owner.host.discardShareFiles(unattached) }
                 guard self.shareCaptureReadCurrent(owner.host, startup: owner.startup, ownBusy: true) else { self.shareCaptureWakePending = true; return }
                 let canonical = raw.object("draft"), text = canonical.text("title"), note = canonical.text("note")
                 var opened = try await self.query("captureOpen", beforeDispatch: { self.shareCaptureReadCurrent(owner.host, startup: owner.startup, ownBusy: true) })
@@ -43259,7 +43292,8 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
                 guard self.shareCaptureReadCurrent(owner.host, startup: owner.startup, ownBusy: true) else { self.shareCaptureWakePending = true; return }
                 self.capture = edited.object("view"); self.captureID = owner.source.id; self.draft = text; self.noteDraft = note
                 self.contextQuery = ""; self.contextPickerPresented = false; self.previewedText = "\u{0}"
-                self.notice = raw["draft"] is NSNull ? self.label("share.unavailable") : nil
+                self.notice = raw["draft"] is NSNull && skipped == 0 ? self.label("share.unavailable")
+                    : skipped > 0 ? self.label("share.filesSkipped").replacingOccurrences(of: "{{count}}", with: String(skipped)) : nil
                 self.capturePresented = true; owner.presentationID = self.capturePresentationID
                 _ = try? await owner.host.call("logLine", argumentsJSON: self.json(["Native iOS shared capture bound",
                     #"{"releaseCheck":"v1.3.9/ios-share-text-url","operation":"share-open","outcome":"confirmed"}"#]))
@@ -43301,6 +43335,13 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
             guard shareCaptureFinishCurrent(owner) else { throw CocoaError(.userCancelled) }
             _ = try await owner.host.call("logLine", argumentsJSON: json(["Native iOS shared capture finish confirmed", try json([
                 "releaseCheck": "v1.3.9/ios-share-text-url", "operation": "share-finish", "outcome": outcome.rawValue])]))
+            if owner.source.files != nil {
+                let id = owner.source.id, host = owner.host, discarded = outcome == .ignored ? owner.attachmentURIs : []
+                Task {
+                    if !discarded.isEmpty { try? await host.discardShareFiles(discarded) }
+                    try? await NativeShareMailbox.current().removePayload(id)
+                }
+            }
             owner.saveLease?.invalidate(); shareCaptureOwner = nil; retryNeeded = false; error = nil; shareCaptureWakePending = true
         } catch {
             owner.requiresRetry = true; retryNeeded = true
@@ -44987,7 +45028,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
                 owner.saveLease?.invalidate(); let lease = NativeTaskAIEditorLease(); owner.saveLease = lease; owner.submissionID = submission.id
                 dispatched = true
                 result = try decode(await currentHost.submitShareCapture(source: owner.source, method: submission.kind.method,
-                    requestJSON: submission.request, lease: lease, readmit: { [weak self, weak owner] in
+                    requestJSON: submission.request, attachmentsJSON: owner.attachmentsJSON, lease: lease, readmit: { [weak self, weak owner] in
                         guard let self, let owner else { return false }
                         return await self.shareCaptureSubmissionCurrent(owner, submission: submission)
                     }))

@@ -17,13 +17,27 @@ enum NativeShareCaptureJSON {
         try envelope.validate()
         return try encoded(["id": envelope.id, "fingerprint": digest(envelope.encoded())])
     }
-    static func makeRequest(_ envelope: NativeShareEnvelope, method: String, requestJSON: String) throws -> String {
+    static func makeRequest(_ envelope: NativeShareEnvelope, method: String, requestJSON: String, attachmentsJSON: String? = nil) throws -> String {
         let capture = try object(requestJSON), source = try object(identity(envelope))
-        return try encoded(["source": source, "method": method, "requestFingerprint": digest(Data(encoded(capture).utf8)), "capture": capture])
+        var request: [String: Any] = ["source": source, "method": method, "requestFingerprint": digest(Data(try encoded(capture).utf8)), "capture": capture]
+        if let attachmentsJSON {
+            guard let attachments = try NativeJSON.jsonObject(with: Data(attachmentsJSON.utf8)) as? [[String: Any]], self.attachments(attachments),
+                  attachments.allSatisfy({ attachment in envelope.sharedFiles.contains { file in
+                      attachment["id"] as? String == file.id && attachment["fileHash"] as? String == file.sha256
+                          && (attachment["size"] as? NSNumber)?.int64Value == file.size } }) else { throw NativeShareError.invalidInput }
+            request["attachments"] = attachments
+        }
+        return try encoded(request)
+    }
+    private static func attachments(_ value: Any?) -> Bool {
+        guard let list = value as? [[String: Any]], (1...NativeShareEnvelope.fileLimit).contains(list.count) else { return false }
+        let ids = list.compactMap { $0["id"] as? String }
+        return ids.count == list.count && Set(ids).count == ids.count && list.allSatisfy { $0["kind"] as? String == "file" }
     }
     static func request(_ raw: String) throws -> [String: Any] {
         let value = try object(raw)
-        guard Set(value.keys) == Set(["source", "method", "requestFingerprint", "capture"]),
+        let fields: Set<String> = ["source", "method", "requestFingerprint", "capture"]
+        guard Set(value.keys) == fields || Set(value.keys) == fields.union(["attachments"]) && attachments(value["attachments"]),
               let source = value["source"] as? [String: Any], Set(source.keys) == Set(["id", "fingerprint"]),
               let id = source["id"] as? String, IntakeWire.uuid(id),
               let fingerprint = source["fingerprint"] as? String, hash(fingerprint),
@@ -49,4 +63,31 @@ enum NativeShareCaptureJSON {
         return value
     }
     private static func hash(_ value: String) -> Bool { value.utf8.count == 64 && value.utf8.allSatisfy { (48...57).contains($0) || (97...102).contains($0) } }
+}
+
+extension NativeVoiceFiles {
+    func materializeShareFile(source: URL, targetURI: String, sha256: String, size: Int64) throws {
+        guard let target = URL(string: targetURI), target.isFileURL,
+              target.deletingLastPathComponent().standardizedFileURL.path == managedRoot.standardizedFileURL.path else { throw NativeShareError.invalidInput }
+        if let existing = try? installer.handle(NativeShareCaptureJSON.encoded(["op": "hash", "path": targetURI])) {
+            let value = try NativeShareCaptureJSON.object(existing)
+            guard value["sha256"] as? String == sha256, (value["size"] as? NSNumber)?.int64Value == size else { throw NativeShareError.changedSource }
+            return
+        }
+        let receipt = try files.copyProviderSource(source, checkCancellation: {})
+        defer { _ = try? files.retireProviderSource(receipt, checkCancellation: {}) }
+        let proof = try files.snapshotCacheSource(receipt.sourceURI)
+        guard receipt.matches(proof), proof.sha256 == sha256, proof.size == size else { throw NativeShareError.changedSource }
+        var state = NativeVoiceFileSettlement(source: .init(proof), targetURI: targetURI,
+            operationID: UUID().uuidString.lowercased().replacingOccurrences(of: "-", with: ""), stage: nil)
+        state.stage = try reserve(state)
+        defer { retireStage(state) }
+        try publish(state)
+        try verify(state)
+    }
+    func discardShareFile(_ uri: String) throws {
+        guard let target = URL(string: uri), target.isFileURL,
+              target.deletingLastPathComponent().standardizedFileURL.path == managedRoot.standardizedFileURL.path else { throw NativeShareError.invalidInput }
+        try files.deleteNow(uri)
+    }
 }

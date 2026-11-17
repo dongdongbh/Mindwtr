@@ -585,7 +585,7 @@ const windowed = <T extends { items: unknown[] }>(picker: T): Windowed<T> => ({
 });
 
 export type NativeShareCaptureMethod = 'captureSubmit' | 'captureCopilotSubmit' | 'captureLinesSubmit';
-export function buildPreparedShareCaptureDocument(method: NativeShareCaptureMethod, command: unknown, before: AppData):
+export function buildPreparedShareCaptureDocument(method: NativeShareCaptureMethod, command: unknown, before: AppData, attachments?: Attachment[]):
     NativeHostResult<{ data: AppData; result: AnyPreparedQuickCapture['result'] | NativePreparedQuickCaptureLines['result'] }> {
     if (!isObjectRecord(command) || !hasKeys(command, ['request', 'prepared'])) return fail('INVALID_INPUT', 'Prepared share capture is invalid');
     const collections = { _allTasks: before.tasks, _allProjects: before.projects, _allSections: before.sections ?? [],
@@ -594,7 +594,8 @@ export function buildPreparedShareCaptureDocument(method: NativeShareCaptureMeth
         const prepared = readPreparedLines(command.prepared), request = readLinesRequest(command.request);
         if (!prepared || !request || !sameJson(request, prepared.request)) return fail('INVALID_INPUT', 'Prepared share lines are invalid');
         if (prepared.tasks.some(task => before.tasks.some(existing => existing.id === task.id))) return fail('STALE_REVISION', 'Share task already exists without its receipt');
-        const next = applyPreparedCaptureLinesData(collections, prepared);
+        const next = applyPreparedCaptureLinesData(collections, attachments
+            ? { ...prepared, tasks: prepared.tasks.map((task, index) => index === 0 ? { ...task, attachments } : task) } : prepared);
         return next ? { ok: true, value: { data: { ...before, tasks: next.tasks, projects: next.projects, settings: next.settings }, result: prepared.result } }
             : fail('STALE_REVISION', 'Prepared share lines changed');
     }
@@ -603,7 +604,7 @@ export function buildPreparedShareCaptureDocument(method: NativeShareCaptureMeth
     if (!prepared || !request || (prepared.version === 2) !== (method === 'captureCopilotSubmit') || !sameJson(request, prepared.request))
         return fail('INVALID_INPUT', 'Prepared share capture is invalid');
     if (before.tasks.some(existing => existing.id === prepared.task.id)) return fail('STALE_REVISION', 'Share task already exists without its receipt');
-    const next = applyPreparedCaptureData(collections, prepared);
+    const next = applyPreparedCaptureData(collections, attachments ? { ...prepared, task: { ...prepared.task, attachments } } : prepared);
     return next ? { ok: true, value: { data: { ...before, tasks: next.tasks, projects: next.projects, settings: next.settings }, result: prepared.result } }
         : fail('STALE_REVISION', 'Prepared share capture changed');
 }

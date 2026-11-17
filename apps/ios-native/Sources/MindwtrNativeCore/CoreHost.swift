@@ -2113,12 +2113,12 @@ public final class CoreHost: @unchecked Sendable {
         }
     }
 
-    public func submitShareCapture(source: NativeShareEnvelope, method: String, requestJSON: String,
+    public func submitShareCapture(source: NativeShareEnvelope, method: String, requestJSON: String, attachmentsJSON: String? = nil,
                                    lease: NativeTaskAIEditorLease, readmit: @escaping @Sendable () async -> Bool) async throws -> String {
         let entry = ShortWriteEntry()
         do {
             try beginOuterAdmission(); defer { finishOuterAdmission() }
-            let request = try NativeShareCaptureJSON.makeRequest(source, method: method, requestJSON: requestJSON)
+            let request = try NativeShareCaptureJSON.makeRequest(source, method: method, requestJSON: requestJSON, attachmentsJSON: attachmentsJSON)
             _ = try NativeShareCaptureJSON.request(request)
             guard await readmit(), lease.isCurrent, !Task.isCancelled else { throw CoreHostRejection(message: "STALE_REVISION: Share capture changed") }
             return try await perform { engine in
@@ -2129,6 +2129,24 @@ public final class CoreHost: @unchecked Sendable {
             if !entry.value, !(error is CoreHostRejection) { throw CoreHostRejection(message: "INVALID_INPUT: Share capture was not admitted") }
             throw error
         }
+    }
+    public func materializeShareFiles(_ source: NativeShareEnvelope,
+                                      payload: @escaping @Sendable (NativeShareEnvelope.File) -> URL) async throws -> [String?] {
+        try beginOuterAdmission(); defer { finishOuterAdmission() }
+        let port = try await perform { try $0.shareFiles() }
+        return await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                continuation.resume(returning: source.sharedFiles.map { file in
+                    let uri = port.managedRoot.appendingPathComponent(file.managedFileName).absoluteString
+                    return (try? port.materializeShareFile(source: payload(file), targetURI: uri, sha256: file.sha256, size: file.size)) == nil ? nil : uri
+                })
+            }
+        }
+    }
+    public func discardShareFiles(_ uris: [String]) async throws {
+        try beginOuterAdmission(); defer { finishOuterAdmission() }
+        let port = try await perform { try $0.shareFiles() }
+        for uri in uris { try port.discardShareFile(uri) }
     }
     public func probeShareCapture(source: NativeShareEnvelope) async throws -> String {
         try beginOuterAdmission(); defer { finishOuterAdmission() }
@@ -8709,6 +8727,10 @@ private final class Engine: @unchecked Sendable {
             for session in voiceSettingsSessions.values { session.binding.live = false }
         }
         return (captures, jobs)
+    }
+    func shareFiles() throws -> NativeVoiceFiles {
+        try requirePersonalWorkspace()
+        return try newVoiceFiles()
     }
     private func newVoiceFiles() throws -> NativeVoiceFiles {
         if rnAdoptionContainerURL != nil {
@@ -26655,7 +26677,9 @@ private final class Engine: @unchecked Sendable {
             guard let args = try NativeJSON.jsonObject(with: Data(json.utf8)) as? [String], args.count == 1,
                   args[0].utf8.count <= NativeShareEnvelope.maximumBytes, try NativeJSON.hasUniqueObjectKeys(args[0]),
                   let input = try NativeJSON.jsonObject(with: Data(args[0].utf8)) as? [String: Any],
-                  Set(input.keys) == Set(["subject", "text", "webUrl"]) else { throw NativeShareError.invalidInput }
+                  Set(input.keys) == Set(["subject", "text", "webUrl"])
+                    || Set(input.keys) == Set(["subject", "text", "webUrl", "files", "skippedFiles", "receivedAt"])
+                    && (input["files"] as? [[String: Any]]).map({ $0.count <= NativeShareEnvelope.fileLimit }) == true else { throw NativeShareError.invalidInput }
             for (field, limit) in [("subject", NativeShareEnvelope.subjectLimit), ("text", NativeShareEnvelope.textLimit), ("webUrl", NativeShareEnvelope.webURLLimit)] {
                 guard input[field] is NSNull || (input[field] as? String).map({ $0.utf16.count <= limit }) == true else { throw NativeShareError.invalidInput }
             }

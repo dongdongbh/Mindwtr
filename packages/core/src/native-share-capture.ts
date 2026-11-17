@@ -1,14 +1,16 @@
 import { NativeReceiptSqliteAdapter } from './native-request-receipts';
+import { SHARE_INTENT_MAX_FILES } from './share-capture-files';
 import { buildPreparedShareCaptureDocument, type NativeShareCaptureMethod } from './native-host-contract-quick-capture';
 import type { createNativeHostContract } from './native-host-contract';
 import { flushPendingSave, getPersistenceStatus, getStorageAdapter, useTaskStore } from './store';
 import { runSerializedSyncDocumentWriteOperation } from './data-transfer-transaction';
 import { markNextLoadAsDocumentReplacement } from './store-settings';
 import { taskEditValuesEqual } from './json-value-equality';
+import type { Attachment } from './types';
 
 type Contract = Pick<ReturnType<typeof createNativeHostContract>, 'prepareQuickCapture' | 'prepareQuickCaptureCopilot' | 'prepareQuickCaptureLines'>;
 export type NativeShareCaptureIdentity = { id: string; fingerprint: string };
-type Request = { source: NativeShareCaptureIdentity; method: NativeShareCaptureMethod; requestFingerprint: string; capture: unknown };
+type Request = { source: NativeShareCaptureIdentity; method: NativeShareCaptureMethod; requestFingerprint: string; capture: unknown; attachments?: Attachment[] };
 type Plan = { version: 1; request: Request; capture: { request: unknown; prepared: unknown } };
 const invalid = () => new Error('INVALID_INPUT: Share capture is invalid');
 const unavailable = () => new Error('SAVE_FAILED: Share capture outcome is not proven');
@@ -20,8 +22,24 @@ const identity = (value: unknown): NativeShareCaptureIdentity => {
     if (!record(value) || !exact(value, ['id', 'fingerprint']) || !uuid(value.id) || !hash(value.fingerprint)) throw invalid();
     return { id: value.id, fingerprint: value.fingerprint };
 };
+const instant = (value: unknown): value is string => typeof value === 'string' && value.length <= 40
+    && !Number.isNaN(Date.parse(value)) && new Date(value).toISOString() === value;
+const sharedAttachment = (value: unknown, source: string): value is Attachment => record(value)
+    && exact(value, ['id', 'kind', 'title', 'uri', 'mimeType', 'size', 'fileHash', 'createdAt', 'updatedAt', 'localStatus'])
+    && uuid(value.id) && value.id !== source && value.kind === 'file'
+    && typeof value.title === 'string' && !!value.title.trim() && value.title.length <= 1024
+    && typeof value.uri === 'string' && value.uri.startsWith('file:///') && value.uri.length <= 16_384
+    && typeof value.mimeType === 'string' && !!value.mimeType && value.mimeType.length <= 255
+    && typeof value.size === 'number' && Number.isSafeInteger(value.size) && value.size >= 0
+    && hash(value.fileHash) && instant(value.createdAt) && value.updatedAt === value.createdAt && value.localStatus === 'available';
+const sharedAttachments = (value: unknown, source: string): Attachment[] => {
+    if (!Array.isArray(value) || value.length < 1 || value.length > SHARE_INTENT_MAX_FILES
+        || !value.every(entry => sharedAttachment(entry, source)) || new Set(value.map(entry => (entry as Attachment).id)).size !== value.length) throw invalid();
+    return value as Attachment[];
+};
 const request = (value: unknown): Request => {
-    if (!record(value) || !exact(value, ['source', 'method', 'requestFingerprint', 'capture'])
+    const fields = ['source', 'method', 'requestFingerprint', 'capture'];
+    if (!record(value) || !(exact(value, fields) || exact(value, [...fields, 'attachments']))
         || !['captureSubmit', 'captureCopilotSubmit', 'captureLinesSubmit'].includes(value.method as string) || !hash(value.requestFingerprint)
         || !record(value.capture)) throw invalid();
     const source = identity(value.source), method = value.method as NativeShareCaptureMethod;
@@ -29,7 +47,8 @@ const request = (value: unknown): Request => {
     if (!record(capture) || (method === 'captureLinesSubmit'
         ? !Array.isArray(capture.captureIds) || capture.captureIds[0] !== source.id
         : capture.captureId !== source.id)) throw invalid();
-    return { source, method, requestFingerprint: value.requestFingerprint, capture: value.capture };
+    return { source, method, requestFingerprint: value.requestFingerprint, capture: value.capture,
+        ...('attachments' in value ? { attachments: sharedAttachments(value.attachments, source.id) } : {}) };
 };
 const payload = (source: NativeShareCaptureIdentity) => JSON.stringify(['iosShareCapture', source.id, source.fingerprint]);
 const savedReply = (value: unknown, source: NativeShareCaptureIdentity): { version: 1; requestFingerprint: string; result: Record<string, unknown> } => {
@@ -100,7 +119,7 @@ export function createNativeShareCaptureMethods(deps: { contract: Contract; curr
                 } else {
                     const before = await selected.getData({ rawTasks: true });
                     deps.current(); if (getStorageAdapter() !== selected || !before) throw unavailable();
-                    const built = buildPreparedShareCaptureDocument(plan.request.method, plan.capture, before);
+                    const built = buildPreparedShareCaptureDocument(plan.request.method, plan.capture, before, plan.request.attachments);
                     if (!built.ok) throw new Error(built.error.code + ': ' + built.error.message);
                     const reply = { version: 1, requestFingerprint: plan.request.requestFingerprint, result: built.value.result };
                     try {

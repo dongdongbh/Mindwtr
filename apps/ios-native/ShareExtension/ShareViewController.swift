@@ -13,6 +13,7 @@ final class ShareViewController: UIViewController {
     private let spinner = UIActivityIndicatorView(style: .medium)
     private let retry = UIButton(type: .system)
     private let close = UIButton(type: .system)
+    private let cancellation = ShareCancellation()
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -57,15 +58,20 @@ final class ShareViewController: UIViewController {
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
-        if !finished { finished = true; operation?.cancel() }
+        if !finished { finished = true; cancellation.cancel(); operation?.cancel(); discardPayload() }
     }
 
     private func localized(_ name: String) -> String { NSLocalizedString(name, comment: "Native text/URL share extension") }
     @objc private func retryPressed() { begin() }
     @objc private func closePressed() {
         guard !finished, close.isEnabled else { return }
-        finished = true; operation?.cancel()
+        finished = true; cancellation.cancel(); operation?.cancel(); discardPayload()
         extensionContext?.cancelRequest(withError: NSError(domain: NSCocoaErrorDomain, code: NSUserCancelledError))
+    }
+    private func discardPayload() {
+        guard let mailbox = try? NativeShareMailbox.current() else { return }
+        let id = requestID.uuidString.lowercased()
+        Task { try? await mailbox.removePayload(id, unlessPublished: true) }
     }
     private func begin() {
         guard operation == nil, !finished else { return }
@@ -75,15 +81,16 @@ final class ShareViewController: UIViewController {
             guard let self else { return }
             defer { self.operation = nil }
             do {
+                let mailbox = try NativeShareMailbox.current()
                 let envelope: NativeShareEnvelope
                 if let frozenEnvelope = self.frozenEnvelope { envelope = frozenEnvelope }
                 else {
-                    envelope = try await self.readEnvelope()
+                    do { envelope = try await self.readEnvelope(mailbox) }
+                    catch { try? await mailbox.removePayload(self.requestID.uuidString.lowercased(), unlessPublished: true); throw error }
                     self.frozenEnvelope = envelope
                 }
                 try Task.checkCancellation()
                 guard !self.finished else { return }
-                let mailbox = try NativeShareMailbox.current()
                 self.close.isEnabled = false
                 try await mailbox.publish(envelope)
                 guard !self.finished else { return }
@@ -97,9 +104,10 @@ final class ShareViewController: UIViewController {
         }
     }
 
-    private func readEnvelope() async throws -> NativeShareEnvelope {
-        guard let items = extensionContext?.inputItems as? [NSExtensionItem], (1...2).contains(items.count) else { throw NativeShareError.invalidInput }
+    private func readEnvelope(_ mailbox: NativeShareMailbox) async throws -> NativeShareEnvelope {
+        guard let items = extensionContext?.inputItems as? [NSExtensionItem], (1...8).contains(items.count) else { throw NativeShareError.invalidInput }
         var subject: String?, text: String?, webURL: String?, providers = 0
+        var files: [NativeShareEnvelope.File] = [], skipped = 0, writer: NativeSharePayloadWriter?
         func accept(_ value: String, into existing: inout String?, limit: Int) throws {
             guard value.utf16.count <= limit else { throw NativeShareError.invalidInput }
             if let existing, existing != value { throw NativeShareError.invalidInput }
@@ -115,9 +123,15 @@ final class ShareViewController: UIViewController {
                 try accept(body.string, into: &text, limit: NativeShareEnvelope.textLimit)
             }
             for provider in item.attachments ?? [] {
-                providers += 1; guard providers <= 2 else { throw NativeShareError.invalidInput }
+                providers += 1; guard providers <= 32 else { throw NativeShareError.invalidInput }
                 try Task.checkCancellation()
-                if provider.hasItemConformingToTypeIdentifier(UTType.url.identifier) {
+                if let type = fileType(provider) {
+                    guard files.count < NativeShareEnvelope.fileLimit else { continue }
+                    if writer == nil { writer = try mailbox.payloadWriter(for: requestID) }
+                    do { files.append(try await copy(provider, type: type, into: writer!)) }
+                    catch is CancellationError { throw CancellationError() }
+                    catch { skipped += 1 }
+                } else if provider.hasItemConformingToTypeIdentifier(UTType.url.identifier) {
                     guard webURL == nil else { throw NativeShareError.invalidInput }
                     let value = try await load(provider, type: UTType.url.identifier)
                     if let url = value as? URL { webURL = url.absoluteString }
@@ -128,7 +142,59 @@ final class ShareViewController: UIViewController {
                 } else { throw NativeShareError.invalidInput }
             }
         }
-        return try NativeShareEnvelope(id: requestID, receivedAt: receivedAt, subject: subject, text: text, webUrl: webURL)
+        return try NativeShareEnvelope(id: requestID, receivedAt: receivedAt, subject: subject, text: text, webUrl: webURL,
+            files: writer == nil ? nil : files, skippedFiles: writer == nil ? nil : skipped)
+    }
+    private nonisolated static func copyImageItem(_ item: NSSecureCoding?, type: UTType, into writer: NativeSharePayloadWriter,
+                                                  check: @escaping () throws -> Void) throws -> ((id: UUID, size: Int64, sha256: String), URL) {
+        if let url = item as? URL, url.isFileURL { return (try writer.copy(from: url, checkCancellation: check), url) }
+        let bytes: Data
+        if let data = item as? Data, data.count <= NativeShareEnvelope.File.maximumBytes { bytes = data }
+        else if let image = item as? UIImage, let data = image.pngData() { bytes = data }
+        else { throw NativeShareError.invalidInput }
+        let pathExtension = item is UIImage ? "png" : type.preferredFilenameExtension ?? "png"
+        let temporary = FileManager.default.temporaryDirectory.appendingPathComponent("Image-" + UUID().uuidString.lowercased() + "." + pathExtension)
+        try bytes.write(to: temporary, options: [.withoutOverwriting])
+        defer { try? FileManager.default.removeItem(at: temporary) }
+        return (try writer.copy(from: temporary, checkCancellation: check), temporary)
+    }
+    private func fileType(_ provider: NSItemProvider) -> UTType? {
+        let types = provider.registeredTypeIdentifiers.compactMap { UTType($0) }
+        for target in [UTType.image, .movie, .fileURL, .pdf] {
+            if let match = types.first(where: { $0.conforms(to: target) }) { return match }
+        }
+        guard !types.contains(where: { $0.conforms(to: .url) || $0.conforms(to: .plainText) }) else { return nil }
+        return types.first { $0.conforms(to: .data) }
+    }
+    private func copy(_ provider: NSItemProvider, type: UTType, into writer: NativeSharePayloadWriter) async throws -> NativeShareEnvelope.File {
+        let check = cancellation.check
+        let suggested = provider.suggestedName.flatMap { $0.isEmpty ? nil : $0 }
+        let (copied, original): ((id: UUID, size: Int64, sha256: String), URL) = try await withCheckedThrowingContinuation { continuation in
+            if type.conforms(to: .fileURL) {
+                provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, _ in
+                    guard let url = item as? URL, url.isFileURL else { continuation.resume(throwing: NativeShareError.invalidInput); return }
+                    let scoped = url.startAccessingSecurityScopedResource(); defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+                    continuation.resume(with: Result { (try writer.copy(from: url, checkCancellation: check), url) })
+                }
+                return
+            }
+            _ = provider.loadFileRepresentation(forTypeIdentifier: type.identifier) { url, _ in
+                if let url { continuation.resume(with: Result { (try writer.copy(from: url, checkCancellation: check), url) }); return }
+                guard type.conforms(to: .image) else { continuation.resume(throwing: NativeShareError.invalidInput); return }
+                provider.loadItem(forTypeIdentifier: type.identifier, options: nil) { item, _ in
+                    continuation.resume(with: Result { try Self.copyImageItem(item, type: type, into: writer, check: check) })
+                }
+            }
+        }
+        let fileExtension = original.pathExtension.isEmpty ? type.preferredFilenameExtension ?? "" : original.pathExtension
+        var name = original.lastPathComponent
+        if let suggested, !type.conforms(to: .fileURL) {
+            name = (suggested as NSString).pathExtension.isEmpty && !fileExtension.isEmpty ? suggested + "." + fileExtension : suggested
+        }
+        name = name.replacingOccurrences(of: "/", with: "-")
+        let mimeType = UTType(filenameExtension: (name as NSString).pathExtension)?.preferredMIMEType
+            ?? type.preferredMIMEType ?? "application/octet-stream"
+        return try NativeShareEnvelope.File(id: copied.id, name: String(name.prefix(255)), mimeType: mimeType, size: copied.size, sha256: copied.sha256)
     }
     private func load(_ provider: NSItemProvider, type: String) async throws -> NSSecureCoding {
         try await withCheckedThrowingContinuation { continuation in
@@ -144,5 +210,15 @@ final class ShareViewController: UIViewController {
         if let data = item as? Data, data.count <= NativeShareEnvelope.maximumBytes,
            let value = String(data: data, encoding: .utf8), value.utf16.count <= limit { return value }
         throw NativeShareError.invalidInput
+    }
+}
+
+private final class ShareCancellation: @unchecked Sendable {
+    private let lock = NSLock()
+    private var cancelled = false
+    func cancel() { lock.lock(); cancelled = true; lock.unlock() }
+    func check() throws {
+        lock.lock(); defer { lock.unlock() }
+        if cancelled { throw CancellationError() }
     }
 }

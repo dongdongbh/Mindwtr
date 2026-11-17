@@ -36,7 +36,7 @@ struct NativeVoiceFileSettlement: Codable {
 
 final class NativeVoiceFiles: @unchecked Sendable {
     let files: NativeAttachmentFiles
-    private let installer: NativeAttachmentInstaller
+    let installer: NativeAttachmentInstaller
     private let queue = DispatchQueue(label: "tech.dongdongbh.mindwtr.voice-files", qos: .userInitiated)
     let managedRoot: URL
     convenience init(libraryRoot: URL) throws {
