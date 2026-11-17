@@ -62,8 +62,18 @@ const extensions = {
       "../mobile/modules/ios-widget/ios/MindwtrWidgetActionStore.swift",
       "../mobile/modules/ios-widget/ios/MindwtrWidgetTaskItem.swift",
     ],
+    devSources: "WIDGET_SOURCES",
+  },
+  ShareExtension: {
+    bundle: "tech.dongdongbh.mindwtr.share-extension",
+    profile: "Mindwtr_ShareExtension_AppStore",
+    info: "ShareExtension/Info.plist",
+    entitlements: "ShareExtension/Mindwtr.entitlements",
+    devSources: "SHARE_SOURCES",
   },
 };
+const devSources = (name) => [...read("apps/ios-native/scripts/create-dev-project.py")
+  .match(new RegExp(name + " = \\(([\\s\\S]*?)\\)"))[1].matchAll(/"([^"]+)"/g)].map((match) => match[1]);
 
 test("every file reference belongs to at most one group, as Xcode requires", () => {
   const members = Object.values(objects).filter((item) => item.isa === "PBXGroup" || item.isa === "PBXVariantGroup")
@@ -101,9 +111,11 @@ test("each production extension keeps RN's identity, profile, App Group, sources
     }
     expect(configurations(target).Release["PROVISIONING_PROFILE_SPECIFIER[sdk=iphoneos*]"]).toBe(expected.profile);
     expect(groups(path.relative(repo, path.join(native, expected.entitlements)))).toEqual([group]);
-    expect(new Set(sources(target))).toEqual(new Set(expected.sources));
+    expect(new Set(sources(target))).toEqual(new Set(expected.sources ?? devSources(expected.devSources)));
+    expect(new Set(devSources(expected.devSources))).toEqual(new Set(sources(target)));
     expect(embedded).toContain(target.productReference);
     expect(dependencies).toContain(target.key);
     expect(generator).toContain(`"${name}": "${expected.bundle}"`);
+    expect(configurations(target).Release.MINDWTR_DISPLAY_NAME ?? "Mindwtr").toBe("Mindwtr");
   }
 });

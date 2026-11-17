@@ -19,7 +19,8 @@ WATCH_CLOUDKIT_OUTPUT = "MindwtrNativeDevCloudKitWatch.generated.xcodeproj"
 CLOUDKIT_CONTAINER = "iCloud." + APP
 PRODUCTION_DEVICE_SETTINGS = ("CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*]", "MINDWTR_CLOUDKIT_CONTAINER[sdk=iphoneos*]",
                               "CODE_SIGN_STYLE", "PROVISIONING_PROFILE_SPECIFIER[sdk=iphoneos*]")
-PRODUCTION_EXTENSIONS = {"MindwtrWidgets": "tech.dongdongbh.mindwtr.MindwtrWidgets"}
+PRODUCTION_EXTENSIONS = {"MindwtrWidgets": "tech.dongdongbh.mindwtr.MindwtrWidgets",
+                         "ShareExtension": "tech.dongdongbh.mindwtr.share-extension"}
 WIDGET_INFO = "../mobile/widgets-ios/Info.plist"
 WATCH_ROOT = "../mobile/targets/watch"
 WATCH_GROUP = GROUP + ".watch"
@@ -213,6 +214,7 @@ def overlay(project, locales):
                     settings[key] = original["buildSettings"][key]
             if directory == "ShareExtension":
                 settings.update({"SWIFT_ACTIVE_COMPILATION_CONDITIONS": "$(inherited) MINDWTR_SHARE_EXTENSION",
+                    "MINDWTR_DISPLAY_NAME": "Mindwtr Native Dev",
                     "CODE_SIGN_ENTITLEMENTS": "ShareExtension/ShareExtension.entitlements",
                     "CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]": "ShareExtension/Simulator.entitlements"})
             else:
