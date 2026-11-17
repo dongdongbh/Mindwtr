@@ -79,6 +79,18 @@ large-5000 and 1k fixtures, interleaved A/B on archived APKs in quiet windows.
   stripped (`JS_STRIP_SOURCE`); without it the cache is 32 MB. A rope-string tag the wrapper did not know sent large replies to
   Kotlin as `null` (5k boot failed with `NOT_READY`); fixed and pinned by a boot gate. Still rejected from the earlier attempts:
   building the host table inside a function (no gain at 110 methods), and lazy-requiring the importer parsers (370 → 406 ms).
+- **`core:boot` at 5k, the SQL reply (11-16):** [evidence](native-android-boot-5k-2026-11-16.md). Split of `core:boot` (323 ms): the
+  5,000-row read 147 ms (98.5 ms Kotlin `sql:all`, 42.8 ms `JSON.parse`), the load normalizer 88.9 ms, row decode 29.3 ms,
+  `verifyActivation` 21 ms. `SqliteBridge.all` now writes each reply's JSON straight from the row instead of building an `org.json`
+  object per row, and reads each column's type once. The reply text is byte-identical (on-device check of every reply at startup, 0
+  mismatches; `SqliteBridgeRowsTest`). Interleaved A/B, n = 20 each: 5k cold first content **578 → 518 ms** (p90 587 → 529),
+  `core:boot` 324 → 258 ms; empty median unchanged (229 vs 229, n = 40), but the first sample of each round was slower on `fix`
+  (255 vs 235 ms, n = 8, cause not found). Cache-miss start (first start after a fresh install and seed, `fix` build, n = 6): empty
+  **869 ms**, 5k **1535 ms**, vs 233 and 520 ms from the cache on the same installs. About 600 ms of it is the bundle parse
+  (`core:evaluate` 680–711 ms); the 5k number also holds a one-time migration save that only a never-opened fixture pays. Trace sections kept:
+  `sqlite:readRows`, `sqlite:decodeTasks`, `store:normalize`.
+  **Next bounded hypothesis:** the load normalizer (88.6 ms at 5k) copies every task a second time right after `mapSqliteTaskRow`;
+  shared core, so it needs a frozen-output corpus for RN, desktop and iOS before any change. After that, `JSON.parse` of the read (43 ms).
 
 September 15 shared-core update: [archive reactivation candidate validation](archive-reactivation-2026-09-15.md) removes repeated full-section projections. This is synthetic core work-count evidence; native desktop and mobile latency remain unmeasured for this change.
 

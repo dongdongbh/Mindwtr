@@ -1,3 +1,4 @@
+import { traceSection, traceSectionAsync } from './perf-trace';
 import type { AppData, Area, Person, Project, SavedFilter, Task, Section } from './types';
 
 export type CalendarSyncEntry = {
@@ -1182,7 +1183,7 @@ export class SqliteAdapter {
 
         this.rowBaseline = null;
         await this.ensureSchemaNow();
-        const loadSnapshotRows = () => Promise.all([
+        const loadSnapshotRows = () => traceSectionAsync('sqlite:readRows', () => Promise.all([
             this.loadAllRows('tasks'),
             this.loadAllRows('projects'),
             this.loadAllRows('sections'),
@@ -1190,7 +1191,7 @@ export class SqliteAdapter {
             this.loadAllRows('people'),
             this.client.get<Record<string, unknown>>('SELECT data FROM settings WHERE id = 1'),
             this.client.all<Record<string, unknown>>('SELECT rowid as _rowid, * FROM saved_filters ORDER BY createdAt, name'),
-        ]);
+        ]));
         let snapshotRows: Awaited<ReturnType<typeof loadSnapshotRows>> | null = null;
         let epoch: number | undefined;
         const generation = this.generation;
@@ -1221,14 +1222,14 @@ export class SqliteAdapter {
             writesStarted: this.writesStarted,
         } : null;
 
-        const tasks: Task[] = tasksRows.map((row) => {
+        const tasks: Task[] = traceSection('sqlite:decodeTasks', () => tasksRows.map((row) => {
             if (!options?.rawTasks) return this.mapTaskRow(row);
             const task = taskFromSqliteRow(row);
 
 
             if (row.recurrence === null) task.recurrence = undefined;
             return task;
-        });
+        }));
         const projects: Project[] = projectsRows.map((row) => projectFromSqliteRow(row));
         const sections: Section[] = sectionsRows.map((row) => sectionFromSqliteRow(row));
         const nowIso = new Date().toISOString();

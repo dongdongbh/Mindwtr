@@ -222,6 +222,8 @@ const RELEASE_CHECK_FIELD_NAMES = [
 
     'engine', 'cache',
 
+    'rows',
+
     'mode',
 
     'direction',

@@ -1,3 +1,4 @@
+import { traceSection } from './perf-trace';
 import { nativeAIGeminiThinkingBudgetWitness, readNativeAIGeminiThinkingBudgetRequest } from './native-ai-gemini-thinking-budget-request';
 import { nativeAIReasoningEffortWitness, readNativeAIReasoningEffortRequest } from './native-ai-reasoning-effort-request';
 import { nativeAIRequestTimeoutWitness, readNativeAIRequestTimeoutRequest } from './native-ai-request-timeout-request';
@@ -574,7 +575,7 @@ export const createSettingsActions = ({
 
 
             const recoveryLoad = options?.recoveryLoad === true;
-            const normalizedTasks = recoveryLoad ? rawTasks : rawTasks.map((task) => normalizeTaskForLoad(task, nowIso));
+            const normalizedTasks = recoveryLoad ? rawTasks : traceSection('store:normalize', () => rawTasks.map((task) => normalizeTaskForLoad(task, nowIso)));
             const normalizedProjects = recoveryLoad ? rawProjects : rawProjects.map(normalizeProjectLifecycleFields);
 
             const loadContext = buildLoadContext(settings, isFreshInstall, nowIso, nowMs);

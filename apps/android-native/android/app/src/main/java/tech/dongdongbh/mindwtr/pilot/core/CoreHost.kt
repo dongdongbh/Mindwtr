@@ -344,6 +344,10 @@ class CoreHost(
         Log.i(TAG, "Native Android QuickJS engine releaseCheck=v1.3.9/quickjs-engine engine=${BuildConfig.QUICKJS_ENGINE} outcome=$outcome cache=$bundleOutcome")
         logLine("Native Android QuickJS engine releaseCheck=v1.3.9/quickjs-engine", JSONObject().put("releaseCheck", "v1.3.9/quickjs-engine")
             .put("engine", BuildConfig.QUICKJS_ENGINE).put("outcome", outcome).put("cache", bundleOutcome))
+        val rows = sqlRowsWritten.get()
+        Log.i(TAG, "Native Android SQL rows releaseCheck=v1.3.9/sql-rows-direct outcome=direct rows=$rows")
+        logLine("Native Android SQL rows releaseCheck=v1.3.9/sql-rows-direct", JSONObject().put("releaseCheck", "v1.3.9/sql-rows-direct")
+            .put("outcome", "direct").put("rows", rows))
     }
 
 

@@ -9,6 +9,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.io.RandomAccessFile
+import java.util.concurrent.atomic.AtomicLong
 
 
 class SqliteBridge(databaseFile: File) {
@@ -95,32 +96,43 @@ class SqliteBridge(databaseFile: File) {
     fun all(sql: String, paramsJson: String): String {
         val statement = statementFor(sql)
         bind(statement, JSONArray(paramsJson))
-        val rows = JSONArray()
-
-
-        var columnCount = 0
-        var names: Array<String> = emptyArray()
+        val json = StringBuilder("[")
+        var keys: Array<String?>? = null
+        var sources = IntArray(0)
+        var rows = 0L
         while (statement.step()) {
-            if (names.isEmpty()) {
-                columnCount = statement.getColumnCount()
-                names = Array(columnCount) { statement.getColumnName(it) }
+            if (keys == null) {
+                val names = List(statement.getColumnCount()) { statement.getColumnName(it) }
+                keys = Array(names.size) { if (names.indexOf(names[it]) == it) JSONObject.quote(names[it]) + ":" else null }
+                sources = IntArray(names.size) { names.lastIndexOf(names[it]) }
             }
-            val row = JSONObject()
-            for (column in 0 until columnCount) {
-                if (statement.isNull(column)) {
-                    row.put(names[column], JSONObject.NULL)
-                    continue
-                }
-                when (statement.getColumnType(column)) {
-                    COLUMN_INTEGER -> row.put(names[column], statement.getLong(column))
-                    COLUMN_FLOAT -> row.put(names[column], statement.getDouble(column))
-                    COLUMN_BLOB -> row.put(names[column], JSONObject.NULL)
-                    else -> row.put(names[column], statement.getText(column))
-                }
+            if (rows++ > 0) json.append(',')
+            json.append('{')
+            var first = true
+            for (column in keys.indices) {
+                val key = keys[column] ?: continue
+                if (!first) json.append(',')
+                first = false
+                json.append(key)
+                appendValue(json, statement, sources[column])
             }
-            rows.put(row)
+            json.append('}')
         }
-        return rows.toString()
+        sqlRowsWritten.addAndGet(rows)
+        return json.append(']').toString()
+    }
+
+    private fun appendValue(json: StringBuilder, statement: SQLiteStatement, column: Int) {
+        when (statement.getColumnType(column)) {
+            COLUMN_NULL, COLUMN_BLOB -> json.append("null")
+            COLUMN_INTEGER -> json.append(statement.getLong(column))
+            COLUMN_FLOAT -> json.append(JSONObject.numberToString(statement.getDouble(column)))
+            else -> {
+                val text = statement.getText(column)
+                if (text.all { it in ' '..'~' && it != '"' && it != '\\' && it != '/' }) json.append('"').append(text).append('"')
+                else json.append(JSONObject.quote(text))
+            }
+        }
     }
 
     private fun bind(statement: SQLiteStatement, params: JSONArray) {
@@ -153,8 +165,12 @@ class SqliteBridge(databaseFile: File) {
         const val COLUMN_INTEGER = 1
         const val COLUMN_FLOAT = 2
         const val COLUMN_BLOB = 4
+        const val COLUMN_NULL = 5
     }
 }
+
+
+internal val sqlRowsWritten = AtomicLong()
 
 
 internal fun syncFile(file: File) {
