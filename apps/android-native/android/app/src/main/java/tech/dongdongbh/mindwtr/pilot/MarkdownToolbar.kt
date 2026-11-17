@@ -140,6 +140,33 @@ internal class AssistGate {
 }
 
 
+internal class PairedCloser {
+    private var pair: TextFieldValue? = null
+    private var echo: Pair<TextFieldValue, TextFieldValue>? = null
+
+    fun inserted(rewritten: TextFieldValue, typed: TextFieldValue) {
+        val caret = rewritten.selection.start
+        echo = null
+        pair = rewritten.takeIf { it.selection.collapsed && caret > 0 && caret < it.text.length && it.text.removeRange(caret, caret + 1) == typed.text }
+    }
+
+    fun forget() {
+        pair = null
+        echo = null
+    }
+
+    fun changed(before: TextFieldValue, typed: TextFieldValue): TextFieldValue? {
+        echo?.let { (fixed, stale) -> if (before.sameEdit(fixed) && typed.sameEdit(stale)) return fixed }
+        echo = null
+        val shown = pair ?: return null
+        pair = null
+        val caret = before.selection.start
+        if (!before.sameEdit(shown) || typed.selection != TextRange(caret - 1) || typed.text != before.text.removeRange(caret - 1, caret)) return null
+        return TextFieldValue(before.text.removeRange(caret, caret + 1), TextRange(caret)).also { echo = it to typed }
+    }
+}
+
+
 internal data class ReferenceCard(val below: Boolean, val maxHeight: Int)
 
 
@@ -162,6 +189,7 @@ internal class MarkdownAssist(private val model: InboxViewModel, private val pai
     var references by mutableStateOf<MarkdownReferences?>(null)
         private set
     private val gate = AssistGate()
+    private val closer = PairedCloser()
     private var field: () -> TextFieldValue = { TextFieldValue() }
     private var searching = false
     private var searchAgain = false
@@ -171,15 +199,19 @@ internal class MarkdownAssist(private val model: InboxViewModel, private val pai
     val textLayout = { result: TextLayoutResult -> layout = result }
 
 
-    fun close() = gate.close()
+    fun close() {
+        gate.close()
+        closer.forget()
+    }
 
     fun changed(before: TextFieldValue, typed: TextFieldValue, current: () -> TextFieldValue, apply: (TextFieldValue) -> Unit) {
         if (typed.sameEdit(before)) return
         field = current
+        closer.changed(before, typed)?.let { apply(it); return search(it) }
         if (typed.text == before.text) return search(typed)
         model.background(emptyList(), { runtime -> rewrite(runtime, before, typed) }) { rewritten, _ ->
             if (!gate.lands(current(), typed)) return@background
-            rewritten?.let(apply)
+            rewritten?.let { apply(it); closer.inserted(it, typed) }
             search(rewritten ?: typed)
         }
     }
@@ -187,6 +219,7 @@ internal class MarkdownAssist(private val model: InboxViewModel, private val pai
     fun choose(reference: MarkdownReference, apply: (TextFieldValue) -> Unit) {
         val shown = references?.takeUnless { gate.closed } ?: return
         references = null
+        closer.forget()
         apply(shown.insert(reference))
     }
 
