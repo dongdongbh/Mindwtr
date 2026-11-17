@@ -2,6 +2,7 @@
 
 Changes collected since the latest stable release.
 
+- Encrypted sync: this version uses a stronger encryption format. If you sync with encryption on, update Mindwtr on every device first. Then, on one device, open Settings › Sync and choose Upgrade sync encryption, and enter your passphrase once. Until you do, sync stops with a message that the sync location uses older encryption. After the upgrade, versions older than this one cannot read the sync files. Your existing encrypted copies are kept.
 - Sync: when another device is writing to the sync location and Mindwtr says it will upload your changes on its own shortly, it now does. Before, the upload waited until your next edit, until you reopened the app, or until you synced by hand.
 - Sync: on desktop and mobile, an edit you make just as a WebDAV or Dropbox sync finishes no longer flips back to the old value on screen. Since v1.2.5, a second edit to the same task could then overwrite the first edit on every device.
 - Sync: on mobile, when you edited once or more while a sync failed and the next sync carried your edits, the sync badge no longer stays on syncing until your next edit. On desktop, React Native mobile and native Android, a sync you start while another is running now reports the result of the sync that carries your change. On mobile, when you pull to refresh during a sync, your sync starts about 1 s after the running one ends.
