@@ -30,6 +30,7 @@ public struct NativeMarkdownHistory: Sendable {
 
     private var entries: [NativeMarkdownEdit] = []
     private var revision: UInt64 = 0
+    private var justInsertedPair: NativeMarkdownEdit?
 
     public init() {}
 
@@ -38,6 +39,7 @@ public struct NativeMarkdownHistory: Sendable {
 
     public mutating func record(_ before: NativeMarkdownEdit) {
         revision &+= 1
+        justInsertedPair = nil
         guard entries.last != before else { return }
         entries.append(before)
         if entries.count > Self.limit { entries.removeFirst(entries.count - Self.limit) }
@@ -46,15 +48,20 @@ public struct NativeMarkdownHistory: Sendable {
     public mutating func undo() -> NativeMarkdownEdit? {
         guard let last = entries.popLast() else { return nil }
         revision &+= 1
+        justInsertedPair = nil
         return last
     }
 
     public mutating func reset() {
         entries = []
         revision &+= 1
+        justInsertedPair = nil
     }
 
-    public mutating func externalChange() { revision &+= 1 }
+    public mutating func externalChange() {
+        revision &+= 1
+        justInsertedPair = nil
+    }
 
     public func ticket(expecting text: String) -> Ticket { Ticket(revision: revision, expected: text) }
 
@@ -66,7 +73,24 @@ public struct NativeMarkdownHistory: Sendable {
         guard isCurrent(ticket, text: current), reply["changed"] as? Bool == true,
               let edit = NativeMarkdownEdit(reply: reply) else { return nil }
         revision &+= 1
+        justInsertedPair = Self.insertsOneCharacterAtCaret(edit, into: current) ? edit : nil
         return edit
+    }
+
+    public mutating func backspaceInJustInsertedPair(_ current: NativeMarkdownEdit, deleting range: NSRange, replacement: String) -> NativeMarkdownEdit? {
+        guard let pair = justInsertedPair, replacement.isEmpty, range.length == 1, range.location == current.start - 1,
+              current.start == current.end, current.start == pair.start, current.text.utf16.elementsEqual(pair.text.utf16) else { return nil }
+        let text = current.text as NSString
+        let edit = NativeMarkdownEdit(text: text.replacingCharacters(in: NSRange(location: current.start, length: 1), with: ""),
+                                      start: current.start, end: current.start)
+        record(current)
+        return edit
+    }
+
+    private static func insertsOneCharacterAtCaret(_ edit: NativeMarkdownEdit, into typed: String) -> Bool {
+        let text = edit.text as NSString
+        guard edit.start == edit.end, edit.start > 0, edit.start < text.length, text.length == typed.utf16.count + 1 else { return false }
+        return text.replacingCharacters(in: NSRange(location: edit.start, length: 1), with: "").utf16.elementsEqual(typed.utf16)
     }
 
     public mutating func applyToolbar(_ ticket: Ticket, current: String, before: NativeMarkdownEdit, reply: [String: Any]) -> NativeMarkdownEdit? {

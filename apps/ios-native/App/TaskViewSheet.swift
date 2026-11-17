@@ -3897,7 +3897,13 @@ struct NativeMarkdownTextEditor: UIViewRepresentable {
         func textView(_ view: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {
             guard parent.enabled else { return false }
             let selected = view.selectedRange
-            before = NativeMarkdownEdit(text: view.text ?? "", start: selected.location, end: NSMaxRange(selected))
+            let current = NativeMarkdownEdit(text: view.text ?? "", start: selected.location, end: NSMaxRange(selected))
+            if view.markedTextRange == nil, let edit = history.backspaceInJustInsertedPair(current, deleting: range, replacement: text) {
+                before = nil
+                show(edit, in: view)
+                return false
+            }
+            before = current
             return true
         }
 
