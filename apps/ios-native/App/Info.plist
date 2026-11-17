@@ -20,6 +20,10 @@
         <array><string>$(MINDWTR_URL_SCHEME)</string></array>
       </dict>
     </array>
+    <key>MindwtrDropboxAppKey</key>
+    <string>$(MINDWTR_DROPBOX_APP_KEY)</string>
+    <key>MindwtrDropboxRedirectURI</key>
+    <string>$(MINDWTR_URL_SCHEME)://redirect</string>
     <key>MindwtrWatchEnabled</key>
     <true/>
     <key>MindwtrFeedbackEndpointURL</key>

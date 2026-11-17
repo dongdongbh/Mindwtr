@@ -13,7 +13,7 @@ const exact = (v: Record<string, unknown>, fields: string[]) => Object.keys(v).l
 const bytes = (v: unknown, maximum: number) => { try { return new TextEncoder().encode(JSON.stringify(v)).length <= maximum; } catch { return false; } };
 export const readNativeIosDropboxConfiguration = (v: unknown): NativeIosDropboxConfiguration | null => record(v)
     && exact(v, ['version', 'clientId', 'redirectUri']) && v.version === 1 && typeof v.clientId === 'string' && /^[A-Za-z0-9]{1,512}$/.test(v.clientId)
-    && v.redirectUri === 'mindwtr-native-dev://redirect' ? v as NativeIosDropboxConfiguration : null;
+    && (v.redirectUri === 'mindwtr://redirect' || v.redirectUri === 'mindwtr-native-dev://redirect') ? v as NativeIosDropboxConfiguration : null;
 const ANDROID_DROPBOX_REDIRECTS = ['mindwtr://redirect', 'mindwtr-native-dev://redirect', 'mindwtr-upgradetest://redirect'];
 export const readNativeAndroidDropboxConfiguration = (v: unknown): NativeIosDropboxConfiguration | null => record(v)
     && exact(v, ['version', 'clientId', 'redirectUri']) && v.version === 1 && typeof v.clientId === 'string' && /^[A-Za-z0-9]{1,512}$/.test(v.clientId)

@@ -2,13 +2,14 @@ import Foundation
 import CoreFoundation
 
 public struct NativeDropboxConfiguration: Sendable {
+    public static let registeredRedirectURIs: Set<String> = ["mindwtr://redirect", "mindwtr-native-dev://redirect"]
     public let clientID: String
     public let redirectURI: String
 
     public init(clientID: String, redirectURI: String) throws {
         guard !clientID.isEmpty, clientID.utf8.count <= 512,
               clientID.utf8.allSatisfy({ (48...57).contains($0) || (65...90).contains($0) || (97...122).contains($0) }),
-              redirectURI.utf8.elementsEqual("mindwtr-native-dev://redirect".utf8) else {
+              Self.registeredRedirectURIs.contains(redirectURI) else {
             throw CoreHostRejection(message: "INVALID_INPUT: Dropbox public configuration is invalid")
         }
         self.clientID = clientID; self.redirectURI = redirectURI

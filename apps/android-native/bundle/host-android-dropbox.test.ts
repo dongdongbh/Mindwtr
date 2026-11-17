@@ -135,7 +135,7 @@ describe('native Android Dropbox configuration', () => {
             { version: 1, clientId: 'bad key', redirectUri: REDIRECT }, { version: 1, clientId: CLIENT, redirectUri: REDIRECT, extra: 1 }]) {
             expect(readNativeAndroidDropboxConfiguration(bad)).toBeNull();
         }
-        expect(readNativeIosDropboxConfiguration({ version: 1, clientId: CLIENT, redirectUri: REDIRECT })).toBeNull();
+        expect(readNativeIosDropboxConfiguration({ version: 1, clientId: CLIENT, redirectUri: 'mindwtr-upgradetest://redirect' })).toBeNull();
     });
 
     it('shows the RN panel with the app key and redirect, and hides Dropbox in the FOSS build as RN does', async () => {

@@ -84,10 +84,7 @@ final class NativeDropboxAuthorization {
 
     static func configuration(bundle: Bundle = .main) -> NativeDropboxConfiguration? {
         guard let id = bundle.object(forInfoDictionaryKey: "MindwtrDropboxAppKey") as? String,
-              let redirect = bundle.object(forInfoDictionaryKey: "MindwtrDropboxRedirectURI") as? String,
-              !id.isEmpty, id.utf8.count <= 512,
-              id.utf8.allSatisfy({ (48...57).contains($0) || (65...90).contains($0) || (97...122).contains($0) }),
-              redirect == "mindwtr-native-dev://redirect" else { return nil }
+              let redirect = bundle.object(forInfoDictionaryKey: "MindwtrDropboxRedirectURI") as? String else { return nil }
         return try? NativeDropboxConfiguration(clientID: id, redirectURI: redirect)
     }
     static func isCallbackRoute(_ url: URL, configuration: NativeDropboxConfiguration?) -> Bool {

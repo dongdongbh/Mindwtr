@@ -31,9 +31,13 @@ final class NativeDropboxAuthorizationJobsTests: XCTestCase {
         for id in ["", "has-dash", "has_underscore", "é", String(repeating: "a", count: 513)] {
             XCTAssertThrowsError(try NativeDropboxConfiguration(clientID: id, redirectURI: "mindwtr-native-dev://redirect"))
         }
-        for uri in ["mindwtr://redirect", "mindwtr-native-dev://redirect/", "mindwtr-native-dev://other", "MINDWTR-NATIVE-DEV://redirect", "mindwtr-native-dev://redirect?state=x"] {
+        for uri in ["mindwtr://redirect/", "mindwtr://other", "MINDWTR://redirect", "mindwtr-native-dev://redirect/", "mindwtr-native-dev://other", "MINDWTR-NATIVE-DEV://redirect", "mindwtr-native-dev://redirect?state=x"] {
             XCTAssertThrowsError(try NativeDropboxConfiguration(clientID: "public123", redirectURI: uri))
         }
+    }
+    func testProductionRedirectUsesTheRegisteredMindwtrScheme() throws {
+        let production = try NativeDropboxConfiguration(clientID: "SyntheticPublic123", redirectURI: "mindwtr://redirect")
+        XCTAssertEqual(production.redirectURI, "mindwtr://redirect")
     }
     func testControlAndOnceOnlyGrantAreExactAndRequestBound() throws {
         let expected = grant(requestID)
