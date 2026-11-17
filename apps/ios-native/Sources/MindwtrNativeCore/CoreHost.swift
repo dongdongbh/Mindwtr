@@ -26772,6 +26772,14 @@ private final class Engine: @unchecked Sendable {
         return args
     }
 
+    private static func clientDiagnostic(_ context: [String: Any], _ releaseCheck: String, fixed: [String: String] = [:],
+                                         tokens: Set<String> = [], counts: Set<String> = []) -> Bool {
+        Set(context.keys) == Set(["releaseCheck"]).union(fixed.keys).union(tokens).union(counts)
+            && context["releaseCheck"] as? String == releaseCheck
+            && fixed.allSatisfy { context[$0.key] as? String == $0.value }
+            && tokens.allSatisfy { name in (context[name] as? String).map { $0.range(of: "^[A-Za-z0-9._:-]{1,64}$", options: .regularExpression) != nil } == true }
+            && counts.allSatisfy { name in isInteger(context[name]) && (context[name] as? NSNumber).map { (0.0...100_000.0).contains($0.doubleValue) } == true }
+    }
     private func validateClientDiagnosticArguments(_ args: [Any]) throws {
         let invalid = HostFailure("INVALID_INPUT: Invalid client diagnostic")
         guard let message = args[0] as? String, message.utf8.count <= 256,
@@ -26926,6 +26934,52 @@ private final class Engine: @unchecked Sendable {
                 && context["outcome"] as? String == "opened"
         case "Native iOS Add Task shortcut presented":
             valid = Self.equalJSON(context, ["releaseCheck": "v1.3.9/ios-quick-capture-intent", "outcome": "presented"])
+        case "Native iOS deferred text input revalidated":
+            valid = Self.clientDiagnostic(context, "v1.3.9/ios-text-input-deferred", tokens: ["outcome", "family"])
+        case "Native iOS Sandbox reminder preparation confirmed":
+            valid = Self.clientDiagnostic(context, "v1.3.9/ios-sandbox-lifecycle", fixed: ["operation": "reminderPreparation", "outcome": "confirmed", "workspace": "personal"])
+        case "Native iOS Sandbox personal return confirmed":
+            valid = Self.clientDiagnostic(context, "v1.3.9/ios-sandbox-lifecycle", fixed: ["operation": "return", "outcome": "confirmed", "workspace": "personal"])
+        case "Native iOS workspace retirement refused":
+            valid = Self.clientDiagnostic(context, "v1.3.9/ios-sandbox-lifecycle", fixed: ["operation": "retire", "outcome": "refused", "workspace": "personal"])
+        case "Native iOS reminder response settled":
+            valid = Self.clientDiagnostic(context, "v1.3.9/ios-reminder-response-settled", tokens: ["action", "outcome"])
+        case "Native iOS personal intake check failed":
+            valid = Self.clientDiagnostic(context, "v1.3.9/ios-intake-check", fixed: ["operation": "intake-check"], tokens: ["check", "outcome", "unfinished"])
+        case "Native iOS task editor dismissed on navigation":
+            valid = Self.clientDiagnostic(context, "v1.3.9/ios-editor-navigation", fixed: ["outcome": "closed-clean"])
+        case "Native iOS reminder dismissed":
+            valid = Self.clientDiagnostic(context, "v1.3.9/ios-reminder-dismiss-background", tokens: ["appState"])
+        case "Native iOS Sandbox reminder replay confirmed":
+            valid = Self.clientDiagnostic(context, "v1.3.9/ios-sandbox-lifecycle", fixed: ["operation": "reminderReplay", "outcome": "confirmed", "workspace": "personal"])
+        case "Native iOS Watch context published":
+            valid = Self.clientDiagnostic(context, "v1.3.9/ios-watch-publication", fixed: ["outcome": "submitted"])
+        case "Native iOS legacy widget actions acknowledged":
+            valid = Self.clientDiagnostic(context, "v1.3.9/ios-widget-legacy-ack", fixed: ["outcome": "confirmed"], counts: ["count"])
+        case "Native iOS widget families published":
+            valid = Self.clientDiagnostic(context, "v1.3.9/ios-widget-family-publication", fixed: ["outcome": "ready"], counts: ["count"])
+        case "Native iOS CloudKit change notification received":
+            valid = Self.clientDiagnostic(context, "v1.3.9/ios-cloudkit-push", fixed: ["operation": "push", "outcome": "received"])
+        case "Native iOS background sync hold ended":
+            valid = Self.clientDiagnostic(context, "v1.3.9/ios-background-sync-hold", tokens: ["outcome", "heldMs"])
+        case "Native iOS background sync ended":
+            valid = Self.clientDiagnostic(context, "v1.3.9/ios-background-sync", tokens: ["outcome", "backend", "detail", "reminders", "durationMs"])
+        case "Native iOS sync cancelled without a restart":
+            valid = Self.clientDiagnostic(context, "v1.3.9/ios-sync-clean-cancel", tokens: ["operation"])
+        case "Native Reminders foreground import stopped":
+            valid = Self.clientDiagnostic(context, "v1.3.5/ios-reminders-foreground", fixed: ["outcome": "stopped"])
+        case "Native iOS ordinary project next action confirmed":
+            valid = Self.clientDiagnostic(context, "v1.3.9/ios-ordinary-project-next-action", tokens: ["completionSource", "outcome", "scope"])
+        case "Native iOS Preview task completion saved":
+            valid = Self.clientDiagnostic(context, "v1.3.9/preview-mark-done", fixed: ["platform": "ios", "outcome": "saved"])
+        case "Native iOS host read refused":
+            valid = Set(context.keys) == ["level", "method", "code"] && context["level"] as? String == "warn"
+                && Self.clientDiagnostic(["releaseCheck": "", "method": context["method"] as Any, "code": context["code"] as Any], "", tokens: ["method", "code"])
+        case "Native iOS due badge updated":
+            valid = Set(context.keys) == ["releaseCheck", "count", "enabled", "result"] && context["releaseCheck"] as? String == "v1.3.9/ios-due-badge"
+                && Self.isInteger(context["count"]) && (context["count"] as? NSNumber).map { (0.0...100_000.0).contains($0.doubleValue) } == true
+                && (context["enabled"] as? NSNumber).map { CFGetTypeID($0) == CFBooleanGetTypeID() } == true
+                && Self.clientDiagnostic(["releaseCheck": "", "result": context["result"] as Any], "", tokens: ["result"])
         case "Native iOS Share protected publication imported":
             valid = Self.equalJSON(context, ["releaseCheck": "v1.3.9/ios-share-protection", "operation": "share-import", "outcome": "confirmed"])
         case "Native iOS production Share route admitted":

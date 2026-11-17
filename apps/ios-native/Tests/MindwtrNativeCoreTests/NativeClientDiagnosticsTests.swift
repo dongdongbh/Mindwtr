@@ -56,6 +56,27 @@ final class NativeClientDiagnosticsTests: XCTestCase {
             ("Native iOS foreground activation refreshed", ["releaseCheck": "v1.3.5/ios-foreground-activation", "outcome": "refreshed"]),
             ("Native iOS calendar push observer released after cancel", ["releaseCheck": "v1.3.9/ios-calendar-push-observer-release", "outcome": "released"]),
             ("Native iOS personal intake reopened after container relocation", ["releaseCheck": "v1.3.9/ios-intake-same-tree-reopen", "operation": "same-tree-reopen", "outcome": "confirmed"]),
+            ("Native iOS deferred text input revalidated", ["releaseCheck": "v1.3.9/ios-text-input-deferred", "outcome": "synthetic-outcome", "family": "synthetic-family"]),
+            ("Native iOS Sandbox reminder preparation confirmed", ["releaseCheck": "v1.3.9/ios-sandbox-lifecycle", "operation": "reminderPreparation", "outcome": "confirmed", "workspace": "personal"]),
+            ("Native iOS Sandbox personal return confirmed", ["releaseCheck": "v1.3.9/ios-sandbox-lifecycle", "operation": "return", "outcome": "confirmed", "workspace": "personal"]),
+            ("Native iOS workspace retirement refused", ["releaseCheck": "v1.3.9/ios-sandbox-lifecycle", "operation": "retire", "outcome": "refused", "workspace": "personal"]),
+            ("Native iOS reminder response settled", ["releaseCheck": "v1.3.9/ios-reminder-response-settled", "action": "synthetic-action", "outcome": "synthetic-outcome"]),
+            ("Native iOS personal intake check failed", ["releaseCheck": "v1.3.9/ios-intake-check", "operation": "intake-check", "check": "synthetic-check", "outcome": "synthetic-outcome", "unfinished": "synthetic-unfinished"]),
+            ("Native iOS task editor dismissed on navigation", ["releaseCheck": "v1.3.9/ios-editor-navigation", "outcome": "closed-clean"]),
+            ("Native iOS reminder dismissed", ["releaseCheck": "v1.3.9/ios-reminder-dismiss-background", "appState": "synthetic-appstate"]),
+            ("Native iOS Sandbox reminder replay confirmed", ["releaseCheck": "v1.3.9/ios-sandbox-lifecycle", "operation": "reminderReplay", "outcome": "confirmed", "workspace": "personal"]),
+            ("Native iOS Watch context published", ["releaseCheck": "v1.3.9/ios-watch-publication", "outcome": "submitted"]),
+            ("Native iOS legacy widget actions acknowledged", ["releaseCheck": "v1.3.9/ios-widget-legacy-ack", "outcome": "confirmed", "count": 3]),
+            ("Native iOS widget families published", ["releaseCheck": "v1.3.9/ios-widget-family-publication", "outcome": "ready", "count": 3]),
+            ("Native iOS CloudKit change notification received", ["releaseCheck": "v1.3.9/ios-cloudkit-push", "operation": "push", "outcome": "received"]),
+            ("Native iOS background sync hold ended", ["releaseCheck": "v1.3.9/ios-background-sync-hold", "outcome": "synthetic-outcome", "heldMs": "synthetic-heldms"]),
+            ("Native iOS background sync ended", ["releaseCheck": "v1.3.9/ios-background-sync", "outcome": "synthetic-outcome", "backend": "synthetic-backend", "detail": "synthetic-detail", "reminders": "synthetic-reminders", "durationMs": "synthetic-durationms"]),
+            ("Native iOS sync cancelled without a restart", ["releaseCheck": "v1.3.9/ios-sync-clean-cancel", "operation": "synthetic-operation"]),
+            ("Native Reminders foreground import stopped", ["releaseCheck": "v1.3.5/ios-reminders-foreground", "outcome": "stopped"]),
+            ("Native iOS ordinary project next action confirmed", ["releaseCheck": "v1.3.9/ios-ordinary-project-next-action", "completionSource": "synthetic-completionsource", "outcome": "synthetic-outcome", "scope": "synthetic-scope"]),
+            ("Native iOS Preview task completion saved", ["releaseCheck": "v1.3.9/preview-mark-done", "platform": "ios", "outcome": "saved"]),
+            ("Native iOS host read refused", ["level": "warn", "method": "inboxView", "code": "NOT_READY"]),
+            ("Native iOS due badge updated", ["releaseCheck": "v1.3.9/ios-due-badge", "count": 3, "enabled": true, "result": "applied"]),
             ("Native iOS Share protected publication imported", ["releaseCheck": "v1.3.9/ios-share-protection", "operation": "share-import", "outcome": "confirmed"]),
             ("Native iOS production Share route admitted", ["releaseCheck": "v1.3.9/ios-production-share-route", "operation": "import", "outcome": "ready"]),
         ]
@@ -143,6 +164,7 @@ final class NativeClientDiagnosticsTests: XCTestCase {
         for (message, context) in approved {
             var expected = context
             if let count = context["count"] as? NSNumber { expected["count"] = count.stringValue }
+            if let enabled = context["enabled"] as? Bool { expected["enabled"] = enabled ? "true" : "false" }
             XCTAssertTrue(try saved.contains { line in
                 guard line["message"] as? String == message else { return false }
                 return try json(line["context"] as? [String: Any] ?? [:]) == json(expected)
@@ -405,6 +427,32 @@ final class NativeClientDiagnosticsTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: log), bytes)
         XCTAssertEqual(try rows(), before)
         XCTAssertFalse(FileManager.default.fileExists(atPath: database.appendingPathExtension("pending.json").path))
+    }
+
+    func testTokenMarkersRefuseFreeTextExtraFieldsAndForeignSlugs() async throws {
+        let core = try await preparedHost(), before = try rows()
+        let message = "Native iOS background sync ended"
+        let context: [String: Any] = ["releaseCheck": "v1.3.9/ios-background-sync", "outcome": "finished", "backend": "webdav",
+                                      "detail": "synced", "reminders": "unchanged", "durationMs": "120"]
+        _ = try await core.call("logLine", argumentsJSON: json([message, json(context)]))
+        _ = try await lines(core)
+        let log = root.appendingPathComponent("logs/mindwtr.log"), bytes = try Data(contentsOf: log)
+        var refused: [[String: Any]] = []
+        for (field, value) in [("detail", "Buy milk tomorrow"), ("detail", ""), ("backend", String(repeating: "a", count: 65)),
+                               ("releaseCheck", "v1.3.8/ios-background-sync"), ("outcome", "https://private.invalid/x y")] as [(String, Any)] {
+            var changed = context; changed[field] = value; refused.append(changed)
+        }
+        var extra = context; extra["text"] = "private"; refused.append(extra)
+        var missing = context; missing.removeValue(forKey: "detail"); refused.append(missing)
+        var count: [String: Any] = ["releaseCheck": "v1.3.9/ios-widget-family-publication", "outcome": "ready", "count": "5"]
+        for raw in refused {
+            do { _ = try await core.call("logLine", argumentsJSON: json([message, json(raw)])); XCTFail("Token marker must refuse \(raw)") } catch {}
+        }
+        do { _ = try await core.call("logLine", argumentsJSON: json(["Native iOS widget families published", json(count)])); XCTFail("Count must be a number") } catch {}
+        count["count"] = 100_001
+        do { _ = try await core.call("logLine", argumentsJSON: json(["Native iOS widget families published", json(count)])); XCTFail("Count must be bounded") } catch {}
+        XCTAssertEqual(try Data(contentsOf: log), bytes)
+        XCTAssertEqual(try rows(), before)
     }
 
     func testClientDiagnosticsRequireStartupAndRefuseAfterClose() async throws {
