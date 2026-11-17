@@ -38401,4 +38401,32 @@ extension FoundationUITests {
         XCTAssertEqual(title.label, "Done")
         XCTAssertEqual(app.staticTexts["task-inboxBulkDelete-notice"].label, "1 task")
     }
+
+    func testUIBatchChecklistHandleDragReorders() {
+        let app = uiBatchApp()
+        app.launch(); defer { app.terminate() }
+        uiBatchCapture(app, "UI batch checklist")
+        app.buttons["UI batch checklist"].tap()
+        boardTap(app, "task-mode-edit")
+        let scroll = app.scrollViews["task-editor-scroll"]
+        let details = app.buttons["task-editor-section-details"]
+        revealPagedElement(app, details, in: scroll)
+        if details.value as? String == "Expand" { details.tap() }
+        let add = app.buttons["task-checklist-add"]
+        revealPagedElement(app, add, in: scroll)
+        add.tap()
+        let first = app.textFields["task-checklist-input-0"]
+        boardEnabled(first, timeout: 20); first.typeText("Alpha\n")
+        let second = app.textFields["task-checklist-input-1"]
+        XCTAssertTrue(second.waitForExistence(timeout: 20)); second.typeText("Beta\n")
+        let third = app.textFields["task-checklist-input-2"]
+        XCTAssertTrue(third.waitForExistence(timeout: 20)); third.typeText("Gamma")
+        let handle = app.buttons["task-checklist-drag-0"], last = app.buttons["task-checklist-drag-2"]
+        boardEnabled(handle); boardEnabled(last)
+        handle.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+            .press(forDuration: 0.1, thenDragTo: last.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.9)))
+        let moved = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "Beta"), object: app.textFields["task-checklist-input-0"])
+        XCTAssertEqual(XCTWaiter.wait(for: [moved], timeout: 10), .completed, "Dragging the handle reorders the checklist, as in RN")
+        XCTAssertEqual(app.textFields["task-checklist-input-2"].value as? String, "Alpha")
+    }
 }

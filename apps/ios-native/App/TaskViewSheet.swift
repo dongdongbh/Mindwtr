@@ -48,7 +48,6 @@ struct TaskViewSheet: View {
     @State private var checklistFrames: [String: CGRect] = [:]
     @State private var checklistViewport = CGRect.zero
     @State private var checklistActionRow: String?
-    @GestureState private var checklistGestureActive = false
     @FocusState private var focusedChecklistIndex: Int?
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     private var value: CoreObject { model.taskView }
@@ -437,9 +436,6 @@ struct TaskViewSheet: View {
                 .onPreferenceChange(ChecklistRowFramesPreference.self) { checklistFrames = $0 }
                 .onReceive(Timer.publish(every: 0.05, on: .main, in: .common).autoconnect()) { _ in
                     scrollChecklistDrag(reader)
-                }
-                .onChange(of: checklistGestureActive) { active in
-                    if !active { checklistDragRow = nil; checklistDragTarget = nil }
                 }
                 .onDisappear { checklistDragRow = nil; checklistDragTarget = nil }
                 .onChange(of: focusedChecklistIndex) { _ in scrollChecklistFocus(reader) }
@@ -1047,30 +1043,31 @@ struct TaskViewSheet: View {
             .accessibilityElement().accessibilityLabel(labels.text("drag"))
             .accessibilityHint(labels.text("actions")).accessibilityAddTraits(.isButton)
             .accessibilityIdentifier("task-checklist-drag-\(index)")
-            .onTapGesture { if !frozen { endEditingBeforeAction(); checklistActionRow = identity } }
             .accessibilityAction { if !frozen { endEditingBeforeAction(); checklistActionRow = identity } }
-            .gesture(DragGesture(minimumDistance: 6, coordinateSpace: .global)
-                .updating($checklistGestureActive) { _, active, _ in active = true }
-                .onChanged { value in
-                    guard !frozen, model.taskChecklistField.objects("items").count > 1 else { return }
-                    if checklistDragRow == nil {
-                        endEditingBeforeAction(); focusedChecklistIndex = nil; checklistActionRow = nil
-                        checklistDragStartPointer = value.startLocation.y
-                        checklistDragOriginY = checklistFrames[identity]?.minY ?? 0
-                        checklistDragRow = identity
-                    }
-                    checklistDragPointer = value.location.y
-                    checklistDragTarget = checklistDropTarget()
+            .overlay(ChecklistHandleDrag(enabled: !frozen, tap: {
+                endEditingBeforeAction(); checklistActionRow = identity
+            }, moved: { start, pointer in
+                guard model.taskChecklistField.objects("items").count > 1 else { return }
+                if checklistDragRow == nil {
+                    endEditingBeforeAction(); focusedChecklistIndex = nil; checklistActionRow = nil
+                    checklistDragStartPointer = start
+                    checklistDragOriginY = checklistFrames[identity]?.minY ?? 0
+                    checklistDragRow = identity
                 }
-                .onEnded { _ in
-                    guard !frozen, checklistDragRow == identity else { return }
-                    let rows = checklistRowSession.sync(model.taskChecklistField.objects("items"))
-                    let from = rows.firstIndex { $0.identity == identity }
-                    let target = checklistDropTarget()
-                    let to = rows.firstIndex { $0.identity == target }
+                checklistDragPointer = pointer
+                checklistDragTarget = checklistDropTarget()
+            }, ended: { finished in
+                guard finished, !frozen, checklistDragRow == identity else {
                     checklistDragRow = nil; checklistDragTarget = nil
-                    if let from, let to, from != to { moveChecklistItem(from: from, to: to, dragged: true) }
-                })
+                    return
+                }
+                let rows = checklistRowSession.sync(model.taskChecklistField.objects("items"))
+                let from = rows.firstIndex { $0.identity == identity }
+                let target = checklistDropTarget()
+                let to = rows.firstIndex { $0.identity == target }
+                checklistDragRow = nil; checklistDragTarget = nil
+                if let from, let to, from != to { moveChecklistItem(from: from, to: to, dragged: true) }
+            }))
             .disabled(frozen)
     }
 
@@ -4162,5 +4159,58 @@ private final class TaskSheetDismissAttemptProxy: NSObject, UIAdaptivePresentati
     func presentationControllerDidAttemptToDismiss(_ presentationController: UIPresentationController) {
         original?.presentationControllerDidAttemptToDismiss?(presentationController)
         onAttempt()
+    }
+}
+
+private struct ChecklistHandleDrag: UIViewRepresentable {
+    let enabled: Bool
+    let tap: () -> Void
+    let moved: (_ start: CGFloat, _ pointer: CGFloat) -> Void
+    let ended: (_ finished: Bool) -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView()
+        view.backgroundColor = .clear
+        view.isAccessibilityElement = false
+        view.accessibilityElementsHidden = true
+        let pan = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.pan(_:)))
+        pan.delegate = context.coordinator
+        view.addGestureRecognizer(pan)
+        view.addGestureRecognizer(UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.tap)))
+        return view
+    }
+
+    func updateUIView(_ view: UIView, context: Context) {
+        context.coordinator.parent = self
+        view.isUserInteractionEnabled = enabled
+    }
+
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        var parent: ChecklistHandleDrag
+        private var start: CGFloat = 0
+
+        init(_ parent: ChecklistHandleDrag) { self.parent = parent }
+
+        @objc func tap() { parent.tap() }
+
+        @objc func pan(_ pan: UIPanGestureRecognizer) {
+            let pointer = pan.location(in: nil).y
+            switch pan.state {
+            case .began:
+                start = pointer - pan.translation(in: nil).y
+                parent.moved(start, pointer)
+            case .changed: parent.moved(start, pointer)
+            case .ended: parent.ended(true)
+            case .cancelled, .failed: parent.ended(false)
+            default: break
+            }
+        }
+
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                               shouldBeRequiredToFailBy other: UIGestureRecognizer) -> Bool {
+            gestureRecognizer is UIPanGestureRecognizer && other === (other.view as? UIScrollView)?.panGestureRecognizer
+        }
     }
 }
