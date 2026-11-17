@@ -37,8 +37,8 @@ final class NativePomodoroHostTests: XCTestCase {
         let db = try SQLiteBridge(url: database); defer { db.close() }
         return try XCTUnwrap(NativeJSON.jsonObject(with: Data(db.execute(sql, parametersJSON: json(args)).utf8)) as? [[String: Any]])
     }
-    private func request(_ action: String = "reconcile", id: String = UUID().uuidString.lowercased()) throws -> String {
-        var value: [String: Any] = ["action": action, "requestId": id, "observedAtMs": observed, "localDayKey": "2026-10-10"]
+    private func request(_ action: String = "reconcile", id: String = UUID().uuidString.lowercased(), observedAtMs: Int64? = nil) throws -> String {
+        var value: [String: Any] = ["action": action, "requestId": id, "observedAtMs": observedAtMs ?? observed, "localDayKey": "2026-10-10"]
         if action == "initialize" { value["durations"] = ["focusMinutes": 25, "breakMinutes": 5] }
         else { value["autoStart"] = ["autoStartFocus": false, "autoStartBreaks": false] }
         return try json(value)
@@ -221,6 +221,34 @@ final class NativePomodoroHostTests: XCTestCase {
         let undo: [String: Any] = ["requestId": UUID().uuidString.lowercased(), "completionRequestId": try XCTUnwrap(completion["requestId"])]
         _ = try await core.call("taskCompletionUndo", argumentsJSON: json([json(undo)]))
         XCTAssertEqual(try rows("SELECT status FROM tasks WHERE id='task'").first?["status"] as? String, "next"); try credited(9)
+    }
+
+    func testReferenceLinkedTaskKeepsTheTimerRunningAndLinked() async throws { try await assertLinkedTimerKeepsRunning("reference") }
+
+    func testMissingLinkedTaskKeepsTheTimerRunningAndLinked() async throws { try await assertLinkedTimerKeepsRunning("missing") }
+
+    private func assertLinkedTimerKeepsRunning(_ mode: String) async throws {
+        try await seed()
+        try rows("INSERT INTO tasks(id,title,status,contexts,tags,createdAt,updatedAt,rev,revBy,timeSpentMinutes,isFocusedToday,pushCount,showFutureRecurrence,suppressMindwtrReminders) VALUES ('other','OTHER','next','[]','[]',?,?,1,?,0,0,0,0,0)", [at, at, device])
+        if mode == "missing" { try rows("DELETE FROM tasks WHERE id='task'") } else { try rows("UPDATE tasks SET status='reference' WHERE id='task'") }
+        let formatter = ISO8601DateFormatter(); formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        var state = try object(XCTUnwrap(rows("SELECT state_json FROM native_pomodoro_session").first?["state_json"] as? String))
+        var session = try XCTUnwrap(state["session"] as? [String: Any])
+        session["phaseEndsAt"] = formatter.string(from: Date().addingTimeInterval(1170)); state["session"] = session
+        try rows("UPDATE native_pomodoro_session SET state_json=?", [json(state)])
+        let core = host(); _ = try await core.start()
+        let now = { Int64(Date().timeIntervalSince1970 * 1000) }
+        let reconciled = try object(await core.writePomodoroTransition(requestJSON: request(observedAtMs: now())))
+        XCTAssertEqual(reconciled["kind"] as? String, "noop", mode)
+        let running = try storedSession()
+        XCTAssertEqual((running["timerState"] as? [String: Any])?["isRunning"] as? Bool, true, mode); XCTAssertEqual(running["selectedTaskId"] as? String, "task", mode)
+        let paused = try object(await core.writePomodoroTransition(requestJSON: request("toggle", observedAtMs: now())))
+        let result = try XCTUnwrap(paused["result"] as? [String: Any], mode)
+        XCTAssertEqual(result["creditedMinutes"] as? Int, mode == "reference" ? 5 : 0, mode)
+        XCTAssertEqual(result["creditDisposition"] as? String, mode == "reference" ? "credited" : "unavailable", mode)
+        let stopped = try storedSession()
+        XCTAssertEqual((stopped["timerState"] as? [String: Any])?["isRunning"] as? Bool, false, mode); XCTAssertEqual(stopped["selectedTaskId"] as? String, "task", mode)
+        if mode == "reference" { try credited(9) }
     }
 
     func testIntentWriteFailureAndOverlappingUUIDRetainOnlyExactOriginal() async throws {

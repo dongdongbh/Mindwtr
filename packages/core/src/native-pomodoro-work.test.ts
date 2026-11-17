@@ -73,6 +73,23 @@ describe('native partial Pomodoro work', () => {
         expect(prepareNativePomodoroTransition({ request: request('reconcile', 1200), session, target: null, deviceId: 'device' })).toBeNull();
         expect(validatePreparedNativePomodoroTransition(plan)).toEqual(plan);
     });
+    it.each(['reference', 'missing'] as const)('keeps the timer running when the linked task is %s and unlinks it only on selectTask', (kind) => {
+        const target = kind === 'missing' ? { id: 'a', row: null } : task('a', 4, { status: 'reference' });
+        expect(prepareNativePomodoroTransition({ request: request('reconcile', 91), session: initial(), target, deviceId: 'device' })).toBeNull();
+        const paused = prepareNativePomodoroTransition({ request: request('toggle', 91), session: initial(), target, deviceId: 'device' })!;
+        expect(read(paused.sessionAfter).state?.session).toMatchObject({ selectedTaskId: 'a',
+            timerState: { remainingSeconds: 1409, isRunning: false, completedFocusSessions: 0 } });
+        expect(paused.taskPatch?.timeSpentMinutes ?? null).toBe(kind === 'reference' ? 5 : null);
+        expect(validatePreparedNativePomodoroTransition(paused)).toEqual(paused);
+        const unlinked = prepareNativePomodoroTransition({ request: { ...request('reconcile', 91), action: 'selectTask', taskId: null },
+            session: initial(), target, deviceId: 'device' })!;
+        const session = read(unlinked.sessionAfter).state?.session;
+        expect(session?.selectedTaskId).toBeUndefined();
+        expect(session?.timerState).toMatchObject({ isRunning: true, completedFocusSessions: 0 });
+        expect(session?.phaseEndsAt).toBe(new Date(AT + 1_500_000).toISOString());
+        expect(unlinked.taskPatch?.timeSpentMinutes ?? null).toBe(kind === 'reference' ? 5 : null);
+        expect(validatePreparedNativePomodoroTransition(unlinked)).toEqual(unlinked);
+    });
     it('settles owed map entries through the existing atomic multi-task plan', () => {
         const session = initial(); session.state!.session.workSecondsByTaskId = { b: 91 };
         const updated = read(JSON.stringify(session.state)); const input = request('toggle', 30);

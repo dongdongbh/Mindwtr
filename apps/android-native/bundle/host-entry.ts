@@ -2485,7 +2485,7 @@ const reconcileNativePomodoroAfterTaskChange = async () => {
         const selectedTaskId = session.state?.session.selectedTaskId;
         if (!selectedTaskId) { nativePomodoroSettlementPending = false; return; }
         const selected = useTaskStore.getState()._allTasks.find(task => task.id === selectedTaskId);
-        if (selected && !selected.deletedAt && !isTaskCancelled(selected) && isTaskActionable(selected)) {
+        if (!selected || (!selected.deletedAt && selected.status !== 'done' && selected.status !== 'archived')) {
             nativePomodoroSettlementPending = false; return;
         }
         const now = new Date(), options = useTaskStore.getState().settings.gtd?.pomodoro;

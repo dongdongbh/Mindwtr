@@ -353,10 +353,10 @@ function prepareTransition(input: NativePomodoroTransitionInput, legacyAccountin
         return { ...session, workSecondsByTaskId: settled.workSecondsByTaskId };
     };
     const resolve = (session: StoredPomodoroSession, before: NativePomodoroTaskBefore | null) => {
-        const status = before?.row ? cell(before.row, 'status') : null;
-        const completedAt = before?.row ? cell(before.row, 'completedAt') : null;
-        const stopped = !legacyAccounting && before !== null && (!before.row || cell(before.row, 'deletedAt')
-            || status === 'done' || status === 'archived' || status === 'reference');
+        const row = before?.row ?? null;
+        const status = row ? cell(row, 'status') : null;
+        const completedAt = row ? cell(row, 'completedAt') : null;
+        const stopped = !legacyAccounting && row !== null && (Boolean(cell(row, 'deletedAt')) || status === 'done' || status === 'archived');
         const completedAtMs = typeof completedAt === 'string' ? Date.parse(completedAt) : NaN;
         const deadlineMs = session.phaseEndsAt ? Date.parse(session.phaseEndsAt) : NaN;
         const checkpointMs = Number.isFinite(deadlineMs) ? deadlineMs - (session.timerState?.remainingSeconds ?? 0) * 1000 : request.observedAtMs;
