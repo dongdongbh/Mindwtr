@@ -179,27 +179,29 @@ final class NativePomodoroHostTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
     }
 
-    func testFocusDoneUnlinkedMissingArchivedDeletedAndCappedUseSharedPolicy() async throws {
-        for mode in ["done", "unlinked", "missing", "archived", "deleted", "capped"] {
-            let caseRoot = root.appendingPathComponent(mode); try FileManager.default.createDirectory(at: caseRoot, withIntermediateDirectories: true)
-            let prior = root!; root = caseRoot
-            try await seed(status: mode == "done" ? "done" : "next", selected: mode != "unlinked", minutes: mode == "capped" ? 100_000 : 4)
-            if mode == "missing" { try rows("DELETE FROM tasks WHERE id='task'") }
-            if mode == "archived" { try rows("UPDATE tasks SET status='archived' WHERE id='task'") }
-            if mode == "deleted" { try rows("UPDATE tasks SET deletedAt=? WHERE id='task'", [at]) }
-            let core = host(); _ = try await core.start()
-            let reply = try object(await core.writePomodoroTransition(requestJSON: request()))
-            let settledAtStart = ["done", "archived", "deleted"].contains(mode)
-            XCTAssertEqual(reply["kind"] as? String, settledAtStart ? "noop" : "confirmed", mode)
-            let result = try XCTUnwrap(settledAtStart ? startSettlement() : reply["result"] as? [String: Any], mode)
-            XCTAssertEqual(result["creditDisposition"] as? String, mode == "done" ? "credited" : mode == "unlinked" ? "unlinked" : mode == "capped" ? "capped" : "unavailable", mode)
-            XCTAssertEqual(result["creditedMinutes"] as? Int, mode == "done" ? 25 : 0, mode)
-            if mode == "done" { try credited() }
-            if settledAtStart {
-                let session = try storedSession()
-                XCTAssertEqual((session["timerState"] as? [String: Any])?["isRunning"] as? Bool, false, mode); XCTAssertNil(session["selectedTaskId"], mode)
-            }
-            await core.close(); root = prior
+    func testDoneLinkedTaskUsesSharedPolicy() async throws { try await assertSharedPolicy("done") }
+    func testUnlinkedFocusUsesSharedPolicy() async throws { try await assertSharedPolicy("unlinked") }
+    func testMissingLinkedTaskUsesSharedPolicy() async throws { try await assertSharedPolicy("missing") }
+    func testArchivedLinkedTaskUsesSharedPolicy() async throws { try await assertSharedPolicy("archived") }
+    func testDeletedLinkedTaskUsesSharedPolicy() async throws { try await assertSharedPolicy("deleted") }
+    func testCappedLinkedTaskUsesSharedPolicy() async throws { try await assertSharedPolicy("capped") }
+
+    private func assertSharedPolicy(_ mode: String) async throws {
+        try await seed(status: mode == "done" ? "done" : "next", selected: mode != "unlinked", minutes: mode == "capped" ? 100_000 : 4)
+        if mode == "missing" { try rows("DELETE FROM tasks WHERE id='task'") }
+        if mode == "archived" { try rows("UPDATE tasks SET status='archived' WHERE id='task'") }
+        if mode == "deleted" { try rows("UPDATE tasks SET deletedAt=? WHERE id='task'", [at]) }
+        let core = host(); _ = try await core.start()
+        let reply = try object(await core.writePomodoroTransition(requestJSON: request()))
+        let settledAtStart = ["done", "archived", "deleted"].contains(mode)
+        XCTAssertEqual(reply["kind"] as? String, settledAtStart ? "noop" : "confirmed", mode)
+        let result = try XCTUnwrap(settledAtStart ? startSettlement() : reply["result"] as? [String: Any], mode)
+        XCTAssertEqual(result["creditDisposition"] as? String, settledAtStart ? "credited" : mode == "unlinked" ? "unlinked" : mode == "capped" ? "capped" : "unavailable", mode)
+        XCTAssertEqual(result["creditedMinutes"] as? Int, settledAtStart ? 25 : 0, mode)
+        if settledAtStart {
+            try credited()
+            let session = try storedSession()
+            XCTAssertEqual((session["timerState"] as? [String: Any])?["isRunning"] as? Bool, false, mode); XCTAssertNil(session["selectedTaskId"], mode)
         }
     }
 

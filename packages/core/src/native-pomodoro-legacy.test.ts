@@ -93,18 +93,20 @@ describe('native Pomodoro legacy adoption', () => {
         expect(decodeNativePomodoroSession(prepare({ updatedAtMs: -100 }).sessionAfter).session.updatedAtMs).toBe(0);
     });
     it.each(['missing', 'deleted', 'archived', 'unlinked', 'capped', 'partial-cap'] as const)(
-        'retains elapsed history with existing %s credit disposition', (kind) => {
+        'retains elapsed history with the %s credit disposition', (kind) => {
             const source = running(kind === 'unlinked' ? { selectedTaskId: undefined } : {});
             const target = kind === 'unlinked' ? null : kind === 'missing' ? { id: 'task', row: null }
                 : selectedRow(kind === 'deleted' ? { deletedAt: '2026-10-09' } : kind === 'archived' ? { status: 'archived' }
                     : { timeSpentMinutes: kind === 'capped' ? TIME_SPENT_MAX_MINUTES : TIME_SPENT_MAX_MINUTES - 10, rev: 2_147_483_647 });
+            const credited = ['partial-cap', 'deleted', 'archived'].includes(kind);
             const plan = prepareNativePomodoroTransition({ request: request(JSON.stringify(source)), session: { raw: null, state: null },
-                target, deviceId: kind === 'partial-cap' ? 'device' : null })!;
+                target, deviceId: credited ? 'device' : null })!;
             expect(plan.result.completedFocusSessions).toBe(4);
             expect(plan.result.creditDisposition).toBe(kind === 'unlinked' ? 'unlinked' : kind === 'capped' ? 'capped'
-                : kind === 'partial-cap' ? 'credited' : 'unavailable');
-            expect(plan.result.creditedMinutes).toBe(kind === 'partial-cap' ? 10 : 0);
+                : credited ? 'credited' : 'unavailable');
+            expect(plan.result.creditedMinutes).toBe(kind === 'partial-cap' ? 10 : credited ? 25 : 0);
             if (kind === 'partial-cap') expect(plan.taskPatch).toMatchObject({ timeSpentMinutes: TIME_SPENT_MAX_MINUTES, rev: 2_147_483_647 });
+            else if (credited) expect(plan.taskPatch).toMatchObject({ timeSpentMinutes: 29 });
             else expect(plan.taskPatch).toBeNull();
         });
     it('requires device authority only for actual credit and exact old selection/native absence', () => {

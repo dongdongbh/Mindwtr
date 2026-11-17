@@ -455,6 +455,8 @@ function prepareTransition(input: NativePomodoroTransitionInput, legacyAccountin
 
     const available = (before: NativePomodoroTaskBefore | null): before is { id: string; row: readonly (string | number | null)[] } =>
         Boolean(before?.row && !cell(before.row, 'deletedAt') && cell(before.row, 'status') !== 'archived');
+    const creditable = (before: NativePomodoroTaskBefore | null): before is { id: string; row: readonly (string | number | null)[] } =>
+        legacyAccounting ? available(before) : Boolean(before?.row && !cell(before.row, 'purgedAt'));
     const minutesOf = new Map<string, number | null>();
     const minutesFor = (before: { id: string; row: readonly (string | number | null)[] }): number | null => {
         if (!minutesOf.has(before.id)) {
@@ -494,7 +496,7 @@ function prepareTransition(input: NativePomodoroTransitionInput, legacyAccountin
         for (const credit of credits) {
             const before = credit.taskId === target?.id ? target : owedTargets.find((owed) => owed.id === credit.taskId);
             if (!before) invalid();
-            if (!available(before)) { creditDisposition = 'unavailable'; continue; }
+            if (!creditable(before)) { creditDisposition = 'unavailable'; continue; }
             const rawMinutes = minutesFor(before);
             const oldMinutes = normalizeTimeSpentMinutes(rawMinutes) ?? 0;
             const minutes = addTimeSpentMinutes(rawMinutes, credit.minutes) ?? 0;
@@ -505,7 +507,7 @@ function prepareTransition(input: NativePomodoroTransitionInput, legacyAccountin
         }
     }
     const patchOf = (before: NativePomodoroTaskBefore | null): NativePomodoroTaskPatch | null => {
-        if (!available(before) || !minutesOf.has(before.id) || minutesOf.get(before.id) === cell(before.row, 'timeSpentMinutes')) return null;
+        if (!creditable(before) || !minutesOf.has(before.id) || minutesOf.get(before.id) === cell(before.row, 'timeSpentMinutes')) return null;
         if (!identity(input.deviceId, 200)) invalid();
         deviceId = input.deviceId;
         return { timeSpentMinutes: minutesOf.get(before.id)!, rev: nextRevision(cell(before.row, 'rev'), { warn: false }), revBy: deviceId,

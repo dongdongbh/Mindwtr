@@ -90,6 +90,18 @@ describe('native partial Pomodoro work', () => {
         expect(unlinked.taskPatch?.timeSpentMinutes ?? null).toBe(kind === 'reference' ? 5 : null);
         expect(validatePreparedNativePomodoroTransition(unlinked)).toEqual(unlinked);
     });
+    it.each([
+        ['archived', { status: 'archived' }, 5, 'credited'],
+        ['soft-deleted', { deletedAt: new Date(AT + 60_000).toISOString() }, 5, 'credited'],
+        ['purged', { deletedAt: new Date(AT + 60_000).toISOString(), purgedAt: new Date(AT + 60_000).toISOString() }, null, 'unavailable'],
+    ] as const)('credits active work to the linked task when it is %s unless purged, as on mobile', (_kind, changes, minutes, disposition) => {
+        const plan = prepareNativePomodoroTransition({ request: request('reconcile', 91), session: initial(),
+            target: task('a', 4, changes), deviceId: 'device' })!;
+        expect(plan.taskPatch?.timeSpentMinutes ?? null).toBe(minutes);
+        expect(plan.result).toMatchObject({ creditedMinutes: minutes === null ? 0 : 1, creditDisposition: disposition });
+        expect(read(plan.sessionAfter).state?.session).toMatchObject({ timerState: { isRunning: false } });
+        expect(validatePreparedNativePomodoroTransition(plan)).toEqual(plan);
+    });
     it('settles owed map entries through the existing atomic multi-task plan', () => {
         const session = initial(); session.state!.session.workSecondsByTaskId = { b: 91 };
         const updated = read(JSON.stringify(session.state)); const input = request('toggle', 30);

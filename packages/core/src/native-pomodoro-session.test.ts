@@ -65,10 +65,10 @@ describe('strict native Pomodoro preparation', () => {
         session.raw = JSON.stringify(session.state, null, 2);
         expect(reconcile({ session })!.sessionBefore).toBe(session.raw);
     });
-    it.each([{ deletedAt: new Date(AT).toISOString() }, { status: 'archived' }])('does not credit unavailable task %j', (extra) => {
+    it.each([{ deletedAt: new Date(AT).toISOString() }, { status: 'archived' }])('credits a soft-deleted or archived task %j, as on mobile', (extra) => {
         const plan = reconcile({}, task(extra))!;
-        expect(plan.taskPatch).toBeNull();
-        expect(plan.result.creditDisposition).toBe('unavailable');
+        expect(plan.taskPatch?.timeSpentMinutes).toBe(29);
+        expect(plan.result.creditDisposition).toBe('credited');
     });
     it('consumes missing, unlinked and capped completions without generating a device identity', () => {
         expect(reconcile({ target: { id: 'task', row: null }, deviceId: null })!.result.creditDisposition).toBe('unavailable');
@@ -316,16 +316,16 @@ describe('native Pomodoro explicit actions', () => {
             session: running(), target: { id: 'next-task', row: null }, deviceId: null })).toThrow();
     });
     it.each(['missing', 'deleted', 'archived', 'done', 'capped', 'unlinked'] as const)('selection consumes %s old-target completion without assigning it to the new target', (disposition) => {
-        const selected = disposition !== 'unlinked';
+        const selected = disposition !== 'unlinked', credited = ['done', 'deleted', 'archived'].includes(disposition);
         const target = !selected ? null : disposition === 'missing' ? { id: 'task', row: null }
             : task(disposition === 'deleted' ? { deletedAt: new Date(AT).toISOString() }
                 : disposition === 'archived' ? { status: 'archived' } : disposition === 'capped' ? { timeSpentMinutes: 100_000 } : {});
         const plan = prepareNativePomodoroTransition({ request: { action: 'selectTask', requestId: NEXT, observedAtMs: AT,
             localDayKey: day, autoStart: { autoStartFocus: false, autoStartBreaks: false }, taskId: 'next-task' },
-            session: running(selected ? 'task' : ''), target, deviceId: disposition === 'done' ? 'existing-device' : null })!;
+            session: running(selected ? 'task' : ''), target, deviceId: credited ? 'existing-device' : null })!;
         expect(plan.result.completedFocusSessions).toBe(1);
-        expect(plan.result.creditDisposition).toBe(disposition === 'done' ? 'credited' : disposition === 'capped' || disposition === 'unlinked' ? disposition : 'unavailable');
-        expect(plan.taskPatch?.timeSpentMinutes ?? null).toBe(disposition === 'done' ? 29 : null);
+        expect(plan.result.creditDisposition).toBe(credited ? 'credited' : disposition === 'capped' || disposition === 'unlinked' ? disposition : 'unavailable');
+        expect(plan.taskPatch?.timeSpentMinutes ?? null).toBe(credited ? 29 : null);
         expect(decodeNativePomodoroSession(plan.sessionAfter).session.selectedTaskId).toBe('next-task');
     });
     it('keeps the frozen local day and rejects unsafe clock, generation, deadline and backwards-time results', () => {

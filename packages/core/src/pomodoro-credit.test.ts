@@ -63,6 +63,17 @@ describe('durable Pomodoro work credits', () => {
         expect((await adapter.getData()).tasks[0].timeSpentMinutes).toBe(42);
     });
 
+    it.each([
+        ['archived', { status: 'archived' }, 'applied', 8],
+        ['soft-deleted', { deletedAt: '2026-01-02T00:00:00.000Z' }, 'applied', 8],
+        ['purged', { deletedAt: '2026-01-02T00:00:00.000Z', purgedAt: '2026-01-03T00:00:00.000Z' }, 'missing-task', 5],
+    ] as const)('credits work to a %s task unless it is purged', async (_kind, changes, outcome, minutes) => {
+        const data = initial(); data.tasks[0] = { ...data.tasks[0], ...changes };
+        await adapter.saveData(data); useTaskStore.setState({ _allTasks: data.tasks });
+        expect(await applyPomodoroCredit(credit)).toBe(outcome);
+        expect((await adapter.getData()).tasks.find((task) => task.id === 'task')?.timeSpentMinutes).toBe(minutes);
+    });
+
     it('rolls back the task when the receipt write fails and retries exactly once later', async () => {
         database.exec("CREATE TRIGGER reject_receipt BEFORE UPDATE ON settings BEGIN SELECT RAISE(FAIL, 'receipt write failed'); END;");
         await expect(applyPomodoroCredit(credit)).rejects.toThrow('receipt write failed');
