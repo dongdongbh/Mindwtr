@@ -10028,6 +10028,7 @@ final class FoundationUITests: XCTestCase {
 
     func testContextsTokensEditSearchCompleteAndRestart() {
         let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", UUID().uuidString.lowercased()]
         app.launch()
         func enabled(_ element: XCUIElement, timeout: TimeInterval = 10) {
             XCTAssertTrue(element.waitForExistence(timeout: timeout))
