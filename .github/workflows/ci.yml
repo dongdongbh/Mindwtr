@@ -269,8 +269,6 @@ jobs:
             fi
 
             echo "Tauri system dependency install failed on attempt $attempt, retrying..." >&2
-            sudo apt-get clean
-            sudo rm -rf /var/lib/apt/lists/*
             sleep 10
           done
 
