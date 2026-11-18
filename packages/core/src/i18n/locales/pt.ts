@@ -342,6 +342,8 @@ export const ptOverrides: Record<string, string> = {
         'taskEdit.checklist': 'Lista de verificação',
         'savedFilters.saveTitle': "Salvar filtro",
         'savedFilters.namePlaceholder': "Nome do filtro",
+        'savedFilters.moveEarlier': "Mover para a esquerda",
+        'savedFilters.moveLater': "Mover para a direita",
         'taskEdit.dragChecklistItem': "Arrastar para reordenar",
         'taskEdit.checklistItemActions': "Ações do item da lista",
         'taskEdit.moveChecklistTop': "Mover para o início",

@@ -377,6 +377,8 @@ export const csOverrides: Record<string, string> = {
         'taskEdit.checklist': 'Kontrolní seznam',
         'savedFilters.saveTitle': "Uložit filtr",
         'savedFilters.namePlaceholder': "Název filtru",
+        'savedFilters.moveEarlier': "Posunout doleva",
+        'savedFilters.moveLater': "Posunout doprava",
         'taskEdit.dragChecklistItem': "Přetažením změnit pořadí",
         'taskEdit.checklistItemActions': "Akce položky seznamu",
         'taskEdit.moveChecklistTop': "Přesunout na začátek",

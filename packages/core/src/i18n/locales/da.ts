@@ -469,6 +469,8 @@ export const daOverrides: Record<string, string> = {
     'taskEdit.checklist': 'Tjekliste',
     'savedFilters.saveTitle': "Gem filter",
     'savedFilters.namePlaceholder': "Filternavn",
+    'savedFilters.moveEarlier': "Flyt til venstre",
+    'savedFilters.moveLater': "Flyt til højre",
     'taskEdit.dragChecklistItem': "Træk for at ændre rækkefølge",
     'taskEdit.checklistItemActions': "Handlinger for tjeklistepunkt",
     'taskEdit.moveChecklistTop': "Flyt øverst",

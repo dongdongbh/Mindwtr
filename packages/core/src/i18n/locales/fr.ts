@@ -1267,6 +1267,8 @@ export const frOverrides: Record<string, string> = {
         'settings.syncPreferenceSavedFilters': 'Filtres enregistrés',
         'savedFilters.saveTitle': "Enregistrer le filtre",
         'savedFilters.namePlaceholder': "Nom du filtre",
+        'savedFilters.moveEarlier': "Déplacer à gauche",
+        'savedFilters.moveLater': "Déplacer à droite",
         'settings.syncPreferenceAi': 'Paramètres de l’IA (modèles, fournisseurs)',
         'settings.syncPreferenceAiHint': 'Les clés API et les chemins de modèle locaux ne sont jamais synchronisés.',
         'settings.lastSync': 'Dernière synchronisation',

@@ -349,6 +349,8 @@ export const ruOverrides: Record<string, string> = {
         'taskEdit.checklist': 'Контрольный список',
         'savedFilters.saveTitle': "Сохранить фильтр",
         'savedFilters.namePlaceholder': "Название фильтра",
+        'savedFilters.moveEarlier': "Переместить влево",
+        'savedFilters.moveLater': "Переместить вправо",
         'taskEdit.dragChecklistItem': "Перетащите для изменения порядка",
         'taskEdit.checklistItemActions': "Действия с пунктом списка",
         'taskEdit.moveChecklistTop': "Переместить в начало",

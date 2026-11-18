@@ -26,6 +26,8 @@ export const nlOverrides: Record<string, string> = {
     "taskEdit.startAdvanceReminderLabel": "Voor de start",
     'savedFilters.saveTitle': "Filter opslaan",
     'savedFilters.namePlaceholder': "Filternaam",
+    'savedFilters.moveEarlier': "Naar links verplaatsen",
+    'savedFilters.moveLater': "Naar rechts verplaatsen",
     'taskEdit.dragChecklistItem': "Sleep om te ordenen",
     'taskEdit.checklistItemActions': "Acties voor checklistitem",
     'taskEdit.moveChecklistTop': "Naar bovenaan verplaatsen",

@@ -60,6 +60,7 @@ import {
   moveFocusReorderTask,
   planFocusFilterCriterionRemoval,
   planFocusFilterDelete,
+  planFocusFilterMove,
   planFocusFilterSave,
   planFocusGroupChange,
   planFocusSortChange,
@@ -87,6 +88,7 @@ import {
   TIME_ESTIMATE_OPTIONS,
   type Task,
   type FocusGroupBy,
+  type FocusFilterMoveDirection,
   type SavedFilter,
   type SortField,
 } from '@mindwtr/core';
@@ -676,6 +678,25 @@ export default function FocusScreen({ initialSavedFilterId }: { initialSavedFilt
       { cancelable: true },
     );
   }, [deleteSavedFilter, resolveText]);
+  const moveSavedFilter = useCallback((filter: SavedFilter, direction: FocusFilterMoveDirection) => {
+    updateSettingsFromLatest((latest) => planFocusFilterMove(latest.savedFilters, filter.id, direction), { write: updateSettings, read: () => useTaskStore.getState().settings }).catch(() => undefined);
+  }, [updateSettings]);
+  const openSavedFilterMenu = useCallback((filter: SavedFilter, canMoveEarlier: boolean, canMoveLater: boolean) => {
+    if (!canMoveEarlier && !canMoveLater) {
+      confirmDeleteSavedFilter(filter);
+      return;
+    }
+    Alert.alert(
+      filter.name,
+      undefined,
+      [
+        ...(canMoveEarlier ? [{ text: resolveText('savedFilters.moveEarlier', 'Move left'), onPress: () => moveSavedFilter(filter, 'earlier') }] : []),
+        ...(canMoveLater ? [{ text: resolveText('savedFilters.moveLater', 'Move right'), onPress: () => moveSavedFilter(filter, 'later') }] : []),
+        { text: resolveText('common.cancel', 'Cancel'), style: 'cancel' as const },
+      ],
+      { cancelable: true },
+    );
+  }, [confirmDeleteSavedFilter, moveSavedFilter, resolveText]);
   const removeAdvancedSavedFilterCriterion = useCallback((chipId: string) => {
     const nowIso = new Date().toISOString();
     updateSettingsFromLatest((latest) => planFocusFilterCriterionRemoval({
@@ -1599,19 +1620,28 @@ export default function FocusScreen({ initialSavedFilterId }: { initialSavedFilt
                     {resolveText('common.all', 'All')}
                   </Text>
                 </TouchableOpacity>
-                {savedFocusFilters.map((filter) => {
+                {savedFocusFilters.map((filter, index) => {
                   const selected = selections.activeSavedFilterId === filter.id;
                   const deleteAccessibilityLabel = `${resolveText('common.delete', 'Delete')} ${resolveText('savedFilters.label', 'saved filter')} ${filter.name}`;
+                  const canMoveEarlier = index > 0;
+                  const canMoveLater = index < savedFocusFilters.length - 1;
                   return (
                     <View key={filter.id} style={styles.savedFilterChipGroup}>
                       <TouchableOpacity
                         accessibilityRole="button"
                         accessibilityState={{ selected }}
-                        accessibilityActions={[{ name: 'delete', label: deleteAccessibilityLabel }]}
+                        accessibilityActions={[
+                          ...(canMoveEarlier ? [{ name: 'moveEarlier', label: resolveText('savedFilters.moveEarlier', 'Move left') }] : []),
+                          ...(canMoveLater ? [{ name: 'moveLater', label: resolveText('savedFilters.moveLater', 'Move right') }] : []),
+                          { name: 'delete', label: deleteAccessibilityLabel },
+                        ]}
                         onAccessibilityAction={(event) => {
-                          if (event.nativeEvent.actionName === 'delete') confirmDeleteSavedFilter(filter);
+                          const action = event.nativeEvent.actionName;
+                          if (action === 'delete') confirmDeleteSavedFilter(filter);
+                          else if (action === 'moveEarlier') moveSavedFilter(filter, 'earlier');
+                          else if (action === 'moveLater') moveSavedFilter(filter, 'later');
                         }}
-                        onLongPress={() => confirmDeleteSavedFilter(filter)}
+                        onLongPress={() => openSavedFilterMenu(filter, canMoveEarlier, canMoveLater)}
                         onPress={() => {
                           if (selected) {
                             clearFilters();

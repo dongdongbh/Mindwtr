@@ -2897,6 +2897,8 @@ export const zhHans: Record<string, string> = {
         'settings.syncPreferenceSavedFilters': '已保存筛选',
         'savedFilters.saveTitle': "保存筛选",
         'savedFilters.namePlaceholder': "筛选名称",
+        'savedFilters.moveEarlier': "左移",
+        'savedFilters.moveLater': "右移",
         'settings.backgroundSync': '后台同步',
         'settings.backgroundSyncDesc': '桌面端会在启动时、应用重新获得焦点时、Mindwtr 运行时每 15 分钟一次，以及任务/项目变更后短暂延迟同步。关闭到托盘可保持运行；开机自动启动可在登录后启动。退出应用会停止桌面后台同步。',
         'settings.attachmentsCleanupPendingDeletes': '待处理远程删除',

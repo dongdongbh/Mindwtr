@@ -2969,6 +2969,8 @@ export const en: Record<string, string> = {
         'settings.syncPreferenceSavedFilters': 'Saved filters',
         'savedFilters.saveTitle': "Save filter",
         'savedFilters.namePlaceholder': "Filter name",
+        'savedFilters.moveEarlier': "Move left",
+        'savedFilters.moveLater': "Move right",
         'settings.backgroundSync': 'Background sync',
         'settings.backgroundSyncDesc': 'Desktop sync runs on startup, when the app regains focus, every 15 minutes while Mindwtr is running, and shortly after task/project changes. Close-to-tray keeps it active; launch-at-startup can start it after sign-in. Quitting the app stops desktop background sync.',
         'settings.attachmentsCleanupPendingDeletes': 'Pending remote deletes',

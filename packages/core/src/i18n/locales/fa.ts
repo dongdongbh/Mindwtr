@@ -480,6 +480,8 @@ export const faOverrides: Record<string, string> = {
         'taskEdit.checklist': 'چک‌لیست',
         'savedFilters.saveTitle': "ذخیرهٔ فیلتر",
         'savedFilters.namePlaceholder': "نام فیلتر",
+        'savedFilters.moveEarlier': "انتقال به جلو",
+        'savedFilters.moveLater': "انتقال به عقب",
         'taskEdit.dragChecklistItem': "برای تغییر ترتیب بکشید",
         'taskEdit.checklistItemActions': "عملیات مورد فهرست",
         'taskEdit.moveChecklistTop': "انتقال به ابتدا",

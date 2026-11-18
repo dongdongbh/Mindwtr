@@ -13,6 +13,7 @@ import {
     moveFocusReorderTask,
     planFocusFilterCriterionRemoval,
     planFocusFilterDelete,
+    planFocusFilterMove,
     planFocusGroupChange,
     reconcileFocusReorderOrder,
     resolveFocusFilterState,
@@ -138,6 +139,29 @@ describe('Focus controls', () => {
         const filters: SavedFilter[] = [{ id: 's', name: 'S', view: 'focus', criteria: {}, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' }];
         expect(planFocusFilterDelete(filters, 's', '2026-02-01T00:00:00.000Z').savedFilters)
             .toEqual([{ ...filters[0], updatedAt: '2026-02-01T00:00:00.000Z', deletedAt: '2026-02-01T00:00:00.000Z' }]);
+    });
+
+    it('moves a saved Focus filter past its visible neighbor, leaving hidden filters in their slots', () => {
+        const at = '2026-01-01T00:00:00.000Z';
+        const make = (id: string, extra: Partial<SavedFilter> = {}): SavedFilter =>
+            ({ id, name: id.toUpperCase(), view: 'focus', criteria: {}, createdAt: at, updatedAt: at, ...extra });
+        const filters = [
+            make('a'),
+            make('ctx', { view: 'contexts' }),
+            make('gone', { deletedAt: at }),
+            make('b'),
+            make('c'),
+        ];
+        const ids = (list: SavedFilter[] | undefined) => list?.map((filter) => filter.id);
+
+        expect(ids(planFocusFilterMove(filters, 'b', 'earlier')?.savedFilters)).toEqual(['b', 'ctx', 'gone', 'a', 'c']);
+        expect(ids(planFocusFilterMove(filters, 'b', 'later')?.savedFilters)).toEqual(['a', 'ctx', 'gone', 'c', 'b']);
+        expect(planFocusFilterMove(filters, 'a', 'earlier')).toBeNull();
+        expect(planFocusFilterMove(filters, 'c', 'later')).toBeNull();
+        expect(planFocusFilterMove(filters, 'ctx', 'later')).toBeNull();
+        expect(planFocusFilterMove(undefined, 'a', 'later')).toBeNull();
+        expect(planFocusFilterMove(filters, 'a', 'later')?.savedFilters[3]).toBe(filters[0]);
+        expect(filters.map((filter) => filter.id)).toEqual(['a', 'ctx', 'gone', 'b', 'c']);
     });
 
     it('removes an advanced criterion from the stored filter, keeping what this build does not know', () => {
