@@ -24,6 +24,10 @@
     <string>$(MINDWTR_DROPBOX_APP_KEY)</string>
     <key>MindwtrDropboxRedirectURI</key>
     <string>$(MINDWTR_URL_SCHEME)://redirect</string>
+    <key>MindwtrAnalyticsHeartbeatURL</key>
+    <string>$(MINDWTR_ANALYTICS_HEARTBEAT_URL)</string>
+    <key>MindwtrReleaseVersion</key>
+    <string>$(MINDWTR_RELEASE_VERSION)</string>
     <key>MindwtrWatchEnabled</key>
     <true/>
     <key>MindwtrFeedbackEndpointURL</key>

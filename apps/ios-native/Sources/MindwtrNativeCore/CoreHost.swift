@@ -5398,6 +5398,7 @@ private final class Engine: @unchecked Sendable {
             faults?.configureRuntimeLifetime?(self, runtime, runtime.virtualMachine)
             #endif
             installBridge(runtime)
+            if let appInfo = NativeAppInfo.json { runtime.setObject(appInfo, forKeyedSubscript: "__mindwtrAppInfo" as NSString) }
             runtime.evaluateScript(source, withSourceURL: bundleURL)
             try checkException()
             guard let host = runtime.objectForKeyedSubscript("MindwtrHost"), !host.isUndefined, !host.isNull else {
@@ -26799,6 +26800,9 @@ private final class Engine: @unchecked Sendable {
             valid = Self.equalJSON(context, ["releaseCheck": "v1.3.9/ios-inbox-processing-editor-reload", "outcome": "refreshed"])
         case "Native iOS system search kept on app lock re-read":
             valid = Self.equalJSON(context, ["releaseCheck": "v1.3.9/ios-search-lock-reread", "outcome": "kept"])
+        case "Native iOS analytics heartbeat finished":
+            valid = Set(context.keys) == ["releaseCheck", "sent"] && context["releaseCheck"] as? String == "v1.3.9/ios-analytics-heartbeat"
+                && ["true", "false"].contains(context["sent"] as? String ?? "")
         case "Native iOS startup prompts read":
             valid = Set(context.keys) == ["releaseCheck", "outcome"] && context["releaseCheck"] as? String == "v1.3.9/ios-startup-prompts"
                 && ["onboarding", "donation", "announcement", "none", "held", "failed"].contains(context["outcome"] as? String ?? "")
@@ -27051,6 +27055,7 @@ private final class Engine: @unchecked Sendable {
               let edit = request["edit"] as? [String: Any], Set(edit.keys) == Set(["type", "value"]),
               let type = edit["type"] as? String,
               type == "debugLogging" && Self.isBoolean(edit["value"])
+                || type == "analyticsOptOut" && Self.isBoolean(edit["value"])
                 || type == "archiveRetentionDays" && Self.isInteger(edit["value"])
                     && (edit["value"] as? NSNumber).map({ (0.0...36_500.0).contains($0.doubleValue) }) == true else {
             throw HostFailure("INVALID_INPUT: Invalid Data setting request")

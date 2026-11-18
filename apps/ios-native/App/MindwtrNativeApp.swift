@@ -1120,6 +1120,15 @@ private struct NativeShareMailboxExportApp: App {
 
 struct MindwtrNativeApp: App {
     @UIApplicationDelegateAdaptor(NativeNotificationDelegate.self) private var notificationDelegate
+    init() {
+        #if DEBUG
+        let isDev = true
+        #else
+        let isDev = false
+        #endif
+        NativeAppInfo.install(NativeAppInfo.encode(info: Bundle.main.infoDictionary ?? [:], bundleIdentifier: Bundle.main.bundleIdentifier,
+            systemVersion: UIDevice.current.systemVersion, isPad: UIDevice.current.userInterfaceIdiom == .pad, isDev: isDev))
+    }
     @State private var model = NativeAppModel.shared
     @StateObject private var workspace = NativeAppModel.session
 
@@ -1452,7 +1461,7 @@ private struct AppLockRoot: View {
             }
         }
         .task(id: [startupPromptGate?.uuidString ?? "", startupPrompts.holding ? "held" : ""]) {
-            if let token = startupPromptGate { startupPrompts.begin(model, startup: token) }
+            if let token = startupPromptGate { model.sendAnalyticsHeartbeat(); startupPrompts.begin(model, startup: token) }
         }
         .allowsHitTesting(model.workspaceAdmissionsOpen || workspace.isActive)
         .background {

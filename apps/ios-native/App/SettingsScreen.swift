@@ -4268,6 +4268,7 @@ struct DiagnosticsCard: View {
     @State private var backupRestorePresented = false
     @State private var backupRestoreAnswered = false
     @State private var sandboxConfirm = false
+    @State private var analyticsOptOutConfirm = false
 
     private var archiveRetentionContent: some View {
         let card = model.archiveRetentionCard
@@ -4391,6 +4392,26 @@ struct DiagnosticsCard: View {
                 }
                 Text(model.diagnosticsLabels.text("title")).rnFont(18, .bold)
                     .accessibilityAddTraits(.isHeader).accessibilityIdentifier("diagnostics-title")
+                if let analytics = model.diagnosticsLabels["analytics"] as? CoreObject {
+                    let confirm = analytics.object("confirm")
+                    Toggle(isOn: Binding(get: { analytics.flag("value") }, set: { optedOut in
+                        if optedOut { analyticsOptOutConfirm = true } else { Task { await model.setAnalyticsOptOut(false) } }
+                    })) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(analytics.text("label")).rnFont(15, .semibold)
+                            Text(analytics.text("description")).rnFont(13).foregroundStyle(palette.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    .disabled(!model.diagnosticsToggleEnabled || owner != model.settingsDiagnosticsOwner)
+                    .accessibilityIdentifier("diagnostics-analytics-opt-out")
+                    .alert(confirm.text("title"), isPresented: $analyticsOptOutConfirm) {
+                        Button(confirm.text("keepLabel"), role: .cancel) {}
+                        Button(confirm.text("disableLabel")) { Task { await model.setAnalyticsOptOut(true) } }
+                    } message: {
+                        Text(confirm.text("message"))
+                    }
+                }
                 let logging = model.diagnosticsLabels.object("debugLogging")
                 Toggle(isOn: Binding(get: { logging.flag("value") }, set: { value in
                     Task { await model.setDiagnosticsDebugLogging(value) }

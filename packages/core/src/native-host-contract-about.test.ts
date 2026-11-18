@@ -59,7 +59,7 @@ function device(options: { storage?: Record<string, string>; github?: GithubAnsw
 }
 
 let current: ReturnType<typeof device> | null = null;
-async function openContract(bound: ReturnType<typeof device> | null, language = 'en', settings: AppSettings = {}) {
+async function openContract(bound: ReturnType<typeof device> | null, language = 'en', settings: AppSettings = {}, slot: 'about' | 'analyticsAbout' = 'about') {
     await flushPendingSave();
     resetForTests();
     let data = { tasks: [], projects: [], sections: [], areas: [], people: [], settings };
@@ -71,7 +71,7 @@ async function openContract(bound: ReturnType<typeof device> | null, language = 
     await useTaskStore.getState().fetchData({ throwOnError: true });
     await flushPendingSave();
     current = bound;
-    const contract = createNativeHostContract(bound ? { about: bound.host } : {});
+    const contract = createNativeHostContract(bound ? { [slot]: bound.host } : {});
     value(await contract.setLanguage({ storedLanguage: language, systemLocale: 'en-US' }));
     value(await contract.activate({ writeSafetyReady: true }));
     return contract;
@@ -338,6 +338,23 @@ describe('native host contract: Settings › About against RN\'s frozen fixture'
         contract = await openContract(unset);
         expect(value(await contract.sendAboutHeartbeat())).toEqual({ sent: false });
         expect(unset.events).toEqual([]);
+    });
+
+    it('sends the iOS heartbeat like RN iOS from a heartbeat-only host, iPad counted as a tablet', async () => {
+        const bound = device({ heartbeatUrl: 'https://analytics.example.test/', version: '1.4.0', releaseVersion: 'v1.4.0-rc.1' });
+        bound.host.app = { ...bound.host.app, platform: 'ios', platformVersion: '17.5.1', osRelease: '17.5.1', isPad: true };
+        const contract = await openContract(bound, 'en', {}, 'analyticsAbout');
+        expect(value(contract.getDataSettings()).diagnostics.analytics?.edit).toEqual({ type: 'analyticsOptOut', value: true });
+        expect(value(await contract.sendAboutHeartbeat())).toEqual({ sent: true });
+        const fetches = bound.events.filter((event) => event[0] === 'fetch');
+        expect(fetches).toHaveLength(1);
+        const sent = fetches[0][1] as { url: string; method: string; body: Record<string, string> };
+        expect(sent.url).toBe('https://analytics.example.test/');
+        expect(sent.method).toBe('POST');
+        expect(sent.body).toEqual({ distinct_id: 'made-id', profile_id: useTaskStore.getState().settings.analyticsProfileId, platform: 'ios',
+            channel: 'app-store', app_version: '1.4.0-rc.1', version: '1.4.0-rc.1', device_class: 'tablet', os_major: 'ios-17', locale: 'en-US' });
+        expect(value(await contract.sendAboutHeartbeat())).toEqual({ sent: false });
+        expect(bound.events.filter((event) => event[0] === 'fetch')).toHaveLength(1);
     });
 
     it('asks for the store review when RN would, recording the attempt first', async () => {

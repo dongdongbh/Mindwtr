@@ -18,7 +18,8 @@ const isAppInfo = (value: unknown): value is NativeAppInfo => {
         && typeof info.isFossBuild === 'boolean' && typeof info.isDev === 'boolean'
         && (typeof info.platformVersion === 'string' || typeof info.platformVersion === 'number')
         && (info.githubReleasesApi === undefined || typeof info.githubReleasesApi === 'string')
-        && (info.releaseCandidateUpdates === undefined || typeof info.releaseCandidateUpdates === 'boolean');
+        && (info.releaseCandidateUpdates === undefined || typeof info.releaseCandidateUpdates === 'boolean')
+        && (info.isPad === undefined || typeof info.isPad === 'boolean');
 };
 
 

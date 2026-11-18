@@ -754,6 +754,8 @@ let iosCaptureAIQuestion: { revision: string; request: { title: string; contexts
     settings: ReturnType<typeof useTaskStore.getState>['settings']; language: string } | null = null;
 const nativeAbout = nativeSync ? createNativeAbout(globalThis.__mindwtrAppInfo, keyValue, generateUUID, collectFeedbackDiagnostics) : null;
 const iosStartupPromptHost = globalThis.__mindwtrHostPlatform === 'ios' ? createIOSStartupPromptHost(keyValue) : null;
+const iosAnalyticsAbout = globalThis.__mindwtrHostPlatform === 'ios'
+    ? createNativeAbout(globalThis.__mindwtrAppInfo, keyValue, generateUUID, async () => null) : null;
 
 
 const nativeAppSearch = nativeSync && typeof native().appSearchInfo === 'function'
@@ -834,6 +836,7 @@ const contract = createNativeHostContract({
     },
     projectPickerGroups: true,
     ...(nativeAbout ? { about: nativeAbout } : {}),
+    ...(iosAnalyticsAbout ? { analyticsAbout: iosAnalyticsAbout } : {}),
     ...(iosStartupPromptHost ? { startupPromptHost: iosStartupPromptHost } : {}),
     ...(persistentCapture ? { persistentCapture } : {}) });
 
@@ -9301,6 +9304,9 @@ globalThis.MindwtrHost = {
     },
     beginStartupPrompts(json: string): string {
         return submit(async () => unwrap(await contract.beginStartupPrompts(completionJson(json, 2048))));
+    },
+    sendAboutHeartbeat(): string {
+        return submit(async () => unwrap(await contract.sendAboutHeartbeat()));
     },
     startupPromptAction(json: string): string {
         return submit(async () => unwrap(await contract.startupPromptAction(completionJson(json, 2048))));

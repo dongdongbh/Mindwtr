@@ -112,6 +112,9 @@ final class NativeClientDiagnosticsTests: XCTestCase {
                 result.append(("Native iOS reminder response", ["releaseCheck": "v1.3.5/ios-reminder-response", "action": action, "outcome": outcome]))
             }
         }
+        for sent in ["true", "false"] {
+            result.append(("Native iOS analytics heartbeat finished", ["releaseCheck": "v1.3.9/ios-analytics-heartbeat", "sent": sent]))
+        }
         for outcome in ["onboarding", "donation", "announcement", "none", "held", "failed"] {
             result.append(("Native iOS startup prompts read", ["releaseCheck": "v1.3.9/ios-startup-prompts", "outcome": outcome]))
         }
@@ -207,6 +210,12 @@ final class NativeClientDiagnosticsTests: XCTestCase {
             ["releaseCheck": "v1.3.5/ios-bulk-ui", "operation": "restore", "outcome": "confirmed", "taskId": "private"],
         ] {
             refused.append(try json(["Native iOS bulk operation acknowledged", json(context)]))
+        }
+        for context in [
+            ["releaseCheck": "v1.3.9/ios-analytics-heartbeat", "sent": "maybe"],
+            ["releaseCheck": "v1.3.9/ios-analytics-heartbeat", "sent": "true", "url": "private"],
+        ] {
+            refused.append(try json(["Native iOS analytics heartbeat finished", json(context)]))
         }
         for context in [
             ["releaseCheck": "v1.3.9/ios-startup-prompts", "outcome": "update-reminder"],

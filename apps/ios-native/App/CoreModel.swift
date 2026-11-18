@@ -2430,6 +2430,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     }
 
     private(set) var completedStartupToken: UUID?
+    @ObservationIgnored private var analyticsHeartbeatStarted = false
     private enum ForegroundSyncReason {
         case startup, resume, pull, retention, background, leave
         var command: String {
@@ -15573,6 +15574,11 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     func setDiagnosticsDebugLogging(_ value: Bool) async {
         guard diagnosticsToggleEnabled else { return }
         await submitDataSetting(["type": "debugLogging", "value": value])
+    }
+
+    func setAnalyticsOptOut(_ value: Bool) async {
+        guard diagnosticsToggleEnabled else { return }
+        await submitDataSetting(["type": "analyticsOptOut", "value": value])
     }
 
     func saveArchiveRetention(never: Bool = false) async {
@@ -48840,6 +48846,23 @@ extension CoreModel {
         ready && completedStartupToken != nil && !busy && !retryNeeded && error == nil && workspaceAdmissionsOpen
             && !appLock.concealed && !appLockActive && !appLockRecoveryPending && !settingsSyncRestartRequired
             && reminderCaptureHandoverOwner == nil && notificationResponseContextClean
+    }
+
+    func sendAnalyticsHeartbeat() {
+        guard !analyticsHeartbeatStarted, let currentHost = host, currentHost.workspaceMode == .personal,
+              let selection = try? NativeAppLaunch.selection.get() else { return }
+        switch selection {
+        case .production: break
+        case .standard, .isolated, .rehearsal: return
+        }
+        analyticsHeartbeatStarted = true
+        Task {
+            let sent = (try? await query("sendAboutHeartbeat"))?.flag("sent") == true
+            _ = try? await currentHost.call("logLine", argumentsJSON: json([
+                "Native iOS analytics heartbeat finished",
+                try json(["releaseCheck": "v1.3.9/ios-analytics-heartbeat", "sent": sent ? "true" : "false"]),
+            ]))
+        }
     }
 
     func startupPromptRead(_ method: String, _ request: CoreObject) async throws -> CoreObject {

@@ -1077,6 +1077,7 @@ export function createNativeHostContract(options: {
     ai?: NativeAIHost;
 
     about?: NativeAboutHost;
+    analyticsAbout?: NativeAboutHost;
 
     startupPromptHost?: NativeStartupPromptHost;
 
@@ -1951,13 +1952,13 @@ export function createNativeHostContract(options: {
             formatDate: (value) => createDateFormatter(dateFormatting())(value, 'P', value),
         }),
         ...createSavedSearchWriteMethods({ readiness, save, t: (key) => translate(key) }),
-        ...createAboutMethods({ readiness, t: () => translate, language: () => language, host: () => options.about ?? null }),
+        ...createAboutMethods({ readiness, t: () => translate, language: () => language, host: () => options.about ?? options.analyticsAbout ?? null }),
 
         ...createStartupPromptMethods({ readiness, save, t: () => translate, language: () => language, host: () => options.about ?? options.startupPromptHost ?? null }),
         ...createSettingsMethods({
             readiness,
             save,
-            about: () => options.about ?? null,
+            about: () => options.about ?? options.analyticsAbout ?? null,
             t: () => translate,
             language: () => language,
             systemLocale: () => systemLocale,

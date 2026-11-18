@@ -335,8 +335,8 @@ App Intents and Siri belong to the RN app. They are not in `apps/ios-native`. Th
 
 ## Diagnostics
 
-- Reach: Settings › Data › Diagnostics. Debug logging toggle, share log, clear log.
-- Selectors: `diagnostics-title`, `diagnostics-debug-logging`, `diagnostics-share`, `diagnostics-clear`
+- Reach: Settings › Data › Diagnostics. Anonymous usage stats opt-out (RN's daily heartbeat), debug logging toggle, share log, clear log.
+- Selectors: `diagnostics-title`, `diagnostics-analytics-opt-out`, `diagnostics-debug-logging`, `diagnostics-share`, `diagnostics-clear`
 - Code: `apps/ios-native/App/SettingsScreen.swift`, `apps/ios-native/Sources/MindwtrNativeCore/NativeDiagnosticsLogFile.swift`
 - Checks: `apps/ios-native/App/UITests/FoundationUITests.swift` (testTask197Diagnostics…)
 

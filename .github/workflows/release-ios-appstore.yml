@@ -147,6 +147,8 @@ jobs:
       ANALYTICS_RELEASE_VERSION: ${{ inputs.tag || github.ref_name }}
       DROPBOX_APP_KEY: ${{ vars.DROPBOX_APP_KEY || secrets.DROPBOX_APP_KEY }}
       MINDWTR_DROPBOX_APP_KEY: ${{ vars.DROPBOX_APP_KEY || secrets.DROPBOX_APP_KEY }}
+      MINDWTR_ANALYTICS_HEARTBEAT_URL: ${{ secrets.ANALYTICS_HEARTBEAT_URL }}
+      MINDWTR_RELEASE_VERSION: ${{ inputs.tag || github.ref_name }}
       FEEDBACK_ENDPOINT_URL: ${{ vars.FEEDBACK_ENDPOINT_URL || vars.VITE_FEEDBACK_ENDPOINT_URL || 'https://feedback.mindwtr.app' }}
       DONATION_PROMPT_ENABLED: "true"
       MINDWTR_WATCH_ENABLED: ${{ inputs.include_watch && 'true' || 'false' }}

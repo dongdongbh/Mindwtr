@@ -62,6 +62,7 @@ export type NativeAboutHost = {
         feedbackEndpointUrl: string;
         analyticsHeartbeatUrl: string;
         analyticsHeartbeatChannel: string;
+        isPad?: boolean;
 
         githubReleasesApi?: string;
 
@@ -134,6 +135,7 @@ export function nativeAboutHeartbeat(host: NativeAboutHost): { config: MobileAna
             platform: host.app.platform,
             platformVersion: host.app.platformVersion,
             osRelease: host.app.osRelease,
+            isPad: host.app.isPad,
             locale: host.locale(),
             isDev: host.app.isDev,
             storage: host.storage,
