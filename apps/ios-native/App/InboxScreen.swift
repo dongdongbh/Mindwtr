@@ -2316,8 +2316,12 @@ struct LongPressButton<Label: View>: View {
 
     @ViewBuilder var body: some View {
         if #available(iOS 18.0, *) {
-            Button(action: action) { label() }
+            label()
+                .onTapGesture(perform: action)
                 .modifier(TaskCardStackLongPress(identity: identity, enabled: enabled, action: longPress))
+                .accessibilityElement(children: .combine)
+                .accessibilityAddTraits(.isButton)
+                .accessibilityAction { action() }
         } else {
             label()
                 .onTapGesture(perform: action)
