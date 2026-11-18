@@ -61,11 +61,22 @@ for (const theme of ['dark', 'light']) {
         await page.keyboard.press('Escape');
 
         await page.screenshot({ path: testInfo.outputPath(`projects-${theme}-compact.png`) });
+        await sidebar.getByRole('button', { name: 'Collapse projects panel' }).click();
+        const expandPanel = workspace.locator('header').getByRole('button', { name: 'Expand projects panel' });
+        await expect(expandPanel).toBeVisible();
+        const panelTop = await expandPanel.evaluate(button => button.getBoundingClientRect().top);
         const notes = workspace.locator('[data-project-notes-disclosure]');
         await expect(notes).toHaveAttribute('aria-expanded', 'false');
         await notes.click();
         await expect(workspace.getByText('Support partial refunds without a manual workaround.', { exact: true })).toBeVisible();
+        const details = workspace.locator('header').getByRole('button', { name: 'Details', exact: true });
+        await details.click();
+        await expect(workspace.getByText('Review Date', { exact: true })).toBeVisible();
+        expect(await expandPanel.evaluate(button => button.getBoundingClientRect().top)).toBe(panelTop);
+        await details.click();
         await notes.click();
+        await expandPanel.click();
+        await expect(sidebar).toBeVisible();
         await expect(workspace.getByText('Support partial refunds without a manual workaround.', { exact: true })).toHaveCount(0);
 
         const sectionMenu = workspace.getByRole('button', { name: 'More options: Design', exact: true });

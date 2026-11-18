@@ -13,6 +13,7 @@ type ProjectProgress = {
 };
 
 type ProjectDetailsHeaderProps = {
+    expandProjectsButton?: ReactNode;
     primaryAction?: ReactNode;
     project: Project;
     projectColor: string;
@@ -44,6 +45,7 @@ const MENU_ITEM_CLASS = 'flex w-full items-center gap-2 rounded px-3 py-2 text-l
 
 
 export function ProjectDetailsHeader({
+    expandProjectsButton,
     primaryAction,
     project,
     projectColor,
@@ -182,6 +184,7 @@ export function ProjectDetailsHeader({
             <div className="project-details-header__content flex items-start justify-between gap-3">
                 <div className="project-details-header__titleGroup flex min-w-0 flex-1 flex-col gap-1.5">
                     <div className="flex min-w-0 items-start gap-2">
+                        {expandProjectsButton}
                         <span
                             className="mt-[1.1rem] h-3 w-3 flex-none rounded-full border border-border"
                             style={{ backgroundColor: projectColor }}

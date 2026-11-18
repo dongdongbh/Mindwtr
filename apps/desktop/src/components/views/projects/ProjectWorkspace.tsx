@@ -1738,21 +1738,23 @@ export function ProjectWorkspace({
         />
     ) : null;
 
+    const expandProjectsButton = showProjectsSidebarToggle ? (
+        <button
+            type="button"
+            onClick={onToggleProjectsSidebar}
+            className="inline-flex h-9 w-9 flex-none items-center justify-center rounded-md border border-border bg-background text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+            title={expandProjectsSidebarLabel}
+            aria-label={expandProjectsSidebarLabel}
+            aria-expanded={false}
+        >
+            <PanelLeftOpen className="h-4 w-4" />
+        </button>
+    ) : null;
+
     const projectSearch = (
         <div className="min-w-0 flex-1">
             <div data-project-search-row className="flex flex-col gap-2 sm:flex-row">
-                {showProjectsSidebarToggle && (
-                    <button
-                        type="button"
-                        onClick={onToggleProjectsSidebar}
-                        className="inline-flex h-9 w-9 flex-none items-center justify-center rounded-md border border-border bg-background text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
-                        title={expandProjectsSidebarLabel}
-                        aria-label={expandProjectsSidebarLabel}
-                        aria-expanded={false}
-                    >
-                        <PanelLeftOpen className="h-4 w-4" />
-                    </button>
-                )}
+                {!selectedProject && expandProjectsButton}
                 <div className="relative min-w-0 flex-1">
                     <Search aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                     <input
@@ -1802,6 +1804,7 @@ export function ProjectWorkspace({
                                 </div>
                             )}
                             <ProjectDetailsHeader
+                                expandProjectsButton={expandProjectsButton}
                                 primaryAction={projectAddTaskButton}
                                 project={selectedProject}
                                 projectColor={getProjectColor(selectedProject, areaById, DEFAULT_AREA_COLOR, settings?.theme)}

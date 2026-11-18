@@ -95,7 +95,7 @@ Source: `apps/desktop/src` (Tauri + React). Labels come from `packages/core/src/
 
 - Completion buttons retain concentric hover/focus rings at every density. Check: `e2e/task-completion-alignment.spec.ts`.
 
-- Reach: Sidebar › Projects. The projects panel has New project, Active Projects, Someday / Waiting, and Closed groups, plus a Tag filter. Select a project to open its workspace (Project Notes, Add Section, Add Task, Columns layout, Complete, Duplicate, Cancel project, Convert to section…).
+- Reach: Sidebar › Projects. The projects panel has New project, Active Projects, Someday / Waiting, and Closed groups, plus a Tag filter. When the panel is collapsed, use Expand projects panel beside the selected project title to reopen it. Select a project to open its workspace (Project Notes, Add Section, Add Task, Columns layout, Complete, Duplicate, Cancel project, Convert to section…).
 - Shortcuts: `gp` (Vim, Standard), `Alt+P` (Emacs). `j`/`k` move through the project list when it has focus.
 - Code: `apps/desktop/src/components/views/ProjectsView.tsx`, `apps/desktop/src/components/views/projects/ProjectsSidebar.tsx`, `apps/desktop/src/components/views/projects/ProjectWorkspace.tsx`, `apps/desktop/src/components/views/projects/ProjectDetailsHeader.tsx`, `apps/desktop/src/components/views/projects/ProjectDetailsFields.tsx`, `apps/desktop/src/components/views/projects/ProjectCalendarReference.tsx`, `apps/desktop/src/components/views/projects/ProjectNotesSection.tsx`, `apps/desktop/src/components/views/projects/ProjectToSectionDialog.tsx`, `apps/desktop/src/components/GettingStartedActions.tsx`
 - Selectors: `project-calendar-reference`
