@@ -188,6 +188,28 @@ describe('native editor resume opening-base check', () => {
         expect(env.writes()).toBe(writes);
     });
 
+    it('accepts a draft rebased onto a committed checklist reset and refuses its pre-reset bases', async () => {
+        const completedAt = new Date().toISOString();
+        const checked = [item('first', 'One', true), item('second', 'Two')];
+        const env = await open(task({ status: 'done', completedAt, isFocusedToday: false, checklist: checked }));
+        const doneBase = { title: 'Opening', status: 'done', focusedToday: false, completedAt };
+        expect(await env.host.checkTaskEditorResume({ id: 'resume', touchedBase: doneBase, checklistBase: checked }))
+            .toMatchObject({ ok: true, value: { kind: 'ready' } });
+        const request = { id: 'resume', requestId: '8f14e45f-ceea-4e7a-9c0e-6d3c7a1b2c3d', checklistBase: checked };
+        const prepared = env.host.prepareTaskChecklistReset(request);
+        expect(prepared).toMatchObject({ ok: true, value: { kind: 'prepared' } });
+        if (!prepared.ok || prepared.value.kind !== 'prepared') return;
+        const result = await env.host.commitPreparedTaskChecklistWrite({ request, prepared: prepared.value.prepared });
+        expect(result).toMatchObject({ ok: true, value: { status: 'next', completedAt: null, isFocusedToday: false,
+            checklistBase: checked.map((entry) => ({ ...entry, isCompleted: false })) } });
+        expect(await env.host.checkTaskEditorResume({ id: 'resume', touchedBase: doneBase, checklistBase: checked }))
+            .toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+        expect(await env.host.checkTaskEditorResume({ id: 'resume',
+            touchedBase: { title: 'Opening', status: 'next', focusedToday: false, completedAt: '' },
+            checklistBase: checked.map((entry) => ({ ...entry, isCompleted: false })) }))
+            .toMatchObject({ ok: true, value: { kind: 'ready' } });
+    });
+
     it('returns retryable failure while persistence is queued, without flushing it', async () => {
         const env = await open();
         expect((await useTaskStore.getState().updateTask('resume', { description: 'Queued' })).success).toBe(true);

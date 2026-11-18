@@ -3239,6 +3239,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     private var taskChecklistWriteKind: String?
     private var taskChecklistWriteRequest: String?
     private var taskChecklistResetAcknowledgment: CoreObject?
+    private var taskChecklistResetPending = false
     private(set) var taskChecklistReadPending = false
     private var taskOriginalDraft: CoreObject = [:]
     private var taskOriginalSchedule: CoreObject = [:]
@@ -3393,6 +3394,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
 
     private var focusInitialReadFailures = ProcessInfo.processInfo.arguments.contains("--native-focus-initial-read-failure") ? 2 : 0
     private var taskOwnedCheckpointTestFailure = false
+    private var taskChecklistResetTestSkipRebase = false
     #endif
     private var focusGeneration = 0
     private var focusReadTask: Task<Void, Never>?
@@ -4917,6 +4919,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
             payload["checklistBase"] = taskOriginalChecklist
             payload["checklistValue"] = taskChecklist
         }
+        if taskChecklistResetPending { payload["checklistResetPending"] = true }
         if taskRecoveryAttachmentsOwned {
             payload["version"] = 2
             payload["attachmentsBase"] = taskOriginalAttachments
@@ -7808,6 +7811,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
                     entityLinkTestReadEnabled = ["read-latest", "read-background"].contains(
                         ProcessInfo.processInfo.environment["MINDWTR_ENTITY_TEST_DELIVERY"] ?? "")
                     taskOwnedCheckpointTestFailure = arguments.contains("--native-owned-checkpoint-failure")
+                    taskChecklistResetTestSkipRebase = arguments.contains("--native-checklist-reset-skip-rebase")
                     if let position = arguments.firstIndex(of: "--native-app-lock-auth"), position + 1 < arguments.count {
                         appLock.testOutcomes = arguments[position + 1].split(separator: ",").map(String.init)
                     }
@@ -39836,6 +39840,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
                 check["attachments"] = editedAttachments
             }
             let ready: CoreObject
+            var resetApplied = false
             if owned {
                 let envelope = try decode(try await host.checkAttachmentDraftResumeV3(expectedSession: snapshot.sessionID,
                     expectedGeneration: snapshot.generation))
@@ -39845,7 +39850,20 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
                     throw CancellationError()
                 }
                 ready = envelope.object("ready")
-            } else { ready = try await query("taskEditorResumeCheck", [try json(check)]) }
+            } else {
+                do { ready = try await query("taskEditorResumeCheck", [try json(check)]) }
+                catch let error where payload.flag("checklistResetPending")
+                    && error.localizedDescription.hasPrefix("STALE_REVISION:") {
+                    check = taskChecklistResetCheck(check)
+                    resetApplied = true
+                    ready = try await query("taskEditorResumeCheck", [try json(check)])
+                }
+            }
+            let openingBase = check.object("touchedBase")
+            var restoredEdits = edited
+            if resetApplied, taskDraftValuesEqual(edited["status"], touchedBase["status"]) {
+                for field in taskRecoveryLifecycleFields where openingBase[field] != nil { restoredEdits[field] = openingBase[field] }
+            }
             guard ready.text("kind") == "ready", let fresh = ready["freshDraft"] as? CoreObject,
                   let freshChecklist = ready["freshChecklistBase"] as? [CoreObject],
                   let freshAttachments = ready["freshAttachmentsBase"] as? [CoreObject],
@@ -39866,17 +39884,18 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
             try requireOwnedRestore()
             let restoredChecklist = payload["checklistValue"] as? [CoreObject] ?? freshChecklist
             let restoredEditor: CoreObject
-            if edited.isEmpty { restoredEditor = freshEditor }
+            if restoredEdits.isEmpty { restoredEditor = freshEditor }
             else {
                 restoredEditor = try await query("editDraft", [try json([
                     "id": snapshot.taskID, "draft": freshEditor.object("draft"),
                     "checklist": restoredChecklist,
-                    "edit": ["type": "fields", "patch": edited]])])
+                    "edit": ["type": "fields", "patch": restoredEdits]])])
                 try requireOwnedRestore()
             }
-            let checklistResult = try await query("checklistEdit", [try json([
-                "id": snapshot.taskID, "draft": restoredEditor.object("draft"),
-                "checklist": restoredChecklist])])
+            var checklistRestore: CoreObject = ["id": snapshot.taskID, "draft": restoredEditor.object("draft"),
+                                                "checklist": restoredChecklist]
+            if resetApplied { checklistRestore["edit"] = ["kind": "uncheckAll"] }
+            let checklistResult = try await query("checklistEdit", [try json(checklistRestore)])
             try requireOwnedRestore()
             guard let checklist = checklistResult["checklist"] as? [CoreObject],
                   !checklistResult.object("field").isEmpty else { throw CocoaError(.coderReadCorrupt) }
@@ -39908,11 +39927,11 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
             taskRecoveryAttachmentsOwned = hasAttachments
             taskEditor = finalEditor
             taskOriginalDraft = fresh
-            for (field, value) in touchedBase { taskOriginalDraft[field] = value }
+            for (field, value) in openingBase { taskOriginalDraft[field] = value }
             taskOriginalSchedule = payload.object("scheduleBase").isEmpty ? freshSchedule : payload.object("scheduleBase")
             taskOriginalRecurrence = payload.object("recurrenceBase").isEmpty ? freshRecurrence : payload.object("recurrenceBase")
             taskChecklistLoaded = true
-            taskOriginalChecklist = payload["checklistBase"] as? [CoreObject] ?? freshChecklist
+            taskOriginalChecklist = check["checklistBase"] as? [CoreObject] ?? freshChecklist
             taskChecklist = checklist
             taskOriginalAttachments = savedAttachments ?? freshAttachments
             taskAttachments = editedAttachments ?? freshAttachments
@@ -39961,6 +39980,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
             taskScheduleFailedID = payload["scheduleFailedID"] as? Int
             taskScheduleFailure = taskScheduleFailedID == nil ? nil : CocoaError(.coderReadCorrupt)
             taskRecoveryHydrating = false
+            if resetApplied { checkpointTaskDraft() }
             if !owned { taskRecoveryGateVisible = false }
             taskRecoveryConflict = nil
             taskRecoveryReviewOptions = [:]
@@ -40063,6 +40083,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         taskChecklistWriteRequest = nil
         taskChecklistResetAcknowledgment = nil
         taskChecklistReadPending = false
+        taskChecklistResetPending = false
     }
 
     func setTaskChecklistInput(_ index: Int, text: String) {
@@ -40192,18 +40213,29 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         taskChecklistReadPending = false
         taskChecklistResetAcknowledgment = nil
         taskError = nil
+        rebaseTaskDraftAfterChecklistReset()
         Task { await readTaskView() }
     }
 
     func resetTaskChecklist() async {
         guard taskPresented, taskChecklistLoaded, !taskEditor.flag("readOnly"), !busy, !retryNeeded,
               taskChecklistWriteKind == nil, !taskChecklistReadPending else { return }
-        if taskRecoverySnapshot != nil {
-            guard !taskDirty else {
+        if taskRecoverySnapshot != nil, taskDirty {
+            guard !taskHasActiveAttachmentOwner else {
                 taskRecoveryConflict = "Save or discard this task draft before resetting its checklist."
                 taskRecoveryGateVisible = true
                 return
             }
+            let taskID = viewedTaskID, checklistSession = taskChecklistSession
+            taskChecklistResetPending = true
+            checkpointTaskDraft()
+            await flushTaskDraftCheckpoint()
+            guard taskRecoveryCheckpointError == nil, taskPresented, viewedTaskID == taskID,
+                  taskChecklistSession == checklistSession, !busy, !retryNeeded else {
+                if taskChecklistSession == checklistSession { taskChecklistResetPending = false }
+                return
+            }
+        } else if taskRecoverySnapshot != nil {
             let owned = taskHasActiveAttachmentOwner
             let currentHost = host, taskID = viewedTaskID, caller = selectedSurface
             let oldSession = taskRecoverySession, tab = taskInitialTab
@@ -40251,10 +40283,38 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
             if isDefiniteRejection(error) {
                 taskChecklistWriteKind = nil
                 taskChecklistWriteRequest = nil
+                taskChecklistResetPending = false
             }
             retryNeeded = taskChecklistWriteKind != nil
             taskError = error.localizedDescription
         }
+    }
+
+    private func taskChecklistResetCheck(_ check: CoreObject) -> CoreObject {
+        var reset = check
+        if let base = check["checklistBase"] as? [CoreObject] {
+            reset["checklistBase"] = base.map { item in
+                var unchecked = item
+                unchecked["isCompleted"] = false
+                return unchecked
+            }
+        }
+        var opening = check.object("touchedBase")
+        if opening.text("status") == "done" {
+            opening["status"] = "next"
+            opening["completedAt"] = ""
+            opening["focusedToday"] = false
+            reset["touchedBase"] = opening
+        }
+        return reset
+    }
+
+    private func rebaseTaskDraftAfterChecklistReset() {
+        #if DEBUG && targetEnvironment(simulator)
+        if taskChecklistResetTestSkipRebase { return }
+        #endif
+        taskChecklistResetPending = false
+        checkpointTaskDraftAfterCoreEdit()
     }
 
     func retryTaskChecklistRead() async {

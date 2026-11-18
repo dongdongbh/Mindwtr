@@ -6699,6 +6699,8 @@ final class FoundationUITests: XCTestCase {
         XCTAssertEqual(title.value as? String, "Unsaved checklist title")
         boardTap(app, "task-view-close")
         boardTap(app, "task-editor-discard")
+        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: app.buttons["task-view-close"])
+        waitForExpectations(timeout: 15)
         app.terminate(); app.launch()
         boardEnabled(app.buttons["Checklist saved"], timeout: 30)
         app.buttons["Checklist saved"].tap()
@@ -6719,8 +6721,9 @@ final class FoundationUITests: XCTestCase {
         boardTap(app, "task-complete")
         boardTap(app, "tab-menu")
         boardTap(app, "menu-history")
-        boardEnabled(app.buttons["Checklist saved"])
-        app.buttons["Checklist saved"].tap()
+        let doneRow = app.collectionViews["done-scroll"].buttons["Checklist saved"]
+        boardEnabled(doneRow)
+        doneRow.tap()
         boardTap(app, "task-mode-edit")
         showChecklist()
 
@@ -6729,8 +6732,82 @@ final class FoundationUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["task-view-error"].exists)
         boardTap(app, "task-view-close")
         XCTAssertFalse(app.buttons["task-editor-discard"].exists)
-        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: app.buttons["Checklist saved"])
+        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: doneRow)
         waitForExpectations(timeout: 10)
+    }
+
+    func testChecklistResetWithUnsavedDraftRecoversAfterCrashBeforeRebase() {
+        let app = XCUIApplication()
+        let library = UUID().uuidString.lowercased()
+        app.launchArguments = ["--native-ui-test-library", library, "--native-checklist-reset-skip-rebase"]
+        print("Checklist reset crash isolated library: " + library)
+        app.launch(); defer { app.terminate() }
+        boardEnabled(app.buttons["capture-open"], timeout: 30)
+        boardTap(app, "capture-open")
+        app.textViews["capture-input"].typeText("Reset crash saved")
+        boardTap(app, "capture-save")
+        boardEnabled(app.buttons["Reset crash saved"])
+        app.buttons["Reset crash saved"].tap()
+        boardTap(app, "task-mode-edit")
+        let scroll = app.scrollViews["task-editor-scroll"]
+        let title = app.descendants(matching: .any).matching(identifier: "task-editor-title").firstMatch
+        func input(_ index: Int) -> XCUIElement { app.textFields["task-checklist-input-\(index)"] }
+        func editorTap(_ id: String) {
+            revealPagedElement(app, app.buttons[id], in: scroll)
+            boardTap(app, id)
+        }
+        func showChecklist() {
+            if !app.buttons["task-checklist-add"].exists { editorTap("task-editor-section-details") }
+            revealPagedElement(app, app.buttons["task-checklist-add"], in: scroll)
+        }
+        func revealTitle() {
+            for _ in 0..<12 {
+                if title.exists && title.isHittable && title.frame.minY >= scroll.frame.minY
+                    && title.frame.maxY <= scroll.frame.maxY { break }
+                scroll.swipeDown()
+            }
+            revealPagedElement(app, title, in: scroll)
+        }
+        showChecklist()
+        editorTap("task-checklist-add")
+        revealPagedElement(app, input(0), in: scroll)
+        app.typeText("First action")
+        editorTap("task-checklist-toggle-0")
+        boardTap(app, "task-editor-save")
+        boardEnabled(app.buttons["Reset crash saved"])
+        app.buttons["Reset crash saved"].tap()
+        boardTap(app, "task-mode-edit")
+        showChecklist()
+        XCTAssertEqual(app.buttons["task-checklist-toggle-0"].value as? String, "Done")
+        revealTitle()
+        replaceTextView(title, with: "Reset crash draft")
+        editorTap("task-checklist-add")
+        revealPagedElement(app, input(1), in: scroll)
+        app.typeText("Unsaved second action")
+        editorTap("task-checklist-reset")
+        boardEnabled(app.buttons["task-editor-save"])
+        XCTAssertFalse(app.staticTexts["task-recovery-conflict"].exists)
+        XCTAssertNotEqual(app.buttons["task-checklist-toggle-0"].value as? String, "Done")
+        XCTAssertEqual(input(1).value as? String, "Unsaved second action")
+        app.terminate(); app.launch()
+        boardEnabled(title, timeout: 30)
+        XCTAssertEqual(title.value as? String, "Reset crash draft")
+        showChecklist()
+        XCTAssertEqual(input(0).value as? String, "First action")
+        XCTAssertEqual(input(1).value as? String, "Unsaved second action")
+        XCTAssertNotEqual(app.buttons["task-checklist-toggle-0"].value as? String, "Done")
+        XCTAssertFalse(app.staticTexts["task-recovery-conflict"].exists)
+        boardTap(app, "task-view-close")
+        boardTap(app, "task-editor-discard")
+        boardEnabled(app.buttons["Reset crash saved"])
+        app.terminate(); app.launch()
+        boardEnabled(app.buttons["Reset crash saved"], timeout: 30)
+        app.buttons["Reset crash saved"].tap()
+        boardTap(app, "task-mode-edit")
+        showChecklist()
+        XCTAssertEqual(input(0).value as? String, "First action")
+        XCTAssertFalse(input(1).exists)
+        XCTAssertNotEqual(app.buttons["task-checklist-toggle-0"].value as? String, "Done")
     }
 
     func testProcessInboxUndoNormalPublicDecisionsAndColdRead() {
