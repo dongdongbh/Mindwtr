@@ -1165,6 +1165,7 @@ export const deOverrides: Record<string, string> = {
         'settings.notifications': 'Benachrichtigungen',
         'settings.notificationsDesc': 'Aktiviere Aufgaben-Erinnerungen und tägliche Zusammenfassungen.',
         'settings.notificationsEnable': 'Benachrichtigungen aktivieren',
+        'settings.reminderSoundVibration': 'Ton und Vibration für Erinnerungen',
         'settings.appIconBadge': 'App-Symbolkennzeichen',
         'settings.appIconBadgeHint': 'Zählt Aufgaben auf diesem Gerät, die heute fällig oder überfällig sind. Wird aktualisiert, wenn Mindwtr läuft; bei geschlossener App kann die Zahl veraltet sein.',
         'settings.appIconBadgeDenied': 'Erlaube Kennzeichen für Mindwtr in den iOS-Einstellungen, um diese Anzahl anzuzeigen.',

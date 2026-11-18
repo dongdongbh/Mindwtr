@@ -15,6 +15,7 @@ val LABEL_KEYS = listOf(
     "nav.addTask", "quickAdd.inputLabel", "quickAdd.bulkImportTextFile", "quickAdd.bulkImportTextFileLabel", "common.more", "common.retry", "common.done", "common.edit", "common.back",
     "agenda.laterToday",
 
+    "settings.reminderSoundVibration", "settings.pomodoroAlertPermissionAction", "settings.feedback.actionFailed",
     "settings.lastSyncError", "settings.feedbackFailed",
     "common.cancel", "common.close", "common.save", "common.ok", "common.clear", "common.discard", "settings.dateOnlyReminderChooseTime",
 

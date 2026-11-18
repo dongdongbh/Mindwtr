@@ -1656,6 +1656,7 @@ export const faOverrides: Record<string, string> = {
         'settings.notifications': 'اعلان‌ها',
         'settings.notificationsDesc': 'یادآوری برای کارهایی با تاریخ شروع یا سررسید را فعال کنید.',
         'settings.notificationsEnable': 'یادآوری کارها',
+        'settings.reminderSoundVibration': 'صدا و لرزش یادآورها',
         'settings.appIconBadge': 'نشان نماد برنامه',
         'settings.appIconBadgeHint': 'کارهای سررسید امروز و عقب‌افتاده را در این دستگاه می‌شمارد. هنگام اجرای Mindwtr به‌روز می‌شود؛ وقتی برنامه بسته است، ممکن است تعداد به‌روز نباشد.',
         'settings.appIconBadgeDenied': 'برای فعال کردن این شمارش، نشان‌ها را برای Mindwtr در تنظیمات iOS مجاز کنید.',

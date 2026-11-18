@@ -1608,6 +1608,7 @@ export const zhHant: Record<string, string> = {
         'settings.notifications': '通知',
         'settings.notificationsDesc': '爲有開始/截止日期的任務啓用提醒。',
         'settings.notificationsEnable': '任務提醒',
+        'settings.reminderSoundVibration': '提醒音效與震動',
         'settings.appIconBadge': 'App 圖示標記',
         'settings.appIconBadgeHint': '統計此裝置上今天到期和已逾期的任務。Mindwtr 執行時更新；App 關閉期間，數量可能不是最新的。',
         'settings.appIconBadgeDenied': '請在 iOS 設定中允許 Mindwtr 使用標記，以啟用此計數。',

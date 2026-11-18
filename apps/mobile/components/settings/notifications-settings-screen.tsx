@@ -13,6 +13,7 @@ import {
     tFallback,
 } from '@mindwtr/core';
 
+import { openReminderChannelSettings } from '@/lib/reminder-channel-settings';
 import { requestNotificationPermission, startMobileNotifications } from '@/lib/notification-service';
 import {
     applyPersistentCaptureNotification,
@@ -222,6 +223,17 @@ export function NotificationsSettingsScreen() {
                     {timeRow(reminders.dateOnlyStartTime)}
                     {toggleRow(reminders.dueReminders)}
                     {timeRow(reminders.dateOnlyDueTime)}
+
+                    {Platform.OS === 'android' && Number(Platform.Version) >= 26 && (
+                        <SettingRow
+                            divider
+                            accessibilityRole="button"
+                            label={t('settings.reminderSoundVibration')}
+                            description={t('settings.pomodoroAlertPermissionAction')}
+                            onPress={() => openReminderChannelSettings().catch(() =>
+                                Alert.alert(t('common.error'), t('settings.feedback.actionFailed')))}
+                        />
+                    )}
 
                     {showExactAlarmNotice && reminders.exactAlarmNotice && (
                         <ExactAlarmNoticeRow

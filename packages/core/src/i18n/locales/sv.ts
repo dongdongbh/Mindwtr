@@ -1650,6 +1650,7 @@ export const svOverrides: Record<string, string> = {
         'settings.exportSuccess': 'Data exporterades!',
         'settings.notifications': 'Aviseringar',
         'settings.notificationsDesc': 'Aktivera påminnelser för uppgifter med start- eller förfallodatum.',
+        'settings.reminderSoundVibration': 'Ljud och vibration för påminnelser',
         'settings.appIconBadge': 'Bricka på appikonen',
         'settings.appIconBadgeHint': 'Räknar uppgifter på den här enheten som förfaller i dag eller är försenade. Uppdateras när Mindwtr körs; antalet kan vara inaktuellt när appen är stängd.',
         'settings.appIconBadgeDenied': 'Tillåt brickor för Mindwtr i iOS-inställningarna för att aktivera räknaren.',

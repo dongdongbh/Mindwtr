@@ -1355,6 +1355,7 @@ export const frOverrides: Record<string, string> = {
         'settings.notifications': 'Notifications',
         'settings.notificationsDesc': 'Activez les rappels pour les tâches avec des dates de début ou d’échéance.',
         'settings.notificationsEnable': 'Rappels de tâches',
+        'settings.reminderSoundVibration': 'Son et vibration des rappels',
         'settings.appIconBadge': 'Pastille sur l’icône de l’app',
         'settings.appIconBadgeHint': 'Compte les tâches dues aujourd’hui et en retard sur cet appareil. Se met à jour quand Mindwtr fonctionne ; le nombre peut être périmé lorsque l’app est fermée.',
         'settings.appIconBadgeDenied': 'Autorisez les pastilles pour Mindwtr dans les Réglages iOS pour activer ce compteur.',

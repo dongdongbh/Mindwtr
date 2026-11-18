@@ -93,6 +93,16 @@ internal fun NotificationsSettings(model: InboxViewModel, view: JSONObject) = wi
         reminders.getJSONObject("dateOnlyDueTime").let { row -> Pressable(row) { offOrTime = row } }
 
 
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            val label = t("settings.reminderSoundVibration")
+            SettingRow(label, t("settings.pomodoroAlertPermissionAction"), true,
+                Modifier.clickable(role = Role.Button) {
+                    runCatching { CoreNotifications.openReminderChannelSettings(context) }.onFailure {
+                        android.widget.Toast.makeText(context, t("settings.feedback.actionFailed"), android.widget.Toast.LENGTH_LONG).show()
+                    }
+                })
+        }
+
         reminders.optJSONObject("exactAlarmNotice")?.let { notice ->
             val denied = remember(model.resumes) { ReminderAlarms.exactAlarmsDenied(context) }
             if (denied) SettingRow(notice.getString("label"), notice.getString("description"), true, Modifier.testTag("exact-alarm-notice")) {

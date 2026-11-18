@@ -139,6 +139,14 @@ internal object CoreNotifications {
     }
 
 
+    fun openReminderChannelSettings(context: Context) {
+        ensureChannel(context, REMINDER_CHANNEL, "Mindwtr reminders", Color.rgb(59, 130, 246))
+        context.startActivity(Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
+            .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+            .putExtra(Settings.EXTRA_CHANNEL_ID, REMINDER_CHANNEL))
+        Log.i(CoreHost.TAG, "Reminder channel settings opened releaseCheck=v1.3.9/reminder-channel-settings")
+    }
+
     private fun ensureChannel(context: Context, id: String, name: String, color: Int?) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager

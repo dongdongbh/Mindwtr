@@ -1633,6 +1633,7 @@ export const ukOverrides: Record<string, string> = {
     "settings.notifications": "Сповіщення",
     "settings.notificationsDesc": "Увімкніть нагадування для завдань із датами початку або виконання.",
     "settings.notificationsEnable": "Нагадування про завдання",
+        'settings.reminderSoundVibration': 'Звук і вібрація нагадувань',
     'settings.appIconBadge': 'Лічильник на іконці застосунку',
     'settings.appIconBadgeHint': 'Рахує завдання на цьому пристрої з терміном на сьогодні та прострочені. Оновлюється під час роботи Mindwtr; коли застосунок закрито, число може бути застарілим.',
     'settings.appIconBadgeDenied': 'Дозвольте значки для Mindwtr у параметрах iOS, щоб увімкнути цей лічильник.',

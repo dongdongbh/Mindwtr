@@ -1632,6 +1632,7 @@ export const huOverrides: Record<string, string> = {
     'settings.notifications': 'Értesítések',
     'settings.notificationsDesc': 'Kapcsolja be az emlékeztetőket a kezdő vagy határidős feladatokhoz.',
     'settings.notificationsEnable': 'Feladat-emlékeztetők',
+        'settings.reminderSoundVibration': 'Emlékeztetők hangja és rezgése',
         'settings.appIconBadge': 'Alkalmazásikon-jelvény',
         'settings.appIconBadgeHint': 'Az eszközön lévő, ma esedékes és lejárt feladatokat számolja. A Mindwtr futása közben frissül; bezárt alkalmazásnál a szám elavult lehet.',
         'settings.appIconBadgeDenied': 'A számláló bekapcsolásához engedélyezd a Mindwtr jelvényeit az iOS beállításaiban.',

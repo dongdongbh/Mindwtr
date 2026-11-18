@@ -1677,6 +1677,7 @@ export const en: Record<string, string> = {
         'settings.notifications': 'Notifications',
         'settings.notificationsDesc': 'Enable reminders for tasks with start or due dates.',
         'settings.notificationsEnable': 'Task reminders',
+        'settings.reminderSoundVibration': 'Reminder sound and vibration',
         'settings.appIconBadge': 'App icon badge',
         'settings.appIconBadgeHint': 'Count tasks due today and overdue on this device. Updates when Mindwtr runs; the count may be outdated while the app is closed.',
         'settings.appIconBadgeDenied': 'Allow badges for Mindwtr in iOS Settings to enable this count.',

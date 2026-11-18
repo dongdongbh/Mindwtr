@@ -471,6 +471,8 @@ The native client is a Kotlin and Jetpack Compose app in `apps/android-native`. 
 
 ## Notifications and reminders
 
+- On Android 8 or later, Settings › Notifications › Reminder sound and vibration opens the Mindwtr reminders channel in Android Settings.
+
 - Reach: Settings › Notifications. It has Task reminders, Daily digest, Weekly review (day and time), and Quick capture in notification bar.
 - Shortcuts: A reminder notification has Snooze. A tap opens the task.
 - Selectors: `exact-alarm-notice`, `exact-alarm-allow`

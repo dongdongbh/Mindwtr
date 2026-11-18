@@ -36,6 +36,8 @@ The v1.3.6 task-editor correction is confirmed by the visible disappearance of t
 
 ## v1.3.9 (add before tagging, trim in the release after)
 
+- **reminder-channel-settings** — Android Settings › Notifications › Reminder sound and vibration opens the system reminder channel. Look for `releaseCheck=v1.3.9/reminder-channel-settings` from `CoreNotifications.kt` or `reminder-channel-settings.ts`. This confirms the settings handoff, not physical vibration. (#1573)
+
 - **`v1.3.9/ios-calendar-push-observer-release`** — `apps/ios-native/App/CoreModel.swift`, through the closed native `logLine` boundary: `Native iOS calendar push observer released after cancel` with `outcome=released`. A calendar push start that is cancelled during launch now releases its observer, so the next start succeeds. Open Settings › Advanced › External Calendar right after launch: no red "Couldn't complete this action" shows, and the log may show this marker followed by `Native iOS calendar push lifecycle completed`. No identifiers, task content or errors are logged.
 
 - **`v1.3.9/pomodoro-partial-work`** — `packages/core/src/pomodoro-credit.ts`, `apps/desktop/src/store/pomodoro-store.ts`, `apps/mobile/lib/pomodoro-controller.ts`, and native Pomodoro host transitions: `releaseCheck=v1.3.9/pomodoro-partial-work` records durable elapsed-work credit, replay, or a retained pending credit. Work for part of a linked Focus session, pause, resume, and complete the task from another view. Time Spent must include only active work once; the completed Pomodoro count changes only at a full work boundary. Retry after a failed save and restart without duplicating credit. Sub-minute remainders accumulate per task. No task content or identifiers are logged.

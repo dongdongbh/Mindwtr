@@ -1608,6 +1608,7 @@ export const zhHans: Record<string, string> = {
         'settings.notifications': '通知',
         'settings.notificationsDesc': '为有开始/截止日期的任务启用提醒。',
         'settings.notificationsEnable': '任务提醒',
+        'settings.reminderSoundVibration': '提醒铃声和振动',
         'settings.appIconBadge': '应用图标角标',
         'settings.appIconBadgeHint': '统计此设备上今天截止和已逾期的任务。Mindwtr 运行时更新；应用关闭期间，数量可能不是最新的。',
         'settings.appIconBadgeDenied': '请在 iOS 设置中允许 Mindwtr 使用角标，以启用此计数。',

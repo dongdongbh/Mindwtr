@@ -307,6 +307,8 @@ Source: `apps/mobile`. Routes live in `apps/mobile/app` (expo-router). Labels be
 
 ## Settings › Notifications
 
+- On Android 8 or later, Settings › Notifications › Reminder sound and vibration opens the Mindwtr reminders channel in Android Settings.
+
 - Reach: Settings › Notifications. Task reminders, Daily digest, Weekly review, app icon badge, "Quick capture in notification bar" (Android).
 - Selectors: `app-icon-badge`, `task-reminder-default`
 - Code: `apps/mobile/components/settings/notifications-settings-screen.tsx`, `apps/mobile/lib/notification-service-local.ts`, `apps/mobile/lib/persistent-capture-notification.ts`

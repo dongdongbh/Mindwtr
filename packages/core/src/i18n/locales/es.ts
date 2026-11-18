@@ -1630,6 +1630,7 @@ export const esOverrides: Record<string, string> = {
 'settings.notifications': "Notificaciones",
 'settings.notificationsDesc': "Activa recordatorios para tareas con fechas de inicio o vencimiento.",
 'settings.notificationsEnable': "Recordatorios de tareas",
+        'settings.reminderSoundVibration': 'Sonido y vibración de los recordatorios',
         'settings.appIconBadge': 'Insignia del icono de la app',
         'settings.appIconBadgeHint': 'Cuenta las tareas de este dispositivo que vencen hoy o están atrasadas. Se actualiza mientras Mindwtr se ejecuta; el número puede quedar desactualizado con la app cerrada.',
         'settings.appIconBadgeDenied': 'Permite las insignias de Mindwtr en los Ajustes de iOS para activar este contador.',

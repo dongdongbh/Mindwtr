@@ -103,7 +103,8 @@ export async function acknowledgeNotificationCompletion(actionId: string): Promi
 
 export async function ensureReminderNotificationChannel(channelId: string, channelName: string): Promise<void> {
   if (Platform.OS !== 'android') return;
-  nativeModule?.ensureReminderChannel?.(channelId, channelName);
+  if (!nativeModule?.ensureReminderChannel) throw new Error('Reminder notification channel unavailable');
+  nativeModule.ensureReminderChannel(channelId, channelName);
 }
 
 

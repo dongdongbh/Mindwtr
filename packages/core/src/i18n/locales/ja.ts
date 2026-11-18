@@ -1676,6 +1676,7 @@ export const jaOverrides: Record<string, string> = {
         'settings.notifications': '通知',
         'settings.notificationsDesc': '開始日や期限が設定されたタスクのリマインダーを有効にします。',
         'settings.notificationsEnable': 'タスクのリマインダー',
+        'settings.reminderSoundVibration': 'リマインダーの音とバイブレーション',
         'settings.appIconBadge': 'アプリアイコンのバッジ',
         'settings.appIconBadgeHint': 'このデバイス上の、今日が期限のタスクと期限切れのタスクを数えます。Mindwtr の実行中に更新されます。アプリを閉じている間は、件数が古い場合があります。',
         'settings.appIconBadgeDenied': 'この件数を表示するには、iOS の設定で Mindwtr のバッジを許可してください。',
