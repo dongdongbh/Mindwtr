@@ -41,6 +41,11 @@
     </array>
     <key>NativeCloudKitContainer</key>
     <string>$(MINDWTR_CLOUDKIT_CONTAINER)</string>
+    <key>UIApplicationSceneManifest</key>
+    <dict>
+      <key>UIApplicationSupportsMultipleScenes</key>
+      <false/>
+    </dict>
     <key>UIBackgroundModes</key>
     <array>
       <string>processing</string>
