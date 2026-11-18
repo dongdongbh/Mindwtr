@@ -46,6 +46,54 @@
       <key>UIApplicationSupportsMultipleScenes</key>
       <false/>
     </dict>
+    <key>UIApplicationShortcutItems</key>
+    <array>
+      <dict>
+        <key>UIApplicationShortcutItemType</key>
+        <string>tech.dongdongbh.mindwtr.add_task</string>
+        <key>UIApplicationShortcutItemTitle</key>
+        <string>Add task</string>
+        <key>UIApplicationShortcutItemSubtitle</key>
+        <string>Add task to Inbox</string>
+        <key>UIApplicationShortcutItemIconType</key>
+        <string>UIApplicationShortcutIconTypeCompose</string>
+        <key>UIApplicationShortcutItemUserInfo</key>
+        <dict>
+          <key>url</key>
+          <string>$(MINDWTR_URL_SCHEME):///capture-quick?mode=text</string>
+        </dict>
+      </dict>
+      <dict>
+        <key>UIApplicationShortcutItemType</key>
+        <string>tech.dongdongbh.mindwtr.open_focus</string>
+        <key>UIApplicationShortcutItemTitle</key>
+        <string>Focus</string>
+        <key>UIApplicationShortcutItemSubtitle</key>
+        <string>Open Focus view</string>
+        <key>UIApplicationShortcutItemIconType</key>
+        <string>UIApplicationShortcutIconTypeTask</string>
+        <key>UIApplicationShortcutItemUserInfo</key>
+        <dict>
+          <key>url</key>
+          <string>$(MINDWTR_URL_SCHEME):///focus</string>
+        </dict>
+      </dict>
+      <dict>
+        <key>UIApplicationShortcutItemType</key>
+        <string>tech.dongdongbh.mindwtr.open_calendar</string>
+        <key>UIApplicationShortcutItemTitle</key>
+        <string>Calendar</string>
+        <key>UIApplicationShortcutItemSubtitle</key>
+        <string>Open Calendar view</string>
+        <key>UIApplicationShortcutItemIconType</key>
+        <string>UIApplicationShortcutIconTypeDate</string>
+        <key>UIApplicationShortcutItemUserInfo</key>
+        <dict>
+          <key>url</key>
+          <string>$(MINDWTR_URL_SCHEME):///calendar</string>
+        </dict>
+      </dict>
+    </array>
     <key>UIBackgroundModes</key>
     <array>
       <string>processing</string>

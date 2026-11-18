@@ -129,7 +129,7 @@ final class EntityOpenHostTests: XCTestCase {
         let before = try rows()
         let routes: [(String, [String: String])] = [
             ("/focus", ["type": "focus"]), ("/inbox", ["type": "inbox"]), ("/waiting", ["type": "waiting"]),
-            ("/someday", ["type": "someday"]), ("/capture-quick?mode=text", ["type": "capture"]),
+            ("/someday", ["type": "someday"]), ("/calendar", ["type": "calendar"]), ("/capture-quick?mode=text", ["type": "capture"]),
             ("open-feature?feature=projects", ["type": "projects"]), ("open-feature?feature=review", ["type": "review"]),
             ("open-feature?feature=calendar", ["type": "calendar"]), ("open-feature?feature=inbox", ["type": "inbox"]),
             ("/widget-list/next", ["type": "widgetList", "listId": "next"]), ("/widget-list/upcoming", ["type": "widgetList", "listId": "upcoming"]),

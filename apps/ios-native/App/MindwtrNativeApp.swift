@@ -834,7 +834,33 @@ fileprivate final class NativeReminderCallbackCompletion: @unchecked Sendable {
     var invocations: Int { lock.lock(); defer { lock.unlock() }; return count }
 }
 
+final class NativeQuickActionSceneDelegate: NSObject, UIWindowSceneDelegate {
+    func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options connectionOptions: UIScene.ConnectionOptions) {
+        guard let item = connectionOptions.shortcutItem else { return }
+        _ = Self.open(item)
+    }
+
+    func windowScene(_ windowScene: UIWindowScene, performActionFor shortcutItem: UIApplicationShortcutItem,
+                     completionHandler: @escaping (Bool) -> Void) {
+        completionHandler(Self.open(shortcutItem))
+    }
+
+    private static func open(_ item: UIApplicationShortcutItem) -> Bool {
+        guard let selection = try? NativeAppLaunch.selection.get(),
+              let url = NativeQuickActions.url(type: item.type, selection: selection, bundleIdentifier: Bundle.main.bundleIdentifier) else { return false }
+        NativeAppModel.shared.receiveEntityLink(url)
+        return true
+    }
+}
+
 final class NativeNotificationDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
+    func application(_ application: UIApplication, configurationForConnecting connectingSceneSession: UISceneSession,
+                     options: UIScene.ConnectionOptions) -> UISceneConfiguration {
+        let configuration = UISceneConfiguration(name: nil, sessionRole: connectingSceneSession.role)
+        configuration.delegateClass = NativeQuickActionSceneDelegate.self
+        return configuration
+    }
+
     private struct PersonalCallbacks: Sendable {
         let foreground: @MainActor @Sendable (Bool) async -> Void
         let wake: @MainActor @Sendable () -> Void
