@@ -16,7 +16,7 @@ import {
 } from '@mindwtr/core';
 
 import { logError, logInfo } from '../../../lib/app-log';
-import { fetchExternalCalendarEvents, summarizeExternalCalendarWarnings } from '../../../lib/external-calendar-events';
+import { type ExternalCalendarRead, fetchExternalCalendarEvents, summarizeExternalCalendarWarnings } from '../../../lib/external-calendar-events';
 import { dayKey } from './calendar-primitives';
 import { getWorkspaceCache } from '../../../lib/workspace-cache';
 
@@ -124,11 +124,19 @@ export function useCalendarExternalEvents({ filterQuery, visibleRange, areas = [
                 rangeStart.setHours(0, 0, 0, 0);
                 const rangeEnd = new Date(visibleRange.end);
                 rangeEnd.setHours(23, 59, 59, 999);
-                const { calendars, events, warnings } = await fetchExternalCalendarEvents(rangeStart, rangeEnd);
-                if (cancelled) return;
-                setExternalCalendars(calendars);
-                setExternalEvents(events);
-                setExternalError(summarizeExternalCalendarWarnings(warnings));
+                const display = ({ calendars, events, warnings }: ExternalCalendarRead) => {
+                    if (cancelled) return;
+                    setExternalCalendars(calendars);
+                    setExternalEvents(events);
+                    setExternalError(summarizeExternalCalendarWarnings(warnings));
+                };
+                display(await fetchExternalCalendarEvents(rangeStart, rangeEnd, result => {
+                    if (cancelled) return;
+                    display(result);
+                    void logInfo('Calendar subscriptions loaded while system calendars are pending', {
+                        scope: 'calendar', extra: { releaseCheck: 'v1.3.9/calendar-subscriptions-ready', eventCount: result.events.length },
+                    });
+                }));
             } catch (error) {
                 if (cancelled) return;
                 const message = error instanceof Error && error.message.trim()

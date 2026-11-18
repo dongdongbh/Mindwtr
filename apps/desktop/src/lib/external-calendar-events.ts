@@ -213,25 +213,26 @@ async function fetchTextWithTimeout(url: string, timeoutMs: number): Promise<str
     }
 }
 
+export type ExternalCalendarRead = ExternalCalendarSourceResult & { warnings: string[] };
+
 export async function fetchExternalCalendarEvents(
     rangeStart: Date,
     rangeEnd: Date,
-): Promise<{
-    calendars: ExternalCalendarSubscription[];
-    events: ExternalCalendarEvent[];
-    warnings: string[];
-}> {
+    onSubscriptionsReady?: (result: ExternalCalendarRead) => void,
+): Promise<ExternalCalendarRead> {
     const calendars = await ExternalCalendarService.getCalendars();
     const importableCalendars = calendars.filter((calendar) => !isMindwtrMirrorCalendar(calendar));
     const enabled = importableCalendars.filter((calendar) => calendar.enabled);
     const monthRanges = getVisibleMonthRanges(rangeStart, rangeEnd);
 
-    const [icsResults, systemResults] = await Promise.all([
-        Promise.allSettled(
-            enabled.map((calendar) => loadCachedIcsEventsForCalendar(calendar, monthRanges, rangeStart, rangeEnd))
-        ),
-        fetchSystemCalendarEvents(rangeStart, rangeEnd),
-    ]);
+    let systemReady = false;
+    const systemRead = fetchSystemCalendarEvents(rangeStart, rangeEnd).then(result => {
+        systemReady = true;
+        return result;
+    });
+    const icsResults = await Promise.allSettled(
+        enabled.map((calendar) => loadCachedIcsEventsForCalendar(calendar, monthRanges, rangeStart, rangeEnd))
+    );
 
     const icsSources: ExternalCalendarSourceResult[] = [];
 
@@ -256,15 +257,12 @@ export async function fetchExternalCalendarEvents(
         icsSources.push({ calendars: contributed, events: result.value.events });
     }
 
-    const sources: ExternalCalendarSourceResult[] = [
-        { calendars: calendars.filter((calendar) => !splitCalendarIds.has(calendar.id)), events: [] },
-        {
-            calendars: systemResults.calendars,
-            events: systemResults.events,
-        },
-        ...icsSources,
-    ];
-
+    const subscriptions = { calendars: calendars.filter((calendar) => !splitCalendarIds.has(calendar.id)), events: [] };
+    if (!systemReady && calendars.length > 0 && onSubscriptionsReady) {
+        onSubscriptionsReady({ ...mergeExternalCalendarSources([subscriptions, ...icsSources]), warnings });
+    }
+    const systemResults = await systemRead;
+    const sources = [subscriptions, systemResults, ...icsSources];
     return { ...mergeExternalCalendarSources(sources), warnings };
 }
 

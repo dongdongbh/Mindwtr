@@ -97,6 +97,27 @@ describe('external calendar events', () => {
         }));
     });
 
+    it('shows a local file while the system calendar read is pending, then keeps both sources', async () => {
+        isTauriRuntimeMock.mockReturnValue(true);
+        const file = { id: 'work', name: 'Work', url: 'file:///calendar.ics', enabled: true };
+        const system = { id: 'system:local', name: 'System', url: 'system://local', enabled: true };
+        getCalendarsMock.mockResolvedValue([file]);
+        invokeMock.mockResolvedValue(workIcs);
+        let finishSystem!: () => void;
+        fetchSystemCalendarEventsMock.mockImplementation(() => new Promise(resolve => {
+            finishSystem = () => resolve({ calendars: [system], events: [] });
+        }));
+        const showFiles = vi.fn();
+        const complete = fetchExternalCalendarEvents(
+            new Date('2026-04-26T00:00:00Z'), new Date('2026-04-27T00:00:00Z'), showFiles,
+        );
+        await vi.waitFor(() => expect(showFiles).toHaveBeenCalledWith(expect.objectContaining({
+            events: [expect.objectContaining({ title: 'Team Meeting' })],
+        })));
+        finishSystem();
+        expect((await complete).calendars.map(calendar => calendar.id)).toEqual(['work', 'system:local']);
+    });
+
     it('skips subscribed Mindwtr mirror calendars by default', async () => {
         getCalendarsMock.mockResolvedValue([
             { id: 'mirror', name: 'Mindwtr', url: 'https://calendar.example/mindwtr.ics', enabled: true },

@@ -36,6 +36,8 @@ The v1.3.6 task-editor correction is confirmed by the visible disappearance of t
 
 ## v1.3.9 (add before tagging, trim in the release after)
 
+- **`v1.3.9/calendar-subscriptions-ready`** — Desktop Calendar (`use-calendar-external-events.ts`) reports the subscribed event count when files or feeds finish loading ahead of the system calendars. Open a month containing subscribed events with a slow system calendar. The events appear while the system read is pending. (#1508)
+
 - **`v1.3.9/reminder-channel-settings`** — Android Settings › Notifications › Reminder sound and vibration opens the system reminder channel. Look for `releaseCheck=v1.3.9/reminder-channel-settings` from `CoreNotifications.kt` or `reminder-channel-settings.ts`. This confirms the settings handoff, not physical vibration. (#1573)
 
 - **`v1.3.9/ios-analytics-heartbeat`** — `apps/ios-native/App/CoreModel.swift` (`sendAnalyticsHeartbeat`), through the closed native `logLine` boundary: `Native iOS analytics heartbeat finished` with `sent=true` or `sent=false`, once per app launch after the library opens and the app lock is open. The native iOS app now sends RN's daily anonymous heartbeat through the shared core (`sendAboutHeartbeat`, which also logs `Native analytics heartbeat sent` when a request is accepted). Tester: open a TestFlight build; the log must show this line once, with `sent=true` on the first launch of the day and `sent=false` on later launches that day or after opting out in Settings › Data › Diagnostics. Only the production app (`tech.dongdongbh.mindwtr`) has a heartbeat URL and logs this line; `native.dev`, isolated test libraries and Sandbox never send, and Debug builds of the production app show `sent=false`. No URL, ID, locale or device data is logged.
