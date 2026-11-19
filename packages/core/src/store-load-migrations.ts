@@ -323,7 +323,7 @@ const promoteScheduledTasksMigration: LoadMigration = {
                     logInfo('Dated Inbox task kept in Inbox after its date', {
                         scope: 'store',
                         category: 'storage',
-                        context: { releaseCheck: 'v1.3.8/inbox-choice-after-date-kept' },
+                        context: { },
                     });
                 }
                 return task;

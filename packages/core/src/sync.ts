@@ -867,7 +867,7 @@ function* mergeEntitiesPass<T extends MergeableEntity>(
     if (strippedArchiveClockMerges > 0) {
         logInfo('Sync merge retained archive clocks omitted by an equivalent peer', {
             scope: 'sync', force: true,
-            context: { releaseCheck: 'v1.3.8/archive-clock-converge', entityType, count: strippedArchiveClockMerges },
+            context: { entityType, count: strippedArchiveClockMerges },
         });
     }
 

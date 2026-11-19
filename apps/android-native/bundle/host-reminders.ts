@@ -175,7 +175,7 @@ export const createNativeReminders = (bindings: NativeReminderBindings) => {
         async background(reason: 'capture' | 'sync') {
             if (isSandboxMode()) return { mode: 'sandbox', outcome: 'skipped' };
             const receipt = (outcome: string) => log('Background reminder reconciliation',
-                { releaseCheck: 'v1.3.8/native-background-reminders', reason, outcome }, outcome === 'failed');
+                { reason, outcome }, outcome === 'failed');
             try {
                 const summary = await cycle(false);
                 receipt('cycle-completed');

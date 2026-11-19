@@ -441,7 +441,6 @@ export function useReviewModalController({
             const provider = createAIProvider(buildAIConfig(settings, apiKey, language));
             void logInfo('Weekly review sequence candidates prepared', {
                 extra: {
-                    releaseCheck: 'v1.3.8/review-sequence',
                     candidateCount: staleItems.length,
                     staleTaskCount: staleItems.filter((item) => !item.id.startsWith('project:')).length,
                     staleProjectCount: staleItems.filter((item) => item.id.startsWith('project:')).length,

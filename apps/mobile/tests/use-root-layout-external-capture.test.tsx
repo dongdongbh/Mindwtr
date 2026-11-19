@@ -1066,7 +1066,7 @@ describe('useRootLayoutExternalCapture', () => {
     const held = vi.mocked(logInfo).mock.calls.filter(([message]) => message === 'Incoming link held until unlock');
     expect(held).toEqual([['Incoming link held until unlock', {
       scope: 'routing',
-      extra: { releaseCheck: 'v1.3.8/app-lock-link-hold', kind: 'task' },
+      extra: { kind: 'task' },
       force: true,
     }]]);
 

@@ -394,7 +394,7 @@ export function useRootLayoutExternalCapture({
                 lastHeldKey.current = incomingUrlKey;
                 void logInfo('Incoming link held until unlock', {
                     scope: 'routing',
-                    extra: { releaseCheck: 'v1.3.8/app-lock-link-hold', kind: parseEntityOpenUrl(incomingUrl)?.kind ?? 'link' },
+                    extra: { kind: parseEntityOpenUrl(incomingUrl)?.kind ?? 'link' },
                     force: true,
                 }).catch(() => undefined);
             }

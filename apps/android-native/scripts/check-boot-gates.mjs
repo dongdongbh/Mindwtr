@@ -9863,7 +9863,7 @@ globalThis.standStore = useTaskStore;
     globalThis.reminderInfos = [];
     assert.equal((await counted.background('sync')).outcome, 'cycle-completed');
     const receipt = globalThis.reminderInfos.find(([message]) => message === '[Local Notifications] Background reminder reconciliation');
-    assert.deepEqual([receipt?.[1].context, receipt?.[1].force], [{ releaseCheck: 'v1.3.8/native-background-reminders', reason: 'sync', outcome: 'cycle-completed' }, true]);
+    assert.deepEqual([receipt?.[1].context, receipt?.[1].force], [{ reason: 'sync', outcome: 'cycle-completed' }, true]);
     const failing = mod.createNativeReminders({
         plan: async () => ({ ok: false, error: { code: 'NOT_READY', message: 'storage' } }),
         planSnooze: () => { throw new Error('no snooze here'); },

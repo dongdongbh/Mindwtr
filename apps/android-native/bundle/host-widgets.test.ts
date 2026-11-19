@@ -129,7 +129,7 @@ describe('native Android widget publisher with nothing changed', () => {
 describe('native Android widget publisher and the Focus widget\'s available actions', () => {
     afterEach(() => { setLogger(consoleLogger); resetForTests(); });
 
-    it('logs RN\'s v1.3.8/widget-focus-available line only when a placed Focus widget adds the section', () => {
+    it('logs RN\'s Focus widget availability line only when a placed Focus widget adds the section', () => {
         resetForTests();
 
         setFocusWidgetFilter(NO_FOCUS_WIDGET_FILTER);
@@ -150,6 +150,6 @@ describe('native Android widget publisher and the Focus widget\'s available acti
         value.inputs = () => ({ systemColorScheme: 'light', systemLocale: 'en-US', listSelections: ['focus:available'] });
         createWidgetPublisher(value).publish();
         expect(available()).toEqual([expect.objectContaining({ scope: 'widget', force: true,
-            context: { releaseCheck: 'v1.3.8/widget-focus-available', platform: 'android', count: 1, totalItems: 1 } })]);
+            context: { platform: 'android', count: 1, totalItems: 1 } })]);
     });
 });

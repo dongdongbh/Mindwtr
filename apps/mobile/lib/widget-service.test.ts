@@ -502,7 +502,7 @@ describe('widget-service', () => {
         expect(mockLogInfo).toHaveBeenCalledWith('Focus widget available actions published', {
             scope: 'widget',
             force: true,
-            extra: expect.objectContaining({ releaseCheck: 'v1.3.8/widget-focus-available', platform: 'ios' }),
+            extra: expect.objectContaining({ platform: 'ios' }),
         });
         expect(payloadByKey.get('mindwtr-ios-widget-payload-small')?.lists.focus.items).toHaveLength(11);
         expect(mockIosWidgetReloadTimelines).toHaveBeenCalledWith('MindwtrTasksWidget');

@@ -90,7 +90,7 @@ describe('notification Done without an app root (#1436)', () => {
         expect(JSON.parse(h.payloads[0]).lists.inbox.items.map((item: { id: string }) => item.id)).toContain('task');
         expect(JSON.parse(h.payloads.at(-1)!).lists.inbox.items).toEqual([]);
         expect(h.log).toHaveBeenCalledWith(expect.stringContaining('Background Done'), expect.objectContaining({
-            extra: expect.objectContaining({ releaseCheck: 'v1.3.8/reminder-background-completion', widgetUpdated: 'true' }),
+            extra: expect.objectContaining({ widgetUpdated: 'true' }),
         }));
         expect(JSON.stringify(h.log.mock.calls)).not.toContain('Private reminder title');
     });

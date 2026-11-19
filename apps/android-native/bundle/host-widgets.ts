@@ -104,7 +104,7 @@ export const createWidgetPublisher = (bridge: WidgetBridge) => {
         if (available) logInfo('Focus widget available actions published', {
             scope: 'widget',
             force: true,
-            context: { releaseCheck: 'v1.3.8/widget-focus-available', platform: 'android',
+            context: { platform: 'android',
                 count: available.sections?.find((section) => section.key === 'available')?.items.length ?? 0, totalItems: available.totalCount },
         });
         logInfo('Native Android widget payload published', {

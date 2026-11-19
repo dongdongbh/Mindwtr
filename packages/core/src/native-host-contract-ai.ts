@@ -1280,7 +1280,7 @@ export function createAIMethods(deps: AIDeps) {
                 host.log?.info('Weekly review sequence candidates prepared', {
                     scope: 'ai',
                     extra: {
-                        releaseCheck: 'v1.3.8/review-sequence', candidateCount: staleItems.length,
+                        candidateCount: staleItems.length,
                         staleTaskCount: staleItems.filter((item) => !item.id.startsWith('project:')).length,
                         staleProjectCount: staleItems.filter((item) => item.id.startsWith('project:')).length,
                     },

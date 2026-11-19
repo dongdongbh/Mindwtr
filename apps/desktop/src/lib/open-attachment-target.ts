@@ -29,7 +29,7 @@ export async function openAttachmentTarget(uri: string, attachmentId?: string): 
             await openShell(trimmed);
             if (/^joplin:\/\//i.test(trimmed)) void logInfo('Joplin link handed to the OS', {
                 scope: 'links', force: true,
-                extra: { releaseCheck: 'v1.3.8/joplin-link-open' },
+                extra: { },
             });
             return;
         }

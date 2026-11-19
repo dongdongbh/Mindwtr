@@ -893,7 +893,7 @@ describe('native host contract: AI keys stay out of views, errors and logs', () 
         await host.requestWeeklyReviewAnalysis();
         const request = device.calls.find((call) => call[1] === 'analyzeReview')!;
         expect((request[3] as { items: { id: string }[] }).items.map((item) => item.id)).toEqual(['head', 'project:p']);
-        expect(info).toHaveBeenCalledWith('Weekly review sequence candidates prepared', { scope: 'ai', extra: { releaseCheck: 'v1.3.8/review-sequence', candidateCount: 2, staleTaskCount: 1, staleProjectCount: 1 } });
+        expect(info).toHaveBeenCalledWith('Weekly review sequence candidates prepared', { scope: 'ai', extra: { candidateCount: 2, staleTaskCount: 1, staleProjectCount: 1 } });
     });
 
 

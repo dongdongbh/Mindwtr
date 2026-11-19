@@ -106,7 +106,6 @@ function logFocusAvailablePublished(payload: TasksWidgetPayload, platform: 'andr
         scope: 'widget',
         force: true,
         extra: {
-            releaseCheck: 'v1.3.8/widget-focus-available',
             platform,
             count: String(list.sections?.find((section) => section.key === 'available')?.items.length ?? 0),
             totalItems: String(list.totalCount),

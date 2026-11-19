@@ -219,10 +219,10 @@ class EntryRouter(private val shell: InboxViewModel, dir: File, private val stag
 
     private fun held(entry: EntryQueue.Entry) {
         val kind = runCatching { JSONObject(entry.input).optString("kind") }.getOrDefault("")
-        val context = JSONObject().put("releaseCheck", "v1.3.8/native-app-lock-entry-hold").put("kind", kind)
+        val context = JSONObject().put("kind", kind)
 
         threads.background {
-            shell.coreHost()?.logLine("Native entry held until unlock releaseCheck=v1.3.8/native-app-lock-entry-hold", context)
+            shell.coreHost()?.logLine("Native entry held until unlock", context)
                 ?: Log.i(CoreHost.TAG, "Native entry held until unlock $context")
         }
     }

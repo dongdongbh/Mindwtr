@@ -362,7 +362,7 @@ describe('runLoadMigrations', () => {
             expect(second.data.tasks).toEqual([task]);
             const kept = logs.filter((log) => log.message === 'Dated Inbox task kept in Inbox after its date');
             expect(kept.length).toBeLessThanOrEqual(1);
-            expect(kept.every((log) => log.context?.releaseCheck === 'v1.3.8/inbox-choice-after-date-kept')).toBe(true);
+            expect(kept.every((log) => log.context !== undefined)).toBe(true);
         } finally {
             setLogger(consoleLogger);
         }

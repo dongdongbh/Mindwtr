@@ -1147,7 +1147,7 @@ export function createBoardViewMethods(deps: BoardViewDeps) {
                 ? commitReactivation(prepared) : commitPreparedBoard(prepared, 'preparedBoard'));
             if (result.ok && prepared.request.action.type === 'duplicateTask') {
                 try { logInfo('Native duplicate checklist state confirmed', { scope: 'native-host', category: 'storage', force: true,
-                    context: { releaseCheck: 'v1.3.8/duplicate-checklist-state', version: prepared.version, outcome: 'confirmed' } }); }
+                    context: { version: prepared.version, outcome: 'confirmed' } }); }
                 catch {                                                               }
             }
             return result;

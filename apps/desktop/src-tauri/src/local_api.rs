@@ -701,7 +701,7 @@ fn write_response(stream: &mut TcpStream, response: ApiResponse) -> Result<(), S
     })?;
     if raw.len() >= 256 * 1024 {
         log::info!(
-            "Local HTTP large response completed extra.releaseCheck=v1.3.8/local-api-large-response outcome=complete bytes={}",
+            "Local HTTP large response completed outcome=complete bytes={}",
             raw.len()
         );
     }

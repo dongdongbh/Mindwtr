@@ -42,7 +42,7 @@ describe('openAttachmentTarget', () => {
         expect(invokeMock).not.toHaveBeenCalled();
         expect(logInfoMock).toHaveBeenCalledExactlyOnceWith('Joplin link handed to the OS', {
             scope: 'links', force: true,
-            extra: { releaseCheck: 'v1.3.8/joplin-link-open' },
+            extra: { },
         });
     });
 

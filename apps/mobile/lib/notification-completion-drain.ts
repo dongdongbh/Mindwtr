@@ -47,8 +47,7 @@ export const replayNotificationCompletions = (): Promise<number> => {
                         savedCount += 1;
                         await logInfo('[Local Notifications] Background Done saved and widget refreshed', {
                             scope: 'notifications', force: true,
-                            extra: { releaseCheck: 'v1.3.8/reminder-background-completion',
-                                outcome: blocker || 'completed', widgetUpdated: String(widgetUpdated),
+                            extra: { outcome: blocker || 'completed', widgetUpdated: String(widgetUpdated),
                                 appState: AppState.currentState || 'unknown' },
                         }).catch(() => undefined);
                         logNotificationOutcome('Done action saved and acknowledged', {

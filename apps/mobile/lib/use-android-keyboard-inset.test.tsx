@@ -72,7 +72,7 @@ describe('useAndroidKeyboardInset', () => {
     expect(measureAndroidModalKeyboardInset).toHaveBeenCalledTimes(4);
     expect(logInfo).toHaveBeenCalledWith('Quick capture modal IME inset measured', {
       scope: 'quick-capture', force: true, extra: {
-        releaseCheck: 'v1.3.8/quick-capture-modal-ime', eventInset: 44, nativeInset: 283, outcome: 'measured',
+        eventInset: 44, nativeInset: 283, outcome: 'measured',
       },
     });
     await act(async () => { await vi.advanceTimersByTimeAsync(5000); });

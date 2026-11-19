@@ -81,7 +81,7 @@ export function useAndroidKeyboardInset(active = true, inputRef?: RefObject<Text
           setInset(nativeInset);
           if (sampleIndex === modalImeSettlementDelaysMs.length - 1) {
             void logInfo('Quick capture modal IME inset measured', { scope: 'quick-capture', force: true, extra: {
-              releaseCheck: 'v1.3.8/quick-capture-modal-ime', eventInset, nativeInset, outcome: 'measured',
+              eventInset, nativeInset, outcome: 'measured',
             } }).catch(() => undefined);
           }
         });

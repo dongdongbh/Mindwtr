@@ -46,8 +46,8 @@ describe('archive clock omitted from the same saved operation (#1446)', () => {
             expect(first.data.projects[0].archivedAt).toBe(AT);
             expect(merge(first.data, oldPeer).stats.projects.conflicts).toBe(0);
         }
-        expect(logs.find((entry) => entry.context?.releaseCheck === 'v1.3.8/archive-clock-converge')?.context)
-            .toEqual({ releaseCheck: 'v1.3.8/archive-clock-converge', entityType: 'project', count: 1 });
+        expect(logs.find((entry) => entry.context?.entityType === 'project')?.context)
+            .toEqual({ entityType: 'project', count: 1 });
     });
 
     it.each([
