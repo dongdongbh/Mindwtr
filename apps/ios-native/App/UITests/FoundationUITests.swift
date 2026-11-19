@@ -21618,6 +21618,7 @@ final class FoundationUITests: XCTestCase {
         let titleID = task.identifier
         task.tap()
         XCTAssertTrue(app.buttons["task-mode-view"].waitForExistence(timeout: 10))
+        app.buttons["task-mode-view"].tap()
         XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", title)).firstMatch.waitForExistence(timeout: 10))
         XCTAssertTrue(app.staticTexts["Saved note remains readable."].waitForExistence(timeout: 10))
         app.buttons["task-view-close"].tap()
