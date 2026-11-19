@@ -187,9 +187,9 @@ class AndroidPlayReleasePlanTest(unittest.TestCase):
     def test_testing_plan_uses_same_release_notes_for_every_track(self) -> None:
         plan = MODULE.build_plan(
             package="tech.dongdongbh.mindwtr",
-            artifact_path="mindwtr-1.4.0-rc.1.aab",
+            artifact_path="mindwtr-1.3.9-rc.1.aab",
             expected_version_code=199,
-            version="1.4.0-rc.1",
+            version="1.3.9-rc.1",
             tracks=["internal", "beta"],
             stable_production=False,
             testing_release_notes="Test this release",
@@ -214,7 +214,7 @@ class AndroidPlayReleasePlanTest(unittest.TestCase):
             "stable_production": False,
         }
         native = MODULE.build_plan(**common, native_release_candidate=True)
-        react_native = MODULE.build_plan(**common)
+        react_native = MODULE.build_plan(**{**common, "version": "1.3.9"})
 
         self.assertEqual(
             [release["name"] for release in native["tracks"]],
@@ -222,13 +222,33 @@ class AndroidPlayReleasePlanTest(unittest.TestCase):
         )
         self.assertEqual(
             [release["name"] for release in react_native["tracks"]],
-            ["1.4.0-rc.1 testing", "1.4.0-rc.1 testing"],
+            ["1.3.9 testing", "1.3.9 testing"],
         )
         with self.assertRaises(ValueError):
             MODULE.build_plan(
                 **{**common, "tracks": ["production"], "stable_production": True},
                 native_release_candidate=True,
             )
+
+    def test_testing_cutover_allows_final_rn_and_native_140_but_refuses_later_rn(self) -> None:
+        for version, native, allowed in [
+            ("1.3.9", False, True), ("1.3.10", False, False),
+            ("1.4.0-rc.1", False, False), ("1.4.0-rc.1", True, True),
+            ("1.3.9-rc.1", True, False),
+        ]:
+            with self.subTest(version=version, native=native):
+                options = dict(internal_test_release=False, stable_production_tag=False,
+                               version=version, native_release_candidate=native)
+                if allowed:
+                    self.assertEqual(MODULE.resolve_tracks("internal,beta", **options), ["internal", "beta"])
+                else:
+                    with self.assertRaises(ValueError):
+                        MODULE.resolve_tracks("internal,beta", **options)
+                    with self.assertRaises(ValueError):
+                        MODULE.build_plan(package="tech.dongdongbh.mindwtr", artifact_path="fixture.aab",
+                                          expected_version_code=161, version=version,
+                                          tracks=["internal", "beta"], stable_production=False,
+                                          native_release_candidate=native)
 
 
 if __name__ == "__main__":

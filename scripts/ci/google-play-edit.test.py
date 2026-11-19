@@ -114,6 +114,24 @@ class FakeTransport:
         raise AssertionError(f"Unexpected transport call: {method} {path}")
 
 
+class TestingPromotionTransport(FakeTransport):
+    def __init__(self) -> None:
+        super().__init__()
+        release = self.production_track["releases"][1]
+        release["name"] = "1.3.9"
+        self.production_track["releases"] = [release]
+        self.testing_tracks = [
+            {"track": name, "releases": [{"name": "1.3.8", "versionCodes": ["41"], "status": "completed"}]}
+            for name in ("beta", "internal")
+        ]
+
+    def request(self, method: str, path: str, **options: object) -> object:
+        if method == "GET" and path.endswith("/tracks"):
+            self.calls.append({"method": method, "path": path})
+            return {"tracks": json.loads(json.dumps([self.production_track, *self.testing_tracks]))}
+        return super().request(method, path, **options)
+
+
 class FakeHttpResponse:
     def __init__(self, status: int = 200, body: bytes = b"{}", reason: str = "OK") -> None:
         self.status = status
@@ -208,6 +226,61 @@ def make_plan(root: Path) -> dict[str, object]:
 
 
 class GooglePlayEditTest(unittest.TestCase):
+    def test_promotes_existing_rn_build_to_both_testing_tracks_without_upload_or_production_write(self) -> None:
+        transport = TestingPromotionTransport()
+        before = json.loads(json.dumps(transport.production_track))
+        result = MODULE.promote_rn_testing("tech.dongdongbh.mindwtr", 42, transport, apply=True)
+        writes = [call for call in transport.calls if call["method"] == "PUT"]
+        self.assertEqual([call["path"].rsplit("/", 1)[-1] for call in writes], ["beta", "internal"])
+        for call in writes:
+            release = call["json_body"]["releases"][0]
+            self.assertEqual(release["versionCodes"], ["42"])
+            self.assertEqual(release["status"], "completed")
+            self.assertEqual(release["releaseNotes"], before["releases"][0]["releaseNotes"])
+            self.assertNotIn("userFraction", release)
+        self.assertEqual(transport.production_track, before)
+        self.assertFalse(any("/bundles" in call["path"] for call in transport.calls))
+        self.assertTrue(result["committed"])
+
+    def test_rn_testing_inspection_and_already_promoted_build_do_not_commit(self) -> None:
+        for already_promoted in (False, True):
+            transport = TestingPromotionTransport()
+            if already_promoted:
+                release = transport.production_track["releases"][0]
+                target = {field: release[field] for field in ("name", "versionCodes", "releaseNotes")}
+                target["status"] = "completed"
+                for track in transport.testing_tracks:
+                    track["releases"] = [target]
+            result = MODULE.promote_rn_testing("tech.dongdongbh.mindwtr", 42, transport, apply=already_promoted)
+            self.assertFalse(result["committed"])
+            self.assertFalse(any(call["method"] == "PUT" or call["path"].endswith(":commit") for call in transport.calls))
+            self.assertEqual(transport.calls[-1]["method"], "DELETE")
+
+    def test_rn_testing_refuses_newer_testing_builds_wrong_source_and_ambiguous_codes_before_writes(self) -> None:
+        for condition in ("newer", "wrong_version", "ambiguous", "missing"):
+            with self.subTest(condition=condition):
+                transport = TestingPromotionTransport()
+                source = transport.production_track["releases"][0]
+                if condition == "newer":
+                    transport.testing_tracks[1]["releases"][0]["versionCodes"] = ["43"]
+                elif condition == "wrong_version":
+                    source["name"] = "1.3.10"
+                elif condition == "ambiguous":
+                    source["versionCodes"] = ["42", "41"]
+                else:
+                    source["versionCodes"] = ["41"]
+                with self.assertRaises(MODULE.GooglePlayApiError):
+                    MODULE.promote_rn_testing("tech.dongdongbh.mindwtr", 42, transport, apply=True)
+                self.assertFalse(any(call["method"] == "PUT" or call["path"].endswith(":commit") for call in transport.calls))
+                self.assertEqual(transport.calls[-1]["method"], "DELETE")
+
+    def test_rn_testing_unknown_commit_is_not_retried(self) -> None:
+        transport = TestingPromotionTransport()
+        transport.timeout_commit = True
+        with self.assertRaises(MODULE.CommitOutcomeUnknown):
+            MODULE.promote_rn_testing("tech.dongdongbh.mindwtr", 42, transport, apply=True)
+        self.assertEqual(sum(call["path"].endswith(":commit") for call in transport.calls), 1)
+
     def test_transport_uses_one_fixed_host_without_redirects_and_streams_auth_body(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             artifact = Path(temp_dir) / "artifact.aab"

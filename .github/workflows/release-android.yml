@@ -159,6 +159,8 @@ jobs:
           REF_NAME: ${{ github.ref_name }}
           GITHUB_REF_VALUE: ${{ github.ref }}
           RESOLVED_TAG: ${{ steps.version.outputs.tag }}
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+          NATIVE_RELEASE_CANDIDATE: ${{ inputs.android_client == 'native' && 'true' || 'false' }}
           ROLLOUT_MODE: ${{ inputs.rollout_mode }}
           ROLLOUT_PERCENTAGE: ${{ inputs.rollout_percentage }}
         run: |
@@ -179,6 +181,8 @@ jobs:
             --play-tracks "${PLAY_TRACKS:-production}" \
             --internal-test-release "$INTERNAL_TEST_RELEASE" \
             --stable-production-tag "$stable_production_tag" \
+            --version "$RELEASE_VERSION" \
+            --native-release-candidate "$NATIVE_RELEASE_CANDIDATE" \
             --rollout-mode "${ROLLOUT_MODE:-staged}" \
             --rollout-percentage "${ROLLOUT_PERCENTAGE:-5}" \
             --github-output "$GITHUB_OUTPUT"

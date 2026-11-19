@@ -1,0 +1,53 @@
+name: Complete RN Play Testing Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_code:
+        description: Existing production versionCode for the final RN 1.3.9 release
+        required: true
+        type: string
+      publish:
+        description: Publish the existing bundle to open testing and internal testing
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: google-play-production
+  cancel-in-progress: false
+
+jobs:
+  testing:
+    if: github.repository == 'dongdongbh/Mindwtr'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
+      - name: Authenticate Google Play API
+        id: play_auth
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093
+        with:
+          credentials_json: ${{ secrets.ANDROID_SERVICE_ACCOUNT_JSON }}
+          token_format: access_token
+          access_token_scopes: https://www.googleapis.com/auth/androidpublisher
+      - name: Inspect or publish the existing RN testing bundle
+        env:
+          GOOGLE_PLAY_ACCESS_TOKEN: ${{ steps.play_auth.outputs.access_token }}
+          VERSION_CODE: ${{ inputs.version_code }}
+          PUBLISH: ${{ inputs.publish && 'true' || 'false' }}
+        run: |
+          set -euo pipefail
+          args=(promote-rn-testing --package tech.dongdongbh.mindwtr --version-code "$VERSION_CODE")
+          if [ "$PUBLISH" = true ]; then
+            args+=(--apply)
+          fi
+          python3 scripts/ci/google-play-edit.py "${args[@]}" --result "$RUNNER_TEMP/testing.json"
+          {
+            echo '### Final RN testing release'
+            echo '```json'
+            cat "$RUNNER_TEMP/testing.json"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

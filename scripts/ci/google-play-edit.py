@@ -936,6 +936,73 @@ def publish_release(plan: object, transport: Transport) -> dict[str, object]:
     }
 
 
+def promote_rn_testing(
+    package_name: str, version_code: int, transport: Transport, *, apply: bool = False
+) -> dict[str, object]:
+    package_name = _package_name(package_name)
+    version_code = _version_code(version_code, "versionCode")
+    edit_id = _edit_id(transport.request("POST", _edit_root(package_name), json_body={}))
+    try:
+        response = _mapping(
+            transport.request("GET", f"{_edit_root(package_name, edit_id)}/tracks"),
+            "tracks response",
+        )
+        tracks: dict[str, Mapping[str, Any]] = {}
+        for value in _sequence(response.get("tracks"), "tracks"):
+            track = _mapping(value, "track")
+            name = _string(track.get("track"), "track name", maximum=100)
+            if name in tracks:
+                raise GooglePlayApiError("Google Play returned duplicate tracks")
+            tracks[name] = track
+        production = _mapping(tracks.get("production"), "production track")
+        sources = []
+        for value in _sequence(production.get("releases"), "production releases"):
+            candidate = _mapping(value, "production release")
+            codes = _sequence(candidate.get("versionCodes", []), "production version codes")
+            if version_code in [_version_code(code, "production version code") for code in codes]:
+                sources.append(candidate)
+        if len(sources) != 1:
+            raise GooglePlayApiError("Exact production release was not found")
+        source = sources[0]
+        if source.get("name") != "1.3.9" or source.get("status") not in {"completed", "inProgress"}:
+            raise GooglePlayApiError("RN testing promotion is restricted to the final 1.3.9 release")
+        if [str(code) for code in source.get("versionCodes", [])] != [str(version_code)]:
+            raise GooglePlayApiError("Production release has ambiguous version codes")
+        release = {name: copy.deepcopy(source[name]) for name in ("name", "versionCodes", "releaseNotes") if name in source}
+        release["versionCodes"] = [str(version_code)]
+        release["status"] = "completed"
+        updates = []
+        for name in ("beta", "internal"):
+            target = _mapping(tracks.get(name), f"{name} track")
+            releases = _sequence(target.get("releases", []), f"{name} releases")
+            for value in releases:
+                current = _mapping(value, f"{name} release")
+                for code in _sequence(current.get("versionCodes", []), f"{name} version codes"):
+                    if _version_code(code, f"{name} version code") > version_code:
+                        raise GooglePlayApiError(f"Refusing to replace a newer {name} build")
+            if releases != [release]:
+                updates.append(name)
+        if apply and updates:
+            for name in updates:
+                transport.request(
+                    "PUT", f"{_edit_root(package_name, edit_id)}/tracks/{name}",
+                    json_body={"track": name, "releases": [release]},
+                )
+            _commit_edit(package_name, edit_id, transport)
+        else:
+            _cleanup_edit(package_name, edit_id, transport)
+    except Exception as primary:
+        _cleanup_after_failure(package_name, edit_id, transport, primary)
+        raise
+    return {
+        "package": package_name, "versionCode": version_code,
+        "production": production, "testingRelease": release,
+        "previousTesting": {name: tracks[name] for name in ("beta", "internal")},
+        "updatedTracks": updates if apply else [], "plannedTracks": updates,
+        "committed": bool(apply and updates),
+    }
+
+
 def _load_json(path: Path, label: str) -> object:
     try:
         return json.loads(path.read_text(encoding="utf-8"))
@@ -989,6 +1056,12 @@ def _parser() -> argparse.ArgumentParser:
     automatic = subparsers.add_parser("auto-rollout")
     automatic.add_argument("--package", required=True)
     automatic.add_argument("--result", type=Path)
+
+    testing = subparsers.add_parser("promote-rn-testing")
+    testing.add_argument("--package", required=True)
+    testing.add_argument("--version-code", required=True, type=int)
+    testing.add_argument("--apply", action="store_true")
+    testing.add_argument("--result", required=True, type=Path)
     return parser
 
 
@@ -1024,6 +1097,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 args.percentage,
                 transport,
             )
+        elif args.command == "promote-rn-testing":
+            result = promote_rn_testing(args.package, args.version_code, transport, apply=args.apply)
         else:
             result = control_rollout(args.package, None, "auto", None, transport)
     except Exception as error:
@@ -1040,6 +1115,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "max-version-code": "version lookup",
                 "rollout": "rollout operation",
                 "auto-rollout": "automatic rollout operation",
+                "promote-rn-testing": "testing-track promotion",
             }[args.command]
             print(
                 f"Google Play {completed_operation} succeeded, but recording the local "
@@ -1055,6 +1131,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             f"Published versionCode {result['versionCode']} to "
             f"{', '.join(result['tracks'])}."
         )
+    elif args.command == "promote-rn-testing":
+        print(f"RN testing promotion versionCode {result['versionCode']}: {json.dumps(result)}")
     else:
         percentage_text = (
             ""

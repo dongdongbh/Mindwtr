@@ -7,6 +7,21 @@ import { parse } from 'yaml';
 
 const workflow = (name) => parse(readFileSync(`.github/workflows/${name}.yml`, 'utf8'));
 
+test('final RN testing promotion is explicit and serialized with every Play edit', () => {
+  const promotion = workflow('promote-rn-play-testing');
+  expect(promotion.on.workflow_dispatch.inputs.publish.default).toBe(false);
+  expect(promotion.concurrency).toEqual(workflow('rollout').jobs.play.concurrency);
+  expect(promotion.jobs.testing.if).toContain("github.repository == 'dongdongbh/Mindwtr'");
+  const step = promotion.jobs.testing.steps.find((entry) => entry.env?.PUBLISH);
+  expect(step.run).toContain('promote-rn-testing');
+  expect(step.run).toContain('if [ "$PUBLISH" = true ]');
+  expect(step.run).toContain('args+=(--apply)');
+  expect(step.run).not.toContain('publish --plan');
+  const resolver = workflow('release-android').jobs.preflight.steps.find((entry) => entry.id === 'publish_plan');
+  expect(resolver.run).toContain('--version "$RELEASE_VERSION"');
+  expect(resolver.run).toContain('--native-release-candidate "$NATIVE_RELEASE_CANDIDATE"');
+});
+
 test('Play status discovers production and its maximum without an empty version code', () => {
   const step = workflow('rollout').jobs.play.steps.find((entry) => entry.env?.VERSION_CODE);
   const directory = mkdtempSync(join(tmpdir(), 'mindwtr-play-status-'));

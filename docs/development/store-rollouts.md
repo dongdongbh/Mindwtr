@@ -13,7 +13,7 @@ Rollout promotion does not change the version or rebuild a package.
 | iOS and macOS App Store | Apple phased release, automatic after approval |
 | Google Play production | 5%, then scheduled 20% → 50% → 100% |
 | Microsoft Store production | 5%, then scheduled 20% → 50% → 100% |
-| Play beta/internal | Not touched by stable releases; they keep the native RC ([native Android RCs](native-android-release.md)) |
+| Play beta/internal | v1.3.9 is the final shared RN release; after v1.3.9 they carry native RCs starting at v1.4.0 ([native Android RCs](native-android-release.md)) |
 | RC TestFlight, Play testing, Microsoft Beta flight | Existing beta distribution |
 | GitHub downloads and other package channels | Existing distribution, no staging |
 
@@ -39,6 +39,13 @@ critical regression, especially a credible data-loss report. The scheduled
 controller never resumes a halted rollout.
 
 ## Operate an existing rollout
+
+The final RN v1.3.9 bundle also goes to open testing (`beta`) and internal testing,
+using the same versionCode as production. Complete that publication with
+`promote-rn-play-testing.yml`: inspect first with `publish=false`, then publish
+with `publish=true`. It reuses the production bundle without upload or rebuild,
+refuses a newer testing build, and leaves production's rollout unchanged. After
+v1.3.9, RN builds must not enter testing tracks; native testing starts at v1.4.0.
 
 Use GitHub Actions **Manage Store Rollout** (`rollout.yml`) from `main` for
 status checks, overrides, or emergency halts. It uses the existing Store

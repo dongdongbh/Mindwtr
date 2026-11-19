@@ -16,6 +16,20 @@ STABLE_TRACKS = ("production",)
 ROLLOUT_MODES = {"staged", "immediate"}
 
 
+def validate_testing_version(version: str, native_release_candidate: bool, tracks: Sequence[str]) -> None:
+    if not version or not any(track != "production" and track != "none" for track in tracks):
+        return
+    match = re.fullmatch(r"v?(\d+)\.(\d+)\.(\d+)(?:-[0-9A-Za-z.-]+)?", version)
+    if match is None:
+        raise ValueError("Testing publication requires a semantic release version")
+    base = tuple(int(part) for part in match.groups())
+    if native_release_candidate:
+        if base < (1, 4, 0):
+            raise ValueError("Native testing releases start at 1.4.0")
+    elif base > (1, 3, 9):
+        raise ValueError("React Native testing releases end at 1.3.9")
+
+
 def resolve_rollout(
     rollout_mode: str,
     rollout_percentage: float,
@@ -43,9 +57,12 @@ def resolve_tracks(
     *,
     internal_test_release: bool,
     stable_production_tag: bool,
+    version: str = "",
+    native_release_candidate: bool = False,
 ) -> list[str]:
 
     if internal_test_release:
+        validate_testing_version(version, native_release_candidate, ["internal"])
         return ["internal"]
 
     requested = play_tracks.strip() or "production"
@@ -61,6 +78,7 @@ def resolve_tracks(
 
     if not tracks:
         raise ValueError("At least one Google Play track or none is required")
+    validate_testing_version(version, native_release_candidate, tracks)
     if "none" in tracks:
         if tracks != ["none"]:
             raise ValueError("Google Play track none cannot be combined with other tracks")
@@ -129,6 +147,7 @@ def build_plan(
     )
 
     unique_tracks = list(dict.fromkeys(tracks))
+    validate_testing_version(version, native_release_candidate, unique_tracks)
     if not unique_tracks:
         raise ValueError("No Google Play tracks were configured")
     for track in unique_tracks:
@@ -201,6 +220,8 @@ def _resolve_command(args: argparse.Namespace) -> int:
         args.play_tracks,
         internal_test_release=args.internal_test_release,
         stable_production_tag=args.stable_production_tag,
+        version=args.version,
+        native_release_candidate=args.native_release_candidate,
     )
     rendered = ",".join(tracks) if tracks else "none"
     output = Path(args.github_output)
@@ -249,6 +270,8 @@ def _parser() -> argparse.ArgumentParser:
     resolve.add_argument("--play-tracks", default="production")
     resolve.add_argument("--internal-test-release", type=_parse_bool, default=False)
     resolve.add_argument("--stable-production-tag", type=_parse_bool, default=False)
+    resolve.add_argument("--version", default="")
+    resolve.add_argument("--native-release-candidate", type=_parse_bool, default=False)
     resolve.add_argument("--rollout-mode", default="staged")
     resolve.add_argument("--rollout-percentage", type=float, default=5)
     resolve.add_argument("--github-output", required=True)
