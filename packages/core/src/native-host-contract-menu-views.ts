@@ -4,7 +4,7 @@
 import { isTaskVisibleInArea, resolveAreaFilterSelection } from './area-filter';
 import type { DateFormatter } from './date';
 import type { FilterCriteria } from './types';
-import { formatTimeEstimateLabel, isCustomTimeEstimate, TIME_ESTIMATE_OPTIONS } from './calendar-scheduling';
+import { formatTimeEstimateFilterLabel, isCustomTimeEstimate, TIME_ESTIMATE_OPTIONS } from './calendar-scheduling';
 import {
     applyListFilterEdit,
     EMPTY_LIST_FILTER_STATE,
@@ -83,7 +83,7 @@ import { TASK_EDITOR_ENERGY_LEVEL_OPTIONS, TASK_EDITOR_PRIORITY_OPTIONS } from '
 import type { TaskGroupBy } from './task-group-sections';
 import { DONE_TASK_LIST_SORT_OPTIONS, TASK_LIST_SORT_OPTIONS } from './task-list-sort-options';
 import { tFallback } from './i18n';
-import type { MultiValueFilterMatchMode, Task, TaskEnergyLevel, TaskPriority, TaskSortBy, TaskStatus, TimeEstimate, ViewSectionDefinition } from './types';
+import type { MultiValueFilterMatchMode, Task, TaskEnergyLevel, TaskPriority, TaskSortBy, TaskStatus, TimeEstimate, TimeEstimateFilterValue, ViewSectionDefinition } from './types';
 import { buildProjectViewSectionUpdate, buildTaskViewSectionUndoUpdates, sortViewSectionDefinitions } from './view-sections';
 
 type NativeHostErrorCode = Extract<NativeHostResult<never>, { ok: false }>['error']['code'];
@@ -149,7 +149,7 @@ export type NativeListFilterView = {
     statuses?: { value: TaskStatus; label: string; selected: boolean; edit: ListFilterEdit }[];
     priorities: { value: TaskPriority; label: string; selected: boolean; edit: ListFilterEdit }[];
     energyLevels: { value: TaskEnergyLevel; label: string; selected: boolean; edit: ListFilterEdit }[];
-    timeEstimates: { value: TimeEstimate; label: string; selected: boolean; edit: ListFilterEdit }[];
+    timeEstimates: { value: TimeEstimateFilterValue; label: string; selected: boolean; edit: ListFilterEdit }[];
     taskDates: { label: string; options: { value: string; label: string; selected: boolean; edit: ListFilterEdit }[] };
 };
 
@@ -308,6 +308,8 @@ export const isTimeEstimate = (value: unknown): value is TimeEstimate => (
     typeof value === 'string' && (TIME_ESTIMATE_OPTIONS.includes(value as TimeEstimate) || isCustomTimeEstimate(value as TimeEstimate))
 );
 
+const isTimeEstimateFilterValue = (value: unknown): value is TimeEstimateFilterValue => value === 'none' || isTimeEstimate(value);
+
 export const isPreservedFilterCriteria = (value: unknown): value is FilterCriteria => {
     if (!isObjectRecord(value) || !isNativeJsonWithinBytes(value)) return false;
     const arrays = ['contexts', 'excludedContexts', 'areas', 'projects', 'excludedProjects', 'tags', 'excludedTags',
@@ -335,7 +337,7 @@ const FILTER_STATE_CHECKS: Record<keyof ListFilterState, (value: unknown) => boo
     statuses: (value) => isTextList(value, 7) && value.every((status) => ['inbox', 'next', 'waiting', 'someday', 'reference', 'done', 'archived'].includes(status)),
     priorities: (value) => Array.isArray(value) && value.every((entry) => TASK_EDITOR_PRIORITY_OPTIONS.includes(entry as TaskPriority)),
     energyLevels: (value) => Array.isArray(value) && value.every((entry) => TASK_EDITOR_ENERGY_LEVEL_OPTIONS.includes(entry as TaskEnergyLevel)),
-    timeEstimates: (value) => Array.isArray(value) && value.length <= 50 && value.every(isTimeEstimate),
+    timeEstimates: (value) => Array.isArray(value) && value.length <= 50 && value.every(isTimeEstimateFilterValue),
     location: (value) => isText(value, 500),
     contextMatchMode: (value) => MATCH_MODES.has(value as string),
     tagMatchMode: (value) => MATCH_MODES.has(value as string),
@@ -369,7 +371,7 @@ export const isFilterEdit = (edit: unknown): edit is ListFilterEdit => {
         case 'toggleEnergyLevel':
             return TASK_EDITOR_ENERGY_LEVEL_OPTIONS.includes(edit.value as TaskEnergyLevel);
         case 'toggleTimeEstimate':
-            return isTimeEstimate(edit.value);
+            return isTimeEstimateFilterValue(edit.value);
         case 'setSearch':
             return isText(edit.value, 2000);
         case 'setLocation':
@@ -478,7 +480,7 @@ export const nativeFilterView = (
             value, label: t(`energyLevel.${value}`), selected: state.energyLevels.includes(value), edit: { type: 'toggleEnergyLevel', value },
         })),
         timeEstimates: options.timeEstimates.map((value) => ({
-            value, label: formatTimeEstimateLabel(value), selected: state.timeEstimates.includes(value), edit: { type: 'toggleTimeEstimate', value },
+            value, label: formatTimeEstimateFilterLabel(value, { t }), selected: state.timeEstimates.includes(value), edit: { type: 'toggleTimeEstimate', value },
         })),
     };
 };

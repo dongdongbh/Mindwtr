@@ -241,6 +241,22 @@ describe('saved filters', () => {
         expect(filtered.map((item) => item.id)).toEqual(['medium']);
     });
 
+    it('distinguishes No estimate from Any and combines it with selected buckets', () => {
+        const tasks = [
+            task({ id: 'unset' }),
+            task({ id: 'preset', timeEstimate: '15min' }),
+            task({ id: 'custom', timeEstimate: 'custom:12' }),
+            task({ id: 'other', timeEstimate: '1hr' }),
+        ];
+        const criteria = normalizeFilterCriteria({ timeEstimates: ['none', 'none', 'invalid'] });
+        expect(criteria).toEqual({ timeEstimates: ['none'] });
+        expect(hasActiveFilterCriteria(criteria)).toBe(true);
+        expect(applyFilter(tasks, { timeEstimates: [] })).toEqual(tasks);
+        expect(applyFilter(tasks, criteria).map(({ id }) => id)).toEqual(['unset']);
+        expect(applyFilter(tasks, { timeEstimates: ['none', '15min'] }).map(({ id }) => id))
+            .toEqual(['unset', 'preset', 'custom']);
+    });
+
     it('matches custom time estimates by preset bucket while preserving exact ranges', () => {
         const tasks = [
             task({ id: 'preset-2h', timeEstimate: '2hr' }),

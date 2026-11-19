@@ -1,6 +1,12 @@
 
 export const nlOverrides: Record<string, string> = {
         'inbox.browseProjects': 'Projecten bekijken',
+        'bulk.keepEstimate': "Huidige waarde behouden",
+        'bulk.clearEstimate': "Tijdsinschatting wissen",
+        'bulk.setEstimate': "Tijdsinschatting instellen",
+        'bulk.invalidEstimate': "Voer een geldige tijdsinschatting in.",
+        'bulk.selectionChanged': "De geselecteerde taken of filters zijn gewijzigd. Controleer je selectie en probeer het opnieuw.",
+        'filters.noEstimate': "Geen tijdsinschatting",
     "projects.calendarLimit": "De eerste 200 resultaten worden getoond. Zoek om een andere afspraak te vinden.",
     "projects.calendarTitle": "Agenda",
     "projects.calendarLink": "Agenda-afspraak koppelen",

@@ -654,6 +654,7 @@ describe('ContextsView', () => {
         fireEvent.click(view.getByRole('button', { name: 'Select' }));
         fireEvent.click(view.getByRole('button', { name: 'Select All' }));
 
+        expect(view.getByText('1 selected - 1 tasks')).toBeInTheDocument();
 
         expect(view.getAllByRole('checkbox', { name: 'Select task' }).map((checkbox) => (
             (checkbox as HTMLInputElement).checked

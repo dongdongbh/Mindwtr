@@ -72,6 +72,25 @@ describe('Context filters', () => {
         expect(getContextsSaveCriteria(model.criteria, [], 'all')).toMatchObject({ futureCriterion: { enabled: true } });
     });
 
+    it('applies a saved No estimate filter in Contexts and widgets only while the feature is enabled', () => {
+        const criteria: FilterCriteria = { statuses: ['next'], timeEstimates: ['none'] };
+        const filter: SavedFilter = { id: 'unestimated', name: 'Unestimated', view: 'contexts', criteria, createdAt: stamp, updatedAt: stamp };
+        const tasks = [task('plain'), task('estimated', 'next', { timeEstimate: '15min' })];
+        const data: AppData = { tasks, projects: [], areas: [], sections: [], settings: { savedFilters: [filter] } };
+        const contexts = () => buildContextsFilterModel({ tasks, projects: [], settings: data.settings, filters: EMPTY_LIST_FILTER_STATE,
+            savedFilterId: filter.id, t: (key) => key });
+        const widget = () => buildWidgetPayload(data, 'en', { listIds: ['filter:unestimated'] }).lists!['filter:unestimated'];
+        expect(contexts().resolved.state.timeEstimates).toEqual(['none']);
+        expect(contexts().tasks.map(({ id }) => id)).toEqual(['plain']);
+        expect(widget().items.map(({ id }) => id)).toEqual(['plain']);
+
+        data.settings.features = { timeEstimates: false };
+        expect(contexts().resolved.chips.map(({ id }) => id)).not.toContain('time:none');
+        expect(contexts().tasks).toEqual(tasks);
+        expect(widget().items.map(({ id }) => id)).toEqual(expect.arrayContaining(['plain', 'estimated']));
+        expect(data.settings.savedFilters?.[0].criteria).toEqual(criteria);
+    });
+
     it('reopens the same Context criteria in a widget and retains legacy Next-view narrowing', () => {
         const criteria: FilterCriteria = { contexts: ['@person/emma'], excludedProjects: ['p1'], statuses: ['next', 'someday'] };
         const filter: SavedFilter = { id: 'emma', name: 'Emma', view: 'contexts', criteria, createdAt: stamp, updatedAt: stamp };

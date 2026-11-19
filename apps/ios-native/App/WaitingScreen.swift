@@ -255,9 +255,9 @@ struct StatusListBulkBar: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
                     let organize = bar.object("organize")
-                    if idPrefix == "review" && !organize.isEmpty {
+                    if !organize.isEmpty {
                         action(organize.text("label"), id: "-bulk-organize-open", enabled: model.statusListBulkOrganizeEnabled,
-                               primary: true) { model.openReviewBulkOrganize() }
+                               primary: true) { model.openStatusListBulkOrganize() }
                     }
                     let statuses = bar.objects("statuses")
                     ForEach(statuses.indices, id: \.self) { index in

@@ -2,7 +2,7 @@ import { TaskDateFilter } from '../list/TaskDateFilter';
 import { useEffect, useMemo, useState } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent, RefObject } from 'react';
 import { SAVED_FILTER_NO_PROJECT_ID, tFallback } from '@mindwtr/core';
-import type { DateRange, MultiValueFilterMatchMode, TaskEnergyLevel, TaskPriority, TimeEstimate } from '@mindwtr/core';
+import type { DateRange, MultiValueFilterMatchMode, TaskEnergyLevel, TaskPriority, TimeEstimateFilterValue } from '@mindwtr/core';
 import { Filter, Save } from 'lucide-react';
 
 import { cn } from '../../../lib/utils';
@@ -36,7 +36,7 @@ type AgendaFiltersPanelProps = {
     showTokenFilters?: boolean;
     activeFilterChips: AgendaActiveFilterChip[];
     energyLevelOptions: TaskEnergyLevel[];
-    formatEstimate: (estimate: TimeEstimate) => string;
+    formatEstimate: (estimate: TimeEstimateFilterValue) => string;
     canSaveFilter: boolean;
     contextMatchMode: MultiValueFilterMatchMode;
     contextMatchModeLabels: { title: string; any: string; all: string };
@@ -56,7 +56,7 @@ type AgendaFiltersPanelProps = {
     onToggleFiltersOpen: () => void;
     onToggleProject: (projectId: string) => void;
     onTogglePriority: (priority: TaskPriority) => void;
-    onToggleTime: (estimate: TimeEstimate) => void;
+    onToggleTime: (estimate: TimeEstimateFilterValue) => void;
     onToggleToken: (token: string) => void;
     showPriorityFilters: boolean;
     projectOptions: AgendaProjectFilterOption[];
@@ -68,14 +68,14 @@ type AgendaFiltersPanelProps = {
     selectedProjects: string[];
     excludedProjects?: string[];
     selectedPriorities: TaskPriority[];
-    selectedTimeEstimates: TimeEstimate[];
+    selectedTimeEstimates: TimeEstimateFilterValue[];
     selectedTokens: string[];
     excludedTokens: string[];
     excludedStateLabel: string;
     showNoProjectOption: boolean;
     showFiltersPanel: boolean;
     t: (key: string) => string;
-    timeEstimateOptions: TimeEstimate[];
+    timeEstimateOptions: TimeEstimateFilterValue[];
     showTimeEstimateFilters: boolean;
 };
 
@@ -465,7 +465,7 @@ export function AgendaFiltersPanel({
                         </FilterCategory>
                     )}
 
-                    {(showTimeEstimateFilters || selectedTimeEstimates.length > 0) && (
+                    {showTimeEstimateFilters && (
                         <FilterCategory
                             id="agenda-time-filters"
                             label={t('filters.timeEstimate')}

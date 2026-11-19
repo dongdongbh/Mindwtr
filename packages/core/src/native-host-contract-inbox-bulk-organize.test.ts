@@ -72,6 +72,40 @@ afterEach(async () => { await flushPendingSave(); resetForTests(); vi.restoreAll
 
 describe('Inbox Organize RN/store parity', () => {
     it.each([
+        { draft: { estimateChoice: '30min' }, enabled: true, expected: '30min' },
+        { draft: { estimateChoice: '__CUSTOM__', estimateText: '1h 15m' }, enabled: true, expected: 'custom:75' },
+        { draft: { estimateChoice: BULK_ORGANIZE_NONE }, enabled: true, expected: null },
+        { draft: {}, enabled: true, expected: '1hr' },
+        { draft: { estimateChoice: BULK_ORGANIZE_NONE }, enabled: false, expected: '1hr' },
+        { draft: { estimateChoice: '__CUSTOM__', estimateText: 'not a duration' }, enabled: false, expected: '1hr' },
+    ])('persists only selected estimates for $draft when time estimates enabled=$enabled', async ({ draft, enabled, expected }) => {
+        clock();
+        const initial = seed();
+        initial.settings = { ...initial.settings, features: { timeEstimates: enabled } };
+        initial.tasks = [task('a', { timeEstimate: '1hr' }), task('b', { timeEstimate: '1hr' }), task('unselected', { timeEstimate: '10min' })];
+        const estimates = [{ id: 'a', timeEstimate: expected }, { id: 'b', timeEstimate: expected }, { id: 'unselected', timeEstimate: '10min' }];
+        const changes = expected === '1hr' ? { ...draft, tags: 'changed' } : draft;
+        const rn = await openSqliteHost(initial);
+        try {
+            const input = { ...EMPTY_BULK_ORGANIZE_DRAFT, ...changes };
+            const store = useTaskStore.getState();
+            const write = planBulkOrganize(['a', 'b'], store._tasksById, buildBulkOrganizeInput(input, enabled));
+            if (write?.kind !== 'update') throw new Error('Expected selected task updates');
+            expect(await store.batchUpdateTasks(write.updates)).toEqual({ success: true });
+            await flushPendingSave();
+            expect(await rn.sql('SELECT id, timeEstimate FROM tasks ORDER BY id')).toEqual(estimates);
+        } finally { await rn.close(); }
+        const native = await openSqliteHost(initial);
+        try {
+            const command = await prepare(native, request(changes));
+            expect(value(await native.host.commitPreparedInboxTasksOrganize(command))).toEqual({ count: 2, changed: true });
+            expect(await native.sql('SELECT id, timeEstimate FROM tasks ORDER BY id')).toEqual(estimates);
+            await native.restart();
+            expect(useTaskStore.getState()._tasksById.get('a')?.timeEstimate).toBe(expected ?? undefined);
+            expect(useTaskStore.getState()._tasksById.get('unselected')?.timeEstimate).toBe('10min');
+        } finally { await native.close(); }
+    });
+    it.each([
         ['additive raw/Unicode/token order', { contexts: 'office,@old, @École @école', tags: 'raw,#old,新 #École #école raw' }],
         ['explicit same-value project', { projectChoice: 'p1' }],
         ['None clears project and keeps area', { projectChoice: BULK_ORGANIZE_NONE }],

@@ -1,10 +1,10 @@
 import { useCallback, useMemo } from 'react';
 import { selectionsFromCriteria } from '@mindwtr/core';
-import type { FilterCriteria, MultiValueFilterMatchMode, TaskPriority, TimeEstimate } from '@mindwtr/core';
+import type { FilterCriteria, MultiValueFilterMatchMode, TaskPriority, TimeEstimateFilterValue } from '@mindwtr/core';
 import { useUiStore } from '../../../store/ui-store';
 import { removeFilterChipFromCriteria } from './active-filter-chips';
 
-const EMPTY_ESTIMATES: TimeEstimate[] = [];
+const EMPTY_ESTIMATES: TimeEstimateFilterValue[] = [];
 
 
 export function withListFilterValue<K extends keyof Pick<FilterCriteria, 'contexts' | 'tags' | 'excludedContexts' | 'excludedTags' | 'priority' | 'timeEstimates'>>(
@@ -63,7 +63,7 @@ export function useListFilterControls() {
         setListFilters({ criteria: withListFilterValue(criteria, 'priority', nextPriorities) });
     }, [criteria, selectedPriorities, setListFilters]);
 
-    const toggleEstimate = useCallback((estimate: TimeEstimate) => {
+    const toggleEstimate = useCallback((estimate: TimeEstimateFilterValue) => {
         const nextEstimates = selectedTimeEstimates.includes(estimate)
             ? selectedTimeEstimates.filter((item) => item !== estimate)
             : [...selectedTimeEstimates, estimate];

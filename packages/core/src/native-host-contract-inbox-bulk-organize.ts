@@ -2,7 +2,7 @@ import type { NativeHostResult } from './native-host-contract';
 import type { AppData, Project, Section, Task } from './types';
 import type { PreparedAreaAuthority, PreparedNativeSaveBoundary } from './store-types';
 import type { NativeProjectTasksOrganizeRequest, NativeProjectTasksOrganizePrepared } from './native-host-contract-project-bulk-organize';
-import type { NativeInboxTasksMoveParams, NativeReviewTasksParams } from './native-host-contract-inbox-bulk-status';
+import type { NativeInboxTasksMoveParams, NativeReviewTasksParams, NativeContextsSelectionParams } from './native-host-contract-inbox-bulk-status';
 import type { NativeShownSelection } from './native-host-contract-reference-bulk-status';
 import type { RecurrenceProjection } from './recurrence';
 import { projectNextRecurringTask } from './recurrence';
@@ -11,8 +11,9 @@ import { validSection } from './native-host-contract-project-section-rename';
 import { validFrozenFocusDate } from './native-host-contract-task-focus';
 import { historyRowLoadProjection } from './native-host-contract-task-checklist';
 import { hasValidBulkOrganizeDates, readBulkOrganizeDraftShape } from './native-host-contract-bulk-actions';
-import { BULK_ORGANIZE_KEEP, BULK_ORGANIZE_NONE, EMPTY_BULK_ORGANIZE_DRAFT, buildBulkOrganizeInput,
-    getBulkOrganizeAreaOptions, getBulkOrganizeProjectOptions, planBulkOrganize, type BulkOrganizeDraft } from './task-list-bulk-actions';
+import { BULK_ORGANIZE_KEEP, BULK_ORGANIZE_NONE, buildBulkOrganizeInput,
+    getBulkOrganizeAreaOptions, getBulkOrganizeProjectOptions, isBulkOrganizeEstimateValid, planBulkOrganize, type BulkOrganizeDraft } from './task-list-bulk-actions';
+import { resolveFeatureFlags } from './resolve-feature-flags';
 import { createAreaSaveGuard, readAreaDurableData } from './native-host-contract-area-durable';
 import { createNativeRequestReceipts, isNativeRequestReceiptDurable, NativeReceiptSqliteAdapter } from './native-request-receipts';
 import { taskEditValuesEqual as same } from './json-value-equality';
@@ -29,7 +30,8 @@ import { detachReferenceBatchJson, detachReferenceBatchValue, readStatusBatchSel
     validReferenceBatchRecurrenceProjection, referenceTasksMoveScope, type NativeReferenceTasksMoveScope } from './native-host-contract-reference-bulk-status';
 
 export type NativeInboxTasksOrganizeRequest = { requestId: string; taskIds: string[]; taskRevisions: Record<string, string>;
-    draft: BulkOrganizeDraft } & ({ source: 'inbox'; params: NativeInboxTasksMoveParams } | { source: 'review'; params: NativeReviewTasksParams });
+    draft: BulkOrganizeDraft } & ({ source: 'inbox'; params: NativeInboxTasksMoveParams } | { source: 'review'; params: NativeReviewTasksParams }
+    | { source: 'contexts'; params: NativeContextsSelectionParams });
 export type NativeInboxTasksOrganizeResult = { count: number; changed: boolean };
 export type NativeInboxTasksOrganizePrepared = {
     version: 1; request: NativeInboxTasksOrganizeRequest; scope: NativeReferenceTasksMoveScope;
@@ -58,23 +60,24 @@ const selectionRequest = (request: OrganizeRequest) => {
     const base = { requestId: request.requestId, taskIds: request.taskIds, taskRevisions: request.taskRevisions,
         status: request.draft.status === 'done' ? 'done' as const : 'next' as const };
     if (request.source === 'project') return { ...base, source: request.source, params: request.params };
+    if (request.source === 'contexts') return { ...base, source: request.source, params: request.params };
     if (request.source === 'review') return { ...base, source: request.source, params: request.params };
     return { ...base, source: request.source, params: request.params };
 };
-export const organizeListSource = (request: { source?: unknown }, family: OrganizeSource): 'inbox' | 'project' | 'review' =>
-    family === 'inbox' && request.source === 'review' ? 'review' : family;
+export const organizeListSource = (request: { source?: unknown }, family: OrganizeSource): 'inbox' | 'project' | 'review' | 'contexts' =>
+    family === 'inbox' && (request.source === 'review' || request.source === 'contexts') ? request.source : family;
 const readRequest = (input: unknown, source: OrganizeSource): OrganizeRequest | null => {
     const request = detachReferenceBatchJson<OrganizeRequest>(input);
     return request && exact(request, ['requestId', 'source', 'taskIds', 'taskRevisions', 'draft', 'params'])
-        && record(request.draft) && exact(request.draft, Object.keys(EMPTY_BULK_ORGANIZE_DRAFT))
-        && readBulkOrganizeDraftShape(request.draft) && hasValidBulkOrganizeDates(request.draft)
+        && readBulkOrganizeDraftShape(request.draft, true) && hasValidBulkOrganizeDates(request.draft)
         && (request.draft.status !== 'waiting' || Boolean(request.draft.delegateWho.trim()))
         && readStatusBatchSelectionRequest(selectionRequest(request), organizeListSource(request, source)) ? request : null;
 };
 const offersChoices = (request: OrganizeRequest, scope: NativeReferenceTasksMoveScope): boolean => {
     const choice = (value: string, ids: string[]) => value === BULK_ORGANIZE_KEEP || value === BULK_ORGANIZE_NONE || ids.includes(value);
     return choice(request.draft.projectChoice, getBulkOrganizeProjectOptions(scope.projects.map(loadedReferenceBatchProject)).map(row => row.id))
-        && choice(request.draft.areaChoice, getBulkOrganizeAreaOptions(scope.areas).map(row => row.id));
+        && choice(request.draft.areaChoice, getBulkOrganizeAreaOptions(scope.areas).map(row => row.id))
+        && (!resolveFeatureFlags(scope.settings).timeEstimates || isBulkOrganizeEstimateValid(request.draft));
 };
 
 export const tasksOrganizeScope = (request: OrganizeRequest,
@@ -89,8 +92,8 @@ export const tasksOrganizeScope = (request: OrganizeRequest,
     sections: data.sections.filter(row => sectionIds.has(row.id) || row.projectId === destination),
     settings: statusBatchSettings(data.settings, request.source) };
 };
-const updates = (request: OrganizeRequest, tasks: Task[]) => {
-    const write = planBulkOrganize(request.taskIds, buildEntityMap(tasks), buildBulkOrganizeInput(request.draft));
+const updates = (request: OrganizeRequest, tasks: Task[], settings: AppData['settings']) => {
+    const write = planBulkOrganize(request.taskIds, buildEntityMap(tasks), buildBulkOrganizeInput(request.draft, resolveFeatureFlags(settings).timeEstimates));
     return write?.kind === 'update' ? write.updates : [];
 };
 const requiredDates = (request: OrganizeRequest, scope: NativeReferenceTasksMoveScope) =>
@@ -105,7 +108,7 @@ const tasksOrganizeEffect = (prepared: Pick<OrganizePrepared,
     const temporal = temporalContext(prepared);
     const tasks = scope.tasks.map(row => historyRowLoadProjection(row, prepared.updateAt, temporal));
     const projects = scope.projects.map(loadedReferenceBatchProject);
-    const preflight = prepareTaskBatchUpdatesForStore({ updatesList: updates(request, tasks),
+    const preflight = prepareTaskBatchUpdatesForStore({ updatesList: updates(request, tasks, scope.settings),
         state: { _tasksById: buildEntityMap(tasks), _projectsById: buildEntityMap(projects), _allProjects: projects,
             _allSections: scope.sections, _allAreas: scope.areas, settings: scope.settings, persistenceFailure: null },
         futureBoundary: prepared.futureBoundary, futureDates: temporal.dates, nowMs: Date.parse(prepared.updateAt) });
@@ -171,7 +174,7 @@ export const readTasksOrganizeEnvelope = (input: unknown, source: OrganizeSource
             && new Date(Date.parse(`${prepared.preparedLocalDay}T23:59:59.999Z`) + prepared.boundaryOffsetMinutes * 60_000).toISOString() === prepared.futureBoundary
             && same(requiredDates(request, prepared.scope), prepared.dates.map(row => row.value))
             && expected && same(expected, prepared.effect)
-            && prepared.result.count === updates(request, prepared.scope.tasks.map(row => historyRowLoadProjection(row, prepared.updateAt, temporalContext(prepared)))).length
+            && prepared.result.count === updates(request, prepared.scope.tasks.map(row => historyRowLoadProjection(row, prepared.updateAt, temporalContext(prepared))), prepared.scope.settings).length
             && [...prepared.effect.tasks, ...prepared.effect.projects, ...prepared.effect.sections].every(pair => record(pair) && exact(pair, ['before', 'after']))
             ? envelope as OrganizeEnvelope : null;
     } catch { return null; }
@@ -254,11 +257,11 @@ export function createTasksOrganizeMethods(deps: {
             const memory = useTaskStore.getState(); const now = new Date();
             if (!statusBatchSourcesMatch(selectionRequest(request), { tasks: memory._allTasks, projects: memory._allProjects,
                 sections: memory._allSections, areas: memory._allAreas, settings: memory.settings }, now.toISOString())
-                || (request.source === 'review' && deps.shown?.(request) !== true))
-                return fail('STALE_REVISION', `${request.source === 'review' ? 'Review' : label} selection changed since it was shown`);
+                || ((request.source === 'review' || request.source === 'contexts') && deps.shown?.(request) !== true))
+                return fail('STALE_REVISION', `${request.source === 'contexts' ? 'Contexts' : request.source === 'review' ? 'Review' : label} selection changed since it was shown`);
             if (!offersChoices(request, { tasks: memory._allTasks, projects: memory._allProjects,
                 sections: memory._allSections, areas: memory._allAreas, settings: memory.settings }))
-                return fail('INVALID_INPUT', `${label} Organize destination is not offered`);
+                return fail('INVALID_INPUT', `${label} Organize choices are not offered`);
             const read = await readAreaDurableData(false, true); if (!read.ok) return read;
             const foreignKeys = await checkForeignKeyAuthority(read.value.adapter); if (!foreignKeys.ok) return foreignKeys;
             const data = read.value.authority.snapshot;
@@ -269,7 +272,7 @@ export function createTasksOrganizeMethods(deps: {
             if (!statusBatchSourcesMatch(selectionRequest(request), scope, now.toISOString()) || !offersChoices(request, scope))
                 return fail('STALE_REVISION', `Saved ${label} selection or offered destinations changed`);
             const loaded = buildEntityMap(scope.tasks.map(row => historyRowLoadProjection(row, now.toISOString())));
-            const count = updates(request, [...loaded.values()]).length;
+            const count = updates(request, [...loaded.values()], scope.settings).length;
             if (!count) return { ok: true, value: { kind: 'noop', result: { count: 0, changed: false } } };
             const end = new Date(now); end.setHours(23, 59, 59, 999); const device = ensureDeviceId(scope.settings);
             const base = { version: 1 as const, request, scope, deviceIdBefore: scope.settings.deviceId ?? null,
@@ -330,8 +333,8 @@ export function createTasksOrganizeMethods(deps: {
             if (confirmed.ok && !same(confirmed.value, envelope.prepared.result)) return fail('INVALID_INPUT', `Saved ${label} Organize result does not match its journal`);
             if (confirmed.ok) {
                 const list = envelope.request.source;
-                try { logInfo(`Native ${list === 'review' ? 'Review' : label} bulk Organize confirmed`, { scope: 'native-host', category: 'storage', ...(list !== 'inbox' ? { force: true } : {}),
-                    context: { releaseCheck: list === 'project' ? 'v1.3.9/ios-project-bulk-organize' : list === 'review' ? 'v1.3.9/ios-review-bulk-organize' : 'v1.3.5/ios-inbox-bulk-organize', count: confirmed.value.count, outcome: 'organized' } }); }
+                try { logInfo(`Native ${list === 'contexts' ? 'Contexts' : list === 'review' ? 'Review' : label} bulk Organize confirmed`, { scope: 'native-host', category: 'storage', ...(list !== 'inbox' ? { force: true } : {}),
+                    context: { releaseCheck: list === 'contexts' ? 'v1.3.10/contexts-bulk-organize' : list === 'project' ? 'v1.3.9/ios-project-bulk-organize' : list === 'review' ? 'v1.3.9/ios-review-bulk-organize' : 'v1.3.5/ios-inbox-bulk-organize', count: confirmed.value.count, outcome: 'organized' } }); }
                 catch { }
             }
             return confirmed;

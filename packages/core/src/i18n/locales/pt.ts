@@ -1,6 +1,11 @@
 
 export const ptOverrides: Record<string, string> = {
     "projects.calendarLimit": "Exibindo os primeiros 200 resultados. Pesquise para encontrar outro evento.",
+    'bulk.keepEstimate': "Manter valor atual",
+    'bulk.clearEstimate': "Limpar estimativa",
+    'bulk.setEstimate': "Definir estimativa",
+    'bulk.invalidEstimate': "Introduza uma estimativa de tempo válida.",
+    'bulk.selectionChanged': "As tarefas selecionadas ou os filtros mudaram. Reveja a seleção e tente novamente.",
     "projects.calendarTitle": "Calendário",
     "projects.calendarLink": "Vincular evento do calendário",
     "projects.calendarReplace": "Substituir evento vinculado",
@@ -627,6 +632,7 @@ export const ptOverrides: Record<string, string> = {
         'filters.contexts': 'Contextos e tags',
         'filters.priority': 'Prioridade',
         'filters.timeEstimate': 'Estimativa de tempo',
+        'filters.noEstimate': "Sem estimativa",
         'filters.after': 'Depois de',
         'filters.before': 'Antes de',
         'filters.hasDescription': 'Com descrição',

@@ -5,6 +5,7 @@ import { runStoreCommand, runSyncStoreSave, type Task } from '@mindwtr/core';
 import { Pressable, ScrollView, Text, TextInput, TouchableOpacity } from 'react-native';
 import { ContextsView } from './contexts-view';
 import { TaskListSortModal } from '../task-list/TaskListSortModal';
+import { TaskListBulkOrganizeModal } from '../task-list/TaskListBulkOrganizeModal';
 import { FilterChip, TaskFilterSheet } from '../task-filter-sheet';
 
 const now = '2026-06-11T00:00:00.000Z';
@@ -23,6 +24,7 @@ const storeState = vi.hoisted(() => ({
   tasks: [] as Task[],
   _tasksById: new Map<string, Task>(),
   projects: [],
+  areas: [],
   settings: { appearance: {}, taskSortBy: 'default' } as Record<string, unknown>,
   updateSettings: vi.fn(async (_next: Record<string, unknown>) => undefined),
   updateTask: vi.fn(async () => undefined),
@@ -102,6 +104,8 @@ vi.mock('../task-edit-modal', () => ({
 vi.mock('../token-picker-modal', () => ({
   TokenPickerModal: (props: any) => React.createElement('TokenPickerModal', props),
 }));
+
+vi.mock('../task-list/TaskListBulkOrganizeModal', () => ({ TaskListBulkOrganizeModal: () => null }));
 
 vi.mock('../swipeable-task-item', () => ({
   SwipeableTaskItem: (props: any) => React.createElement('SwipeableTaskItem', props),
@@ -457,6 +461,75 @@ describe('ContextsView', () => {
       await act(async () => { exit.props.onPress(); });
       expect(row().props.selectionMode).toBe(false);
     } finally {
+      storeState.tasks = [];
+      storeState._tasksById = new Map();
+    }
+  });
+
+  it('keeps the organizer open on rejection and applies only to the selected Contexts rows', async () => {
+    storeState.tasks = [makeTask('task-1', 'First'), makeTask('task-2', 'Second'), makeTask('task-3', 'Third')];
+    storeState._tasksById = new Map(storeState.tasks.map((task) => [task.id, task]));
+    storeState.batchUpdateTasks.mockReset();
+    storeState.batchUpdateTasks.mockResolvedValueOnce({ success: false, error: 'Write failed' });
+    storeState.batchUpdateTasks.mockResolvedValueOnce({ success: true });
+    let tree!: ReactTestRenderer;
+    try {
+      await act(async () => { tree = create(<ContextsView />); });
+      const rows = tree.root.findAll((node) => (node.type as unknown) === 'SwipeableTaskItem');
+      for (const row of rows.slice(0, 2)) {
+        await act(async () => { row.props.actions.toggleSelect(row.props.task); });
+      }
+      const button = tree.root.findAllByType(TouchableOpacity).find((node) => node.findAllByProps({ children: 'Bulk organize' }).length > 0)!;
+      await act(async () => { button.props.onPress(); });
+      const dialog = () => tree.root.findByType(TaskListBulkOrganizeModal);
+      expect(dialog().props.selectedCount).toBe(2);
+      await act(async () => { await dialog().props.onApply({ timeEstimate: '30min' }); });
+      expect(dialog().props.selectedCount).toBe(2);
+      await act(async () => { await dialog().props.onApply({ timeEstimate: '30min' }); });
+      expect(tree.root.findAllByType(TaskListBulkOrganizeModal)).toHaveLength(0);
+      expect(storeState.batchUpdateTasks).toHaveBeenCalledTimes(2);
+      for (const [updates] of storeState.batchUpdateTasks.mock.calls) {
+        expect(updates.map((update) => update.id).sort()).toEqual(['task-1', 'task-2']);
+        expect(updates.map((update) => update.updates)).toEqual([{ timeEstimate: '30min' }, { timeEstimate: '30min' }]);
+      }
+    } finally {
+      await act(async () => { tree?.unmount(); });
+      storeState.batchUpdateTasks.mockReset();
+      storeState.batchUpdateTasks.mockResolvedValue(undefined);
+      storeState.tasks = [];
+      storeState._tasksById = new Map();
+    }
+  });
+
+  it('keeps the organizer open when an optimistic estimate hides the selection before a save fails', async () => {
+    const tasks = [makeTask('task-1', 'First'), makeTask('task-2', 'Second')];
+    storeState.tasks = tasks;
+    storeState._tasksById = new Map(tasks.map((task) => [task.id, task]));
+    let rejectSave!: () => void;
+    storeState.batchUpdateTasks.mockImplementationOnce(() => new Promise((resolve) => {
+      rejectSave = () => resolve({ success: false, error: 'Write failed' });
+    }));
+    let tree!: ReactTestRenderer;
+    try {
+      await act(async () => { tree = create(<ContextsView />); });
+      await act(async () => { tree.root.findByType(TaskFilterSheet).props.selections.toggleTimeEstimate('none'); });
+      const row = tree.root.findAll((node) => (node.type as unknown) === 'SwipeableTaskItem')[0];
+      await act(async () => { row.props.actions.toggleSelect(row.props.task); });
+      const button = tree.root.findAllByType(TouchableOpacity).find((node) => node.findAllByProps({ children: 'Bulk organize' }).length > 0)!;
+      await act(async () => { button.props.onPress(); });
+      const dialog = () => tree.root.findByType(TaskListBulkOrganizeModal);
+      let pending!: Promise<void>;
+      await act(async () => { pending = dialog().props.onApply({ timeEstimate: '30min' }); });
+      storeState.tasks = tasks.map((task) => task.id === row.props.task.id ? { ...task, timeEstimate: '30min' } : task);
+      storeState._tasksById = new Map(storeState.tasks.map((task) => [task.id, task]));
+      await act(async () => { tree.update(<ContextsView />); });
+      expect(dialog().props).toMatchObject({ selectedCount: 0, isApplying: true });
+      await act(async () => { rejectSave(); await pending; });
+      expect(dialog().props).toMatchObject({ selectedCount: 0, isApplying: false });
+      await act(async () => { dialog().props.onClose(); });
+      expect(tree.root.findAllByType(TaskListBulkOrganizeModal)).toHaveLength(0);
+    } finally {
+      await act(async () => { tree?.unmount(); });
       storeState.tasks = [];
       storeState._tasksById = new Map();
     }

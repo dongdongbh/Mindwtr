@@ -22276,11 +22276,13 @@ private final class Engine: @unchecked Sendable {
         return validTaskListMoveRequest(selection, source: source)
     }
 
-    private static func validInboxOrganizeDraft(_ draft: [String: Any]) -> Bool {
-        let fields = ["status", "projectChoice", "areaChoice", "contexts", "tags", "startDate", "dueDate", "reviewDate", "delegateWho"]
-        return Set(draft.keys) == Set(fields) && fields.allSatisfy {
-            guard let value = draft[$0] as? String else { return false }
-            return value.utf16.count <= 2_000_000
+    private static func validInboxOrganizeDraft(_ draft: [String: Any], complete: Bool = true) -> Bool {
+        let required: Set<String> = ["status", "projectChoice", "areaChoice", "contexts", "tags", "startDate", "dueDate", "reviewDate", "delegateWho"]
+        let estimates: Set<String> = ["estimateChoice", "estimateText"]
+        guard !complete || required.isSubset(of: draft.keys) else { return false }
+        return draft.allSatisfy { field, raw in
+            guard let value = raw as? String else { return false }
+            return estimates.contains(field) ? value.utf16.count <= 100 : required.contains(field) && value.utf16.count <= 2_000_000
         }
     }
 
@@ -22290,10 +22292,10 @@ private final class Engine: @unchecked Sendable {
         var selection = request
         selection.removeValue(forKey: "draft")
         selection["status"] = "next"
-        return validTaskListMoveRequest(selection, source: source, statusLists: reviewOrganize(request, source: source))
+        return validTaskListMoveRequest(selection, source: source, statusLists: shownListOrganize(request, source: source))
     }
-    private static func reviewOrganize(_ request: [String: Any], source: String) -> Bool {
-        source == "inbox" && request["source"] as? String == "review"
+    private static func shownListOrganize(_ request: [String: Any], source: String) -> Bool {
+        source == "inbox" && ["review", "contexts"].contains(request["source"] as? String ?? "")
     }
     private static func validTaskListOrganizeDestinationCreateRequest(_ request: [String: Any], source: String = "inbox") -> Bool {
         guard Set(request.keys) == Set(["requestId", "taskIds", "taskRevisions", "draft", "params", "source", "kind", "name", "offerRevision"]),
@@ -22306,7 +22308,7 @@ private final class Engine: @unchecked Sendable {
         selection.removeValue(forKey: "draft")
         for field in ["kind", "name", "offerRevision"] { selection.removeValue(forKey: field) }
         selection["status"] = "next"
-        return validTaskListMoveRequest(selection, source: source, statusLists: reviewOrganize(request, source: source))
+        return validTaskListMoveRequest(selection, source: source, statusLists: shownListOrganize(request, source: source))
     }
 
     private static func validTaskListRemoveTagResult(_ result: [String: Any], request: [String: Any], allowNoop: Bool = false) -> Bool {
@@ -29409,8 +29411,7 @@ private final class Engine: @unchecked Sendable {
                     : waitingSelection ? "Waiting" : somedaySelection ? "Someday" : reviewSelection ? "Review" : contextsSelection ? "Contexts" : "Done"
                 let selectionKeys: Set<String> = ["list", "params", "taskIds", "anchorId", "selectionEdit", "rangeSelectMode", "busy", "picker", "organize"]
                 guard json.utf8.count <= 2_000_000, ["done", "reference", "inbox", "project", "waiting", "someday", "review", "contexts"].contains(input["list"] as? String ?? ""),
-                      !(reviewSelection || contextsSelection) || ((contextsSelection ? input["organize"] == nil && input["picker"] == nil
-                          : input["picker"] == nil || input["organize"] != nil) && input["rangeSelectMode"] as? Bool != true),
+                      !(reviewSelection || contextsSelection) || ((input["picker"] == nil || input["organize"] != nil) && input["rangeSelectMode"] as? Bool != true),
                       Set(input.keys).isSubset(of: selectionKeys),
                       input["rangeSelectMode"] == nil || Self.isBoolean(input["rangeSelectMode"]),
                       input["busy"] == nil || Self.isBoolean(input["busy"]),
@@ -29454,30 +29455,29 @@ private final class Engine: @unchecked Sendable {
                     }
                 }
                 if let organize = input["organize"] {
-                    guard inboxSelection || projectSelection || reviewSelection, let value = organize as? [String: Any],
+                    guard inboxSelection || projectSelection || reviewSelection || contextsSelection, let value = organize as? [String: Any],
                           Set(value.keys).isSubset(of: ["draft", "edit"]) else {
                         throw HostFailure("INVALID_INPUT: Inbox Organize requires a bounded draft and edit")
                     }
                     if let draft = value["draft"] {
-                        let fields: Set<String> = ["status", "projectChoice", "areaChoice", "contexts", "tags", "startDate", "dueDate", "reviewDate", "delegateWho"]
-                        guard let draft = draft as? [String: String], Set(draft.keys).isSubset(of: fields),
-                              draft.values.allSatisfy({ $0.utf16.count <= 2_000_000 }) else {
+                        guard let draft = draft as? [String: Any], Self.validInboxOrganizeDraft(draft, complete: false) else {
                             throw HostFailure("INVALID_INPUT: Inbox Organize draft must contain only bounded text fields")
                         }
                     }
                     if let edit = value["edit"] {
                         guard let edit = edit as? [String: Any], let type = edit["type"] as? String,
-                              ["setStatus", "setProject", "setArea", "setText"].contains(type),
+                              ["setStatus", "setProject", "setArea", "setEstimate", "setText"].contains(type),
                               Set(edit.keys) == Set(type == "setText" ? ["type", "field", "value"] : ["type", "value"]),
                               let text = edit["value"] as? String, text.utf16.count <= 2_000_000,
-                              type != "setText" || ["contexts", "tags", "startDate", "dueDate", "reviewDate", "delegateWho"].contains(edit["field"] as? String ?? "") else {
+                              (type != "setEstimate" && edit["field"] as? String != "estimateText") || text.utf16.count <= 100,
+                              type != "setText" || ["contexts", "tags", "startDate", "dueDate", "reviewDate", "delegateWho", "estimateText"].contains(edit["field"] as? String ?? "") else {
                             throw HostFailure("INVALID_INPUT: Inbox Organize edit must match a core control")
                         }
                     }
                 }
                 if let picker = input["picker"] {
                     guard let value = picker as? [String: Any], Set(value.keys).isSubset(of: ["kind", "query", "offset", "limit", "revision"]),
-                          value["kind"] as? String == "removeTag" || ((inboxSelection || projectSelection || reviewSelection) && input["organize"] != nil && ["project", "area"].contains(value["kind"] as? String ?? "")),
+                          value["kind"] as? String == "removeTag" || ((inboxSelection || projectSelection || reviewSelection || contextsSelection) && input["organize"] != nil && ["project", "area"].contains(value["kind"] as? String ?? "")),
                           value["query"] == nil || (value["query"] as? String).map({ $0.utf16.count <= 500 }) == true,
                           value["offset"] == nil || Self.isInteger(value["offset"]) && (0...9_007_199_254_740_991).contains((value["offset"] as? NSNumber)?.doubleValue ?? -1),
                           value["limit"] == nil || Self.isInteger(value["limit"]) && (1...100).contains((value["limit"] as? NSNumber)?.intValue ?? 0),

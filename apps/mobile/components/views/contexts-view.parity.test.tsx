@@ -71,6 +71,7 @@ vi.mock('../task-filter-sheet', async (importOriginal) => {
 });
 vi.mock('../task-edit-modal', () => ({ TaskEditModal: (props: any) => React.createElement('TaskEditModal', props) }));
 vi.mock('../token-picker-modal', () => ({ TokenPickerModal: (props: any) => React.createElement('TokenPickerModal', props) }));
+vi.mock('../task-list/TaskListBulkOrganizeModal', () => ({ TaskListBulkOrganizeModal: () => null }));
 vi.mock('../swipeable-task-item', () => ({ SwipeableTaskItem: (props: any) => React.createElement('SwipeableTaskItem', props) }));
 vi.mock('react-native-gesture-handler', () => ({
   GestureHandlerRootView: (props: any) => React.createElement('GestureHandlerRootView', props, props.children),

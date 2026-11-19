@@ -1,6 +1,11 @@
 
 export const frOverrides: Record<string, string> = {
     "projects.calendarLimit": "Les 200 premiers résultats sont affichés. Recherchez pour trouver un autre événement.",
+    'bulk.keepEstimate': "Conserver la valeur actuelle",
+    'bulk.clearEstimate': "Effacer l’estimation",
+    'bulk.setEstimate': "Définir une estimation",
+    'bulk.invalidEstimate': "Saisissez une durée estimée valide.",
+    'bulk.selectionChanged': "Les tâches sélectionnées ou les filtres ont changé. Vérifiez la sélection et réessayez.",
     "projects.calendarTitle": "Calendrier",
     "projects.calendarLink": "Lier un événement du calendrier",
     "projects.calendarReplace": "Remplacer l’événement lié",
@@ -698,6 +703,7 @@ export const frOverrides: Record<string, string> = {
         'filters.contexts': 'Contextes et tags',
         'filters.priority': 'Priorité',
         'filters.timeEstimate': 'Estimation du temps',
+        'filters.noEstimate': "Sans estimation",
         'filters.after': 'Après',
         'filters.before': 'Avant',
         'filters.hasDescription': 'Avec description',

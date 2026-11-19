@@ -26,6 +26,8 @@ vi.mock('@react-native-community/datetimepicker', () => ({
   default: (props: Record<string, unknown>) => React.createElement('DateTimePicker', props),
 }));
 
+vi.mock('../../contexts/toast-context', () => ({ ToastViewport: () => null }));
+
 const createBulkOrganizeProjectMock = vi.hoisted(() => vi.fn());
 const createBulkOrganizeAreaMock = vi.hoisted(() => vi.fn());
 const ensureDestinationSavedMock = vi.hoisted(() => vi.fn());
@@ -194,6 +196,27 @@ afterEach(() => {
 });
 
 describe('TaskListBulkOrganizeModal', () => {
+  it('keeps estimates by default, validates custom estimates, and stages explicit clearing', () => {
+    const onApply = vi.fn();
+    const tree = renderModal({ onApply });
+    const apply = () => act(() => { buttonWithText(tree, 'Apply to selected').props.onPress(); });
+    expect(buttonWithText(tree, 'Keep existing').props.accessibilityState.selected).toBe(true);
+    apply();
+    expect(onApply.mock.lastCall?.[0]).not.toHaveProperty('timeEstimate');
+
+    act(() => { buttonWithText(tree, 'Custom…').props.onPress(); });
+    apply();
+    expect(onApply).toHaveBeenCalledTimes(1);
+    const estimate = tree.root.findAllByType(TextInput).find((input) => input.props.accessibilityLabel === 'Set estimate');
+    act(() => { estimate?.props.onChangeText('1h 15m'); });
+    apply();
+    expect(onApply.mock.lastCall?.[0]).toHaveProperty('timeEstimate', 'custom:75');
+
+    act(() => { buttonWithText(tree, 'Clear estimate').props.onPress(); });
+    apply();
+    expect(onApply.mock.lastCall?.[0]).toHaveProperty('timeEstimate', null);
+  });
+
   it('stages Today/Tomorrow as local date-only values and leaves untouched dates unchanged', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2026, 8, 30, 23, 30));

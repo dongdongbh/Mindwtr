@@ -4,6 +4,7 @@ import { addBulkOrganizeArea, addBulkOrganizeProject } from './bulk-organize-cre
 import { collectBulkTaskTokens, type BulkTaskTokenMode } from './bulk-task-tokens';
 import { safeParseDate, type DateFormatter } from './date';
 import { tFallback } from './i18n';
+import { logInfo } from './logger';
 import { isStatusListTaskReadOnly } from './menu-views-model';
 import { buildReviewShareText } from './review-views-model';
 import { NATIVE_HOST_CONTRACT_VERSION, NATIVE_HOST_MAX_WINDOW, type NativeHostResult, type NativeListActionResult, type NativeListToast, type NativeProjectDetailFilterView } from './native-host-contract';
@@ -32,7 +33,9 @@ import {
 import { updateRangeSelection } from './range-selection';
 import { isProjectedRecurringTaskId } from './recurrence';
 import { getProjectChoiceState, sortProjectsForPicker } from './project-utils';
+import { resolveFeatureFlags } from './resolve-feature-flags';
 import { useTaskStore } from './store';
+import { runStoreCommand } from './store-write-gate';
 import {
     applyBulkOrganizeDraftEdit,
     BULK_ORGANIZE_DATE_FIELDS,
@@ -51,6 +54,7 @@ import {
     getTaskListBulkBusyLabels,
     getTaskListBulkToast,
     getTaskListRemoveTagPickerText,
+    isBulkOrganizeEstimateValid,
     planBulkOrganize,
     planBulkTagEdit,
     runTaskListBulkWrite,
@@ -68,15 +72,16 @@ import type { Area, Project, Task, TaskStatus } from './types';
 
 export type NativeBulkList = 'inbox' | 'waiting' | 'someday' | 'reference' | 'done';
 const BULK_LISTS: readonly NativeBulkList[] = ['inbox', 'waiting', 'someday', 'reference', 'done'];
-export type NativeBulkWriteList = NativeBulkList | 'project';
+export type NativeBulkWriteList = NativeBulkList | 'project' | 'contexts';
 type BulkWriteScope<L extends string> = { list: L; params?: undefined } | { list: 'project'; params: ProjectBulkParams };
-const BULK_WRITE_LISTS: readonly NativeBulkWriteList[] = [...BULK_LISTS, 'project'];
+type ContextsBulkScope = { list: 'contexts'; params: Record<string, unknown> };
+const BULK_WRITE_LISTS: readonly NativeBulkWriteList[] = [...BULK_LISTS, 'project', 'contexts'];
 export type NativeBulkReadList = NativeBulkList | 'project' | 'review' | 'contexts';
 const BULK_READ_LISTS: readonly NativeBulkReadList[] = [...BULK_LISTS, 'project', 'review', 'contexts'];
 const BULK_READ_SCREENS: Record<NativeBulkReadList, (typeof TASK_LIST_BULK_SCREENS)[keyof typeof TASK_LIST_BULK_SCREENS]> = {
     ...TASK_LIST_BULK_SCREENS,
     review: { status: 'all', organize: true, moveToSection: false, removeTags: false },
-    contexts: { status: 'all', organize: false, moveToSection: false, removeTags: false },
+    contexts: { status: 'all', organize: true, moveToSection: false, removeTags: false },
 };
 
 
@@ -188,9 +193,10 @@ const isIdList = (value: unknown, allowEmpty = false): value is string[] => (
 );
 const isDay = (value: unknown): value is string => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value) && safeParseDate(value) !== null;
 const TEXT_LIMITS: Record<BulkOrganizeTextField, number> = {
-    contexts: 2000, tags: 2000, startDate: 10, dueDate: 10, reviewDate: 10, delegateWho: 500,
+    contexts: 2000, tags: 2000, startDate: 10, dueDate: 10, reviewDate: 10, delegateWho: 500, estimateText: 100,
 };
-const DRAFT_KEYS = new Set(Object.keys(EMPTY_BULK_ORGANIZE_DRAFT));
+const REQUIRED_DRAFT_KEYS = Object.keys(EMPTY_BULK_ORGANIZE_DRAFT);
+const DRAFT_KEYS = new Set([...REQUIRED_DRAFT_KEYS, 'estimateChoice', 'estimateText']);
 const PARAM_ONLY_KEYS = ['filterEdit', 'offset', 'limit', 'revision'];
 const REVIEW_PARAMS = ['scope', 'expandedAreaIds', 'expandedProjectIds', 'expandedLaterProjectIds'];
 const CONTEXTS_PARAMS = ['tokens', 'matchMode', 'searchQuery', 'filters', 'savedFilterId', 'preservedCriteria', 'sortOverride'];
@@ -208,13 +214,17 @@ const exactDestination = (kind: 'project' | 'area', query: string): Project | Ar
 };
 
 
-export const readBulkOrganizeDraftShape = (value: unknown): BulkOrganizeDraft | null => {
-    if (value === undefined) return EMPTY_BULK_ORGANIZE_DRAFT;
-    if (!isObjectRecord(value) || Object.keys(value).some((key) => !DRAFT_KEYS.has(key))) return null;
+export const readBulkOrganizeDraftShape = (value: unknown, requireComplete = false): BulkOrganizeDraft | null => {
+    if (value === undefined && !requireComplete) return EMPTY_BULK_ORGANIZE_DRAFT;
+    if (!isObjectRecord(value) || Object.keys(value).some((key) => !DRAFT_KEYS.has(key))
+        || (requireComplete && REQUIRED_DRAFT_KEYS.some((key) => !Object.prototype.hasOwnProperty.call(value, key)))) return null;
     const draft = { ...EMPTY_BULK_ORGANIZE_DRAFT, ...value } as BulkOrganizeDraft;
     const valid = (draft.status === BULK_ORGANIZE_KEEP || BULK_ORGANIZE_STATUS_OPTIONS.includes(draft.status))
         && isText(draft.projectChoice, 200) && isText(draft.areaChoice, 200)
-        && (Object.keys(TEXT_LIMITS) as BulkOrganizeTextField[]).every((field) => isText(draft[field], TEXT_LIMITS[field]));
+        && (draft.estimateChoice === undefined || isText(draft.estimateChoice, 100))
+        && (Object.keys(TEXT_LIMITS) as BulkOrganizeTextField[]).every((field) => (
+            (field === 'estimateText' && draft[field] === undefined) || isText(draft[field], TEXT_LIMITS[field])
+        ));
     return valid ? draft : null;
 };
 export const hasValidBulkOrganizeDates = (draft: BulkOrganizeDraft): boolean =>
@@ -237,6 +247,7 @@ const readEdit = (value: unknown): BulkOrganizeDraftEdit | null => {
         case 'setStatus':
         case 'setProject':
         case 'setArea':
+        case 'setEstimate':
             return typeof value.value === 'string' ? value as BulkOrganizeDraftEdit : null;
         case 'setText':
             return typeof value.field === 'string' && value.field in TEXT_LIMITS && typeof value.value === 'string' ? value as BulkOrganizeDraftEdit : null;
@@ -258,6 +269,7 @@ export function buildNativeBulkOrganizeView(
     const { t, formatDate } = context;
     const dialog = buildBulkOrganizeDialogModel({
         draft, projects: getBulkOrganizeProjectOptions(state.projects), areas: getBulkOrganizeAreaOptions(state.areas), selectedCount: context.selectedCount, t,
+        timeEstimatesEnabled: resolveFeatureFlags(state.settings).timeEstimates,
     });
     const now = new Date();
     return {
@@ -328,9 +340,12 @@ export function buildNativeRemoveTagPicker(tags: readonly string[], query: strin
 
 export function readBulkOrganizeApply(value: unknown): NativeHostResult<BulkOrganizeTaskUpdateInput> {
     const draft = readDraft(value);
-    if (!draft || !hasValidBulkOrganizeDates(draft)) return fail('INVALID_INPUT', 'A Bulk organize draft with choices the dialog offers is required');
+    const estimatesEnabled = resolveFeatureFlags(useTaskStore.getState().settings).timeEstimates;
+    if (!draft || !hasValidBulkOrganizeDates(draft) || (estimatesEnabled && !isBulkOrganizeEstimateValid(draft))) {
+        return fail('INVALID_INPUT', 'A Bulk organize draft with choices the dialog offers is required');
+    }
     if (draft.status === 'waiting' && !draft.delegateWho.trim()) return fail('INVALID_INPUT', 'Waiting needs the person these tasks wait for');
-    return { ok: true, value: buildBulkOrganizeInput(draft) };
+    return { ok: true, value: buildBulkOrganizeInput(draft, estimatesEnabled) };
 }
 
 export function createBulkActionMethods(deps: BulkActionDeps) {
@@ -383,10 +398,10 @@ export function createBulkActionMethods(deps: BulkActionDeps) {
             const result = read(offset, revision);
             if (!result.ok) return result;
             revision = result.value.revision;
-            const value = result.value as { total: number; readOnly?: boolean; rows?: { id: string }[]; items?: { type: string; row?: { id: string; readOnly?: boolean } }[] };
+            const value = result.value as { total: number; readOnly?: boolean; rows?: { id: string; readOnly?: boolean }[]; items?: { type: string; row?: { id: string; readOnly?: boolean } }[] };
             if (list === 'project' && value.readOnly) return fail('INVALID_INPUT', 'An archived Project has no task selection');
             const entries: Row[] = value.rows
-                ? value.rows.map((row) => ({ id: row.id, readOnly: list === 'contexts' && (row as { readOnly?: boolean }).readOnly === true }))
+                ? value.rows.map((row) => ({ id: row.id, readOnly: list === 'contexts' && row.readOnly === true }))
                 : (value.items ?? []).flatMap((item) => (item.type === 'task' && item.row ? [{ id: item.row.id, readOnly: item.row.readOnly === true }] : []));
 
             for (const entry of entries) {
@@ -511,7 +526,7 @@ export function createBulkActionMethods(deps: BulkActionDeps) {
             if (!read.ok) return read;
             const { revision: listRevision, rows } = read.value;
             const removeTagPicker = input.picker?.kind === 'removeTag';
-            const organizePicker = (input.list === 'inbox' || input.list === 'project' || input.list === 'review') && input.organize !== undefined
+            const organizePicker = screen.organize && input.organize !== undefined
                 && (input.picker?.kind === 'project' || input.picker?.kind === 'area');
             if (!removeTagPicker && !organizePicker && (input.picker?.offset ?? 0) > 0 && input.picker?.revision !== listRevision) return fail('STALE_REVISION', 'The list changed; open the picker again');
             const selectable = selectableIds(rows);
@@ -621,20 +636,21 @@ export function createBulkActionMethods(deps: BulkActionDeps) {
             kind: 'project' | 'area';
             name: string;
             draft?: Partial<BulkOrganizeDraft>;
-        } & BulkWriteScope<NativeBulkList | 'review'>): Promise<NativeHostResult<NativeBulkOrganizeCreateResult>> {
+        } & (BulkWriteScope<NativeBulkList | 'review'> | ContextsBulkScope)): Promise<NativeHostResult<NativeBulkOrganizeCreateResult>> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
 
 
             const draft = isObjectRecord(input) ? readBulkOrganizeDraftShape(input.draft) : null;
-            if (!isObjectRecord(input) || (input.list !== 'review' && (!BULK_WRITE_LISTS.includes(input.list) || !TASK_LIST_BULK_SCREENS[input.list].organize))
+            if (!isObjectRecord(input) || !BULK_READ_LISTS.includes(input.list) || !BULK_READ_SCREENS[input.list].organize
                 || (input.kind !== 'project' && input.kind !== 'area') || !isText(input.name) || !input.name.trim() || !draft
-                || (input.list === 'project' ? !readProjectBulkParams(input.params) || !listRows('project', input.params).ok : input.params !== undefined)) {
-                return fail('INVALID_INPUT', 'A request UUID, a list that offers Bulk organize, a project or area name and a valid draft are required; a Project selection also needs its editable task view params');
+                || (input.list === 'project' || input.list === 'contexts' ? !listRows(input.list, input.params).ok : input.params !== undefined)) {
+                return fail('INVALID_INPUT', 'A request UUID, a list that offers Bulk organize, a project or area name and a valid draft are required; Project and Contexts also need their task view params');
             }
             const { kind, requestId } = input;
             const name = input.name.trim();
-            return receipts.run(requestId, JSON.stringify(['bulkCreate', input.list, kind, name, draft]), async () => {
+            const scope = input.list === 'contexts' ? [input.params] : [];
+            return receipts.run(requestId, JSON.stringify(['bulkCreate', input.list, kind, name, draft, ...scope]), async () => {
                 const offered = (id: string) => (kind === 'project'
                     ? getBulkOrganizeProjectOptions(useTaskStore.getState().projects).some((project) => project.id === id)
                     : getBulkOrganizeAreaOptions(useTaskStore.getState().areas).some((area) => area.id === id));
@@ -670,17 +686,26 @@ export function createBulkActionMethods(deps: BulkActionDeps) {
         },
 
 
-        async runBulkAction(input: { requestId: string; action: NativeBulkAction } & BulkWriteScope<NativeBulkList>): Promise<NativeHostResult<NativeListActionResult<NativeBulkAction>>> {
+        async runBulkAction(input: { requestId: string } & (
+            | ({ action: NativeBulkAction } & BulkWriteScope<NativeBulkList>)
+            | ({ action: Extract<NativeBulkAction, { type: 'organize' }> & { selectAll?: undefined } } & ContextsBulkScope)
+        )): Promise<NativeHostResult<NativeListActionResult<NativeBulkAction>>> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
-            if (!isObjectRecord(input) || !BULK_WRITE_LISTS.includes(input.list) || !isObjectRecord(input.action)
-                || (input.list === 'project' ? (input.action as Record<string, unknown>).selectAll !== undefined || !readProjectBulkParams(input.params) : input.params !== undefined)) {
+            if (!isObjectRecord(input) || !BULK_WRITE_LISTS.includes(input.list) || !isObjectRecord(input.action)) {
                 return fail('INVALID_INPUT', 'A request UUID, a list and an action are required; a Project selection also needs its task view params and no Select all');
             }
             const { list } = input;
             const action = input.action as NativeBulkAction & Record<string, unknown>;
-            return receipts.run(input.requestId, JSON.stringify(['bulk', list, action, ...(list === 'project' ? [input.params] : [])]), async (): Promise<ActionOutcome> => {
-                const screen = TASK_LIST_BULK_SCREENS[list];
+            if (list === 'contexts' && (action.type !== 'organize' || action.selectAll !== undefined || !isObjectRecord(input.params))) {
+                return fail('INVALID_INPUT', 'Contexts Organize requires its task view params and selected tasks');
+            }
+            if (list === 'project' ? action.selectAll !== undefined || !readProjectBulkParams(input.params) : list !== 'contexts' && input.params !== undefined) {
+                return fail('INVALID_INPUT', 'A Project selection needs its task view params and no Select all');
+            }
+            let contextsOrganizedCount = 0;
+            const writeAction = async (): Promise<ActionOutcome> => {
+                const screen = BULK_READ_SCREENS[list];
                 const t = deps.t();
                 const state = useTaskStore.getState();
 
@@ -706,11 +731,19 @@ export function createBulkActionMethods(deps: BulkActionDeps) {
                     })) {
                     return unchanged();
                 }
-                if (list === 'project' && isIdList(action.taskIds)) {
-                    const rows = listRows('project', input.params);
+                if ((list === 'project' || list === 'contexts') && isIdList(action.taskIds)) {
+                    const rows = listRows(list, input.params);
                     if (!rows.ok) return rows;
-                    const inProject = new Set(selectableIds(rows.value.rows));
-                    if (action.taskIds.some((id) => !inProject.has(id))) return fail('INVALID_INPUT', 'Every task must be an editable task of this Project');
+                    const inScope = new Set(selectableIds(rows.value.rows));
+                    if (action.taskIds.some((id) => !inScope.has(id))) {
+                        return list === 'contexts'
+                            ? fail('STALE_REVISION', 'The Contexts selection changed; select tasks again')
+                            : fail('INVALID_INPUT', 'Every task must be an editable task of this Project');
+                    }
+                    if (list === 'contexts' && revisions) {
+                        const stale = refuseStaleTasks(action.taskIds, revisions);
+                        if (stale) return stale;
+                    }
                 }
                 const target = resolveTarget(list, action);
                 if ('ok' in target) return target;
@@ -745,14 +778,25 @@ export function createBulkActionMethods(deps: BulkActionDeps) {
                         const apply = readBulkOrganizeApply(action.draft);
                         if (!apply.ok) return apply;
                         const write = planBulkOrganize(taskIds, state._tasksById, apply.value);
-                        return run(write && write.kind === 'update' && !hasLanded(write.updates) ? write : null);
+                        if (!write || write.kind !== 'update' || hasLanded(write.updates)) return unchanged();
+                        if (list === 'contexts') contextsOrganizedCount = write.updates.length;
+                        return run(write);
                     }
                     case 'trashTasks':
                         return run(taskIds.length > 0 ? { kind: 'trash', taskIds } : null);
                     default:
                         return fail('INVALID_INPUT', 'This list does not offer that action');
                 }
-            });
+            };
+            const payload = JSON.stringify(['bulk', list, action, ...(input.params === undefined ? [] : [input.params])]);
+            const result = await receipts.run(input.requestId, payload, () => list === 'contexts' ? runStoreCommand(writeAction) : writeAction());
+            if (contextsOrganizedCount > 0 && result.ok && result.value.changed) {
+                try {
+                    logInfo('Native Android Contexts bulk Organize confirmed', { scope: 'native-host', category: 'storage', force: true,
+                        context: { releaseCheck: 'v1.3.10/contexts-bulk-organize', count: contextsOrganizedCount, outcome: 'organized' } });
+                } catch { }
+            }
+            return result;
         },
     };
 }

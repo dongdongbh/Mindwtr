@@ -3141,7 +3141,9 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     assert.match(menuModel, /val page: MenuPage\? get\(\) = loaded\?\.takeIf \{ it\.list == list \}/);
 
 
-    assert.match(menuModel, /bulk\?\.let \{ input -> page = page\.withBulk\(runtime\.menuRead\("bulk", JSONObject\(input\.toString\(\)\)\.put\("params", sent\)\.toString\(\)\)\) \}/);
+    assert.match(menuModel, /bulk\?\.let \{ input ->\s+val scope = if \(list == "contexts"\) sent\.contextsBulkScope\(\) else sent\s+if \(list != "contexts" \|\| first\.getJSONArray\("selectedIds"\)\.length\(\) > 0\) \{\s+page = page\.withBulk\(runtime\.menuRead\("bulk", JSONObject\(input\.toString\(\)\)\.put\("params", scope\)\.toString\(\)\)\)/);
+    assert.match(menuModel, /private fun JSONObject\.contextsBulkScope\(\): JSONObject = JSONObject\(toString\(\)\)\.apply \{\s+remove\("selectedIds"\)\s+remove\("filterSheetOpen"\)\s+\}/);
+    assert.match(menuModel, /if \(list == "contexts"\) put\("params", \(page \?: return null\)\.params\.contextsBulkScope\(\)\)/);
     assert.match(menuModel, /bulk\.optJSONArray\("except"\)\?\.let \{ put\("selectAll", JSONObject\(\)\.put\("except", it\)\) \} \?: put\("taskIds", bulk\.optJSONArray\("selected"\) \?: JSONArray\(\)\)/);
     assert.match(menuModel, /bulk\.optJSONObject\("selectAll"\)\?\.let \{ put\("selectAll", it\) \}\s+\?: put\("taskIds", bulk\.getJSONArray\("selectedIds"\)\)\.put\("taskRevisions", bulk\.getJSONObject\("taskRevisions"\)\)/,
         'an action takes core\'s own Select all object, or the explicit selection with the revisions core\'s bar showed');
@@ -3213,8 +3215,9 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
 
     assert.match(menuModel, /first\.optJSONObject\("bulk"\)\?\.takeIf \{ list == "review" \}/);
     assert.match(menuModel, /JSONObject\(params\.toString\(\)\)\.apply \{\s+remove\("organize"\); remove\("picker"\)/, 'later windows go without the dialog\'s inputs');
-    for (const list of ['review']) assert.match(menuModel, new RegExp(`"${list}" -> kept\\([\\s\\S]{0,240}?\\.also \\{ dialogInputs\\(list, it\\) \\}`), `${list}'s read carries its open dialog`);
-    assert.match(menuModel, /"contexts" -> kept\(listOf\("tokens", "matchMode", "searchQuery", "filters", "preservedCriteria", "savedFilterId"\)\)\s+\.put\("sortOverride", own\.opt\("sortOverride"\) \?: JSONObject\.NULL\)[\s\S]{0,120}\.also \{\s+if \(dialog\?\.optString\("kind"\) == "filters"\) it\.put\("filterSheetOpen", true\)\s+dialogInputs\(list, it\)\s+\}/, 'Contexts carries the filter sheet and its open dialog');
+    assert.match(menuModel, /"review" -> kept\([\s\S]{0,240}?\.also \{ listDialogInputs\(list, dialog, it\) \}/, 'Review carries its open dialog');
+    assert.match(menuModel, /"contexts" -> kept\(listOf\("tokens", "matchMode", "searchQuery", "filters", "preservedCriteria", "savedFilterId"\)\)\s+\.put\("sortOverride", own\.opt\("sortOverride"\) \?: JSONObject\.NULL\)[\s\S]{0,120}\.also \{\s+if \(dialog\?\.optString\("kind"\) == "filters"\) it\.put\("filterSheetOpen", true\)\s+listDialogInputs\(list, dialog, it\)\s+\}/, 'the Contexts list read carries filter and token picker inputs');
+    assert.match(menuModel, /private fun bulkInput\(list: String\): JSONObject\? \{\s+if \(list == "contexts"\) \{[\s\S]{0,450}?\.put\("taskIds", selected\)\.also \{ organizeDialogInputs\(open, it\) \}/, 'Contexts uses the separate bulk read for the Organize dialog and destination picker');
     assert.match(menuModel, /if \(list == "review"\) bulkEdit\?\.optJSONObject\("organizeEdit"\)\?\.let \{ params\.optJSONObject\("organize"\)\?\.put\("edit", it\) \}/);
     assert.match(organizeKt, /into\.put\("organize", JSONObject\(\)\.put\("draft", open\.optJSONObject\("draft"\) \?: JSONObject\(\)\)\)/);
     assert.match(bulkUi, /val bulk = page\?\.bulk\?\.takeIf \{ list in BULK_LISTS \} \?: return/, 'the lists\' bar never draws Review\'s');

@@ -2,6 +2,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest
 import { collectBulkTaskTokens } from './bulk-task-tokens';
 import { loadTranslations } from './i18n/i18n-loader';
 import { createNativeHostContract } from './native-host-contract';
+import * as logger from './logger';
 import type { NativeBulkAction } from './native-host-contract-bulk-actions';
 import { createBulkOrganizeArea, createBulkOrganizeProject } from './bulk-organize-create';
 import { paramsKey } from './native-host-contract-menu-views';
@@ -132,6 +133,85 @@ describe('native host contract: selection mode', () => {
 
     const undoOf = (taskIds: string[]) => ({ type: 'restoreTasks', taskIds, taskRevisions: taskRevisionsOf(taskIds) });
 
+    it('organizes only the revision-matched Contexts selection under No estimate', async () => {
+        freezeClock();
+        const tasks: Task[] = ['one', 'two', 'three', 'estimated', 'different-context'].map((id) => ({
+            id, title: id, status: id === 'two' ? 'waiting' : 'next', createdAt: fixture.now, updatedAt: fixture.now,
+            contexts: [id === 'different-context' ? '@other' : '@work'], tags: [],
+            ...(id === 'estimated' ? { timeEstimate: '15min' } : {}),
+        }));
+        const sqlite = await openSqliteHost({ tasks, settings: { features: { timeEstimates: true } } });
+        try {
+            const { host } = sqlite;
+            const log = vi.spyOn(logger, 'logInfo');
+            const params = { tokens: ['@work'], matchMode: 'all', filters: { timeEstimates: ['none'] } };
+            const draft: BulkOrganizeDraft = { ...EMPTY_BULK_ORGANIZE_DRAFT, estimateChoice: '30min' };
+            const bulk = value(host.getBulkActions({ list: 'contexts', params, taskIds: ['one', 'two', 'estimated', 'different-context'], organize: { draft } }));
+            expect(bulk).toMatchObject({ selectedIds: ['one', 'two'], selectableCount: 3, organize: { canApply: true } });
+            const action = { type: 'organize', draft, taskIds: bulk.selectedIds, taskRevisions: bulk.taskRevisions } satisfies NativeBulkAction;
+            expect(await host.runBulkAction({ requestId: requestId(), list: 'contexts', params, action: {
+                ...action, taskIds: ['one', 'estimated'], taskRevisions: taskRevisionsOf(['one', 'estimated']),
+            } })).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+            expect(await host.runBulkAction({ requestId: requestId(), list: 'contexts', params, action: {
+                ...action, taskRevisions: { ...bulk.taskRevisions, two: 'stale' },
+            } })).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+            const request = { requestId: requestId(), list: 'contexts', params, action } satisfies Parameters<typeof host.runBulkAction>[0];
+            expect(value(await host.runBulkAction(request)).changed).toBe(true);
+            expect(value(await host.runBulkAction(request)).changed).toBe(true);
+            expect(value(host.getBulkActions({ list: 'contexts', params, taskIds: ['one', 'two', 'three'] })).selectedIds).toEqual(['three']);
+            expect(await sqlite.sql('SELECT id, status, timeEstimate FROM tasks ORDER BY id')).toEqual([
+                { id: 'different-context', status: 'next', timeEstimate: null },
+                { id: 'estimated', status: 'next', timeEstimate: '15min' },
+                { id: 'one', status: 'next', timeEstimate: '30min' },
+                { id: 'three', status: 'next', timeEstimate: null },
+                { id: 'two', status: 'waiting', timeEstimate: '30min' },
+            ]);
+            expect(log.mock.calls.filter(([message]) => message === 'Native Android Contexts bulk Organize confirmed')).toEqual([
+                ['Native Android Contexts bulk Organize confirmed', expect.objectContaining({ context: {
+                    releaseCheck: 'v1.3.10/contexts-bulk-organize', count: 2, outcome: 'organized',
+                } })],
+            ]);
+            const picker = value(host.getBulkActions({ list: 'contexts', params, taskIds: ['three'], organize: { draft },
+                picker: { kind: 'project', query: 'Garden' } }));
+            const createId = requestId();
+            const created = value(await host.createBulkOrganizeDestination({ requestId: createId, list: 'contexts', params,
+                kind: 'project', name: picker.picker?.create?.name ?? '', draft: picker.organize?.draft }));
+            expect(created).toMatchObject({ id: createId, changed: true, draft: { projectChoice: createId, estimateChoice: '30min' } });
+        } finally { await sqlite.close(); }
+    });
+
+    it('keeps read-only references visible and excludes them from Contexts Organize', async () => {
+        freezeClock();
+        const tasks: Task[] = [
+            { id: 'editable', title: 'Editable', status: 'reference', createdAt: fixture.now, updatedAt: fixture.now, contexts: ['@work'], tags: [] },
+            { id: 'read-only', title: 'Retained reference', status: 'reference', projectId: 'p-old',
+                createdAt: fixture.now, updatedAt: fixture.now, contexts: ['@work'], tags: [] },
+        ];
+        const projects = fixture.projects.filter((project) => project.id === 'p-old').map((project) => ({ ...project, status: 'active' as const }));
+        const sqlite = await openSqliteHost({ tasks, projects, areas: fixture.areas });
+        try {
+            await sqlite.client().run('UPDATE projects SET deletedAt = ? WHERE id = ?', [fixture.now, 'p-old']);
+            await sqlite.restart(undefined, { recoveryLoad: true });
+            const { host } = sqlite;
+            const params = { tokens: ['@work'], matchMode: 'all' as const, filters: { timeEstimates: ['none' as const] } };
+            const read = (selectedIds: string[]) => value(host.getContextsView({ ...params, selectedIds, offset: 0, limit: 50 }));
+            const ordinary = read(['read-only']);
+            expect(ordinary.rows.find((row) => row.id === 'read-only')).toMatchObject({ readOnly: true });
+            expect(ordinary.selectedIds).toEqual(['read-only']);
+            expect(ordinary.bulk?.organizeEnabled).toBe(false);
+            expect(read(['editable', 'read-only']).bulk?.organizeEnabled).toBe(true);
+            const draft = { ...EMPTY_BULK_ORGANIZE_DRAFT, estimateChoice: '30min' };
+            const bulk = value(host.getBulkActions({ list: 'contexts', params, taskIds: ['editable', 'read-only'], organize: { draft } }));
+            expect(bulk).toMatchObject({ selectedIds: ['editable'], selectedCount: 1, organize: { canApply: true } });
+            const action = { type: 'organize' as const, taskIds: ['editable', 'read-only'], taskRevisions: taskRevisionsOf(['editable', 'read-only']), draft };
+            expect(await host.runBulkAction({ requestId: requestId(), list: 'contexts', params, action }))
+                .toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+            expect(await sqlite.sql('SELECT id, timeEstimate FROM tasks ORDER BY id')).toEqual([
+                { id: 'editable', timeEstimate: null }, { id: 'read-only', timeEstimate: null },
+            ]);
+        } finally { await sqlite.close(); }
+    });
+
     describe('equals core called directly', () => {
         const cases: { name: string; action: NativeBulkAction; list: 'inbox' | 'done'; write: () => TaskListBulkWrite | null }[] = [
             { name: 'move', list: 'inbox', action: { type: 'moveTasks', taskIds: ['i-call', 'i-milk'], status: 'next' } as NativeBulkAction, write: () => ({ kind: 'move', taskIds: ['i-call', 'i-milk'], status: 'next' }) },
@@ -193,6 +273,7 @@ describe('native host contract: selection mode', () => {
                 projects: getBulkOrganizeProjectOptions(state.projects),
                 areas: getBulkOrganizeAreaOptions(state.areas),
                 selectedCount: 2,
+                timeEstimatesEnabled: true,
                 t,
             });
             const { draft, statuses, dates, waitingFor, contexts, tags, ...rest } = view.organize!;
@@ -212,6 +293,26 @@ describe('native host contract: selection mode', () => {
                 ],
             });
             expect(dates[1]).toMatchObject({ value: '', displayValue: '', pickerStart: '2026-09-26' });
+        });
+
+        it('offers keep by default and validates custom estimates before applying', async () => {
+            freezeClock();
+            const { host } = await open();
+            const read = (organize: Record<string, unknown> = {}) => value(host.getBulkActions({ list: 'inbox', taskIds: ['i-milk'], organize })).organize!;
+            const initial = read();
+            expect(initial.canApply).toBe(true);
+            expect(initial.estimate?.options.find(({ selected }) => selected)?.value).toBe(BULK_ORGANIZE_KEEP);
+            const custom = initial.estimate?.options.find(({ value }) => value === '__CUSTOM__');
+            expect(custom).toBeDefined();
+            const selected = read({ draft: initial.draft, edit: custom?.edit });
+            expect(selected.canApply).toBe(false);
+            const invalid = read({ draft: selected.draft, edit: { type: 'setText', field: 'estimateText', value: 'invalid estimate' } });
+            expect(invalid.canApply).toBe(false);
+            const valid = read({ draft: invalid.draft, edit: { type: 'setText', field: 'estimateText', value: '1h 15m' } });
+            expect(valid.canApply).toBe(true);
+            expect(valid.estimate?.timeEstimate).toBe('custom:75');
+            useTaskStore.setState(({ settings }) => ({ settings: { ...settings, features: { ...settings.features, timeEstimates: false } } }));
+            expect(read({ draft: valid.draft }).estimate).toBeNull();
         });
 
         it('keeps a date the user is still typing in the organize dialog and only blocks Apply', async () => {

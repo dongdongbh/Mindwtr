@@ -593,6 +593,21 @@ describe('mergeSettingsForSync > savedFilters', () => {
         },
     );
 
+    it('retains No estimate when an older peer echoes the same filter without that choice', () => {
+        const full: SavedFilter = { ...older, criteria: { timeEstimates: ['none', '15min'] } };
+        const stripped = v132NormalizeSavedFilters([full]);
+        expect(stripped).toEqual([{ ...full, criteria: { timeEstimates: ['15min'] } }]);
+        const current = settingsWith([full], OLDER);
+        const legacy = settingsWith(stripped, NEWER);
+        const merged = mergeSettingsForSync(current, legacy);
+        expect(merged.savedFilters).toEqual([full]);
+        expect(mergeSettingsForSync(legacy, current).savedFilters).toEqual([full]);
+        expect(mergeSettingsForSync(merged, legacy).savedFilters).toEqual([full]);
+
+        const edited = { ...stripped[0], updatedAt: LATEST };
+        expect(mergeSettingsForSync(current, settingsWith([edited], NEWER)).savedFilters).toEqual([edited]);
+    });
+
     it('logs a privacy-safe receipt only when retaining a full filter over a legacy rewrite', () => {
         const full: SavedFilter = { ...older, criteria: { anyDateRange: { preset: 'overdue_next_7_days' } } };
         const stripped = v132NormalizeSavedFilters([full]);
@@ -689,6 +704,9 @@ function v132NormalizeSavedFilter(value: unknown): SavedFilter | null {
     const deletedAt = typeof record.deletedAt === 'string' && record.deletedAt.trim() ? record.deletedAt.trim() : undefined;
     const criteria = normalizeFilterCriteria(record.criteria);
     delete criteria.anyDateRange;
+    const legacyEstimates = criteria.timeEstimates?.filter((estimate) => estimate !== 'none');
+    if (legacyEstimates?.length) criteria.timeEstimates = legacyEstimates;
+    else delete criteria.timeEstimates;
     const rawCriteria = typeof record.criteria === 'object' && record.criteria !== null
         ? record.criteria as Record<string, unknown> : {};
     for (const field of ['dueDateRange', 'startDateRange'] as const) {

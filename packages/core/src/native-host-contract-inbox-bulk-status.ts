@@ -20,6 +20,10 @@ export type NativeStatusListTasksMoveRequest = { requestId: string; taskIds: str
         showDetails?: boolean; projectsInSections?: boolean; filters?: Partial<ListFilterState> } });
 export type NativeReviewTasksMoveRequest = { requestId: string; taskIds: string[]; taskRevisions: Record<string, string>;
     source: 'review'; status: Exclude<TaskStatus, 'archived'>; params: NativeReviewTasksParams };
+export type NativeContextsSelectionParams = { tokens?: string[]; matchMode?: 'all' | 'any'; searchQuery?: string;
+    filters: Partial<ListFilterState>; savedFilterId?: string | null; preservedCriteria?: import('./types').FilterCriteria; sortOverride?: TaskSortBy | null };
+export type NativeContextsTasksMoveRequest = Omit<NativeReviewTasksMoveRequest, 'source' | 'params'> & {
+    source: 'contexts'; params: NativeContextsSelectionParams };
 export type NativeInboxTasksMovePrepared = Omit<NativeReferenceTasksMovePrepared, 'request' | 'result'> & {
     request: NativeInboxTasksMoveRequest; result: NativeInboxTasksMoveResult;
 };

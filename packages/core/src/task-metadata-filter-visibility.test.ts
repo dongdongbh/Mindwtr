@@ -14,7 +14,7 @@ const task = (overrides: Partial<Task>): Task => ({
 });
 
 describe('getTaskMetadataFilterVisibility', () => {
-    it('hides optional metadata filters when visible tasks do not use those fields', () => {
+    it('offers estimate filtering before any tasks have estimates', () => {
         expect(getTaskMetadataFilterVisibility([
             task({ id: 'plain' }),
         ], {
@@ -24,7 +24,7 @@ describe('getTaskMetadataFilterVisibility', () => {
             energyLevel: false,
             location: false,
             priority: false,
-            timeEstimate: false,
+            timeEstimate: true,
         });
     });
 

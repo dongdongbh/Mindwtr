@@ -140,6 +140,7 @@ Source: `apps/mobile`. Routes live in `apps/mobile/app` (expo-router). Labels be
 
 ## Bulk selection
 
+- With Time Estimates enabled, open Contexts › Filters › Time estimate › No estimate. Select tasks › Bulk organize › Time estimate to keep, set or clear their estimates. Setting an estimate removes the task from this filter.
 - Bulk organize status includes Inbox for returning tasks to processing; existing project, notes, tags and dates stay unchanged unless explicitly edited.
 
 - Reach: Long press a task row in Inbox, project tasks, Waiting For, Someday, Contexts, or Review. The bar shows Move to, Bulk organize, Range, Add tag, Remove tag, Delete, and Done to exit.

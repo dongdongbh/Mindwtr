@@ -25,6 +25,7 @@ import {
     type NativeBulkOrganizeView,
     type NativeBulkPicker,
 } from './native-host-contract-bulk-actions';
+import { isTimeEstimate } from './native-host-contract-menu-views';
 import {
     createNativeRequestReceipts,
     isRevision,
@@ -39,6 +40,7 @@ import {
     type NativeUnsavedWrite,
 } from './native-request-receipts';
 import { isSelectableProjectForTaskAssignment } from './project-utils';
+import { resolveFeatureFlags } from './resolve-feature-flags';
 import { getProjectAccentColor } from './task-accent-color';
 import { getTrashUndoLabel } from './trash-view-model';
 import {
@@ -415,9 +417,11 @@ const isOrganizeInput = (value: unknown): value is BulkOrganizeTaskUpdateInput =
         && (value.contexts === undefined || isTextList(value.contexts))
         && (value.tags === undefined || isTextList(value.tags))
         && ['startTime', 'dueDate', 'reviewAt'].every((key) => !(key in value) || isDateValue(value[key]))
+        && (value.timeEstimate === undefined || (resolveFeatureFlags(state.settings).timeEstimates
+            && (value.timeEstimate === null || isTimeEstimate(value.timeEstimate))))
         && (!('assignedTo' in value) || value.assignedTo === null || isText(value.assignedTo))
         && Object.keys(value).every((key) => [
-            'status', 'projectId', 'sectionId', 'sectionProjectId', 'areaId', 'contexts', 'tags', 'startTime', 'dueDate', 'reviewAt', 'assignedTo',
+            'status', 'projectId', 'sectionId', 'sectionProjectId', 'areaId', 'contexts', 'tags', 'startTime', 'dueDate', 'reviewAt', 'assignedTo', 'timeEstimate',
         ].includes(key));
 };
 const isPicker = (value: unknown) => (

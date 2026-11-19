@@ -39399,6 +39399,30 @@ extension CoreHostTests {
         await cold.close()
     }
 
+    func testContextsOrganizeEstimateEditsReachTheJournalAndSelectedRows() async throws {
+        _ = try await seedShownListBulk()
+        let sql = try SQLiteBridge(url: database)
+        _ = try sql.execute("UPDATE settings SET data=json_set(data,'$.features.timeEstimates',json('true')) WHERE id=1")
+        sql.close()
+        let writer = host(bundleURL: try dateBundle(at: archive180Clock))
+        _ = try await writer.start()
+        let (params, shown) = try await shownListParams(writer, list: "contexts")
+        let id = try XCTUnwrap(shown.first)
+        var draft = organize743EmptyDraft
+        for edit in [["type": "setEstimate", "value": "__CUSTOM__"], ["type": "setText", "field": "estimateText", "value": "45m"]] {
+            let bulk = try object(await writer.call("menuRead", argumentsJSON: json(["bulk", json([
+                "list": "contexts", "params": params, "taskIds": [id], "organize": ["draft": draft, "edit": edit]])])))
+            draft = try XCTUnwrap((bulk["organize"] as? [String: Any])?["draft"] as? [String: String])
+        }
+        var request = try await shownListRequest(writer, list: "contexts", params: params, ids: [id])
+        request.removeValue(forKey: "status")
+        request["draft"] = draft
+        let result = try object(await writer.call("inboxTasksOrganizeWrite", argumentsJSON: json([json(request)])))
+        XCTAssertEqual(result["count"] as? Int, 1)
+        XCTAssertEqual(try storedTask(id)["timeEstimate"] as? String, "custom:45")
+        await writer.close()
+    }
+
     func testReviewBulkOrganizeRidesTheInboxOrganizeFamilyAndColdRecoveryReportsReviewSource() async throws {
         _ = try await seedShownListBulk()
         let faults = HostIOFaults(), writer = host(faults, bundleURL: try dateBundle(at: archive180Clock))

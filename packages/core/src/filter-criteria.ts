@@ -6,7 +6,7 @@ import type {
     TaskEnergyLevel,
     TaskPriority,
     TaskStatus,
-    TimeEstimate,
+    TimeEstimateFilterValue,
 } from './types';
 
 
@@ -22,7 +22,7 @@ export type FilterSelections = {
     locations: string[];
     priorities: TaskPriority[];
     energyLevels: TaskEnergyLevel[];
-    timeEstimates: TimeEstimate[];
+    timeEstimates: TimeEstimateFilterValue[];
     contextMatchMode: MultiValueFilterMatchMode;
     tagMatchMode: MultiValueFilterMatchMode;
 };

@@ -1,6 +1,26 @@
-import type { Task, TaskStatus } from './types';
+import { taskEditValuesEqual } from './json-value-equality';
+import type { AppData, Task, TaskStatus, TimeEstimate } from './types';
 
 export type BulkOrganizeStatus = Exclude<TaskStatus, 'archived'>;
+
+export type BulkOrganizeSelectionScope = Pick<AppData, 'projects' | 'areas' | 'settings'> & { savedFilterId?: string | null };
+
+export function isBulkOrganizeSelectionCurrent(
+    taskIds: readonly string[], shownTask: (id: string) => Task | undefined,
+    shown: BulkOrganizeSelectionScope, current: BulkOrganizeSelectionScope & { _tasksById: ReadonlyMap<string, Task> },
+): boolean {
+    if (taskIds.some((id) => {
+        const task = shownTask(id);
+        const latest = current._tasksById.get(id);
+        return !task || (task !== latest && !taskEditValuesEqual(task, latest));
+    })) return false;
+    if (shown.areas !== current.areas && !taskEditValuesEqual(shown.areas, current.areas)) return false;
+    if (shown.projects !== current.projects && !taskEditValuesEqual(shown.projects, current.projects)) return false;
+    const scope = (settings: AppData['settings']) => [settings?.filters, settings?.features?.priorities,
+        settings?.features?.timeEstimates, settings?.gtd?.autoArchiveDays,
+        shown.savedFilterId ? settings?.savedFilters?.filter((filter) => filter.id === shown.savedFilterId) : undefined];
+    return shown.settings === current.settings || taskEditValuesEqual(scope(shown.settings), scope(current.settings));
+}
 
 export type BulkOrganizeTaskUpdateInput = {
 
@@ -17,6 +37,7 @@ export type BulkOrganizeTaskUpdateInput = {
     startTime?: string | null;
     dueDate?: string | null;
     reviewAt?: string | null;
+    timeEstimate?: TimeEstimate | null;
     assignedTo?: string | null;
 };
 
@@ -52,7 +73,7 @@ const isTaskMap = (
 );
 
 export function buildBulkOrganizeTaskUpdate(
-    task: Pick<Task, 'contexts' | 'tags' | 'projectId'>,
+    task: Pick<Task, 'contexts' | 'tags' | 'projectId' | 'timeEstimate'>,
     input: BulkOrganizeTaskUpdateInput,
 ): Partial<Task> {
     const updates: Partial<Task> = {};
@@ -103,6 +124,9 @@ export function buildBulkOrganizeTaskUpdate(
     if (hasOwn(input, 'startTime')) updates.startTime = normalizedOptionalString(input.startTime);
     if (hasOwn(input, 'dueDate')) updates.dueDate = normalizedOptionalString(input.dueDate);
     if (hasOwn(input, 'reviewAt')) updates.reviewAt = normalizedOptionalString(input.reviewAt);
+    if (input.timeEstimate !== undefined && (task.timeEstimate ?? null) !== input.timeEstimate) {
+        updates.timeEstimate = input.timeEstimate ?? undefined;
+    }
     if (hasOwn(input, 'assignedTo')) updates.assignedTo = normalizedOptionalString(input.assignedTo);
 
     return updates;

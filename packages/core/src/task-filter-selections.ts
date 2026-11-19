@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { formatTimeEstimateLabel } from './calendar-scheduling';
+import { formatTimeEstimateFilterLabel } from './calendar-scheduling';
 import {
   countActiveFilterCriteria,
   criteriaFromSelections,
@@ -20,7 +20,7 @@ import type {
   TaskEnergyLevel,
   TaskPriority,
   TaskStatus,
-  TimeEstimate,
+  TimeEstimateFilterValue,
 } from './types';
 
 
@@ -126,7 +126,7 @@ export function useTaskFilterSelections({
   const [statuses, setStatuses] = useState<TaskStatus[]>([]);
   const [priorities, setPriorities] = useState<TaskPriority[]>([]);
   const [energyLevels, setEnergyLevels] = useState<TaskEnergyLevel[]>([]);
-  const [timeEstimates, setTimeEstimates] = useState<TimeEstimate[]>([]);
+  const [timeEstimates, setTimeEstimates] = useState<TimeEstimateFilterValue[]>([]);
   const [locationQuery, setLocationQuery] = useState('');
   const [contextMatchMode, setContextMatchMode] = useState<MultiValueFilterMatchMode>('all');
   const [tagMatchMode, setTagMatchMode] = useState<MultiValueFilterMatchMode>('all');
@@ -245,7 +245,7 @@ export function useTaskFilterSelections({
     setActiveSavedFilterId(null);
     setEnergyLevels((current) => toggleValue(current, energyLevel));
   }, [forgetPreservedFields]);
-  const toggleTimeEstimate = useCallback((estimate: TimeEstimate) => {
+  const toggleTimeEstimate = useCallback((estimate: TimeEstimateFilterValue) => {
     forgetPreservedFields('timeEstimates', 'timeEstimateRange');
     setActiveSavedFilterId(null);
     setTimeEstimates((current) => toggleValue(current, estimate));
@@ -429,7 +429,7 @@ export function useTaskFilterSelections({
       timeEstimates.forEach((estimate) => {
         result.push({
           id: `time:${estimate}`,
-          label: formatTimeEstimateLabel(estimate),
+          label: formatTimeEstimateFilterLabel(estimate, { t }),
           onPress: () => toggleTimeEstimate(estimate),
         });
       });
@@ -444,7 +444,7 @@ export function useTaskFilterSelections({
     if (visibility.timeEstimate && hasPreservedEstimates) {
       result.push({
         id: 'preserved:timeEstimates',
-        label: `${tFallback(t, 'filters.timeEstimate', 'Time estimate')}: ${(preservedCriteria.timeEstimates ?? []).filter((value) => typeof value === 'string').map((value) => formatTimeEstimateLabel(value)).join(', ')}`,
+        label: `${tFallback(t, 'filters.timeEstimate', 'Time estimate')}: ${(preservedCriteria.timeEstimates ?? []).filter((value) => typeof value === 'string').map((value) => formatTimeEstimateFilterLabel(value, { t })).join(', ')}`,
         onPress: () => { forgetPreservedFields('timeEstimates'); setTimeEstimates([]); },
       });
     }

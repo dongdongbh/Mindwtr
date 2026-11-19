@@ -3,12 +3,13 @@
 
 import { buildBulkOrganizeTaskUpdates, parseBulkOrganizeTokenInput, type BulkOrganizeStatus, type BulkOrganizeTaskUpdateInput } from './bulk-organize';
 import { buildBulkTaskTokenUpdates, type BulkTaskTokenMode } from './bulk-task-tokens';
+import { formatTimeEstimateLabel, isCustomTimeEstimate, resolveTimeEstimateOptions } from './calendar-scheduling';
 import { getQuickDate, isQuickDatePresetSelected, safeFormatDate, safeParseDate, type DateFormatter } from './date';
 import { tFallback } from './i18n';
 import { formatListItemCount } from './list-count';
 import { isSelectableProjectForTaskAssignment } from './project-utils';
 import type { StoreActionResult, TaskStore } from './store-types';
-import { getQuickDateLabel } from './task-editor-schedule';
+import { getQuickDateLabel, parseTaskEditorTimeEstimate } from './task-editor-schedule';
 import { compareAreasByOrder } from './task-utils';
 import { getTrashUndoLabel } from './trash-view-model';
 import type { Area, Project, Task, TaskStatus } from './types';
@@ -136,8 +137,9 @@ export const BULK_ORGANIZE_STATUS_OPTIONS: BulkOrganizeStatus[] = ['inbox', 'nex
 export const BULK_ORGANIZE_KEEP = '__KEEP__';
 
 export const BULK_ORGANIZE_NONE = '__NONE__';
+const BULK_ORGANIZE_CUSTOM_ESTIMATE = '__CUSTOM__';
 
-export type BulkOrganizeTextField = 'contexts' | 'tags' | 'startDate' | 'dueDate' | 'reviewDate' | 'delegateWho';
+export type BulkOrganizeTextField = 'contexts' | 'tags' | 'startDate' | 'dueDate' | 'reviewDate' | 'delegateWho' | 'estimateText';
 export type BulkOrganizeDateField = Extract<BulkOrganizeTextField, 'startDate' | 'dueDate' | 'reviewDate'>;
 export const BULK_ORGANIZE_DATE_FIELDS: BulkOrganizeDateField[] = ['startDate', 'dueDate', 'reviewDate'];
 
@@ -156,6 +158,8 @@ export type BulkOrganizeDraft = {
     dueDate: string;
     reviewDate: string;
 
+    estimateChoice?: string;
+    estimateText?: string;
     delegateWho: string;
 };
 
@@ -176,6 +180,7 @@ export type BulkOrganizeDraftEdit =
 
     | { type: 'setProject'; value: string }
     | { type: 'setArea'; value: string }
+    | { type: 'setEstimate'; value: string }
     | { type: 'setText'; field: BulkOrganizeTextField; value: string };
 
 export function applyBulkOrganizeDraftEdit(draft: BulkOrganizeDraft, edit: BulkOrganizeDraftEdit): BulkOrganizeDraft {
@@ -186,9 +191,47 @@ export function applyBulkOrganizeDraftEdit(draft: BulkOrganizeDraft, edit: BulkO
             return { ...draft, projectChoice: edit.value, areaChoice: BULK_ORGANIZE_KEEP };
         case 'setArea':
             return { ...draft, areaChoice: edit.value };
+        case 'setEstimate':
+            return { ...draft, estimateChoice: edit.value, estimateText: draft.estimateText ?? '' };
         case 'setText':
             return { ...draft, [edit.field]: edit.value };
     }
+}
+
+const readBulkOrganizeEstimate = (draft: Pick<BulkOrganizeDraft, 'estimateChoice' | 'estimateText'>) => {
+    if (draft.estimateChoice === BULK_ORGANIZE_NONE) return null;
+    if (draft.estimateChoice === BULK_ORGANIZE_CUSTOM_ESTIMATE) {
+        const parsed = parseTaskEditorTimeEstimate(draft.estimateText ?? '') ?? undefined;
+        return isCustomTimeEstimate(parsed) ? parsed : undefined;
+    }
+    return resolveTimeEstimateOptions().find((value) => value === draft.estimateChoice);
+};
+
+export function isBulkOrganizeEstimateValid(draft: Pick<BulkOrganizeDraft, 'estimateChoice' | 'estimateText'>): boolean {
+    return (draft.estimateChoice ?? BULK_ORGANIZE_KEEP) === BULK_ORGANIZE_KEEP || readBulkOrganizeEstimate(draft) !== undefined;
+}
+
+export function buildBulkOrganizeEstimateModel(draft: Pick<BulkOrganizeDraft, 'estimateChoice' | 'estimateText'>, t: Translate) {
+    const selected = draft.estimateChoice ?? BULK_ORGANIZE_KEEP;
+    const option = (value: string, label: string) => ({
+        value, label, selected: value === selected, edit: { type: 'setEstimate' as const, value },
+    });
+    return {
+        label: tFallback(t, 'taskEdit.timeEstimateLabel', 'Time Estimate'),
+        selected,
+        timeEstimate: readBulkOrganizeEstimate(draft),
+        options: [
+            option(BULK_ORGANIZE_KEEP, tFallback(t, 'bulk.keepEstimate', 'Keep existing')),
+            option(BULK_ORGANIZE_NONE, tFallback(t, 'bulk.clearEstimate', 'Clear estimate')),
+            ...resolveTimeEstimateOptions().map((value) => option(value, formatTimeEstimateLabel(value, { t }))),
+            option(BULK_ORGANIZE_CUSTOM_ESTIMATE, tFallback(t, 'recurrence.custom', 'Custom…')),
+        ],
+        custom: selected === BULK_ORGANIZE_CUSTOM_ESTIMATE ? {
+            label: tFallback(t, 'bulk.setEstimate', 'Set estimate'), value: draft.estimateText ?? '', placeholder: '1h 30m',
+        } : null,
+        validationMessage: !isBulkOrganizeEstimateValid(draft)
+            ? tFallback(t, 'bulk.invalidEstimate', 'Enter a valid time estimate.') : null,
+    };
 }
 
 const chosenId = (choice: string): string | undefined => (
@@ -224,6 +267,7 @@ export type BulkOrganizeDialogModel = {
     waitingFor: { label: string; placeholder: string } | null;
 
     dates: { field: BulkOrganizeDateField; label: string }[];
+    estimate: ReturnType<typeof buildBulkOrganizeEstimateModel> | null;
     contexts: { label: string; placeholder: string };
     tags: { label: string; placeholder: string };
 
@@ -239,6 +283,7 @@ export function buildBulkOrganizeDialogModel(input: {
     projects: readonly Project[];
     areas: readonly Area[];
     selectedCount: number;
+    timeEstimatesEnabled?: boolean;
     t: Translate;
 }): BulkOrganizeDialogModel {
     const { draft, t } = input;
@@ -261,6 +306,7 @@ export function buildBulkOrganizeDialogModel(input: {
             ? tFallback(t, 'taskEdit.noAreaOption', 'No area')
             : selectedArea?.name ?? areaLabel;
     const isWaiting = draft.status === 'waiting';
+    const estimate = input.timeEstimatesEnabled ? buildBulkOrganizeEstimateModel(draft, t) : null;
     return {
         title: tFallback(t, 'bulk.organize', 'Bulk organize'),
         subtitle: `${input.selectedCount} ${tFallback(t, 'bulk.selected', 'selected')} - ${tFallback(t, 'bulk.organizeHintShort', 'Titles and descriptions stay unchanged.')}`,
@@ -298,10 +344,11 @@ export function buildBulkOrganizeDialogModel(input: {
                 label: isWaiting ? tFallback(t, 'process.followUpLabel', 'Follow-up') : tFallback(t, 'taskEdit.reviewDateLabel', 'Review'),
             },
         ],
+        estimate,
         contexts: { label: tFallback(t, 'taskEdit.contextsLabel', 'Contexts'), placeholder: '@computer, @office' },
         tags: { label: tFallback(t, 'taskEdit.tagsLabel', 'Tags'), placeholder: '#project, #admin' },
-        canApply: input.selectedCount > 0 && (!isWaiting || draft.delegateWho.trim().length > 0),
-        validationMessage: tFallback(t, 'bulk.waitingPersonRequired', 'Choose who these items are waiting for.'),
+        canApply: input.selectedCount > 0 && (!isWaiting || draft.delegateWho.trim().length > 0) && !estimate?.validationMessage,
+        validationMessage: estimate?.validationMessage ?? tFallback(t, 'bulk.waitingPersonRequired', 'Choose who these items are waiting for.'),
         createFailed: {
             project: tFallback(t, 'projects.createFailed', 'Failed to create project.'),
             area: tFallback(t, 'projects.createAreaFailed', 'Failed to create area.'),
@@ -310,7 +357,7 @@ export function buildBulkOrganizeDialogModel(input: {
 }
 
 
-export function buildBulkOrganizeInput(draft: BulkOrganizeDraft): BulkOrganizeTaskUpdateInput {
+export function buildBulkOrganizeInput(draft: BulkOrganizeDraft, timeEstimatesEnabled = false): BulkOrganizeTaskUpdateInput {
     const input: BulkOrganizeTaskUpdateInput = {
         contexts: parseBulkOrganizeTokenInput(draft.contexts, '@'),
         tags: parseBulkOrganizeTokenInput(draft.tags, '#'),
@@ -325,6 +372,8 @@ export function buildBulkOrganizeInput(draft: BulkOrganizeDraft): BulkOrganizeTa
     if (draft.startDate.trim()) input.startTime = draft.startDate.trim();
     if (draft.dueDate.trim()) input.dueDate = draft.dueDate.trim();
     if (draft.reviewDate.trim()) input.reviewAt = draft.reviewDate.trim();
+    const timeEstimate = timeEstimatesEnabled ? readBulkOrganizeEstimate(draft) : undefined;
+    if (timeEstimate !== undefined) input.timeEstimate = timeEstimate;
     if (draft.status === 'waiting') input.assignedTo = draft.delegateWho.trim();
     return input;
 }

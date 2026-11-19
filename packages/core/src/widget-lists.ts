@@ -4,6 +4,7 @@ import { buildFocusTaskSections, DEFAULT_FOCUS_SORT_BY, type FocusTaskLists } fr
 import type { FocusWidgetFilter } from './focus-widget-filter';
 import { compareSomedayTasks, compareWaitingTasks } from './menu-views-model';
 import { applyFilter, normalizeSavedFilters } from './saved-filters';
+import { resolveFeatureFlags } from './resolve-feature-flags';
 import { logInfo } from './logger';
 import { sortTasksBy, sortTasksBySavedPreference } from './task-utils';
 import type { AppData, FocusGroupBy, SavedFilter, Task, TaskSortBy } from './types';
@@ -159,8 +160,10 @@ const savedFilterStatus: Partial<Record<SavedFilter['view'], Task['status']>> = 
 
 function buildSavedFilterList(filter: SavedFilter, context: WidgetListContext): WidgetTaskList {
     const { data, activeTasks, sortBy, prioritiesEnabled } = context;
+    const criteria = resolveFeatureFlags(data.settings).timeEstimates ? filter.criteria
+        : { ...filter.criteria, timeEstimates: undefined, timeEstimateRange: undefined };
     if (filter.view === 'focus') {
-        const lists = context.getFocusLists({ criteria: filter.criteria,
+        const lists = context.getFocusLists({ criteria,
             sortBy: filter.sortBy ?? DEFAULT_FOCUS_SORT_BY, sortOrder: filter.sortOrder });
         const tasks = [...new Map(buildFocusTaskSections(lists, (key) => context.tr[key])
             .flatMap((section) => section.items).map((task) => [task.id, task])).values()];
@@ -173,7 +176,7 @@ function buildSavedFilterList(filter: SavedFilter, context: WidgetListContext): 
     const pool = status ? activeTasks.filter((task) => task.status === status)
         : includeReference ? [...activeTasks, ...(context.referenceTasks ?? [])] : activeTasks;
     const projects = data.projects || [];
-    const matched = applyFilter(pool, filter.criteria, { projects, tokenMatchMode: 'all', now: context.now });
+    const matched = applyFilter(pool, criteria, { projects, tokenMatchMode: 'all', now: context.now });
     if (filter.criteria.excludedProjects?.length || ((filter.view === 'contexts' || filter.view === 'all') && filter.criteria.statuses?.length)) {
         try { logInfo('Context filter projected for widget', { scope: 'widget-lists', category: 'unknown', force: true, context: {
             releaseCheck: 'v1.3.8/context-filter-criteria', count: matched.length, outcome: 'projected',

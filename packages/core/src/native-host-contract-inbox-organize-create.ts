@@ -1,12 +1,12 @@
 import type { NativeHostResult } from './native-host-contract';
 import type { AppData, Area, Project, Section, Task } from './types';
 import type { PreparedAreaAuthority, PreparedAreaCreate, PreparedNativeSaveBoundary } from './store-types';
-import type { NativeInboxTasksMoveParams, NativeReviewTasksParams } from './native-host-contract-inbox-bulk-status';
+import type { NativeInboxTasksMoveParams, NativeReviewTasksParams, NativeContextsSelectionParams } from './native-host-contract-inbox-bulk-status';
 import type { NativeProjectOrganizeDestinationCreateRequest, NativeProjectOrganizeDestinationCreatePrepared } from './native-host-contract-project-organize-create';
 import { organizeListSource, tasksOrganizeScope } from './native-host-contract-inbox-bulk-organize';
 import { exact, iso, record } from './native-host-contract-project-shared';
 import { readBulkOrganizeDraftShape, type createBulkActionMethods } from './native-host-contract-bulk-actions';
-import { BULK_ORGANIZE_KEEP, BULK_ORGANIZE_NONE, EMPTY_BULK_ORGANIZE_DRAFT,
+import { BULK_ORGANIZE_KEEP, BULK_ORGANIZE_NONE,
     buildBulkOrganizeDialogModel, getBulkOrganizeAreaOptions, getBulkOrganizeProjectOptions, type BulkOrganizeDraft } from './task-list-bulk-actions';
 import { DEFAULT_AREA_COLOR, DEFAULT_PROJECT_COLOR } from './color-constants';
 import { buildNewProject } from './store-projects/project-actions';
@@ -31,7 +31,8 @@ export type NativeInboxOrganizeDestinationCreateRequest = {
     requestId: string; kind: 'project' | 'area'; name: string;
     draft: BulkOrganizeDraft; offerRevision: string; taskIds: string[];
     taskRevisions: Record<string, string>;
-} & ({ source: 'inbox'; params: NativeInboxTasksMoveParams } | { source: 'review'; params: NativeReviewTasksParams });
+} & ({ source: 'inbox'; params: NativeInboxTasksMoveParams } | { source: 'review'; params: NativeReviewTasksParams }
+    | { source: 'contexts'; params: NativeContextsSelectionParams });
 export type NativeInboxOrganizeDestinationCreateResult = { id: string; changed: true };
 type Pair<T> = { before: T | null; after: T };
 export type NativeInboxOrganizeDestinationCreatePrepared = {
@@ -61,6 +62,7 @@ const fail = (code: 'INVALID_INPUT' | 'STALE_REVISION' | 'SAVE_FAILED', message:
 const selectionRequest = (r: Request) => {
     const base = { requestId: r.requestId, taskIds: r.taskIds, taskRevisions: r.taskRevisions, status: 'next' as const };
     if (r.source === 'project') return { ...base, source: r.source, params: r.params };
+    if (r.source === 'contexts') return { ...base, source: r.source, params: r.params };
     if (r.source === 'review') return { ...base, source: r.source, params: r.params };
     return { ...base, source: r.source, params: r.params };
 };
@@ -68,6 +70,7 @@ const scopeRequest = (r: Request) => {
     const draft: BulkOrganizeDraft = { ...r.draft, status: BULK_ORGANIZE_KEEP };
     const base = { requestId: r.requestId, taskIds: r.taskIds, taskRevisions: r.taskRevisions, draft };
     if (r.source === 'project') return { ...base, source: r.source, params: r.params };
+    if (r.source === 'contexts') return { ...base, source: r.source, params: r.params };
     if (r.source === 'review') return { ...base, source: r.source, params: r.params };
     return { ...base, source: r.source, params: r.params };
 };
@@ -75,8 +78,8 @@ const readRequest = (value: unknown, source: Source): Request | null => {
     const r = detachReferenceBatchJson<Request>(value);
     return r && exact(r, ['requestId', 'source', 'kind', 'name', 'draft', 'offerRevision', 'taskIds', 'taskRevisions', 'params'])
         && (r.kind === 'project' || r.kind === 'area') && text(r.name, 100_000) && r.name === r.name.trim()
-        && text(r.offerRevision, 100_000) && record(r.draft) && exact(r.draft, Object.keys(EMPTY_BULK_ORGANIZE_DRAFT))
-        && readBulkOrganizeDraftShape(r.draft) && readStatusBatchSelectionRequest(selectionRequest(r), organizeListSource(r, source)) ? r : null;
+        && text(r.offerRevision, 100_000) && readBulkOrganizeDraftShape(r.draft, true)
+        && readStatusBatchSelectionRequest(selectionRequest(r), organizeListSource(r, source)) ? r : null;
 };
 const normalized = (name: string) => name.trim().toLowerCase();
 const restoreTarget = (r: Request, areas: Area[]) => r.kind === 'area'
@@ -332,8 +335,8 @@ export function createOrganizeDestinationCreateMethods(deps: {
             if (confirmed.ok && !same(confirmed.value, envelope.prepared.result)) return fail('INVALID_INPUT', `Saved ${label} Organize destination creation result does not match its journal`);
             if (confirmed.ok) {
                 const list = envelope.request.source;
-                try { logInfo(`Native ${list === 'review' ? 'Review' : label} Organize destination confirmed`, { scope: 'native-host', category: 'storage', ...(list !== 'inbox' ? { force: true } : {}),
-                    context: { releaseCheck: list === 'project' ? 'v1.3.9/ios-project-organize-destination-create' : list === 'review' ? 'v1.3.9/ios-review-bulk-organize' : 'v1.3.5/ios-inbox-organize-stable-offer', kind: envelope.request.kind, outcome: 'saved' } }); }
+                try { logInfo(`Native ${list === 'contexts' ? 'Contexts' : list === 'review' ? 'Review' : label} Organize destination confirmed`, { scope: 'native-host', category: 'storage', ...(list !== 'inbox' ? { force: true } : {}),
+                    context: { releaseCheck: list === 'contexts' ? 'v1.3.10/contexts-bulk-organize' : list === 'project' ? 'v1.3.9/ios-project-organize-destination-create' : list === 'review' ? 'v1.3.9/ios-review-bulk-organize' : 'v1.3.5/ios-inbox-organize-stable-offer', kind: envelope.request.kind, outcome: 'saved' } }); }
                 catch { }
             }
             return confirmed;

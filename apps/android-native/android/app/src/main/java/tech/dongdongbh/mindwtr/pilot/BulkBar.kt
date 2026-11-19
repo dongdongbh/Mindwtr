@@ -254,6 +254,20 @@ fun OrganizeDialog(model: InboxViewModel, open: JSONObject) = with(model.menu) {
                     }
                 }
                 for (date in organize.menuObjects("dates")) DateField(model, open, date, locked)
+                organize.optJSONObject("estimate")?.let { estimate ->
+                    Section(estimate.getString("label")) {
+                        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            for (option in estimate.menuObjects("options")) OrganizeChip(option.getString("label"), option.getBoolean("selected"), !locked) {
+                                organizeEdit(option.getJSONObject("edit"))
+                            }
+                        }
+                        estimate.optJSONObject("custom")?.let { custom ->
+                            ModalInput(open.optString("typed:estimateText", custom.getString("value")), custom.getString("placeholder"), custom.getString("label"), enabled = !locked) {
+                                organizeType("estimateText", it.take(100))
+                            }
+                        }
+                    }
+                }
                 for (name in listOf("contexts", "tags")) {
                     val tokens = organize.getJSONObject(name)
                     Section(tokens.getString("label")) {

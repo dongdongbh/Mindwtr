@@ -3388,9 +3388,9 @@ describeSqlite('SqliteAdapter keeps saved filters as stored', () => {
         db.close();
     });
 
-    it('round-trips Context project exclusions and multiple statuses through JSON and table recovery', async () => {
+    it('round-trips Context project exclusions, statuses and estimates through JSON and table recovery', async () => {
         const filters: NonNullable<AppData['settings']['savedFilters']> = [{ ...older, view: 'contexts',
-            criteria: { contexts: ['@person/emma'], excludedProjects: ['project-excluded'], statuses: ['next', 'someday'] } }];
+            criteria: { contexts: ['@person/emma'], excludedProjects: ['project-excluded'], statuses: ['next', 'someday'], timeEstimates: ['none', '15min'] } }];
         const adapter = new SqliteAdapter(createClient(db));
         await adapter.saveData(JSON.parse(JSON.stringify(doc(filters))));
         const first = await new SqliteAdapter(createClient(db)).getData();

@@ -25,7 +25,7 @@ import {
   DONE_TASK_LIST_SORT_OPTIONS,
   TASK_LIST_SORT_OPTIONS,
   getTaskSortByLabel,
-  TIME_ESTIMATE_OPTIONS,
+  TIME_ESTIMATE_FILTER_OPTIONS,
   buildStatusListFilterOptions,
   buildStatusListFilterSummary,
   buildStatusListModel,
@@ -1640,7 +1640,7 @@ function TaskListComponent({
         options={{
           tokens: tokenFilterOptions,
           projects: referenceProjectFilterOptions,
-          timeEstimates: TIME_ESTIMATE_OPTIONS,
+          timeEstimates: TIME_ESTIMATE_FILTER_OPTIONS,
           visibility: metadataFilterVisibility,
         }}
         hasAdditionalActiveFilters={archivedReferenceFilterActive}

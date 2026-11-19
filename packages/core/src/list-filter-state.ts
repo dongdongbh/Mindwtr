@@ -1,4 +1,4 @@
-import { formatTimeEstimateLabel } from './calendar-scheduling';
+import { formatTimeEstimateFilterLabel } from './calendar-scheduling';
 import { countActiveFilterCriteria, criteriaFromSelections } from './filter-criteria';
 import { tFallback } from './i18n';
 import { buildAdvancedFilterCriteriaChips } from './saved-filter-labels';
@@ -10,7 +10,7 @@ import type {
     TaskEnergyLevel,
     TaskPriority,
     TaskStatus,
-    TimeEstimate,
+    TimeEstimateFilterValue,
 } from './types';
 
 
@@ -23,7 +23,7 @@ export type ListFilterState = {
     statuses?: TaskStatus[];
     priorities: TaskPriority[];
     energyLevels: TaskEnergyLevel[];
-    timeEstimates: TimeEstimate[];
+    timeEstimates: TimeEstimateFilterValue[];
     location: string;
     anyDateRange?: DateRange;
     contextMatchMode: MultiValueFilterMatchMode;
@@ -53,7 +53,7 @@ export type ListFilterEdit =
     | { type: 'toggleStatus'; value: TaskStatus }
     | { type: 'togglePriority'; value: TaskPriority }
     | { type: 'toggleEnergyLevel'; value: TaskEnergyLevel }
-    | { type: 'toggleTimeEstimate'; value: TimeEstimate }
+    | { type: 'toggleTimeEstimate'; value: TimeEstimateFilterValue }
     | { type: 'setSearch'; value: string }
     | { type: 'setLocation'; value: string }
     | { type: 'setAnyDateRange'; value: DateRange | null }
@@ -223,7 +223,7 @@ export function resolveListFilterState(
     }
     if (visibility.timeEstimate) {
         state.timeEstimates.forEach((estimate) => {
-            chips.push({ id: `time:${estimate}`, label: formatTimeEstimateLabel(estimate), excluded: false, edit: { type: 'toggleTimeEstimate', value: estimate } });
+            chips.push({ id: `time:${estimate}`, label: formatTimeEstimateFilterLabel(estimate, { t }), excluded: false, edit: { type: 'toggleTimeEstimate', value: estimate } });
         });
     }
     if (state.anyDateRange) {

@@ -29,7 +29,7 @@ import {
     type FocusListItem,
 } from './focus-controls';
 import { buildFocusTaskSections, DEFAULT_FOCUS_SORT_BY } from './focus-sections';
-import { formatTimeEstimateLabel } from './calendar-scheduling';
+import { formatTimeEstimateFilterLabel } from './calendar-scheduling';
 import { safeFormatDate } from './date';
 import { tFallback } from './i18n';
 import type { ListFilterEdit } from './list-filter-state';
@@ -195,7 +195,7 @@ const sheetRows = (
         rows.push([tf('filters.projects', 'Projects'), join(options.projects.filter((project) => filters.projects.includes(project.id)).map((project) => project.title))]);
     }
     if (options.visibility.timeEstimate && options.timeEstimates.length > 0) {
-        rows.push([tf('filters.timeEstimate', 'Time estimate'), join(filters.timeEstimates.map((estimate) => formatTimeEstimateLabel(estimate)))]);
+        rows.push([tf('filters.timeEstimate', 'Time estimate'), join(filters.timeEstimates.map((estimate) => formatTimeEstimateFilterLabel(estimate, { t })))]);
     }
     if (options.visibility.energyLevel) rows.push([tf('taskEdit.energyLevel', 'Energy level'), join(filters.energyLevels.map((level) => t(`energyLevel.${level}`)))]);
     if (options.visibility.priority || options.visibility.location) {

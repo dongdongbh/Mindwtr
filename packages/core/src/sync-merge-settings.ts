@@ -83,6 +83,9 @@ const legacySavedFilterProjection = (filter: SavedFilter, inventedAt: string | u
 
     delete criteria.anyDateRange;
     delete criteria.excludedProjects;
+    if (Array.isArray(criteria.timeEstimates)) {
+        criteria.timeEstimates = criteria.timeEstimates.filter((estimate) => estimate !== 'none');
+    }
     for (const field of ['dueDateRange', 'startDateRange']) {
         const range = criteria[field];
         if (isObjectRecord(range) && typeof range.preset === 'string'

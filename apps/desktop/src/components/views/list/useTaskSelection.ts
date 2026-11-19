@@ -5,7 +5,13 @@ import {
     buildBulkOrganizeTaskUpdates,
     buildBulkTaskTokenUpdates,
     buildTaskMovePatch,
+    isBulkOrganizeSelectionCurrent,
+    logStaleWriteRefused,
+    resolveFeatureFlags,
+    runStoreCommand,
     updateRangeSelection,
+    useTaskStore,
+    type BulkOrganizeSelectionScope,
     type BulkOrganizeTaskUpdateInput,
     type RangeSelectionOptions,
     type Task,
@@ -33,6 +39,7 @@ type TaskSelectionActions = {
     batchMoveTasks?: (taskIds: string[], newStatus: TaskStatus) => Promise<unknown> | unknown;
     batchUpdateTasks?: (updates: TaskUpdate[]) => Promise<unknown> | unknown;
     onActionError?: (action: TaskSelectionAction, error: unknown) => void;
+    organizeScope?: BulkOrganizeSelectionScope;
     restoreTask?: (taskId: string) => Promise<unknown> | unknown;
     showToast?: ShowToast;
     t?: (key: string) => string;
@@ -90,6 +97,7 @@ export function useTaskSelection(
         batchMoveTasks,
         batchUpdateTasks,
         onActionError,
+        organizeScope,
         restoreTask,
         showToast,
         t,
@@ -198,7 +206,9 @@ export function useTaskSelection(
             const failure = action === 'delete'
                 ? translate('bulk.deleteFailed', 'Failed to delete selected tasks')
                 : action === 'organize'
-                    ? translate('bulk.organizeFailed', 'Failed to organize selected tasks')
+                    ? error instanceof Error && error.message === 'STALE_REVISION'
+                        ? translate('bulk.selectionChanged', 'The selected tasks or filters changed. Review the selection and try again.')
+                        : translate('bulk.organizeFailed', 'Failed to organize selected tasks')
                     : action === 'move'
                         ? translate('bulk.moveFailed', 'Failed to move selected tasks')
                         : translate('bulk.updateFailed', 'Failed to update selected tasks');
@@ -315,15 +325,24 @@ export function useTaskSelection(
         return runSelectedTaskAction(
             'organize',
             (taskIds) => {
-                const write = () => batchUpdateTasksFromLatest(taskIds, (task) => {
-                    const latest = buildBulkOrganizeTaskUpdate(task, input);
-                    return Object.keys(latest).length > 0 ? latest : null;
+                const write = () => runStoreCommand(async () => {
+                    const state = useTaskStore.getState();
+                    if (organizeScope && !isBulkOrganizeSelectionCurrent(taskIds,
+                        (id) => tasksById instanceof Map ? tasksById.get(id) : tasksById[id], organizeScope, state)) {
+                        logStaleWriteRefused('bulk-organize');
+                        throw new Error('STALE_REVISION');
+                    }
+                    const estimateDisabled = input.timeEstimate !== undefined && !resolveFeatureFlags(state.settings).timeEstimates;
+                    return batchUpdateTasksFromLatest(taskIds, (task) => {
+                        const latest = buildBulkOrganizeTaskUpdate(task, estimateDisabled ? { ...input, timeEstimate: undefined } : input);
+                        return Object.keys(latest).length > 0 ? latest : null;
+                    });
                 });
                 return input.status === 'done' ? trackInboxCompletion(taskIds, write) : write();
             },
             options,
         );
-    }, [batchUpdateTasks, runSelectedTaskAction, selectedIdsArray, tasksById, trackInboxCompletion]);
+    }, [batchUpdateTasks, organizeScope, runSelectedTaskAction, selectedIdsArray, tasksById, trackInboxCompletion]);
 
     const updateSelectedTaskTokens = useCallback((
         field: 'tags' | 'contexts',

@@ -32,7 +32,7 @@ import {
     showArchiveSearch,
     sortArchivedTasks,
     tFallback,
-    TIME_ESTIMATE_OPTIONS,
+    TIME_ESTIMATE_FILTER_OPTIONS,
     useTaskStore,
     type ArchiveSegment,
     type Area,
@@ -972,7 +972,7 @@ export default function ArchivedScreen() {
                     selections={selections}
                     options={{
                         tokens: tokenFilterOptions,
-                        timeEstimates: TIME_ESTIMATE_OPTIONS,
+                        timeEstimates: TIME_ESTIMATE_FILTER_OPTIONS,
                         visibility: metadataFilterVisibility,
                     }}
                     themeColors={tc}

@@ -25,6 +25,6 @@ export function getTaskMetadataFilterVisibility(
         energyLevel: tasks.some((task) => Boolean(task.energyLevel)),
         location: tasks.some((task) => hasText(task.location)),
         priority: prioritiesEnabled && tasks.some((task) => Boolean(task.priority)),
-        timeEstimate: timeEstimatesEnabled && tasks.some((task) => Boolean(task.timeEstimate)),
+        timeEstimate: timeEstimatesEnabled,
     };
 }

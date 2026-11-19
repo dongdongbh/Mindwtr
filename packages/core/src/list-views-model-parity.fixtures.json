@@ -87,7 +87,9 @@
    "base": "9f486312f",
    "change": "Task rn-focus-menu-bugs-20260924-01, correction pass 1: the Trash swipe Restore action draws the lucide RotateCcw icon instead of the emoji. Recaptured with MINDWTR_CAPTURE_LIST_VIEWS=1 on app/(drawer)/trash.parity.test.tsx only. 26 observations changed, and only in their text: the row action label in rows and the text field now read \"Restore\" where they read \"↩️ Restore\". The core replay (list-views-model.replay.ts) drops the emoji to match. Every other field and input is byte-identical.",
    "part": "trash"
-  }
+  },
+  "noEstimateFilterAdjustment": "2026-11-19 (#1507): projected Archive estimate filter visibility whenever its feature is enabled.",
+  "contextsOrganizeAdjustment": "2026-11-19 (#1507): recaptured React Native Contexts with the Bulk organize action enabled in selection mode."
  },
  "contexts": {
   "timeZone": "America/New_York",
@@ -7058,6 +7060,10 @@
        false
       ],
       [
+       "Bulk organize",
+       false
+      ],
+      [
        "Add tag",
        false
       ],
@@ -7107,6 +7113,7 @@
       "Someday",
       "Done",
       "Reference",
+      "Bulk organize",
       "Add tag",
       "Remove tag",
       "Add context",
@@ -7252,6 +7259,10 @@
       ],
       [
        "Reference",
+       false
+      ],
+      [
+       "Bulk organize",
        false
       ],
       [
@@ -7304,6 +7315,7 @@
       "Someday",
       "Done",
       "Reference",
+      "Bulk organize",
       "Add tag",
       "Remove tag",
       "Add context",
@@ -7449,6 +7461,10 @@
       ],
       [
        "Reference",
+       false
+      ],
+      [
+       "Bulk organize",
        false
       ],
       [
@@ -7512,6 +7528,7 @@
       "Someday",
       "Done",
       "Reference",
+      "Bulk organize",
       "Add tag",
       "Remove tag",
       "Add context",
@@ -7657,6 +7674,10 @@
       ],
       [
        "Reference",
+       false
+      ],
+      [
+       "Bulk organize",
        false
       ],
       [
@@ -7709,6 +7730,7 @@
       "Someday",
       "Done",
       "Reference",
+      "Bulk organize",
       "Add tag",
       "Remove tag",
       "Add context",
@@ -7854,6 +7876,10 @@
       ],
       [
        "Reference",
+       false
+      ],
+      [
+       "Bulk organize",
        false
       ],
       [
@@ -7917,6 +7943,7 @@
       "Someday",
       "Done",
       "Reference",
+      "Bulk organize",
       "Add tag",
       "Remove tag",
       "Add context",
@@ -8249,6 +8276,10 @@
        false
       ],
       [
+       "Bulk organize",
+       false
+      ],
+      [
        "Add tag",
        false
       ],
@@ -8300,6 +8331,7 @@
       "Someday",
       "Done",
       "Reference",
+      "Bulk organize",
       "Add tag",
       "Remove tag",
       "Add context",
@@ -8453,6 +8485,10 @@
       ],
       [
        "Reference",
+       false
+      ],
+      [
+       "Bulk organize",
        false
       ],
       [
@@ -8507,6 +8543,7 @@
       "Someday",
       "Done",
       "Reference",
+      "Bulk organize",
       "Add tag",
       "Remove tag",
       "Add context",
@@ -8660,6 +8697,10 @@
       ],
       [
        "Reference",
+       false
+      ],
+      [
+       "Bulk organize",
        false
       ],
       [
@@ -8724,6 +8765,7 @@
       "Someday",
       "Done",
       "Reference",
+      "Bulk organize",
       "Add tag",
       "Remove tag",
       "Add context",
@@ -9045,6 +9087,10 @@
        false
       ],
       [
+       "Bulk organize",
+       false
+      ],
+      [
        "Add tag",
        false
       ],
@@ -9096,6 +9142,7 @@
       "Someday",
       "Done",
       "Reference",
+      "Bulk organize",
       "Add tag",
       "Remove tag",
       "Add context",
@@ -9249,6 +9296,10 @@
       ],
       [
        "Reference",
+       false
+      ],
+      [
+       "Bulk organize",
        false
       ],
       [
@@ -9303,6 +9354,7 @@
       "Someday",
       "Done",
       "Reference",
+      "Bulk organize",
       "Add tag",
       "Remove tag",
       "Add context",
@@ -9456,6 +9508,10 @@
       ],
       [
        "Reference",
+       false
+      ],
+      [
+       "Bulk organize",
        false
       ],
       [
@@ -9521,6 +9577,7 @@
       "Someday",
       "Done",
       "Reference",
+      "Bulk organize",
       "Add tag",
       "Remove tag",
       "Add context",
@@ -9871,6 +9928,10 @@
        false
       ],
       [
+       "Bulk organize",
+       false
+      ],
+      [
        "Add tag",
        false
       ],
@@ -9924,6 +9985,7 @@
       "Someday",
       "Done",
       "Reference",
+      "Bulk organize",
       "Add tag",
       "Remove tag",
       "Add context",
@@ -10088,6 +10150,10 @@
        false
       ],
       [
+       "Bulk organize",
+       false
+      ],
+      [
        "Add tag",
        false
       ],
@@ -10151,6 +10217,7 @@
       "Someday",
       "Done",
       "Reference",
+      "Bulk organize",
       "Add tag",
       "Remove tag",
       "Add context",
@@ -10474,6 +10541,10 @@
        false
       ],
       [
+       "Bulk organize",
+       false
+      ],
+      [
        "Add tag",
        false
       ],
@@ -10525,6 +10596,7 @@
       "Someday",
       "Done",
       "Reference",
+      "Bulk organize",
       "Add tag",
       "Remove tag",
       "Add context",
@@ -10681,6 +10753,10 @@
        false
       ],
       [
+       "Bulk organize",
+       false
+      ],
+      [
        "Add tag",
        false
       ],
@@ -10732,6 +10808,7 @@
       "Someday",
       "Done",
       "Reference",
+      "Bulk organize",
       "Add tag",
       "Remove tag",
       "Add context",
@@ -11050,6 +11127,10 @@
        false
       ],
       [
+       "Bulk organize",
+       false
+      ],
+      [
        "Add tag",
        false
       ],
@@ -11101,6 +11182,7 @@
       "Someday",
       "Done",
       "Reference",
+      "Bulk organize",
       "Add tag",
       "Remove tag",
       "Add context",
@@ -11254,6 +11336,10 @@
       ],
       [
        "Reference",
+       false
+      ],
+      [
+       "Bulk organize",
        false
       ],
       [
@@ -11308,6 +11394,7 @@
       "Someday",
       "Done",
       "Reference",
+      "Bulk organize",
       "Add tag",
       "Remove tag",
       "Add context",
@@ -11461,6 +11548,10 @@
       ],
       [
        "Reference",
+       false
+      ],
+      [
+       "Bulk organize",
        false
       ],
       [
@@ -11530,6 +11621,7 @@
       "Someday",
       "Done",
       "Reference",
+      "Bulk organize",
       "Add tag",
       "Remove tag",
       "Add context",
@@ -11683,6 +11775,10 @@
       ],
       [
        "Reference",
+       false
+      ],
+      [
+       "Bulk organize",
        false
       ],
       [
@@ -11737,6 +11833,7 @@
       "Someday",
       "Done",
       "Reference",
+      "Bulk organize",
       "Add tag",
       "Remove tag",
       "Add context",
@@ -11890,6 +11987,10 @@
       ],
       [
        "Reference",
+       false
+      ],
+      [
+       "Bulk organize",
        false
       ],
       [
@@ -11959,6 +12060,7 @@
       "Someday",
       "Done",
       "Reference",
+      "Bulk organize",
       "Add tag",
       "Remove tag",
       "Add context",
@@ -12393,6 +12495,10 @@
        false
       ],
       [
+       "Bulk organize",
+       false
+      ],
+      [
        "Add tag",
        false
       ],
@@ -12444,6 +12550,7 @@
       "Someday",
       "Done",
       "Reference",
+      "Bulk organize",
       "Add tag",
       "Remove tag",
       "Add context",
@@ -12876,6 +12983,10 @@
        false
       ],
       [
+       "Bulk organize",
+       false
+      ],
+      [
        "Add tag",
        false
       ],
@@ -12925,6 +13036,7 @@
       "Someday",
       "Done",
       "Reference",
+      "Bulk organize",
       "Add tag",
       "Remove tag",
       "Add context",
@@ -13070,6 +13182,10 @@
       ],
       [
        "Reference",
+       false
+      ],
+      [
+       "Bulk organize",
        false
       ],
       [
@@ -13122,6 +13238,7 @@
       "Someday",
       "Done",
       "Reference",
+      "Bulk organize",
       "Add tag",
       "Remove tag",
       "Add context",
@@ -13250,6 +13367,10 @@
        false
       ],
       [
+       "Bulk organize",
+       false
+      ],
+      [
        "Add tag",
        false
       ],
@@ -13299,6 +13420,7 @@
       "Someday",
       "Done",
       "Reference",
+      "Bulk organize",
       "Add tag",
       "Remove tag",
       "Add context",
@@ -13447,6 +13569,10 @@
        false
       ],
       [
+       "Bulk organize",
+       false
+      ],
+      [
        "Add tag",
        false
       ],
@@ -13496,6 +13622,7 @@
       "Someday",
       "Done",
       "Reference",
+      "Bulk organize",
       "Add tag",
       "Remove tag",
       "Add context",
@@ -29200,7 +29327,7 @@
        "energyLevel": false,
        "location": false,
        "priority": false,
-       "timeEstimate": false
+       "timeEstimate": true
       },
       "activeCount": 0,
       "chips": []
@@ -32457,7 +32584,7 @@
        "energyLevel": true,
        "location": true,
        "priority": false,
-       "timeEstimate": false
+       "timeEstimate": true
       },
       "activeCount": 0,
       "chips": []
@@ -32525,7 +32652,7 @@
        "energyLevel": true,
        "location": true,
        "priority": false,
-       "timeEstimate": false
+       "timeEstimate": true
       },
       "activeCount": 0,
       "chips": []
@@ -32580,7 +32707,7 @@
        "energyLevel": false,
        "location": false,
        "priority": false,
-       "timeEstimate": false
+       "timeEstimate": true
       },
       "activeCount": 0,
       "chips": []
@@ -32665,7 +32792,7 @@
        "energyLevel": false,
        "location": false,
        "priority": false,
-       "timeEstimate": false
+       "timeEstimate": true
       },
       "activeCount": 0,
       "chips": []

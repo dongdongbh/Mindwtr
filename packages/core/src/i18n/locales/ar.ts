@@ -1,6 +1,11 @@
 
 export const arOverrides: Record<string, string> = {
     "projects.calendarLimit": "تُعرض أول 200 نتيجة. ابحث للعثور على حدث آخر.",
+    'bulk.keepEstimate': "الاحتفاظ بالقيمة الحالية",
+    'bulk.clearEstimate': "مسح التقدير",
+    'bulk.setEstimate': "تعيين تقدير",
+    'bulk.invalidEstimate': "أدخل تقديرًا زمنيًا صالحًا.",
+    'bulk.selectionChanged': "تغيّرت المهام المحددة أو الفلاتر. راجع التحديد وحاول مرة أخرى.",
     "projects.calendarTitle": "التقويم",
     "projects.calendarLink": "ربط حدث من التقويم",
     "projects.calendarReplace": "استبدال الحدث المرتبط",
@@ -628,6 +633,7 @@ export const arOverrides: Record<string, string> = {
         'filters.contexts': 'السياقات والعلامات',
         'filters.priority': 'أولوية',
         'filters.timeEstimate': 'تقدير الوقت',
+        'filters.noEstimate': "بدون تقدير",
         'filters.after': 'بعد',
         'filters.before': 'قبل',
         'filters.hasDescription': 'يحتوي على وصف',

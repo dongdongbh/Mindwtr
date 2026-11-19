@@ -10,7 +10,7 @@ import { buildProjectOrderMap,
     createTaskFilterPredicate,
     DEFAULT_AREA_COLOR,
     executeCaptureTransaction,
-    formatTimeEstimateLabel,
+    formatTimeEstimateFilterLabel,
     getListSearchChipLabel,
     getQuickAddProjectInitialProps,
     getTaskMetadataFilterVisibility,
@@ -37,8 +37,8 @@ import { buildProjectOrderMap,
     shouldShowTaskForStart,
     sortTasksBy,
     TaskPriority,
-    TimeEstimate,
-    TIME_ESTIMATE_OPTIONS,
+    TimeEstimateFilterValue,
+    TIME_ESTIMATE_FILTER_OPTIONS,
     resolveI18nText,
     useTaskStore, tFallback,
     baseTextCollator,
@@ -128,7 +128,7 @@ interface ListViewProps {
 }
 
 const EMPTY_PRIORITIES: TaskPriority[] = [];
-const EMPTY_ESTIMATES: TimeEstimate[] = [];
+const EMPTY_ESTIMATES: TimeEstimateFilterValue[] = [];
 
 const SOMEDAY_NO_SECTION_GROUP_ID = 'view-section:someday:';
 
@@ -1082,8 +1082,8 @@ const ListViewContent = memo(function ListViewContent({ title, statusFilter }: L
         );
     }, [areas, newTaskTitle, projects, quickAddParseOptions, showQuickAdd, t]);
     const priorityOptions = PRIORITY_FILTER_OPTIONS;
-    const timeEstimateOptions = TIME_ESTIMATE_OPTIONS;
-    const formatEstimate = (value: TimeEstimate) => formatTimeEstimateLabel(value, { t });
+    const timeEstimateOptions = TIME_ESTIMATE_FILTER_OPTIONS;
+    const formatEstimate = (value: TimeEstimateFilterValue) => formatTimeEstimateFilterLabel(value, { t });
     const excludedLabel = resolveText('filters.excluded', 'Excluded');
     const chipDeps: ActiveFilterChipDeps = {
         t,

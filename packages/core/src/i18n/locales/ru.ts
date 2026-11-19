@@ -1,6 +1,11 @@
 
 export const ruOverrides: Record<string, string> = {
     "projects.calendarLimit": "Показаны первые 200 совпадений. Используйте поиск, чтобы найти другое событие.",
+    'bulk.keepEstimate': "Оставить как есть",
+    'bulk.clearEstimate': "Очистить оценку",
+    'bulk.setEstimate': "Указать оценку",
+    'bulk.invalidEstimate': "Введите корректную оценку времени.",
+    'bulk.selectionChanged': "Выбранные задачи или фильтры изменились. Проверьте выбор и повторите попытку.",
     "projects.calendarTitle": "Календарь",
     "projects.calendarLink": "Связать событие календаря",
     "projects.calendarReplace": "Заменить связанное событие",
@@ -612,6 +617,7 @@ export const ruOverrides: Record<string, string> = {
         'filters.contexts': 'Контексты и теги',
         'filters.priority': 'Приоритет',
         'filters.timeEstimate': 'Оценка времени',
+        'filters.noEstimate': "Без оценки времени",
         'filters.after': 'После',
         'filters.before': 'До',
         'filters.hasDescription': 'С описанием',

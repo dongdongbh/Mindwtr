@@ -12,9 +12,9 @@ import {
     normalizeSavedFilters,
     generateUUID,
     updateSettingsFromLatest,
-    formatTimeEstimateLabel,
+    formatTimeEstimateFilterLabel,
     SAVED_FILTER_NO_PROJECT_ID,
-    TIME_ESTIMATE_OPTIONS,
+    TIME_ESTIMATE_FILTER_OPTIONS,
     type SavedFilter,
     taskMatchesContextOrTagSelection,
     shallow,
@@ -33,6 +33,7 @@ import {
     updateTaskFromLatest,
     selectContextsToken,
     toggleContextsToken,
+    type BulkOrganizeTaskUpdateInput,
     type Task,
     type ContextOrTagMatchMode,
     type ContextsChipLabel,
@@ -44,6 +45,7 @@ import { AgendaFiltersPanel } from './agenda/AgendaFiltersPanel';
 import { useTaskFilterSelections } from '@mindwtr/core/task-filter-selections';
 import { BulkSelectionToolbar } from './list/BulkSelectionToolbar';
 import { ListBulkActions } from './list/ListBulkActions';
+import { TaskBulkOrganizeModal } from './list/TaskBulkOrganizeModal';
 import { cn } from '../../lib/utils';
 import { useLanguage } from '../../contexts/language-context';
 import { usePerformanceMonitor } from '../../hooks/usePerformanceMonitor';
@@ -159,6 +161,7 @@ export function ContextsView() {
     const sortBy = resolveNonDoneTaskSortBy(settings?.taskSortBy, settings);
     const [searchQuery, setSearchQuery] = useState('');
     const [bulkTokenPicker, setBulkTokenPicker] = useState<BulkTokenPickerState>(null);
+    const [bulkOrganizeOpen, setBulkOrganizeOpen] = useState(false);
     const [contextsCollapsed, setContextsCollapsed] = useState(false);
     const [tagsCollapsed, setTagsCollapsed] = useState(false);
     const [hoveredContext, setHoveredContext] = useState<string | null>(null);
@@ -235,7 +238,8 @@ export function ContextsView() {
         statuses: statusFilters.length ? statusFilters : undefined }), [filterSelections.criteria, statusFilters]);
     const saveCriteria = getContextsSaveCriteria({ ...filterSelections.currentCriteria,
         statuses: statusFilters.length ? statusFilters : undefined }, selectedContexts, matchMode, [searchQuery]);
-    const canSaveContextFilter = saveCriteria !== null && (selectedContexts.length > 0 || Boolean(filterSelections.currentCriteria.contexts?.length || filterSelections.currentCriteria.tags?.length)) && !filterSelections.activeSavedFilter && !searchQuery.trim();
+    const canSaveContextFilter = saveCriteria !== null && !filterSelections.activeSavedFilter && !searchQuery.trim()
+        && Boolean(selectedContexts.length || saveCriteria.contexts?.length || saveCriteria.tags?.length || saveCriteria.timeEstimates?.length);
     const changeContextStatus = (status: TaskStatus | 'all') => {
         const next = status === 'all' ? [] : statusFilters.includes(status) ? statusFilters.filter((value) => value !== status) : [...statusFilters, status];
         filterSelections.setStatusSelection(next);
@@ -331,6 +335,7 @@ export function ContextsView() {
         isExporting,
         multiSelectedIds,
         moveSelectedTasks,
+        organizeSelectedTasks,
         selectedIdsArray,
         selectionMode,
         selectAllVisibleTasks,
@@ -341,6 +346,7 @@ export function ContextsView() {
         batchDeleteTasks,
         batchMoveTasks,
         batchUpdateTasks,
+        organizeScope: { areas, projects, settings, savedFilterId: filterSelections.activeSavedFilter?.id },
         restoreTask,
         showToast,
         t,
@@ -417,6 +423,10 @@ export function ContextsView() {
     }, [collapseAllTaskDetails, setListOptions, showListDetails]);
 
     const handleBatchMove = moveSelectedTasks;
+
+    const handleApplyBulkOrganize = async (input: BulkOrganizeTaskUpdateInput) => {
+        await organizeSelectedTasks(input, { afterSuccess: () => setBulkOrganizeOpen(false) });
+    };
 
     const handleBatchDelete = async () => {
         await deleteSelectedTasks({
@@ -872,9 +882,9 @@ export function ContextsView() {
                             selectedPriorities={filterSelections.priorities} onTogglePriority={filterSelections.togglePriority}
                             showEnergyLevelFilters={filterVisibility.energyLevel} energyLevelOptions={['low', 'medium', 'high']}
                             selectedEnergyLevels={filterSelections.energyLevels} onToggleEnergy={filterSelections.toggleEnergyLevel}
-                            showTimeEstimateFilters={filterVisibility.timeEstimate} timeEstimateOptions={TIME_ESTIMATE_OPTIONS}
+                            showTimeEstimateFilters={filterVisibility.timeEstimate} timeEstimateOptions={TIME_ESTIMATE_FILTER_OPTIONS}
                             selectedTimeEstimates={filterSelections.timeEstimates} onToggleTime={filterSelections.toggleTimeEstimate}
-                            formatEstimate={(value) => formatTimeEstimateLabel(value, { t })}
+                            formatEstimate={(value) => formatTimeEstimateFilterLabel(value, { t })}
                             showLocationFilter={filterVisibility.location} locationFilter={filterSelections.locationQuery} onLocationChange={filterSelections.setLocation}
                             searchQuery={searchQuery} onSearchChange={setSearchQuery} excludedStateLabel={t('filters.excluded')}
                             anyDateRange={filterSelections.anyDateRange} onAnyDateRangeChange={filterSelections.setAnyDateRange}
@@ -919,7 +929,7 @@ export function ContextsView() {
                             <div className="mb-4">
                                 <BulkSelectionToolbar
                                     selectionCount={selectedIdsArray.length}
-                                    totalCount={filteredTasks.length}
+                                    totalCount={filteredTaskIds.length}
                                     allSelected={allVisibleTasksSelected}
                                     onSelectAll={selectAllVisibleTasks}
                                     onClearSelection={clearTaskSelection}
@@ -936,6 +946,7 @@ export function ContextsView() {
                                     onMoveToDestination={handleBatchMoveToDestination}
                                     projects={projects}
                                     areas={areas}
+                                    onBulkOrganize={() => setBulkOrganizeOpen(true)}
                                     onAssignEnergyLevel={handleBatchAssignEnergyLevel}
                                     onAddTag={handleBatchPickTag}
                                     onRemoveTag={handleBatchRemoveTag}
@@ -978,6 +989,16 @@ export function ContextsView() {
                     </div>
                 </div>
             </div>
+            <TaskBulkOrganizeModal
+                isOpen={bulkOrganizeOpen}
+                selectedCount={selectedIdsArray.length}
+                projects={projects}
+                areas={areas}
+                isApplying={activeAction === 'organize'}
+                t={t}
+                onCancel={() => setBulkOrganizeOpen(false)}
+                onApply={handleApplyBulkOrganize}
+            />
             <TokenPickerModal
                 isOpen={bulkTokenPicker !== null}
                 title={tokenPickerTitle}

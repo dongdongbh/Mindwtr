@@ -160,7 +160,8 @@ fun ContextsList(model: InboxViewModel) = with(model.menu) {
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ContextsBulkBar(model: InboxViewModel, bulk: JSONObject, selected: List<String>, revisions: JSONObject) = with(model.menu) {
-    val c = LocalTheme.current.colors
+    val theme = LocalTheme.current
+    val c = theme.colors
     val any = idle && selected.isNotEmpty()
     Column(Modifier.fillMaxWidth().background(c.cardBg).rnBorderBottom(c.border).padding(horizontal = 12.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -174,6 +175,7 @@ private fun ContextsBulkBar(model: InboxViewModel, bulk: JSONObject, selected: L
             }
         }
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            BarButton(bulk.getString("organizeLabel"), any && bulk.optBoolean("organizeEnabled"), theme.filledBg, theme.filledText, icon = Lucide.ClipboardCheck) { openOrganize() }
             for (token in bulk.menuObjects("tokenActions")) {
                 BarButton(token.getString("title"), any && token.getBoolean("enabled"), c.filterBg, c.text) {
                     keepDialog(JSONObject().put("kind", "tokens").put("list", "contexts").put("field", token.getString("field"))

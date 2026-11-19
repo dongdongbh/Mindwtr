@@ -24,7 +24,7 @@ import {
 } from './focus-controls';
 import { DEFAULT_FOCUS_SORT_BY } from './focus-sections';
 import { tFallback } from './i18n';
-import { formatTimeEstimateLabel } from './calendar-scheduling';
+import { formatTimeEstimateFilterLabel } from './calendar-scheduling';
 import type { ListFilterEdit, ListFilterState } from './list-filter-state';
 import { NATIVE_HOST_CONTRACT_VERSION, NATIVE_HOST_MAX_WINDOW, type NativeHostResult } from './native-host-contract';
 import { buildNativeTaskDateFilter, fail, firstWindow, isFilterEdit, isPreservedFilterCriteria, isObjectRecord, isText, matchesPickerQuery, readFilterState, type NativeWindow } from './native-host-contract-menu-views';
@@ -45,7 +45,7 @@ import { buildAdvancedFilterCriteriaChips } from './saved-filter-labels';
 import { useTaskStore } from './store';
 import { FOCUS_SORT_OPTIONS } from './task-list-sort-options';
 import { TASK_EDITOR_ENERGY_LEVEL_OPTIONS, TASK_EDITOR_PRIORITY_OPTIONS } from './task-editor-model';
-import type { FilterCriteria, FocusGroupBy, SortField, TaskEnergyLevel, TaskPriority, TimeEstimate } from './types';
+import type { FilterCriteria, FocusGroupBy, SortField, TaskEnergyLevel, TaskPriority, TimeEstimateFilterValue } from './types';
 
 type Translate = (key: string) => string;
 
@@ -186,7 +186,7 @@ export type NativeFocusFilterSheet = {
     projects: NativeWindow<NativeFocusProjectOption>;
     priorities: { value: TaskPriority; label: string; selected: boolean; edit: FocusControlEdit }[];
     energyLevels: { value: TaskEnergyLevel; label: string; selected: boolean; edit: FocusControlEdit }[];
-    timeEstimates: { value: TimeEstimate; label: string; selected: boolean; edit: FocusControlEdit }[];
+    timeEstimates: { value: TimeEstimateFilterValue; label: string; selected: boolean; edit: FocusControlEdit }[];
 
     location: string;
     taskDates: { label: string; options: { value: string; label: string; selected: boolean; edit: FocusControlEdit }[] };
@@ -263,7 +263,7 @@ export function buildNativeFocusControls(model: FocusControlsModel, ctx: { t: Tr
         { field: 'energy' as const, prefix: 'energy:', label: tf('taskEdit.energyLevel', 'Energy level'),
             values: preserved?.energy?.map((value) => t(`energyLevel.${value}`)) },
         { field: 'timeEstimates' as const, prefix: 'time:', label: tf('filters.timeEstimate', 'Time estimate'),
-            values: preserved?.timeEstimates?.map((value) => formatTimeEstimateLabel(value, { t })) },
+            values: preserved?.timeEstimates?.map((value) => formatTimeEstimateFilterLabel(value, { t })) },
         { field: 'projects' as const, prefix: 'project:', label: tf('filters.projects', 'Projects'),
             values: preserved?.projects?.map((id) => model.projectById.get(id)?.title ?? id) },
     ].filter((part) => part.values?.length);
@@ -349,7 +349,7 @@ export function buildNativeFocusControls(model: FocusControlsModel, ctx: { t: Tr
                 value, label: t(`energyLevel.${value}`), selected: filters.energyLevels.includes(value), edit: filterEdit({ type: 'toggleEnergyLevel', value }),
             })),
             timeEstimates: model.options.timeEstimates.map((value) => ({
-                value, label: formatTimeEstimateLabel(value), selected: filters.timeEstimates.includes(value), edit: filterEdit({ type: 'toggleTimeEstimate', value }),
+                value, label: formatTimeEstimateFilterLabel(value, { t }), selected: filters.timeEstimates.includes(value), edit: filterEdit({ type: 'toggleTimeEstimate', value }),
             })),
             location: filters.location,
             taskDates: { ...taskDates, options: taskDates.options.map((option) => ({ ...option, edit: filterEdit(option.edit) })) },
@@ -361,7 +361,7 @@ export function buildNativeFocusControls(model: FocusControlsModel, ctx: { t: Tr
                 tokens: joinSummary([...filters.tokens, ...filters.excludedTokens.map((token) => `${excluded}: ${token}`)], all),
                 projects: joinSummary(model.options.projects.filter((project) => filters.projects.includes(project.id) || filters.excludedProjects?.includes(project.id))
                     .map((project) => filters.excludedProjects?.includes(project.id) ? `${tf('filters.excluded', 'Excluded')}: ${project.title}` : project.title), all),
-                timeEstimates: joinSummary(filters.timeEstimates.map((estimate) => formatTimeEstimateLabel(estimate)), all),
+                timeEstimates: joinSummary(filters.timeEstimates.map((estimate) => formatTimeEstimateFilterLabel(estimate, { t })), all),
                 energyLevels: joinSummary(filters.energyLevels.map((level) => t(`energyLevel.${level}`)), all),
                 more: joinSummary([
                     ...filters.priorities.map((priority) => t(`priority.${priority}`)),

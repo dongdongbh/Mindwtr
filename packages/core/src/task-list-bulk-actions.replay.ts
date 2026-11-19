@@ -6,6 +6,7 @@ import { collectBulkTaskTokens } from './bulk-task-tokens';
 import { createNativeHostContract, type NativeHostResult } from './native-host-contract';
 import type { NativeBulkList } from './native-host-contract-bulk-actions';
 import { sortProjectsForPicker } from './project-utils';
+import { resolveFeatureFlags } from './resolve-feature-flags';
 import { updateRangeSelection } from './range-selection';
 import { getSomedaySectionMoveSelection } from './someday-sections-model';
 import { flushPendingSave, resetForTests, setStorageAdapter, useTaskStore } from './store';
@@ -206,7 +207,8 @@ export function createCoreDriver(t: (key: string) => string): BulkDriver {
     const organizeDialog = (state: HostState) => {
         const projects = getBulkOrganizeProjectOptions(store().projects);
         const areas = getBulkOrganizeAreaOptions(store().areas);
-        return { projects, areas, dialog: buildBulkOrganizeDialogModel({ draft: state.organize!.draft, projects, areas, selectedCount: state.selected.length, t }) };
+        const timeEstimatesEnabled = resolveFeatureFlags(store().settings).timeEstimates;
+        return { projects, areas, dialog: buildBulkOrganizeDialogModel({ draft: state.organize!.draft, projects, areas, selectedCount: state.selected.length, timeEstimatesEnabled, t }) };
     };
     const perform = async (write: TaskListBulkWrite | null) => {
         if (!write) return { changed: false, toast: null, undo: null };
@@ -284,7 +286,8 @@ export function createCoreDriver(t: (key: string) => string): BulkDriver {
             switch (action.type) {
                 case 'move': return perform({ kind: 'move', taskIds: state.selected, status: action.status });
                 case 'tags': return perform(planBulkTagEdit(state.selected, tasksById(), action.mode, action.mode === 'add' ? action.values[0] : action.values));
-                case 'organize': return perform(planBulkOrganize(state.selected, tasksById(), buildBulkOrganizeInput(state.organize!.draft)));
+                case 'organize': return perform(planBulkOrganize(state.selected, tasksById(),
+                    buildBulkOrganizeInput(state.organize!.draft, resolveFeatureFlags(store().settings).timeEstimates)));
                 case 'trash': return perform({ kind: 'trash', taskIds: state.selected });
             }
         },
@@ -437,7 +440,7 @@ export async function replayBulkScenario(
                 subtitle: dialog.subtitle,
                 close: [dialog.closeLabel, false],
                 labels: [
-                    dialog.statusLabel, dialog.project.label, dialog.area.label,
+                    dialog.statusLabel, ...(dialog.estimate ? [dialog.estimate.label] : []), dialog.project.label, dialog.area.label,
                     ...(dialog.waitingFor ? [dialog.waitingFor.label] : []),
                     ...dialog.dates.map((date) => date.label),
                     dialog.contexts.label, dialog.tags.label,

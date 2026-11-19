@@ -1,6 +1,11 @@
 
 export const hiOverrides: Record<string, string> = {
     "projects.calendarLimit": "पहले 200 परिणाम दिखाए जा रहे हैं। अन्य इवेंट खोजने के लिए खोजें।",
+    'bulk.keepEstimate': "मौजूदा मान रखें",
+    'bulk.clearEstimate': "अनुमान हटाएँ",
+    'bulk.setEstimate': "अनुमान सेट करें",
+    'bulk.invalidEstimate': "मान्य समय अनुमान दर्ज करें।",
+    'bulk.selectionChanged': "चुने गए कार्य या फ़िल्टर बदल गए हैं। चयन की जाँच करें और फिर से कोशिश करें।",
     "projects.calendarTitle": "कैलेंडर",
     "projects.calendarLink": "कैलेंडर इवेंट लिंक करें",
     "projects.calendarReplace": "लिंक किया गया इवेंट बदलें",
@@ -616,6 +621,7 @@ export const hiOverrides: Record<string, string> = {
         'filters.contexts': 'संदर्भ और टैग',
         'filters.priority': 'प्राथमिकता',
         'filters.timeEstimate': 'समय का अनुमान',
+        'filters.noEstimate': "कोई अनुमान नहीं",
         'filters.after': 'के बाद',
         'filters.before': 'से पहले',
         'filters.hasDescription': 'विवरण है',

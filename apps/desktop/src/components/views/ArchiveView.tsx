@@ -3,7 +3,7 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import { ErrorBoundary } from '../ErrorBoundary';
 import {
     createTaskFilterPredicate,
-    formatTimeEstimateLabel,
+    formatTimeEstimateFilterLabel,
     getListSearchChipLabel,
     getTaskMetadataFilterVisibility,
     hasActiveFilterCriteria,
@@ -15,10 +15,10 @@ import {
     sortTasksBy,
     taskMatchesAreaFilterSelection,
     tFallback,
-    TIME_ESTIMATE_OPTIONS,
+    TIME_ESTIMATE_FILTER_OPTIONS,
     useTaskStore,
 } from '@mindwtr/core';
-import type { FilterCriteria, Task, Project, TimeEstimate } from '@mindwtr/core';
+import type { FilterCriteria, Task, Project, TimeEstimateFilterValue } from '@mindwtr/core';
 
 import { CheckSquare, Filter, SlidersHorizontal, Undo2, Trash2 } from 'lucide-react';
 import { useLanguage } from '../../contexts/language-context';
@@ -410,7 +410,7 @@ export function ArchiveView() {
     ), [selectedIds, selectionMode, toggleTaskSelection]);
 
     const formatEstimate = useCallback(
-        (value: TimeEstimate) => formatTimeEstimateLabel(value, { t }),
+        (value: TimeEstimateFilterValue) => formatTimeEstimateFilterLabel(value, { t }),
         [t]
     );
     const excludedLabel = tFallback(t, 'filters.excluded', 'Excluded');
@@ -674,7 +674,7 @@ export function ArchiveView() {
                     selectedPriorities={selectedPriorities}
                     onTogglePriority={togglePriority}
                     showTimeEstimateFilters={showTimeEstimateFilters}
-                    timeEstimateOptions={TIME_ESTIMATE_OPTIONS}
+                    timeEstimateOptions={TIME_ESTIMATE_FILTER_OPTIONS}
                     selectedTimeEstimates={selectedTimeEstimates}
                     onToggleEstimate={toggleEstimate}
                     formatEstimate={formatEstimate}

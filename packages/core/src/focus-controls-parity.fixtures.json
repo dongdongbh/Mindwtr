@@ -9,7 +9,8 @@
   "areaSelectionRecapture": " 2026-10-20 (#1421): real RN Focus harness recaptured with the area-selection fix; only Today’s Focus sections/counts and the occupied empty state changed in 47 observations. Empty sibling sections are retained with that occupied header. Occupied slots are global before criteria; no inputs, writes, nonempty sibling sections, or other behavior changed.",
   "projectColorRecapture": "2026-10-20: real RN Focus harness recaptured on 3d10ce6154d1a485e860a30945fec9040b54faf0 with MINDWTR_CAPTURE_FOCUS_CONTROLS=1 after Project color inheritance changed. Exactly four Alpha project headers now omit the implicit default-gray accent; every input and all other observations are unchanged.",
   "noColorDotRecapture": "2026-10-24 (#1422 follow-up): real RN Focus harness recaptured with MINDWTR_CAPTURE_FOCUS_CONTROLS=1 after a Project with no Area and no own color got the grey default dot back, as Area buckets have. Exactly the four Alpha project headers changed (empty color to #94a3b8); every input and all other observations are unchanged.",
-  "reviewOrderRecapture": "2026-11-14 (#1557 / #1092): recaptured from the real RN Focus harness with MINDWTR_CAPTURE_FOCUS_CONTROLS=1 while preparing the requested restoration of Review Due between Today and Next Actions, superseding the #1281 ordering decision. Exactly 91 observations change section positions only; every input, section content, task order, control and write remains identical."
+  "reviewOrderRecapture": "2026-11-14 (#1557 / #1092): recaptured from the real RN Focus harness with MINDWTR_CAPTURE_FOCUS_CONTROLS=1 while preparing the requested restoration of Review Due between Today and Next Actions, superseding the #1281 ordering decision. Exactly 91 observations change section positions only; every input, section content, task order, control and write remains identical.",
+  "noEstimateFilterAdjustment": "2026-11-19 (#1507): added No estimate to enabled estimate choices and projected Time estimate visibility for empty Focus."
  },
  "timeZone": "America/New_York",
  "now": "2026-09-23T14:00:00.000Z",
@@ -1038,6 +1039,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -1309,6 +1311,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -1566,6 +1569,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -1845,6 +1849,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -2140,6 +2145,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -2435,6 +2441,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -2747,6 +2754,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -3073,6 +3081,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -3397,6 +3406,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -3729,6 +3739,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -4081,6 +4092,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -4446,6 +4458,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -4831,6 +4844,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -5236,6 +5250,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -5661,6 +5676,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -6096,6 +6112,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -6511,6 +6528,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -6906,6 +6924,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -7283,6 +7302,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -7647,6 +7667,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -7918,6 +7939,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -8173,6 +8195,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -8450,6 +8473,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -8757,6 +8781,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -9026,6 +9051,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -9295,6 +9321,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -9564,6 +9591,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -9833,6 +9861,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -10102,6 +10131,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -10371,6 +10401,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -10645,6 +10676,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -10939,6 +10971,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -11252,6 +11285,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -11585,6 +11619,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -11939,6 +11974,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -12312,6 +12348,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -12705,6 +12742,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -13115,6 +13153,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -13529,6 +13568,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -13780,6 +13820,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -14031,6 +14072,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -14302,6 +14344,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -14544,6 +14587,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -14834,6 +14878,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -15104,6 +15149,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -15373,6 +15419,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -15682,6 +15729,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -16474,6 +16522,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -16726,6 +16775,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -16991,6 +17041,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -17314,6 +17365,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -17561,6 +17613,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -17855,6 +17908,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -18126,6 +18180,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -18378,6 +18433,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -18657,6 +18713,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -18941,6 +18998,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -19218,6 +19276,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -19490,6 +19549,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -19770,6 +19830,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -20082,6 +20143,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -20339,6 +20401,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -20618,6 +20681,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -20915,6 +20979,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -21229,6 +21294,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -21544,6 +21610,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -21859,6 +21926,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -22149,6 +22217,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -22428,6 +22497,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -22856,6 +22926,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -23229,6 +23300,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -23498,6 +23570,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -23767,6 +23840,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -24016,6 +24090,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -24379,6 +24454,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -24624,6 +24700,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -24923,6 +25000,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -25296,6 +25374,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -25727,6 +25806,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -26176,6 +26256,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -26688,6 +26769,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -26940,6 +27022,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -27212,6 +27295,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -27563,6 +27647,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -28022,6 +28107,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -28210,6 +28296,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -28448,6 +28535,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -28695,6 +28783,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -28950,6 +29039,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -29294,6 +29384,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -29577,6 +29668,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -29891,6 +29983,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -30185,6 +30278,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -30410,6 +30504,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -30424,7 +30519,7 @@
        "energyLevel": false,
        "location": false,
        "priority": false,
-       "timeEstimate": false
+       "timeEstimate": true
       }
      },
      "rows": [
@@ -30438,6 +30533,10 @@
       ],
       [
        "Projects",
+       "All"
+      ],
+      [
+       "Time estimate",
        "All"
       ]
      ],
@@ -30458,9 +30557,7 @@
       "criteria": {
        "priority": "<undefined>",
        "energy": "<undefined>",
-       "locations": "<undefined>",
-       "timeEstimates": "<undefined>",
-       "timeEstimateRange": "<undefined>"
+       "locations": "<undefined>"
       },
       "currentCriteria": {},
       "activeCount": 0,

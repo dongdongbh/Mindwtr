@@ -233,7 +233,7 @@ import {
     toggleContextsToken,
     type ContextsTokenPicker,
 } from './contexts-view-model';
-import { formatTimeEstimateLabel } from './calendar-scheduling';
+import { formatTimeEstimateLabel, TIME_ESTIMATE_FILTER_OPTIONS } from './calendar-scheduling';
 import { applyListFilterEdit, resolveListFilterState, type ListFilterEdit, type ListFilterState, type ResolvedListFilter } from './list-filter-state';
 import { getTaskListHeaderText, isStatusListTaskReadOnly, type ListFilterOptions } from './menu-views-model';
 import { getProjectAccentColor } from './task-accent-color';
@@ -4525,7 +4525,7 @@ export type NativeContextsView = {
 
     sort: { title: string; accessibilityLabel: string; options: { value: TaskSortBy; label: string; selected: boolean }[] };
     total: number;
-    rows: NativeTaskRow[];
+    rows: (NativeTaskRow & { readOnly?: boolean })[];
     empty: ReturnType<typeof getContextsEmptyState> | null;
 
     selectedIds: string[];
@@ -4535,6 +4535,8 @@ export type NativeContextsView = {
         countLabel: string;
         exitLabel: string;
         statuses: { status: TaskStatus; label: string }[];
+        organizeLabel: string;
+        organizeEnabled: boolean;
         tokenActions: NativeContextsTokenAction[];
         deleteLabel: string;
         deleteConfirmation: ListConfirmation;
@@ -4885,7 +4887,7 @@ function createListViewMethods(deps: ListViewDeps) {
         const options: ListFilterOptions = {
             tokens: getArchiveTokenFilterOptions(allArchived, params.filterSheetOpen, resolved.state),
             projects: null,
-            timeEstimates: TIME_ESTIMATE_OPTIONS,
+            timeEstimates: visibility.timeEstimate ? TIME_ESTIMATE_FILTER_OPTIONS : TIME_ESTIMATE_OPTIONS,
             visibility,
         };
         return {
@@ -4997,6 +4999,8 @@ function createListViewMethods(deps: ListViewDeps) {
                 const onScreen = new Set(model.tasks.map((task) => task.id));
                 const selected = selectedIds.filter((id) => onScreen.has(id));
                 const tasksById = Object.fromEntries(state.tasks.map((task) => [task.id, task]));
+                const readOnlyProjectIds = new Set(state._allProjects.filter((project) => project.deletedAt || project.status === 'archived').map((project) => project.id));
+                const readOnly = (task: Task) => Boolean(task.deletedAt || task.purgedAt || (task.projectId && readOnlyProjectIds.has(task.projectId)));
                 const chipLabels = model.filterSections.flatMap((section) => getContextsChipLabels(section.tokens));
                 return {
                     model,
@@ -5004,6 +5008,7 @@ function createListViewMethods(deps: ListViewDeps) {
                     sortOverride,
                     filter,
                     selected,
+                    readOnly,
                     taskRevisions: taskRevisionsOf(selected),
                     chips: [
                         { id: 'all', kind: 'all' as const, label: t('common.all'), accessibilityLabel: t('contexts.all'), count: model.allCount, selected: tokens.length === 0, next: next([], 'all') },
@@ -5032,6 +5037,8 @@ function createListViewMethods(deps: ListViewDeps) {
                         countLabel: `${selected.length} ${t('bulk.selected')}`,
                         exitLabel: t('bulk.exitSelect'),
                         statuses: CONTEXTS_BULK_STATUSES.map((status) => ({ status, label: t(`status.${status}`) })),
+                        organizeLabel: t('bulk.organize'),
+                        organizeEnabled: selected.some((id) => !readOnly(tasksById[id])),
                         tokenActions: (['tags', 'contexts'] as const).flatMap((field) => (['add', 'remove'] as const).map((mode) => {
                             const picker = getContextsTokenPicker({ field, action: mode, activeTasks: model.activeTasks, settings: state.settings, selectedIds: selected, tasksById, t });
                             return { ...picker, field, mode, enabled: mode === 'add' || picker.tokens.length > 0 };
@@ -5087,7 +5094,10 @@ function createListViewMethods(deps: ListViewDeps) {
                 matchMode: view.matchMode,
                 sort: view.sort,
                 total: view.tasks.length,
-                rows: view.tasks.slice(input.offset, input.offset + input.limit).map((task) => toNativeTaskRow(task, view.titles, deps.rowMeta(task, now))),
+                rows: view.tasks.slice(input.offset, input.offset + input.limit).map((task) => ({
+                    ...toNativeTaskRow(task, view.titles, deps.rowMeta(task, now)),
+                    ...(view.readOnly(task) ? { readOnly: true } : {}),
+                })),
                 empty: view.empty,
                 selectedIds: view.selected,
                 taskRevisions: view.taskRevisions,

@@ -8,7 +8,7 @@ import {
     type AreaFilterSelection,
 } from './area-filter';
 import { normalizeBulkTaskTokenInput } from './bulk-task-tokens';
-import { TIME_ESTIMATE_OPTIONS } from './calendar-scheduling';
+import { TIME_ESTIMATE_FILTER_OPTIONS, TIME_ESTIMATE_OPTIONS } from './calendar-scheduling';
 import { safeParseDueDate, type DateFormatter } from './date';
 import { countActiveFilterCriteria } from './filter-criteria';
 import { tFallback } from './i18n';
@@ -29,7 +29,7 @@ import {
 import { getTaskMetadataFilterVisibility, type TaskMetadataFilterVisibility } from './task-metadata-filter-visibility';
 import { getUsedTaskTokens } from './task-token-usage';
 import { baseTextCollator, getWaitingPerson, sortDoneTasksForListView, sortTasksBy } from './task-utils';
-import type { AppSettings, Area, FilterCriteria, Project, Task, TaskSortBy, TimeEstimate, ViewSectionDefinition } from './types';
+import type { AppSettings, Area, FilterCriteria, Project, Task, TaskSortBy, TimeEstimateFilterValue, ViewSectionDefinition } from './types';
 import {
     groupProjectsByViewSection,
     groupTasksByViewSection,
@@ -130,7 +130,7 @@ export type ListFilterOptions = {
     tokens: string[];
 
     projects: { id: string; title: string }[] | null;
-    timeEstimates: TimeEstimate[];
+    timeEstimates: TimeEstimateFilterValue[];
     visibility: TaskMetadataFilterVisibility;
 
     retainTokens?: string[];
@@ -261,7 +261,7 @@ export function buildSomedayFilterOptions(input: {
     return {
         tokens,
         projects,
-        timeEstimates: TIME_ESTIMATE_OPTIONS,
+        timeEstimates: features.timeEstimates ? TIME_ESTIMATE_FILTER_OPTIONS : TIME_ESTIMATE_OPTIONS,
         visibility: getTaskMetadataFilterVisibility(input.tasks, {
             prioritiesEnabled: features.priorities,
             timeEstimatesEnabled: features.timeEstimates,
@@ -550,16 +550,17 @@ export function buildStatusListFilterOptions(input: {
         };
     }
     const features = resolveFeatureFlags(input.settings);
+    const timeEstimatesEnabled = input.kind !== 'inbox' && input.timeEstimateFilters === true && features.timeEstimates;
     return {
         tokens: withTokens ? getUsedTaskTokens([...input.tasks], (task) => [
             ...(task.contexts ?? []).map((token) => normalizeBulkTaskTokenInput(token, 'contexts')),
             ...(task.tags ?? []).map((token) => normalizeBulkTaskTokenInput(token, 'tags')),
         ], { includeAncestors: true }) : [],
         projects: null,
-        timeEstimates: TIME_ESTIMATE_OPTIONS,
+        timeEstimates: timeEstimatesEnabled ? TIME_ESTIMATE_FILTER_OPTIONS : TIME_ESTIMATE_OPTIONS,
         visibility: getTaskMetadataFilterVisibility(input.tasks, {
             prioritiesEnabled: features.priorities,
-            timeEstimatesEnabled: input.kind !== 'inbox' && input.timeEstimateFilters === true && features.timeEstimates,
+            timeEstimatesEnabled,
         }),
     };
 }

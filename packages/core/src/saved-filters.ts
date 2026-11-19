@@ -11,7 +11,7 @@ import {
     startOfWeek,
 } from 'date-fns';
 
-import { TIME_ESTIMATE_OPTIONS, timeEstimateToFilterBucket, timeEstimateToMinutes } from './calendar-scheduling';
+import { TIME_ESTIMATE_FILTER_OPTIONS, timeEstimateToFilterBucket, timeEstimateToMinutes } from './calendar-scheduling';
 import type { BulkTaskTokenField } from './bulk-task-tokens';
 import { normalizeBulkTaskTokenInput } from './bulk-task-tokens';
 import { safeParseDate, safeParseDueDate } from './date';
@@ -32,6 +32,7 @@ import type {
     TaskPriority,
     TaskStatus,
     TimeEstimate,
+    TimeEstimateFilterValue,
 } from './types';
 
 export const SAVED_FILTER_NO_PROJECT_ID = '__no_project__';
@@ -46,7 +47,7 @@ type ApplyFilterOptions = {
 const TASK_STATUS_VALUES = new Set<TaskStatus>(['inbox', 'next', 'waiting', 'someday', 'reference', 'done', 'archived']);
 const FILTER_PRIORITY_VALUES = new Set<FilterPriority>(['none', 'low', 'medium', 'high', 'urgent']);
 const TASK_ENERGY_VALUES = new Set<TaskEnergyLevel>(['low', 'medium', 'high']);
-const TIME_ESTIMATE_VALUES = new Set<TimeEstimate>(TIME_ESTIMATE_OPTIONS);
+const TIME_ESTIMATE_VALUES = new Set<TimeEstimateFilterValue>(TIME_ESTIMATE_FILTER_OPTIONS);
 const MULTI_VALUE_FILTER_MATCH_MODE_VALUES = new Set<MultiValueFilterMatchMode>(['any', 'all']);
 const SAVED_FILTER_VIEW_VALUES = new Set<SavedFilterView>(['focus', 'next', 'waiting', 'someday', 'contexts', 'all']);
 const FOCUS_GROUP_BY_VALUES = new Set<FocusGroupBy>(['none', 'context', 'project', 'area', 'energy', 'priority', 'person', 'tag']);
@@ -437,8 +438,8 @@ const taskMatchesPreparedFilterCriteria = (
     if (!matchesAssignedTo(normalized.assignedTo, task.assignedTo)) return false;
     if (!matchesLocation(normalized.locations, task.location)) return false;
     if (normalized.timeEstimates?.length) {
-        const bucket = timeEstimateToFilterBucket(task.timeEstimate);
-        if (!bucket || !normalized.timeEstimates.includes(bucket)) return false;
+        const bucket = timeEstimateToFilterBucket(task.timeEstimate) ?? 'none';
+        if (!normalized.timeEstimates.includes(bucket)) return false;
     }
     if (!matchesTimeEstimateRange(normalized.timeEstimateRange, task.timeEstimate)) return false;
     if (normalized.hasDescription !== undefined) {

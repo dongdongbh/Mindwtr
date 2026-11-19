@@ -15,8 +15,8 @@ import {
 } from '@dnd-kit/core';
 import { SortableContext, arrayMove, sortableKeyboardCoordinates, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { ErrorBoundary } from '../ErrorBoundary';
-import { shallow, useTaskStore, TaskPriority, TimeEstimate, TIME_ESTIMATE_OPTIONS, buildFocusPools, compareProjectsByOrder, planFocusFilterCriterionRemoval, formatFocusTaskLimitText,
-    getFocusHiddenByAreaLabel, logInfo, getFocusStarBlockedText, formatTimeEstimateLabel, generateUUID, getUsedTaskTokens, deriveFocusTaskLists, getProjectDeadlineBoostLabel, getTaskMetadataFilterVisibility, isTaskFutureFocusCandidate, markSavedFilterDeleted, normalizeFocusTaskLimit, collectBulkTaskTokens, resolveFeatureFlags, resolveTaskPerspectiveForFeatures, safeFormatDate, safeParseDate, selectFocusSavedFilters, isDueForReview, shouldShowTaskForStart, splitTodayTasksByStartTime, translateWithFallback, tFallback, updateSettingsFromLatest } from '@mindwtr/core';
+import { shallow, useTaskStore, TaskPriority, TimeEstimateFilterValue, TIME_ESTIMATE_FILTER_OPTIONS, buildFocusPools, compareProjectsByOrder, planFocusFilterCriterionRemoval, formatFocusTaskLimitText,
+    getFocusHiddenByAreaLabel, logInfo, getFocusStarBlockedText, formatTimeEstimateFilterLabel, generateUUID, getUsedTaskTokens, deriveFocusTaskLists, getProjectDeadlineBoostLabel, getTaskMetadataFilterVisibility, isTaskFutureFocusCandidate, markSavedFilterDeleted, normalizeFocusTaskLimit, collectBulkTaskTokens, resolveFeatureFlags, resolveTaskPerspectiveForFeatures, safeFormatDate, safeParseDate, selectFocusSavedFilters, isDueForReview, shouldShowTaskForStart, splitTodayTasksByStartTime, translateWithFallback, tFallback, updateSettingsFromLatest } from '@mindwtr/core';
 import { DEFAULT_FOCUS_SORT_BY } from '@mindwtr/core';
 import type { BulkOrganizeTaskUpdateInput, MultiValueFilterMatchMode, RangeSelectionOptions, SavedFilter, SortField, Task, TaskEnergyLevel, TaskStatus } from '@mindwtr/core';
 import { useTaskFilterSelections } from '@mindwtr/core/task-filter-selections';
@@ -494,7 +494,7 @@ export function AgendaView() {
     }, [baseActiveTasks, localDayKey, futureStartTick]);
     const priorityOptions: TaskPriority[] = ['low', 'medium', 'high', 'urgent'];
     const energyLevelOptions: TaskEnergyLevel[] = ['low', 'medium', 'high'];
-    const timeEstimateOptions = TIME_ESTIMATE_OPTIONS;
+    const timeEstimateOptions = TIME_ESTIMATE_FILTER_OPTIONS;
     const metadataFilterVisibility = useMemo(() => getTaskMetadataFilterVisibility(activeTasks, {
         prioritiesEnabled,
         timeEstimatesEnabled,
@@ -519,7 +519,7 @@ export function AgendaView() {
             }));
     }, [activeTasks, areaById, projects, settings?.theme]);
     const showNoProjectOption = activeTasks.some((task) => !task.projectId);
-    const formatEstimate = (value: TimeEstimate) => formatTimeEstimateLabel(value, { t });
+    const formatEstimate = (value: TimeEstimateFilterValue) => formatTimeEstimateFilterLabel(value, { t });
     const savedFocusFilters = useMemo(() => selectFocusSavedFilters(settings?.savedFilters), [settings?.savedFilters]);
     const filterSelections = useTaskFilterSelections({
         view: 'focus',
@@ -618,7 +618,7 @@ export function AgendaView() {
         } else if (chipId.startsWith('energy:')) {
             toggleEnergyFilter(chipId.slice('energy:'.length) as TaskEnergyLevel);
         } else if (chipId.startsWith('time:')) {
-            toggleTimeFilter(chipId.slice('time:'.length) as TimeEstimate);
+            toggleTimeFilter(chipId.slice('time:'.length) as TimeEstimateFilterValue);
         }
     }, [toggleEnergyFilter, togglePriorityFilter, toggleProjectFilter, toggleTimeFilter, toggleTokenFilter]);
     const activeFilterChips = useMemo<AgendaActiveFilterChip[]>(() => {

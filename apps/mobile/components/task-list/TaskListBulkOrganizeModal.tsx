@@ -13,6 +13,8 @@ import {
   ensureBulkOrganizeDestinationSaved,
   getBulkOrganizeAreaOptions,
   getBulkOrganizeProjectOptions,
+  resolveFeatureFlags,
+  useTaskStore,
   type Area,
   type BulkOrganizeDateField,
   type BulkOrganizeDraftEdit,
@@ -23,6 +25,7 @@ import {
 import { TaskEditAreaPicker } from '../task-edit/TaskEditAreaPicker';
 import { TaskEditProjectPicker } from '../task-edit/TaskEditProjectPicker';
 import { TaskListBulkDateField } from './TaskListBulkDateField';
+import { ToastViewport } from '../../contexts/toast-context';
 import { useAndroidKeyboardInset } from '../../lib/use-android-keyboard-inset';
 import { styles } from './task-list.styles';
 import { useFilledButtonColors } from '@/hooks/use-filled-button-colors';
@@ -64,6 +67,7 @@ export function TaskListBulkOrganizeModal({
 }: TaskListBulkOrganizeModalProps) {
   const filledButton = useFilledButtonColors();
   const keyboardInset = useAndroidKeyboardInset(visible);
+  const timeEstimatesEnabled = useTaskStore((state) => resolveFeatureFlags(state.settings).timeEstimates);
 
   const [draft, setDraft] = useState(EMPTY_BULK_ORGANIZE_DRAFT);
   const editDraft = useCallback((edit: BulkOrganizeDraftEdit) => {
@@ -123,7 +127,8 @@ export function TaskListBulkOrganizeModal({
   const activeAreas = useMemo(() => getBulkOrganizeAreaOptions(areas), [areas]);
 
 
-  const dialog = buildBulkOrganizeDialogModel({ draft, projects: activeProjects, areas: activeAreas, selectedCount, t });
+  const dialog = buildBulkOrganizeDialogModel({ draft, projects: activeProjects, areas: activeAreas, selectedCount, timeEstimatesEnabled, t });
+  const { estimate } = dialog;
   const selectedProjectId = dialog.project.selectedId;
   const selectedAreaId = dialog.area.selectedId;
   const isBusy = isApplying || isCreatingDestination;
@@ -150,9 +155,9 @@ export function TaskListBulkOrganizeModal({
     onClose();
   }, [isApplying, onClose]);
 
-  const renderChip = (label: string, selected: boolean, onPress: () => void, disabled = false) => (
+  const renderChip = (value: string, label: string, selected: boolean, onPress: () => void, disabled = false) => (
     <TouchableOpacity
-      key={label}
+      key={value}
       accessibilityRole="button"
       accessibilityState={{ selected, disabled: disabled || isBusy }}
       disabled={disabled || isBusy}
@@ -217,7 +222,7 @@ export function TaskListBulkOrganizeModal({
       setShowValidation(true);
       return;
     }
-    void onApply(buildBulkOrganizeInput(draft));
+    void onApply(buildBulkOrganizeInput(draft, timeEstimatesEnabled));
   };
 
   return (
@@ -271,6 +276,7 @@ export function TaskListBulkOrganizeModal({
               </Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.bulkOrganizeChipRow}>
                 {dialog.statuses.map((option) => renderChip(
+                  option.value,
                   option.label,
                   option.selected,
                   () => {
@@ -280,6 +286,33 @@ export function TaskListBulkOrganizeModal({
                 ))}
               </ScrollView>
             </View>
+
+            {estimate && (
+              <View style={styles.bulkOrganizeSection}>
+                <Text style={[styles.bulkOrganizeLabel, { color: themeColors.secondaryText }]}>{estimate.label}</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.bulkOrganizeChipRow}>
+                  {estimate.options.map(({ value, label, selected, edit }) => renderChip(value, label, selected, () => {
+                    editDraft(edit);
+                    setShowValidation(false);
+                  }))}
+                </ScrollView>
+                {estimate.custom && (
+                  <TextInput
+                    accessibilityLabel={estimate.custom.label}
+                    value={estimate.custom.value}
+                    onChangeText={(value) => { editDraft({ type: 'setText', field: 'estimateText', value }); setShowValidation(false); }}
+                    placeholder={estimate.custom.placeholder}
+                    placeholderTextColor={themeColors.secondaryText}
+                    editable={!isBusy}
+                    maxLength={100}
+                    style={[
+                      styles.bulkOrganizeInput,
+                      { backgroundColor: themeColors.inputBg, borderColor: themeColors.border, color: themeColors.text },
+                    ]}
+                  />
+                )}
+              </View>
+            )}
 
             <View style={styles.bulkOrganizeSection}>
               <Text style={[styles.bulkOrganizeLabel, { color: themeColors.secondaryText }]}>
@@ -390,6 +423,8 @@ export function TaskListBulkOrganizeModal({
               </Text>
             )}
           </ScrollView>
+
+          {visible ? <ToastViewport inline /> : null}
 
           <View style={[styles.bulkOrganizeFooter, { borderTopColor: themeColors.border }]}>
             <TouchableOpacity

@@ -82,7 +82,23 @@ describe('Review and Contexts bulk selection through the shared bulk read and st
             const hidden = { requestId: id(22), source: 'review' as const, taskIds: ['work'], taskRevisions: revisions(['work']), draft, params: folded };
             expect(await sqlite.host.prepareInboxTasksOrganize(hidden as never)).toMatchObject({ ok: false });
             expect(await sqlite.host.prepareInboxTasksOrganize({ ...input, requestId: id(23), source: 'contexts', params: CONTEXTS } as never))
-                .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+                .toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+        } finally { await sqlite.close(); }
+    });
+
+    it('organizes only the selected tasks shown by a Contexts filter', async () => {
+        clock(); const sqlite = await openSqliteHost(seed());
+        try {
+            const taskIds = ['home-1'];
+            const draft = { ...EMPTY_BULK_ORGANIZE_DRAFT, tags: '#organized' };
+            const bulk = value(sqlite.host.getBulkActions({ list: 'contexts', params: CONTEXTS, taskIds, organize: { draft } }));
+            expect(bulk.organize?.canApply).toBe(true);
+            const input = { requestId: id(26), source: 'contexts' as const, taskIds, taskRevisions: revisions(taskIds), draft, params: CONTEXTS };
+            const result = value(await sqlite.host.prepareInboxTasksOrganize(input));
+            const command = { request: input, prepared: result.prepared };
+            expect(value(await sqlite.host.commitPreparedInboxTasksOrganize(command))).toEqual({ count: 1, changed: true });
+            expect(useTaskStore.getState()._tasksById.get('home-1')?.tags).toEqual(['#organized']);
+            expect(useTaskStore.getState()._tasksById.get('home-2')?.tags).toEqual([]);
         } finally { await sqlite.close(); }
     });
 

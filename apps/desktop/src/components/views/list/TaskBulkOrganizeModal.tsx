@@ -2,6 +2,7 @@ import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { ClipboardCheck, X } from 'lucide-react';
 import {
     BULK_ORGANIZE_STATUS_OPTIONS,
+    buildBulkOrganizeEstimateModel,
     compareAreasByOrder,
     createBulkOrganizeArea,
     createBulkOrganizeProject,
@@ -11,6 +12,7 @@ import {
     getUsedTaskTokens,
     isSelectableProjectForTaskAssignment,
     parseBulkOrganizeTokenInput,
+    resolveFeatureFlags,
     safeParseDate,
     serializeTaskDraftTokens,
     tFallback,
@@ -82,6 +84,8 @@ export function TaskBulkOrganizeModal({
     const [startDate, setStartDate] = useState('');
     const [dueDate, setDueDate] = useState('');
     const [reviewDate, setReviewDate] = useState('');
+    const [estimateChoice, setEstimateChoice] = useState(KEEP_VALUE);
+    const [estimateText, setEstimateText] = useState('');
     const [delegateWho, setDelegateWho] = useState('');
     const [showValidation, setShowValidation] = useState(false);
     const [createPending, setCreatePending] = useState(false);
@@ -111,6 +115,8 @@ export function TaskBulkOrganizeModal({
         setStartDate('');
         setDueDate('');
         setReviewDate('');
+        setEstimateChoice(KEEP_VALUE);
+        setEstimateText('');
         setDelegateWho('');
         setShowValidation(false);
     }, [isOpen]);
@@ -135,7 +141,9 @@ export function TaskBulkOrganizeModal({
     if (!isOpen || typeof document === 'undefined') return null;
 
     const isWaiting = status === 'waiting';
-    const canApply = selectedCount > 0 && (!isWaiting || delegateWho.trim().length > 0);
+    const estimate = resolveFeatureFlags(settings).timeEstimates
+        ? buildBulkOrganizeEstimateModel({ estimateChoice, estimateText }, t) : null;
+    const canApply = selectedCount > 0 && (!isWaiting || delegateWho.trim().length > 0) && !estimate?.validationMessage;
     const isBusy = isApplying || createPending;
     const selectedProjectId = projectChoice !== KEEP_VALUE && projectChoice !== NONE_VALUE ? projectChoice : undefined;
 
@@ -285,6 +293,7 @@ export function TaskBulkOrganizeModal({
         if (startDate.trim()) input.startTime = startDate.trim();
         if (dueDate.trim()) input.dueDate = dueDate.trim();
         if (reviewDate.trim()) input.reviewAt = reviewDate.trim();
+        if (estimate?.timeEstimate !== undefined) input.timeEstimate = estimate.timeEstimate;
         if (isWaiting) input.assignedTo = delegateWho.trim();
 
         void onApply(input);
@@ -481,6 +490,35 @@ export function TaskBulkOrganizeModal({
                     </div>
                 </div>
 
+                {estimate && (
+                    <div className="grid gap-3 sm:grid-cols-2">
+                        <label className="space-y-1 text-xs font-medium text-muted-foreground">
+                            <span>{estimate.label}</span>
+                            <select
+                                value={estimate.selected}
+                                disabled={isBusy}
+                                onChange={(event) => { setEstimateChoice(event.currentTarget.value); setShowValidation(false); }}
+                                className={`${bulkDateInputClassName} w-full`}
+                            >
+                                {estimate.options.map(({ value, label }) => <option key={value} value={value}>{label}</option>)}
+                            </select>
+                        </label>
+                        {estimate.custom && (
+                            <label className="space-y-1 text-xs font-medium text-muted-foreground">
+                                <span>{estimate.custom.label}</span>
+                                <input
+                                    value={estimate.custom.value}
+                                    placeholder={estimate.custom.placeholder}
+                                    disabled={isBusy}
+                                    maxLength={100}
+                                    onChange={(event) => { setEstimateText(event.currentTarget.value); setShowValidation(false); }}
+                                    className={`${bulkDateInputClassName} w-full`}
+                                />
+                            </label>
+                        )}
+                    </div>
+                )}
+
                 <div className="grid gap-3 sm:grid-cols-2">
                     <div className="space-y-1 text-xs font-medium text-muted-foreground">
                         <label htmlFor={`${tokenInputId}-contexts`}>{tFallback(t, 'taskEdit.contextsLabel', 'Contexts')}</label>
@@ -512,7 +550,7 @@ export function TaskBulkOrganizeModal({
 
                 {showValidation && (
                     <p className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-                        {tFallback(t, 'bulk.waitingPersonRequired', 'Choose who these items are waiting for.')}
+                        {estimate?.validationMessage ?? tFallback(t, 'bulk.waitingPersonRequired', 'Choose who these items are waiting for.')}
                     </p>
                 )}
                 {createError && (

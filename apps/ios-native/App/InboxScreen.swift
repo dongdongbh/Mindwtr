@@ -3760,6 +3760,7 @@ private struct InboxBulkOrganizeDialog: View {
             ForEach(Array(view.objects("dates").enumerated()), id: \.offset) { _, dateField in
                 AnyView(date(dateField))
             }
+            if view["estimate"] is CoreObject { estimate(view.object("estimate")) }
             input("contexts", part: view.object("contexts"))
             input("tags", part: view.object("tags"))
             if !view.isEmpty && !view.flag("canApply") {
@@ -3768,6 +3769,27 @@ private struct InboxBulkOrganizeDialog: View {
             }
         }
         .padding(.bottom, 8)
+    }
+    private func estimate(_ part: CoreObject) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(part.text("label")).rnFont(14, .semibold)
+            AppChipFlow {
+                let options = part.objects("options")
+                ForEach(options.indices, id: \.self) { index in
+                    let option = options[index]
+                    Button { model.editInboxBulkOrganize(option.object("edit")) } label: {
+                        Text(option.text("label")).rnFont(14).padding(.horizontal, 12).padding(.vertical, 10)
+                            .frame(minHeight: 44).foregroundStyle(option.flag("selected") ? palette.onTint : palette.text)
+                            .background(option.flag("selected") ? palette.tint : palette.filter, in: RoundedRectangle(cornerRadius: 12))
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain).disabled(locked)
+                    .accessibilityAddTraits(option.flag("selected") ? .isSelected : [])
+                    .accessibilityIdentifier(prefix + "-estimate-" + option.text("value"))
+                }
+            }
+            if part["custom"] is CoreObject { input("estimateText", part: part.object("custom"), maxLength: 100) }
+        }
     }
     private func destination(_ kind: String) -> some View {
         let part = view.object(kind)
@@ -3785,12 +3807,15 @@ private struct InboxBulkOrganizeDialog: View {
         .buttonStyle(.plain).disabled(locked || !model.inboxBulkOrganizeCurrent || part.flag("disabled"))
         .accessibilityLabel(part.text("accessibilityLabel")).accessibilityIdentifier(prefix + "-" + kind)
     }
-    private func input(_ field: String, part: CoreObject) -> some View {
+    private func input(_ field: String, part: CoreObject, maxLength: Int? = nil) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(part.text("label")).rnFont(13, .semibold).foregroundStyle(palette.secondary)
             TextField(part.text("placeholder"), text: Binding(
                 get: { shownText(field, part: part) },
-                set: { if !isDisplayEcho(field, $0, part: part) { model.setInboxBulkOrganizeText(field, value: $0) } }))
+                set: { value in
+                    let bounded = maxLength.map { String(decoding: value.utf16.prefix($0), as: UTF16.self) } ?? value
+                    if !isDisplayEcho(field, bounded, part: part) { model.setInboxBulkOrganizeText(field, value: bounded) }
+                }))
                 .focused($editingField, equals: field)
                 .rnFont(16).textInputAutocapitalization(.never).autocorrectionDisabled()
                 .padding(12).frame(minHeight: 44).background(palette.input, in: RoundedRectangle(cornerRadius: 10))

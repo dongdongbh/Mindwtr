@@ -260,6 +260,7 @@ Source: `apps/desktop/src` (Tauri + React). Labels come from `packages/core/src/
 
 ## Bulk selection
 
+- With Time Estimates enabled, open Contexts › Filters › Time estimate › No estimate. Select tasks › Bulk organize › Time estimate to keep, set or clear their estimates. Setting an estimate removes the task from this filter.
 - Bulk organize status includes Inbox for returning tasks to processing; existing project, notes, tags and dates stay unchanged unless explicitly edited.
 
 - Reach: Any task list, including Focus, › Select. Available toolbar actions include Select All, Add context, Remove context, Add tag, Remove tag, Bulk organize, Export selected tasks as CSV, and Delete. Focus uses the Review bulk actions; the organizer includes contexts. Done leaves the mode.

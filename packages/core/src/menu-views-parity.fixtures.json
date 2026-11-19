@@ -2,7 +2,8 @@
  "provenance": {
   "command": "cd apps/mobile && MINDWTR_CAPTURE_MENU_VIEWS=1 MINDWTR_CAPTURE_MENU_VIEWS_COMMIT=$(git rev-parse HEAD) bunx vitest run components/views/menu-views-parity.test.tsx",
   "capturedAt": "afb2066e92dc83ae900d1f42bf9b2efe699daf1d",
-  "projectColorPolicy": "#1422 updates only deferred Project identity colors: live Area, then area-less legacy color, then the captured secondaryText fallback. Original capture commit remains above."
+  "projectColorPolicy": "#1422 updates only deferred Project identity colors: live Area, then area-less legacy color, then the captured secondaryText fallback. Original capture commit remains above.",
+  "noEstimateFilterAdjustment": "2026-11-19 (#1507): added No estimate to enabled Someday choices and projected estimate filter visibility for empty Someday lists."
  },
  "timeZone": "America/New_York",
  "now": "2026-09-23T14:00:00.000Z",
@@ -2878,6 +2879,7 @@
       }
      ],
      "timeEstimates": [
+      "none",
       "5min",
       "10min",
       "15min",
@@ -3143,6 +3145,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -3429,6 +3432,7 @@
       }
      ],
      "timeEstimates": [
+      "none",
       "5min",
       "10min",
       "15min",
@@ -3714,6 +3718,7 @@
       }
      ],
      "timeEstimates": [
+      "none",
       "5min",
       "10min",
       "15min",
@@ -3990,6 +3995,7 @@
       }
      ],
      "timeEstimates": [
+      "none",
       "5min",
       "10min",
       "15min",
@@ -4255,6 +4261,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -4541,6 +4548,7 @@
       }
      ],
      "timeEstimates": [
+      "none",
       "5min",
       "10min",
       "15min",
@@ -4831,6 +4839,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -5117,6 +5126,7 @@
       }
      ],
      "timeEstimates": [
+      "none",
       "5min",
       "10min",
       "15min",
@@ -5403,6 +5413,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -5677,6 +5688,7 @@
       }
      ],
      "timeEstimates": [
+      "none",
       "5min",
       "10min",
       "15min",
@@ -5965,6 +5977,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -6244,6 +6257,7 @@
       }
      ],
      "timeEstimates": [
+      "none",
       "5min",
       "10min",
       "15min",
@@ -6542,6 +6556,7 @@
       }
      ],
      "timeEstimates": [
+      "none",
       "5min",
       "10min",
       "15min",
@@ -6869,6 +6884,7 @@
       }
      ],
      "timeEstimates": [
+      "none",
       "5min",
       "10min",
       "15min",
@@ -7143,6 +7159,7 @@
       }
      ],
      "timeEstimates": [
+      "none",
       "5min",
       "10min",
       "15min",
@@ -7420,6 +7437,7 @@
       }
      ],
      "timeEstimates": [
+      "none",
       "5min",
       "10min",
       "15min",
@@ -7690,6 +7708,7 @@
       }
      ],
      "timeEstimates": [
+      "none",
       "5min",
       "10min",
       "15min",
@@ -7964,6 +7983,7 @@
       }
      ],
      "timeEstimates": [
+      "none",
       "5min",
       "10min",
       "15min",
@@ -8214,6 +8234,7 @@
       }
      ],
      "timeEstimates": [
+      "none",
       "5min",
       "10min",
       "15min",
@@ -8481,6 +8502,7 @@
       }
      ],
      "timeEstimates": [
+      "none",
       "5min",
       "10min",
       "15min",
@@ -8730,6 +8752,7 @@
       }
      ],
      "timeEstimates": [
+      "none",
       "5min",
       "10min",
       "15min",
@@ -8979,6 +9002,7 @@
       }
      ],
      "timeEstimates": [
+      "none",
       "5min",
       "10min",
       "15min",
@@ -9228,6 +9252,7 @@
       }
      ],
      "timeEstimates": [
+      "none",
       "5min",
       "10min",
       "15min",
@@ -9477,6 +9502,7 @@
       }
      ],
      "timeEstimates": [
+      "none",
       "5min",
       "10min",
       "15min",
@@ -9726,6 +9752,7 @@
       }
      ],
      "timeEstimates": [
+      "none",
       "5min",
       "10min",
       "15min",
@@ -10007,6 +10034,7 @@
       }
      ],
      "timeEstimates": [
+      "none",
       "5min",
       "10min",
       "15min",
@@ -10273,6 +10301,7 @@
       }
      ],
      "timeEstimates": [
+      "none",
       "5min",
       "10min",
       "15min",
@@ -10530,6 +10559,7 @@
       }
      ],
      "timeEstimates": [
+      "none",
       "5min",
       "10min",
       "15min",
@@ -10793,6 +10823,7 @@
       }
      ],
      "timeEstimates": [
+      "none",
       "5min",
       "10min",
       "15min",
@@ -11063,6 +11094,7 @@
       }
      ],
      "timeEstimates": [
+      "none",
       "5min",
       "10min",
       "15min",
@@ -11315,6 +11347,7 @@
       }
      ],
      "timeEstimates": [
+      "none",
       "5min",
       "10min",
       "15min",
@@ -11583,6 +11616,7 @@
       }
      ],
      "timeEstimates": [
+      "none",
       "5min",
       "10min",
       "15min",
@@ -11846,6 +11880,7 @@
       }
      ],
      "timeEstimates": [
+      "none",
       "5min",
       "10min",
       "15min",
@@ -12065,6 +12100,7 @@
       }
      ],
      "timeEstimates": [
+      "none",
       "5min",
       "10min",
       "15min",
@@ -12310,6 +12346,7 @@
       }
      ],
      "timeEstimates": [
+      "none",
       "5min",
       "10min",
       "15min",
@@ -12560,6 +12597,7 @@
       }
      ],
      "timeEstimates": [
+      "none",
       "5min",
       "10min",
       "15min",
@@ -12815,6 +12853,7 @@
       }
      ],
      "timeEstimates": [
+      "none",
       "5min",
       "10min",
       "15min",
@@ -13126,6 +13165,7 @@
       }
      ],
      "timeEstimates": [
+      "none",
       "5min",
       "10min",
       "15min",
@@ -13378,6 +13418,7 @@
       }
      ],
      "timeEstimates": [
+      "none",
       "5min",
       "10min",
       "15min",
@@ -13650,6 +13691,7 @@
       }
      ],
      "timeEstimates": [
+      "none",
       "5min",
       "10min",
       "15min",
@@ -13908,6 +13950,7 @@
       }
      ],
      "timeEstimates": [
+      "none",
       "5min",
       "10min",
       "15min",
@@ -14167,6 +14210,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -14442,6 +14486,7 @@
       }
      ],
      "timeEstimates": [
+      "none",
       "5min",
       "10min",
       "15min",
@@ -14724,6 +14769,7 @@
        }
       ],
       "timeEstimates": [
+       "none",
        "5min",
        "10min",
        "15min",
@@ -14999,6 +15045,7 @@
       }
      ],
      "timeEstimates": [
+      "none",
       "5min",
       "10min",
       "15min",
@@ -15254,6 +15301,7 @@
       }
      ],
      "timeEstimates": [
+      "none",
       "5min",
       "10min",
       "15min",
@@ -15503,6 +15551,7 @@
       }
      ],
      "timeEstimates": [
+      "none",
       "5min",
       "10min",
       "15min",
@@ -15716,6 +15765,7 @@
      "tokens": [],
      "projects": [],
      "timeEstimates": [
+      "none",
       "5min",
       "10min",
       "15min",
@@ -15730,7 +15780,7 @@
       "energyLevel": false,
       "location": false,
       "priority": false,
-      "timeEstimate": false
+      "timeEstimate": true
      },
      "hasAdditional": false,
      "chips": [],
@@ -15934,6 +15984,7 @@
      "tokens": [],
      "projects": [],
      "timeEstimates": [
+      "none",
       "5min",
       "10min",
       "15min",
@@ -15948,7 +15999,7 @@
       "energyLevel": false,
       "location": false,
       "priority": false,
-      "timeEstimate": false
+      "timeEstimate": true
      },
      "hasAdditional": false,
      "chips": [],
@@ -16131,6 +16182,7 @@
      "tokens": [],
      "projects": [],
      "timeEstimates": [
+      "none",
       "5min",
       "10min",
       "15min",
@@ -16145,7 +16197,7 @@
       "energyLevel": false,
       "location": false,
       "priority": false,
-      "timeEstimate": false
+      "timeEstimate": true
      },
      "hasAdditional": false,
      "chips": [],

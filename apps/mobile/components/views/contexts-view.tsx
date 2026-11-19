@@ -21,7 +21,7 @@ import {
   useTaskFilterSelections,
   generateUUID,
   updateSettingsFromLatest,
-  TIME_ESTIMATE_OPTIONS,
+  TIME_ESTIMATE_FILTER_OPTIONS,
   SAVED_FILTER_NO_PROJECT_ID,
   type SavedFilter,
   shallow,
@@ -52,6 +52,7 @@ import {
   type TaskSortBy,
   sortTasksBy,
   sortTasksBySavedPreference,
+  tFallback,
 } from '@mindwtr/core';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocalSearchParams } from 'expo-router';
@@ -70,8 +71,9 @@ import { SwipeableTaskItem, type TaskRowActions } from '../swipeable-task-item';
 import { Tag, CheckCircle2, X, SlidersHorizontal } from 'lucide-react-native';
 import { TaskFilterSheet, FilterChip } from '../task-filter-sheet';
 import { styles as bulkStyles } from '../task-list/task-list.styles';
-import { assertBulkActionSucceeded, useTaskListSelection } from '../use-task-list-selection';
+import { assertBulkActionSucceeded, usePruneSelectionToVisible, useTaskListSelection } from '../use-task-list-selection';
 import { TASK_LIST_WINDOWING_PROPS } from '../task-list-windowing';
+import { TaskListBulkOrganizeModal } from '../task-list/TaskListBulkOrganizeModal';
 import { TaskListSortButton } from '../task-list/TaskListSortButton';
 import { TaskListSortModal } from '../task-list/TaskListSortModal';
 
@@ -84,6 +86,7 @@ export function ContextsView({ initialSavedFilterId }: { initialSavedFilterId?: 
   const {
     tasks,
     projects,
+    areas,
     updateTask,
     deleteTask,
     restoreTask,
@@ -95,6 +98,7 @@ export function ContextsView({ initialSavedFilterId }: { initialSavedFilterId?: 
   } = useTaskStore((state) => ({
     tasks: state.tasks,
     projects: state.projects,
+    areas: state.areas,
     updateTask: state.updateTask,
     deleteTask: state.deleteTask,
     restoreTask: state.restoreTask,
@@ -112,6 +116,7 @@ export function ContextsView({ initialSavedFilterId }: { initialSavedFilterId?: 
   const [searchQuery, setSearchQuery] = useState('');
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [bulkTokenPicker, setBulkTokenPicker] = useState<BulkTokenPickerState>(null);
+  const [bulkOrganizeVisible, setBulkOrganizeVisible] = useState(false);
   const [sortModalVisible, setSortModalVisible] = useState(false);
   const [sortOverride, setSortOverride] = useState<TaskSortBy | null>(null);
   const [appliedInitialFilter, setAppliedInitialFilter] = useState<string | undefined>(undefined);
@@ -205,11 +210,15 @@ export function ContextsView({ initialSavedFilterId }: { initialSavedFilterId?: 
     : savedSort && savedSort !== 'default' ? sortTasksBySavedPreference(model.tasks, savedSort, {
       projects, prioritizeByPriority: features.priorities, sortOrder: savedSortOrder,
     }) : model.tasks, [activeSortOverride, model.tasks, savedSort, projects, features.priorities, savedSortOrder]);
+  const visibleTaskIds = useMemo(() => sortedTasks.map((task) => task.id), [sortedTasks]);
+  const visibleTaskIdSet = useMemo(() => new Set(visibleTaskIds), [visibleTaskIds]);
+  const canSelectTaskId = useCallback((id: string) => visibleTaskIdSet.has(id), [visibleTaskIdSet]);
   const {
     bulkActionLabel,
     bulkActionLoading,
     exitSelectionMode,
     handleBatchDelete,
+    handleBatchOrganize,
     handleBatchMove,
     hasSelection,
     multiSelectedIds,
@@ -219,9 +228,12 @@ export function ContextsView({ initialSavedFilterId }: { initialSavedFilterId?: 
     setMultiSelectedIds,
     toggleMultiSelect,
   } = useTaskListSelection({
+    backExitsSelection: !(bulkOrganizeVisible || bulkTokenPicker || editingTask || filtersVisible || sortModalVisible),
     batchDeleteTasks,
     batchMoveTasks,
     batchUpdateTasks,
+    canSelectTaskId,
+    organizeScope: { areas, projects, settings, savedFilterId: filters.activeSavedFilter?.id },
     restoreTask,
     t,
     tasksById,
@@ -261,20 +273,13 @@ export function ContextsView({ initialSavedFilterId }: { initialSavedFilterId?: 
     setMatchMode('all');
   }, []);
 
-  useEffect(() => {
-    setMultiSelectedIds((prev) => {
-      const visibleIds = new Set(sortedTasks.map((task) => task.id));
-      const next = new Set(Array.from(prev).filter((id) => visibleIds.has(id)));
-      if (next.size === prev.size) return prev;
-      return next;
-    });
-  }, [setMultiSelectedIds, sortedTasks]);
+  usePruneSelectionToVisible(setMultiSelectedIds, visibleTaskIds);
 
   useEffect(() => {
-    if (selectionMode && multiSelectedIds.size === 0) {
+    if (selectionMode && !hasSelection && !bulkOrganizeVisible) {
       exitSelectionMode();
     }
-  }, [exitSelectionMode, multiSelectedIds.size, selectionMode]);
+  }, [bulkOrganizeVisible, exitSelectionMode, hasSelection, selectionMode]);
 
   const removeTagLabel = getContextsTokenPickerTitle('tags', 'remove', t);
   const tokenPicker = bulkTokenPicker
@@ -559,6 +564,7 @@ export function ContextsView({ initialSavedFilterId }: { initialSavedFilterId?: 
               </ScrollView>
               <View style={bulkStyles.bulkActions}>
                 {([
+                  { label: tFallback(t, 'bulk.organize', 'Bulk organize'), onPress: () => setBulkOrganizeVisible(true), canRun: true },
                   { label: t('bulk.addTag'), onPress: () => setBulkTokenPicker({ field: 'tags', action: 'add' }), canRun: true },
                   { label: removeTagLabel, onPress: () => setBulkTokenPicker({ field: 'tags', action: 'remove' }), canRun: removableTagOptions.length > 0 },
                   { label: t('bulk.addContext'), onPress: () => setBulkTokenPicker({ field: 'contexts', action: 'add' }), canRun: true },
@@ -619,7 +625,7 @@ export function ContextsView({ initialSavedFilterId }: { initialSavedFilterId?: 
         </View>
 
         <TaskFilterSheet visible={filtersVisible} onClose={() => { setFiltersVisible(false); setSaveFilterVisible(false); }}
-          selections={filters} options={{ tokens: [], projects: projectFilterOptions, timeEstimates: TIME_ESTIMATE_OPTIONS, visibility: filterVisibility }}
+          selections={filters} options={{ tokens: [], projects: projectFilterOptions, timeEstimates: TIME_ESTIMATE_FILTER_OPTIONS, visibility: filterVisibility }}
           statusOptions={CONTEXTS_FILTER_STATUSES} themeColors={tc} t={t}
           headerActions={canSave ? <TouchableOpacity accessibilityRole="button" onPress={() => {
             setSaveFilterName(selectedContexts.join(' + ')); setSaveFilterVisible(true);
@@ -636,6 +642,20 @@ export function ContextsView({ initialSavedFilterId }: { initialSavedFilterId?: 
               </View>
             </View>
           </View> : undefined} />
+
+        {bulkOrganizeVisible && (
+          <TaskListBulkOrganizeModal
+            areas={areas}
+            isApplying={bulkActionLoading}
+            onApply={(input) => handleBatchOrganize(input, () => setBulkOrganizeVisible(false))}
+            onClose={() => setBulkOrganizeVisible(false)}
+            projects={projects}
+            selectedCount={selectedIdsArray.length}
+            t={t}
+            themeColors={tc}
+            visible
+          />
+        )}
 
         <TokenPickerModal
           visible={bulkTokenPicker !== null}

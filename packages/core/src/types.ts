@@ -8,6 +8,7 @@ export type TaskEnergyLevel = 'low' | 'medium' | 'high';
 export type TimeEstimatePreset = '5min' | '10min' | '15min' | '30min' | '1hr' | '2hr' | '3hr' | '4hr' | '4hr+';
 export type CustomTimeEstimate = `custom:${number}`;
 export type TimeEstimate = TimeEstimatePreset | CustomTimeEstimate;
+export type TimeEstimateFilterValue = TimeEstimate | 'none';
 
 
 export type TaskSortBy = 'default' | 'due' | 'start' | 'review' | 'title' | 'timeEstimate' | 'priority' | 'created' | 'created-desc' | 'completed';
@@ -333,7 +334,7 @@ export interface FilterCriteria {
     assignedTo?: string[];
     locations?: string[];
     timeEstimateRange?: { min?: number; max?: number };
-    timeEstimates?: TimeEstimate[];
+    timeEstimates?: TimeEstimateFilterValue[];
     hasDescription?: boolean;
     isStarred?: boolean;
 }

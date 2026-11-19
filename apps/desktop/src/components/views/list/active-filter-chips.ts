@@ -1,7 +1,7 @@
 import { getProjectAccentColor } from '@mindwtr/core';
 import {
     buildAdvancedFilterCriteriaChips,
-    formatTimeEstimateLabel,
+    formatTimeEstimateFilterLabel,
     removeAdvancedFilterCriteriaChip,
     SAVED_FILTER_NO_PROJECT_ID,
 } from '@mindwtr/core';
@@ -109,7 +109,7 @@ export function buildSelectionChips(
     (criteria.timeEstimates ?? []).forEach((estimate) => {
         chips.push({
             id: `time:${estimate}`,
-            label: formatTimeEstimateLabel(estimate, { t: deps.t }),
+            label: formatTimeEstimateFilterLabel(estimate, { t: deps.t }),
             ...advanced,
             ...inactiveFlag(applied, 'timeEstimates', estimate),
         });

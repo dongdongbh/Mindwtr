@@ -6,7 +6,7 @@ import { parseQuickAdd, type QuickAddParseOptions } from './quick-add';
 import { isSelectableProjectForTaskAssignment } from './project-utils';
 import { getTaskDateCoherenceIssues, type TaskDateCoherenceIssue } from './task-date-coherence';
 import { isTaskActionable } from './task-status';
-import type { Area, CustomTimeEstimate, Project, Task, TimeEstimate, TimeEstimatePreset } from './types';
+import type { Area, CustomTimeEstimate, Project, Task, TimeEstimate, TimeEstimateFilterValue, TimeEstimatePreset } from './types';
 
 
 type TranslateFn = (key: string) => string;
@@ -44,6 +44,8 @@ export const TIME_ESTIMATE_OPTIONS: TimeEstimate[] = [
     '4hr+',
 ];
 
+
+export const TIME_ESTIMATE_FILTER_OPTIONS: TimeEstimateFilterValue[] = ['none', ...TIME_ESTIMATE_OPTIONS];
 
 export function resolveTimeEstimateOptions(current?: TimeEstimate | null): TimeEstimate[] {
     return current && !TIME_ESTIMATE_OPTIONS.includes(current)
@@ -192,6 +194,16 @@ export function formatTimeEstimateLabel(estimate: TimeEstimate, options?: Calend
             return formatI18nTemplate(t('units.hoursMinutesShort'), { hours, minutes: remainder });
         }
     }
+}
+
+export function formatTimeEstimateFilterLabel(value: TimeEstimateFilterValue, options?: CalendarLabelOptions): string {
+    const t = (key: string) => {
+        const translated = options?.t?.(key);
+        return translated && translated !== key ? translated : defaultTranslate(key);
+    };
+    if (value !== 'none') return formatTimeEstimateLabel(value, { t });
+    const label = t('filters.noEstimate');
+    return label !== 'filters.noEstimate' ? label : 'No estimate';
 }
 
 export function parseTimeEstimateInput(value: string): number | null {

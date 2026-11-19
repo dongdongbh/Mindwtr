@@ -84,6 +84,7 @@ import {
   shallow,
   type FocusListItem as FocusSectionListItem,
   type Project,
+  TIME_ESTIMATE_FILTER_OPTIONS,
   TIME_ESTIMATE_OPTIONS,
   type Task,
   type FocusGroupBy,
@@ -1844,7 +1845,7 @@ export default function FocusScreen({ initialSavedFilterId }: { initialSavedFilt
         options={{
           tokens: tokenOptions,
           projects: projectFilterOptions,
-          timeEstimates: TIME_ESTIMATE_OPTIONS,
+          timeEstimates: metadataFilterVisibility.timeEstimate ? TIME_ESTIMATE_FILTER_OPTIONS : TIME_ESTIMATE_OPTIONS,
           visibility: metadataFilterVisibility,
         }}
         themeColors={tc}

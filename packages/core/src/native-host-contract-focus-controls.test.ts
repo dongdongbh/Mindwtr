@@ -193,6 +193,33 @@ describe('native host contract: Focus controls', () => {
             .toBe('Opens a focused screen for reordering these tasks');
     });
 
+    it('round-trips No estimate through the native filter control and a durable saved filter', async () => {
+        freezeClock();
+        const host = await openHost('base');
+        const before = value(host.getFocus({ limit: 100 }));
+        const noEstimate = before.controls.filterSheet.timeEstimates.find((option) => option.value === 'none')!;
+        expect(noEstimate).toMatchObject({ label: 'No estimate', selected: false });
+        const filtered = value(host.getFocus({ limit: 100, controlEdit: noEstimate.edit }));
+        const visibleIds = filtered.sections.flatMap((section) => section.rows.map(({ id }) => id));
+        expect(visibleIds).toContain('f2');
+        expect(visibleIds).not.toContain('f1');
+        expect(filtered.controls.filterSheet.chips).toContainEqual(expect.objectContaining({ id: 'time:none', label: 'No estimate' }));
+
+        const savedId = generateUUID();
+        value(await host.saveFocusFilter({ requestId: savedId, controls: filtered.controls.state, name: 'Unestimated' }));
+        await useTaskStore.getState().fetchData({ throwOnError: true });
+        expect(useTaskStore.getState().settings.savedFilters?.find((filter) => filter.id === savedId)?.criteria)
+            .toEqual({ timeEstimates: ['none'] });
+        const applied = value(host.getFocus({ limit: 100, controlEdit: { type: 'applySavedFilter', id: savedId } }));
+        expect(applied.controls.widgetFilter.criteria).toEqual({ timeEstimates: ['none'] });
+        expect(applied.controls.filterSheet.timeEstimates.find((option) => option.value === 'none')?.selected).toBe(true);
+
+        await useTaskStore.getState().updateSettings({ features: { timeEstimates: false } });
+        const disabled = value(host.getFocus({ limit: 100, controlEdit: { type: 'applySavedFilter', id: savedId } }));
+        expect(disabled.controls.filterSheet.visibility.timeEstimate).toBe(false);
+        expect(disabled.controls.widgetFilter.criteria.timeEstimates).toBeUndefined();
+    });
+
     it('round trips task-date options, widget criteria, preserved advanced chips and clear', async () => {
         freezeClock();
         const host = await openHost('base');

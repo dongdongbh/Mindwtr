@@ -407,8 +407,33 @@ describe('useTaskListSelection selection boundaries', () => {
 });
 
 describe('useTaskListSelection handleBatchOrganize', () => {
-  it('keeps a tag a sync save published while the organize write waited', async () => {
-    const tasks = { b: { ...makeTask('b'), tags: ['#urgent'] } };
+  const initialSettings = useTaskStore.getState().settings;
+  afterEach(() => { useTaskStore.setState({ settings: initialSettings }); });
+
+  it('refuses scoped organize when a pending sync adds an estimate to a selected task', async () => {
+    const task = { ...makeTask('a'), rev: 1 };
+    useTaskStore.setState({ _allTasks: [task], settings: { features: { timeEstimates: true } } });
+    const { projects, areas, settings } = useTaskStore.getState();
+    const params = baseParams({ tasksById: { a: task }, organizeScope: { projects, areas, settings } });
+    renderer.act(() => { renderer.create(<Harness {...params} />); });
+    renderer.act(() => { hookRef.toggleMultiSelect('a'); });
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    const save = runSyncStoreSave(async () => {
+      await held;
+      useTaskStore.setState({ _allTasks: [{ ...task, timeEstimate: '15min', rev: 2 }] });
+    });
+    let pending!: Promise<void>;
+    renderer.act(() => { pending = hookRef.handleBatchOrganize({ timeEstimate: '30min' }); });
+    release();
+    await renderer.act(async () => { await save; await pending; });
+    expect(params.batchUpdateTasks).not.toHaveBeenCalled();
+    expect(useTaskStore.getState()._tasksById.get('a')?.timeEstimate).toBe('15min');
+  });
+
+  it('keeps new tags and respects disabled estimates published while the organize write waited', async () => {
+    const task: Task = { ...makeTask('b'), tags: ['#urgent'], timeEstimate: '15min' };
+    const tasks = { b: task };
     useTaskStore.setState({ _allTasks: Object.values(tasks) });
     const batchUpdateTasks = vi.fn((updates: { id: string; updates: Partial<Task> }[]) => runStoreCommand(async () => {
       const byId = new Map(updates.map((entry) => [entry.id, entry.updates]));
@@ -423,13 +448,18 @@ describe('useTaskListSelection handleBatchOrganize', () => {
     const save = runSyncStoreSave(async () => {
       await held;
       const stored = useTaskStore.getState()._tasksById.get('b')!;
-      useTaskStore.setState({ _allTasks: [{ ...stored, rev: (stored.rev ?? 1) + 1, tags: [...stored.tags, '#remote'] }] });
+      useTaskStore.setState(({ settings }) => ({
+        _allTasks: [{ ...stored, rev: (stored.rev ?? 1) + 1, tags: [...stored.tags, '#remote'] }],
+        settings: { ...settings, features: { ...settings.features, timeEstimates: false } },
+      }));
     });
     let pending!: Promise<void>;
-    renderer.act(() => { pending = hookRef.handleBatchOrganize({ tags: ['#new'] }); });
+    renderer.act(() => { pending = hookRef.handleBatchOrganize({ tags: ['#new'], timeEstimate: null }); });
     release();
     await renderer.act(async () => { await save; await pending; });
-    expect(useTaskStore.getState()._tasksById.get('b')?.tags).toEqual(expect.arrayContaining(['#urgent', '#remote', '#new']));
+    expect(useTaskStore.getState()._tasksById.get('b')).toMatchObject({
+      tags: expect.arrayContaining(['#urgent', '#remote', '#new']), timeEstimate: '15min',
+    });
   });
 });
 

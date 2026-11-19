@@ -55,6 +55,7 @@ The native client is a Kotlin and Jetpack Compose app in `apps/android-native`. 
 
 ## Selection mode and Bulk organize
 
+- With Time Estimates enabled, open Contexts › Filters › Time estimate › No estimate. Select tasks › Bulk organize › Time estimate to keep, set or clear their estimates. Setting an estimate removes the task from this filter.
 - Bulk organize status includes Inbox for returning tasks to processing; existing project, notes, tags and dates stay unchanged unless explicitly edited.
 
 - Reach: Long-press a row in Inbox, Waiting For, Someday/Maybe, Reference, or Done. The bulk bar shows the count, statuses, Add tag, Remove tag, Delete, and Bulk organize (Inbox only).

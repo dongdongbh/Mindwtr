@@ -2,7 +2,7 @@ import { TaskDateFilter } from './TaskDateFilter';
 import { useEffect, useMemo, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { Filter } from 'lucide-react';
 import { tFallback } from '@mindwtr/core';
-import type { DateRange, MultiValueFilterMatchMode, TaskPriority, TimeEstimate } from '@mindwtr/core';
+import type { DateRange, MultiValueFilterMatchMode, TaskPriority, TimeEstimateFilterValue } from '@mindwtr/core';
 
 import { cn } from '../../../lib/utils';
 import { PriorityFlag } from '../../Task/PriorityFlag';
@@ -42,10 +42,10 @@ interface ListFiltersPanelProps {
     selectedPriorities: TaskPriority[];
     onTogglePriority: (priority: TaskPriority) => void;
     showTimeEstimateFilters: boolean;
-    timeEstimateOptions: TimeEstimate[];
-    selectedTimeEstimates: TimeEstimate[];
-    onToggleEstimate: (estimate: TimeEstimate) => void;
-    formatEstimate: (estimate: TimeEstimate) => string;
+    timeEstimateOptions: TimeEstimateFilterValue[];
+    selectedTimeEstimates: TimeEstimateFilterValue[];
+    onToggleEstimate: (estimate: TimeEstimateFilterValue) => void;
+    formatEstimate: (estimate: TimeEstimateFilterValue) => string;
     showIncludeArchivedProjects?: boolean;
     includeArchivedProjects?: boolean;
     onToggleIncludeArchivedProjects?: () => void;
@@ -283,7 +283,7 @@ export function ListFiltersPanel({
                             </FilterCategory>
                         )}
 
-                        {(showTimeEstimateFilters || selectedTimeEstimates.length > 0) && (
+                        {showTimeEstimateFilters && (
                             <FilterCategory
                                 id="list-time-filters"
                                 label={t('filters.timeEstimate')}

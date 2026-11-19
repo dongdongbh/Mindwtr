@@ -1,6 +1,11 @@
 
 export const trOverrides: Record<string, string> = {
     "projects.calendarLimit": "İlk 200 eşleşme gösteriliyor. Başka bir etkinlik bulmak için arayın.",
+    'bulk.keepEstimate': "Mevcut değeri koru",
+    'bulk.clearEstimate': "Tahmini temizle",
+    'bulk.setEstimate': "Tahmin belirle",
+    'bulk.invalidEstimate': "Geçerli bir süre tahmini girin.",
+    'bulk.selectionChanged': "Seçili görevler veya filtreler değişti. Seçimi kontrol edip tekrar deneyin.",
     "projects.calendarTitle": "Takvim",
     "projects.calendarLink": "Takvim etkinliği bağla",
     "projects.calendarReplace": "Bağlı etkinliği değiştir",
@@ -624,6 +629,7 @@ export const trOverrides: Record<string, string> = {
         'filters.contexts': 'Bağlamlar ve etiketler',
         'filters.priority': 'Öncelik',
         'filters.timeEstimate': 'Zaman tahmini',
+        'filters.noEstimate': "Tahmin yok",
         'filters.after': 'Sonra',
         'filters.before': 'Önce',
         'filters.hasDescription': 'Açıklaması var',

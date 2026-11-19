@@ -1,4 +1,4 @@
-import { TIME_ESTIMATE_OPTIONS } from './calendar-scheduling';
+import { TIME_ESTIMATE_FILTER_OPTIONS, TIME_ESTIMATE_OPTIONS } from './calendar-scheduling';
 import { CONTEXTS_NO_CONTEXT_TOKEN } from './contexts-view-model';
 import { selectionsFromCriteria } from './filter-criteria';
 import { getFocusProjectFilterLabel, getFocusProjectFilterOptions } from './focus-controls';
@@ -82,13 +82,16 @@ export function buildContextsFilterModel(input: {
     const projectById = new Map(input.projects.map((project) => [project.id, project]));
     const options: ListFilterOptions = {
         tokens: [], projects: getFocusProjectFilterOptions(input.tasks, input.projects, input.t),
-        timeEstimates: TIME_ESTIMATE_OPTIONS, visibility,
+        timeEstimates: visibility.timeEstimate ? TIME_ESTIMATE_FILTER_OPTIONS : TIME_ESTIMATE_OPTIONS, visibility,
         getProjectLabel: (id) => getFocusProjectFilterLabel(id, projectById, input.t),
     };
     const resolved = resolveListFilterState(state, { visibility, getProjectLabel: options.getProjectLabel, t: input.t });
     resolved.chips = resolved.chips.map(chip => chip.id.startsWith('project:') && chip.edit.type === 'toggleProject'
         ? { ...chip, edit: { type: 'removeProject' as const, value: chip.edit.value } } : chip);
-    const criteria = activeSavedFilter && !input.edit ? activeSavedFilter.criteria : { ...resolved.criteria, ...preservedCriteria };
+    const criteria = {
+        ...(activeSavedFilter && !input.edit ? activeSavedFilter.criteria : { ...resolved.criteria, ...preservedCriteria }),
+        ...(visibility.timeEstimate ? {} : { timeEstimates: undefined, timeEstimateRange: undefined }),
+    };
     return { resolved, criteria, options, savedFilters, preservedCriteria, activeSavedFilter: input.edit ? null : activeSavedFilter,
         tasks: selectContextsFilterTasks(input.tasks, criteria, input.projects).filter((task) => taskMatchesFilterSearchQuery(task, resolved.searchQuery)) };
 }

@@ -211,12 +211,13 @@ App Intents and Siri belong to the RN app. They are not in `apps/ios-native`. Th
 
 ## Review and Contexts bulk selection
 
-- Reach: Review (scope All or Due, groups expanded) or Contexts › long-press a task card. A bar shows the count, all six statuses, Add tag and Delete. Review also offers Organize (first, filled) and Share.
+- With Time Estimates enabled, open Contexts › Filters › Time estimate › No estimate. Select tasks › Bulk organize › Time estimate to keep, set or clear their estimates. Setting an estimate removes the task from this filter.
+- Reach: Review (scope All or Due, groups expanded) or Contexts › long-press a task card. A bar shows the count, all six statuses, Add tag and Delete. Both offer Organize as the first action. Review also offers Share.
 - Shortcuts: Tap a row's circle or card to toggle it.
 - Selectors: screen prefix `review` or `contexts`, then `-bulk-count`, `-bulk-exit`, `-select-` (+ task id), `-bulk-status-` (+ status), `-bulk-tag-open`, `-bulk-organize-open` and `-bulk-share` (Review only), `-bulk-delete`, `-bulk-confirm`; `review-scroll`, `contexts-scroll`; Undo is `task-` + `statusListBulkDelete` + `-undo`. The Review Organize dialog reuses the Inbox dialog, so its controls read review-organize-apply, review-organize-project and so on
 - Code: `apps/ios-native/App/ReviewScreen.swift`, `apps/ios-native/App/ContextsScreen.swift`, `apps/ios-native/App/WaitingScreen.swift` (StatusListBulkBar), `apps/ios-native/App/CoreModel.swift` (statusList…)
 - Checks: `apps/ios-native/App/UITests/FoundationUITests.swift` (testShownListBulk…, testReviewBulkOrganize…), `apps/ios-native/Tests/MindwtrNativeCoreTests/CoreHostTests.swift` (testReviewAndContextsBulk…, testReviewBulkMoveColdRecovery…, testReviewBulkOrganizeRides…), `packages/core/src/native-host-contract-review-contexts-bulk.test.ts`
-- Notes: Review ends the selection when the scope changes or a selected row is folded away, as mobile does. Contexts drops only the selected rows a chip, search or filter hides. Review Organize writes through the Inbox Organize family with source `review`, so its failed-save retry and cold recovery match Inbox. Mark reviewed, Remove tag, and Contexts' Add/Remove context are not built yet.
+- Notes: Review ends the selection when the scope changes or a selected row is folded away, as mobile does. Contexts drops only the selected rows a chip, search or filter hides. Review and Contexts Organize use the Inbox Organize family with their respective list scope, so its failed-save retry and cold recovery match Inbox. Mark reviewed, Remove tag, and Contexts' Add/Remove context are not built yet.
 
 ## Waiting For
 

@@ -2,7 +2,7 @@
 
 
 import { isTaskVisibleInArea, projectMatchesAreaFilterSelection, resolveAreaFilterSelection, taskMatchesAreaFilterSelection } from './area-filter';
-import { TIME_ESTIMATE_OPTIONS } from './calendar-scheduling';
+import { TIME_ESTIMATE_FILTER_OPTIONS, TIME_ESTIMATE_OPTIONS } from './calendar-scheduling';
 import { hasTimeComponent, safeParseDueDate } from './date';
 import { countActiveFilterCriteria, criteriaFromSelections, selectionsFromCriteria } from './filter-criteria';
 import { buildFocusTaskGroups, type FocusTaskGroup } from './focus-grouping';
@@ -43,7 +43,7 @@ import type {
     Section,
     SortField,
     Task,
-    TimeEstimate,
+    TimeEstimateFilterValue,
 } from './types';
 
 type Translate = (key: string) => string;
@@ -570,7 +570,7 @@ export function applyFocusControlEdit(
 }
 
 export type FocusControlsModel = {
-    options: { tokens: string[]; projects: { id: string; title: string }[]; timeEstimates: TimeEstimate[]; visibility: TaskMetadataFilterVisibility };
+    options: { tokens: string[]; projects: { id: string; title: string }[]; timeEstimates: TimeEstimateFilterValue[]; visibility: TaskMetadataFilterVisibility };
     savedFilters: SavedFilter[];
     filter: ResolvedFocusFilter;
     perspective: TaskPerspectiveFeatureState<SortField, FocusGroupBy>;
@@ -656,7 +656,7 @@ export function buildFocusControlsModel(input: {
     const hasTasks = pools.selection.globalCount > 0 || lists.schedule.length > 0 || lists.nextActions.length > 0
         || lists.upcoming.length > 0 || lists.reviewDue.length > 0 || reviewProjects.length > 0;
     return {
-        options: { tokens, projects, timeEstimates: TIME_ESTIMATE_OPTIONS, visibility },
+        options: { tokens, projects, timeEstimates: visibility.timeEstimate ? TIME_ESTIMATE_FILTER_OPTIONS : TIME_ESTIMATE_OPTIONS, visibility },
         savedFilters,
         filter,
         perspective,

@@ -11,12 +11,12 @@ import {
   View,
 } from 'react-native';
 import {
-  formatTimeEstimateLabel,
+  formatTimeEstimateFilterLabel,
   tFallback,
   type TaskEnergyLevel,
   type TaskMetadataFilterVisibility,
   type TaskPriority,
-  type TimeEstimate,
+  type TimeEstimateFilterValue,
   type TaskStatus,
 } from '@mindwtr/core';
 import { ChevronDown, ChevronRight, ChevronUp, X } from 'lucide-react-native';
@@ -135,7 +135,7 @@ export type TaskFilterSheetOptions = {
   tokens: string[];
 
   projects?: { id: string; title: string }[];
-  timeEstimates: TimeEstimate[];
+  timeEstimates: TimeEstimateFilterValue[];
   visibility: TaskMetadataFilterVisibility;
 };
 
@@ -266,7 +266,7 @@ export function TaskFilterSheet({
     allLabel,
   ), [allLabel, excludedLabel, projectOptions, selections.projects, selections.excludedProjects]);
   const timeSummary = joinSummary(
-    selections.timeEstimates.map((estimate) => formatTimeEstimateLabel(estimate)),
+    selections.timeEstimates.map((estimate) => formatTimeEstimateFilterLabel(estimate, { t })),
     allLabel,
   );
   const energySummary = joinSummary(selections.energyLevels.map((level) => t(`energyLevel.${level}`)), allLabel);
@@ -652,7 +652,7 @@ export function TaskFilterSheet({
                           {options.timeEstimates.map((estimate) => (
                             <FilterChip
                               key={`time:${estimate}`}
-                              label={formatTimeEstimateLabel(estimate)}
+                              label={formatTimeEstimateFilterLabel(estimate, { t })}
                               selected={selections.timeEstimates.includes(estimate)}
                               themeColors={themeColors}
                               onPress={() => selections.toggleTimeEstimate(estimate)}

@@ -32,7 +32,7 @@ import {
     type ArchiveTaskGroupBy,
 } from './archive-view-model';
 import { collectBulkTaskTokens, type BulkTaskTokenField, type BulkTaskTokenMode } from './bulk-task-tokens';
-import { formatTimeEstimateLabel } from './calendar-scheduling';
+import { formatTimeEstimateFilterLabel } from './calendar-scheduling';
 import {
     buildContextsTokenIndex,
     buildContextsViewModel,
@@ -84,7 +84,7 @@ import {
     selectTrashedTasks,
     type ListConfirmation,
 } from './trash-view-model';
-import type { AppSettings, Area, Project, Task, TaskEnergyLevel, TaskPriority, TaskSortBy, TaskStatus, TimeEstimate } from './types';
+import type { AppSettings, Area, Project, Task, TaskEnergyLevel, TaskPriority, TaskSortBy, TaskStatus, TimeEstimateFilterValue } from './types';
 
 type Translate = (key: string) => string;
 type Host = ReturnType<typeof createNativeHostContract>;
@@ -238,7 +238,7 @@ type ContextsModel = {
     matchMode: [string, [string, boolean][]] | null;
     rowIds: string[];
     empty: [string, string, string] | null;
-    bulk: { exit: string; statuses: { status: TaskStatus; label: string }[]; tokens: { field: BulkTaskTokenField; mode: BulkTaskTokenMode; label: string; enabled: boolean }[]; delete: string } | null;
+    bulk: { exit: string; statuses: { status: TaskStatus; label: string }[]; organize: string; tokens: { field: BulkTaskTokenField; mode: BulkTaskTokenMode; label: string; enabled: boolean }[]; delete: string } | null;
     picker: (field: BulkTaskTokenField, mode: BulkTaskTokenMode) => { title: string; tokens: string[]; placeholder: string; allowCustomValue: boolean; multiSelect: boolean };
     deleteConfirmation: ListConfirmation;
 };
@@ -297,6 +297,7 @@ export function createContextsCoreBackend(t: Translate): ContextsBackend {
                 bulk: {
                     exit: t('bulk.exitSelect'),
                     statuses: CONTEXTS_BULK_STATUSES.map((status) => ({ status, label: t(`status.${status}`) })),
+                    organize: t('bulk.organize'),
                     tokens: (['tags', 'contexts'] as const).flatMap((field) => (['add', 'remove'] as const).map((mode) => ({
                         field, mode, label: getContextsTokenPickerTitle(field, mode, t),
                         enabled: mode === 'add' || collectBulkTaskTokens(state.selected, tasksById, field).length > 0,
@@ -362,6 +363,7 @@ export function createContextsContractBackend(host: Host, requestId: () => strin
                 bulk: view.bulk ? {
                     exit: view.bulk.exitLabel,
                     statuses: view.bulk.statuses,
+                    organize: view.bulk.organizeLabel,
                     tokens: view.bulk.tokenActions.map(({ field, mode, title, enabled }) => ({ field, mode, label: title, enabled })),
                     delete: view.bulk.deleteLabel,
                 } : null,
@@ -410,6 +412,7 @@ export async function replayContexts(backend: ContextsBackend, scenario: ListVie
             const bulk = state.selectionMode && current.bulk ? [
                 [current.bulk.exit, false],
                 ...current.bulk.statuses.map(({ label }) => [label, false]),
+                [current.bulk.organize, false],
                 ...current.bulk.tokens.map(({ label, enabled }) => [label, !enabled]),
                 [current.bulk.delete, false],
             ] : null;
@@ -487,7 +490,7 @@ const t_none = 'No context';
 
 type FilterState = {
     searchQuery: string; tokens: string[]; excludedTokens: string[];
-    priorities: TaskPriority[]; energyLevels: TaskEnergyLevel[]; timeEstimates: TimeEstimate[]; location: string;
+    priorities: TaskPriority[]; energyLevels: TaskEnergyLevel[]; timeEstimates: TimeEstimateFilterValue[]; location: string;
 };
 const NO_FILTERS: FilterState = { searchQuery: '', tokens: [], excludedTokens: [], priorities: [], energyLevels: [], timeEstimates: [], location: '' };
 type ArchiveState = {
@@ -555,7 +558,7 @@ function resolveHookFilters(filters: FilterState, visibility: TaskMetadataFilter
             ...filters.excludedTokens.map((token) => ({ id: `excluded-token:${token}`, label: token, excluded: true })),
             ...priorities.map((value) => ({ id: `priority:${value}`, label: t(`priority.${value}`), excluded: false })),
             ...energyLevels.map((value) => ({ id: `energy:${value}`, label: t(`energyLevel.${value}`), excluded: false })),
-            ...timeEstimates.map((value) => ({ id: `time:${value}`, label: formatTimeEstimateLabel(value), excluded: false })),
+            ...timeEstimates.map((value) => ({ id: `time:${value}`, label: formatTimeEstimateFilterLabel(value), excluded: false })),
             ...(location ? [{ id: 'location', label: `${tFallback(t, 'taskEdit.locationLabel', 'Location')}: ${location}`, excluded: false }] : []),
         ],
     };
@@ -829,7 +832,7 @@ export async function replayArchive(backend: ArchiveBackend, scenario: ListViews
                 else filters.tokens = [...filters.tokens, token];
             } else if (first === 'togglePriority') filters.priorities = toggle(filters.priorities, second as TaskPriority);
             else if (first === 'toggleEnergyLevel') filters.energyLevels = toggle(filters.energyLevels, second as TaskEnergyLevel);
-            else if (first === 'toggleTimeEstimate') filters.timeEstimates = toggle(filters.timeEstimates, second as TimeEstimate);
+            else if (first === 'toggleTimeEstimate') filters.timeEstimates = toggle(filters.timeEstimates, second as TimeEstimateFilterValue);
             else if (first === 'setLocation') filters.location = second as string;
         } else if (kind === 'press') {
             const labels = current.labels;

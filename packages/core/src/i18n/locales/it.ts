@@ -1,6 +1,11 @@
 
 export const itOverrides: Record<string, string> = {
     "projects.calendarLimit": "Sono mostrati i primi 200 risultati. Cerca per trovare un altro evento.",
+    'bulk.keepEstimate': "Mantieni il valore attuale",
+    'bulk.clearEstimate': "Cancella stima",
+    'bulk.setEstimate': "Imposta stima",
+    'bulk.invalidEstimate': "Inserisci una stima di tempo valida.",
+    'bulk.selectionChanged': "Le attività selezionate o i filtri sono cambiati. Controlla la selezione e riprova.",
     "projects.calendarTitle": "Calendario",
     "projects.calendarLink": "Collega evento del calendario",
     "projects.calendarReplace": "Sostituisci evento collegato",
@@ -663,6 +668,7 @@ export const itOverrides: Record<string, string> = {
         'filters.contexts': 'Contesti e tag',
         'filters.priority': 'Priorità',
         'filters.timeEstimate': 'Tempo stimato',
+        'filters.noEstimate': "Senza stima",
         'filters.after': 'Dopo',
         'filters.before': 'Prima',
         'filters.hasDescription': 'Con descrizione',

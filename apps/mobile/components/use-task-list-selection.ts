@@ -7,10 +7,14 @@ import {
   collectBulkTaskTokens,
   formatListItemCount,
   getTrashUndoLabel,
+  isBulkOrganizeSelectionCurrent,
+  logStaleWriteRefused,
+  resolveFeatureFlags,
   runStoreCommand,
   tFallback,
   updateRangeSelection,
   useTaskStore,
+  type BulkOrganizeSelectionScope,
   type BulkOrganizeTaskUpdateInput,
   type StoreActionResult,
   type Task,
@@ -28,6 +32,7 @@ type UseTaskListSelectionParams = {
   batchMoveTasks: (ids: string[], status: TaskStatus) => Promise<void | StoreActionResult>;
   batchUpdateTasks: (updates: { id: string; updates: Partial<Task> }[]) => Promise<void | StoreActionResult>;
   canSelectTaskId?: (taskId: string) => boolean;
+  organizeScope?: BulkOrganizeSelectionScope;
   restoreTask: (id: string) => Promise<void | StoreActionResult>;
   t: (key: string) => string;
   tasksById: Record<string, Task>;
@@ -64,6 +69,7 @@ export function useTaskListSelection({
   batchMoveTasks,
   batchUpdateTasks,
   canSelectTaskId,
+  organizeScope,
   restoreTask,
   t,
   tasksById,
@@ -250,18 +256,25 @@ export function useTaskListSelection({
     });
   }, [bulkActionLoading, exitSelectionMode, hasSelection, runBulkAction, showToast, t, writeTagUpdates]);
 
-  const handleBatchOrganize = useCallback(async (input: BulkOrganizeTaskUpdateInput) => {
+  const handleBatchOrganize = useCallback(async (input: BulkOrganizeTaskUpdateInput, afterSuccess?: () => void) => {
     if (!hasSelection || bulkActionLoading) return;
     const updates = buildBulkOrganizeTaskUpdates(selectedIdsArray, tasksById, input);
     if (updates.length === 0) return;
     await runBulkAction(tFallback(t, 'bulk.organize', 'Bulk organize'), async () => {
 
       const { count, result } = await runStoreCommand(async () => {
-        const latest = buildBulkOrganizeTaskUpdates(selectedIdsArray, useTaskStore.getState()._tasksById, input);
+        const state = useTaskStore.getState();
+        if (organizeScope && !isBulkOrganizeSelectionCurrent(selectedIdsArray, (id) => tasksById[id], organizeScope, state)) {
+          logStaleWriteRefused('bulk-organize');
+          throw new Error(tFallback(t, 'bulk.selectionChanged', 'The selected tasks or filters changed. Review the selection and try again.'));
+        }
+        const estimatesEnabled = resolveFeatureFlags(state.settings).timeEstimates;
+        const latest = buildBulkOrganizeTaskUpdates(selectedIdsArray, state._tasksById, estimatesEnabled ? input : { ...input, timeEstimate: undefined });
         return { count: latest.length, result: latest.length > 0 ? await batchUpdateTasks(latest) : undefined };
       });
       if (count === 0) return;
       assertBulkActionSucceeded(result);
+      afterSuccess?.();
       exitSelectionMode();
       showToast({
         title: t('common.done'),
@@ -269,7 +282,7 @@ export function useTaskListSelection({
         tone: 'success',
       });
     });
-  }, [batchUpdateTasks, bulkActionLoading, exitSelectionMode, hasSelection, runBulkAction, selectedIdsArray, showToast, t, tasksById]);
+  }, [batchUpdateTasks, bulkActionLoading, exitSelectionMode, hasSelection, organizeScope, runBulkAction, selectedIdsArray, showToast, t, tasksById]);
 
   return {
     bulkActionLabel,

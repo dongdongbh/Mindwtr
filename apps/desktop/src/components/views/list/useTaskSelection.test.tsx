@@ -102,14 +102,15 @@ describe('useTaskSelection', () => {
         const initialTaskState = useTaskStore.getState();
         afterEach(() => { useTaskStore.setState(initialTaskState, true); });
         const at = new Date().toISOString();
-        const stored = { id: 'a', title: 'A', status: 'next', tags: ['#x'], contexts: ['@desk'], rev: 1, createdAt: at, updatedAt: at } as Task;
+        const stored: Task = { id: 'a', title: 'A', status: 'next', tags: ['#x'], contexts: ['@desk'], timeEstimate: '15min', rev: 1, createdAt: at, updatedAt: at };
 
-        const selectA = () => {
-            useTaskStore.setState({ _allTasks: [stored] });
+        const selectA = (task = stored, scoped = false) => {
+            useTaskStore.setState({ _allTasks: [task] });
             let selection!: ReturnType<typeof useTaskSelection>;
             function Probe() {
-                const { _tasksById, batchUpdateTasks } = useTaskStore.getState();
-                selection = useTaskSelection(['a'], { tasksById: _tasksById, batchUpdateTasks });
+                const { _tasksById, batchUpdateTasks, projects, areas, settings } = useTaskStore.getState();
+                selection = useTaskSelection(['a'], { tasksById: _tasksById, batchUpdateTasks, onActionError: vi.fn(),
+                    organizeScope: scoped ? { projects, areas, settings } : undefined });
                 return null;
             }
             act(() => { renderer.create(<Probe />); });
@@ -136,6 +137,28 @@ describe('useTaskSelection', () => {
             act(() => { written = selection.organizeSelectedTasks({ contexts: ['@home'] }); });
             await act(async () => { await finish(); await written; });
             expect(useTaskStore.getState()._tasksById.get('a')?.contexts).toEqual(['@desk', '@phone', '@home']);
+        });
+
+        it('refuses a scoped organize when a pending sync adds an estimate to a selected task', async () => {
+            const unestimated = { ...stored, timeEstimate: undefined };
+            const selection = selectA(unestimated, true);
+            const finish = holdSyncSave(() => useTaskStore.setState({ _allTasks: [{ ...unestimated, timeEstimate: '15min', rev: 2 }] }));
+            let written!: Promise<boolean>;
+            act(() => { written = selection.organizeSelectedTasks({ timeEstimate: '30min' }); });
+            await act(async () => { await finish(); });
+            expect(await written).toBe(false);
+            expect(useTaskStore.getState()._tasksById.get('a')?.timeEstimate).toBe('15min');
+        });
+
+        it('keeps estimates when a sync save disables estimates while the organize write waits', async () => {
+            const selection = selectA();
+            const finish = holdSyncSave(() => useTaskStore.setState(({ settings }) => ({
+                settings: { ...settings, features: { ...settings.features, timeEstimates: false } },
+            })));
+            let written!: Promise<boolean>;
+            act(() => { written = selection.organizeSelectedTasks({ contexts: ['@home'], timeEstimate: null }); });
+            await act(async () => { await finish(); await written; });
+            expect(useTaskStore.getState()._tasksById.get('a')).toMatchObject({ contexts: ['@desk', '@home'], timeEstimate: '15min' });
         });
     });
 

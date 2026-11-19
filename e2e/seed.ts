@@ -1,5 +1,5 @@
 import type { Page } from '@playwright/test';
-import type { Attachment } from '@mindwtr/core';
+import type { Attachment, TimeEstimate } from '@mindwtr/core';
 
 
 const DATA_KEY = 'mindwtr-data';
@@ -21,6 +21,7 @@ export type SeedTask = {
     contexts?: string[];
     areaId?: string;
     attachments?: Attachment[];
+    timeEstimate?: TimeEstimate;
 };
 
 export type SeedProject = {
@@ -87,6 +88,7 @@ export const seedAppData = async (page: Page, data: SeedData): Promise<void> => 
             ...(task.projectId ? { projectId: task.projectId } : {}),
             ...(task.areaId ? { areaId: task.areaId } : {}),
             ...(task.attachments ? { attachments: task.attachments } : {}),
+            ...(task.timeEstimate ? { timeEstimate: task.timeEstimate } : {}),
         })),
         projects: (data.projects ?? []).map((project) => ({
             ...project,

@@ -5,18 +5,23 @@ import android.os.Looper
 import org.json.JSONObject
 
 
-private val main = Handler(Looper.getMainLooper())
+private val main by lazy { Handler(Looper.getMainLooper()) }
 private var tokenTyped = 0
 
 
 internal fun tokenQuery(open: JSONObject): String? = open.optString("text").takeIf { it.isNotBlank() }
 
 
-internal fun MenuModel.dialogInputs(list: String, into: JSONObject) {
-    val open = dialog ?: return
+internal fun organizeDialogInputs(open: JSONObject, into: JSONObject) {
+    into.put("organize", JSONObject().put("draft", open.optJSONObject("draft") ?: JSONObject()))
+    open.menuText("picker")?.let { kind -> into.put("picker", JSONObject().put("kind", kind).apply { open.menuText("query")?.let { put("query", it) } }) }
+}
+
+
+internal fun listDialogInputs(list: String, open: JSONObject?, into: JSONObject) {
+    if (open == null) return
     if (list == "review" && open.optString("kind") == "organize") {
-        into.put("organize", JSONObject().put("draft", open.optJSONObject("draft") ?: JSONObject()))
-        open.menuText("picker")?.let { kind -> into.put("picker", JSONObject().put("kind", kind).apply { open.menuText("query")?.let { put("query", it) } }) }
+        organizeDialogInputs(open, into)
         return
     }
     if (open.optString("kind") != "tokens" || open.optString("list") != list) return
