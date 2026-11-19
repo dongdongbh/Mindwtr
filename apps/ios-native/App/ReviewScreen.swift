@@ -18,16 +18,8 @@ struct ReviewScreen: View {
     private var overview: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
-                AppChipFlow {
-                    ReviewAction(title: view.object("expansion").text("label"),
-                        enabled: { model.reviewActionsShown && !view.object("expansion").flag("disabled") }, palette: palette, id: "review-expand-cycle") {
-                        Task { await model.editReviewOverview(expansion: ["type": "cycle"]) }
-                    }
-                    ReviewScopeChip(scope: view.object("scope"), enabled: { model.reviewActionsShown }, palette: palette) { model.openReviewPicker(.scope) }
-                    ReviewAction(title: view.object("startReview").text("label"), selected: true,
-                        enabled: { model.reviewActionsShown }, palette: palette, id: "review-start") { model.openReviewPicker() }
-                }
-                .padding(12).frame(maxWidth: .infinity, alignment: .leading).background(palette.card)
+                toolbar
+                .padding(.horizontal, 16).padding(.vertical, 10).frame(maxWidth: .infinity, alignment: .leading).background(palette.card)
                 .overlay(alignment: .bottom) { palette.border.frame(height: 1) }
                 Group {
                     ReviewFailure(model: model, palette: palette)
@@ -89,6 +81,20 @@ struct ReviewScreen: View {
         }
         .accessibilityIdentifier("review-scroll")
         .refreshable { await model.pullToRefresh() }
+    }
+
+    private var toolbar: some View {
+        let expansion = ReviewExpansionButton(expansion: view.object("expansion"), enabled: { model.reviewActionsShown }, palette: palette) {
+            Task { await model.editReviewOverview(expansion: ["type": "cycle"]) }
+        }
+        let chip = ReviewScopeChip(scope: view.object("scope"), enabled: { model.reviewActionsShown }, palette: palette) { model.openReviewPicker(.scope) }
+        let start = ReviewAction(title: view.object("startReview").text("label"), selected: true,
+            enabled: { model.reviewActionsShown }, palette: palette, id: "review-start") { model.openReviewPicker() }
+        return ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) { expansion; chip; Spacer(minLength: 0); start }
+            VStack(alignment: .leading, spacing: 8) { HStack(spacing: 8) { expansion; chip }; start }
+            AppChipFlow { expansion; chip; start }
+        }
     }
 
     private func group(_ item: CoreObject) -> some View {
@@ -768,6 +774,24 @@ private struct ReviewAction: View {
         }
         .buttonStyle(.plain).disabled(!isEnabled).opacity(isEnabled ? 1 : 0.5)
         .accessibilityIdentifier(id).accessibilityAddTraits(selected ? .isSelected : [])
+    }
+}
+
+private struct ReviewExpansionButton: View {
+    let expansion: CoreObject
+    let enabled: () -> Bool
+    let palette: AppPalette
+    let action: () -> Void
+    var body: some View {
+        let isEnabled = enabled() && !expansion.flag("disabled")
+        Button(action: action) {
+            AppIcon(name: "chevrons-down", size: 20).rotationEffect(.degrees(expansion.flag("allExpanded") ? 180 : 0))
+                .foregroundStyle(palette.secondary).frame(width: 44, height: 44)
+                .background(palette.filter, in: RoundedRectangle(cornerRadius: 10))
+                .overlay(RoundedRectangle(cornerRadius: 10).stroke(palette.border, lineWidth: 1)).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain).disabled(!isEnabled).opacity(isEnabled ? 1 : 0.45)
+        .accessibilityLabel(expansion.text("label")).accessibilityIdentifier("review-expand-cycle")
     }
 }
 

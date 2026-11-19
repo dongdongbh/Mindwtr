@@ -25370,6 +25370,9 @@ final class FoundationUITests: XCTestCase {
         app.launch(); defer { app.terminate() }
         task159OpenReview(app)
         XCTAssertTrue(reviewScopeIs(app, "due"))
+        let rowY = app.buttons["review-scope"].frame.midY
+        XCTAssertEqual(app.buttons["review-start"].frame.midY, rowY, accuracy: 2, "Start Review shares the toolbar row at normal text size")
+        XCTAssertEqual(app.buttons["review-expand-cycle"].frame.midY, rowY, accuracy: 2)
         let empty = app.staticTexts["review-empty"]
         XCTAssertTrue(empty.waitForExistence(timeout: 30))
         XCTAssertEqual(empty.label, "No review reminders are due. Tasks without a review date are in All open tasks.")
