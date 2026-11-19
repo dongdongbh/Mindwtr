@@ -9,6 +9,14 @@ const loadSteps = () => {
   return workflow.jobs.macos.steps;
 };
 
+test("ARM macOS release builds use a supported ARM runner", () => {
+  const workflow = parse(readFileSync(WORKFLOW_PATH, "utf8"));
+  const arm = workflow.jobs.macos.strategy.matrix.include.find(
+    (entry) => entry.rust_target === "aarch64-apple-darwin",
+  );
+  expect(arm.platform).toBe("macos-15");
+});
+
 test("Intel macOS release builds and helper smoke checks run on Intel hardware", () => {
   const workflow = parse(readFileSync(WORKFLOW_PATH, "utf8"));
   const intel = workflow.jobs.macos.strategy.matrix.include.find(
