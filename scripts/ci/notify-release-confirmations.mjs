@@ -6,7 +6,7 @@ export const LABEL = 'status:needs-confirmation';
 const STABLE_TAG = /^v\d+\.\d+\.\d+$/;
 const DEFAULT_BOT = 'github-actions[bot]';
 
-export function extractIssueNumbers(body, repository) {
+function releaseMarkdown(body) {
   let fence = null;
   const lines = [];
   for (const line of String(body ?? '').split('\n')) {
@@ -16,24 +16,44 @@ export function extractIssueNumbers(body, repository) {
     } else if (delimiter) fence = delimiter[1];
     else if (!/^( {4}|\t)/.test(line)) lines.push(line);
   }
-  const text = lines.join('\n').replace(/`+[^`\n]*`+/g, '');
+  return lines.join('\n').replace(/`+[^`\n]*`+/g, '`');
+}
+
+function parseIssueNumber(raw) {
+  const number = Number(raw);
+  if (!Number.isSafeInteger(number) || number < 1) throw new Error(`Invalid issue number: ${raw}`);
+  return number;
+}
+
+function confirmationIssueList(text) {
   const directives = [...text.matchAll(/<!--\s*mindwtr-confirmation-issues\s*:\s*([\s\S]*?)-->/gi)];
   const directiveStarts = [...text.matchAll(/<!--\s*mindwtr-confirmation-issues\b/gi)];
   if (directiveStarts.length !== directives.length) throw new Error('Malformed confirmation-issues directive.');
+  if (!directives.length) return null;
+  if (directives.length !== 1) throw new Error('Use only one confirmation-issues directive per release.');
   const numbers = new Set();
-  const add = (raw) => {
-    const number = Number(raw);
-    if (!Number.isSafeInteger(number) || number < 1) throw new Error(`Invalid issue number: ${raw}`);
-    numbers.add(number);
-  };
-  if (directives.length) {
-    if (directives.length !== 1) throw new Error('Use only one confirmation-issues directive per release.');
-    for (const token of directives[0][1].trim().split(/[\s,]+/).filter(Boolean)) {
-      if (!/^#?[1-9]\d*$/.test(token)) throw new Error(`Invalid confirmation-issues token: ${token}`);
-      add(token.replace(/^#/, ''));
-    }
-    return [...numbers].sort((a, b) => a - b);
+  for (const token of directives[0][1].trim().split(/[\s,]+/).filter(Boolean)) {
+    if (!/^#?[1-9]\d*$/.test(token)) throw new Error(`Invalid confirmation-issues token: ${token}`);
+    numbers.add(parseIssueNumber(token.replace(/^#/, '')));
   }
+  if (!numbers.size && directives[0][1].trim()) throw new Error('Expected issue numbers or a blank confirmation list.');
+  return [...numbers].sort((a, b) => a - b);
+}
+
+export function requireConfirmationIssueList(body) {
+  const numbers = confirmationIssueList(releaseMarkdown(body));
+  if (numbers === null) {
+    throw new Error('Stable release notes require a mindwtr-confirmation-issues directive. List the issues to notify or use <!-- mindwtr-confirmation-issues: --> to opt out.');
+  }
+  return numbers;
+}
+
+export function extractIssueNumbers(body, repository) {
+  const text = releaseMarkdown(body);
+  const explicitList = confirmationIssueList(text);
+  if (explicitList !== null) return explicitList;
+  const numbers = new Set();
+  const add = (raw) => numbers.add(parseIssueNumber(raw));
   let remaining = text.replace(/<!--[\s\S]*?(?:-->|$)/g, '');
   const referenceLabels = new Set();
   const normalizeLabel = (label) => label.trim().replace(/\s+/g, ' ').toLowerCase();

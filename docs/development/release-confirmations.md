@@ -6,15 +6,15 @@ The release caller enables posting (`dry_run: false`). The manual workflow defau
 
 ## Selection
 
-The notifier reads the published release body, never unreleased notes on main. It intersects local issue references with open, unlocked issues labelled `status:needs-confirmation`, excluding pull requests. Drafts, prereleases, component tags, and releases without assets are refused. Use bare issue numbers, inline GitHub links, or the explicit list for shipped changes. Reference-style Markdown links and their definitions are skipped to avoid interpreting link labels as local issue numbers; omitted issues are skipped.
+The notifier reads the published release body and intersects its issue list with open, unlocked issues labelled `status:needs-confirmation`. Only stable, published app releases with assets and GitHub issues qualify.
 
-An optional explicit list overrides ordinary references. An empty list disables notifications for that release:
+Before publication, the stable release workflow requires one explicit list in the Markdown file it passes to the publisher. Check that each issue's current retest request refers to a change included in the release. Confirm the fix commit is in the stable tag and review the latest thread for newer fixes or confirmation.
 
 ```html
 <!-- mindwtr-confirmation-issues: 1460, 1475 -->
 ```
 
-Use the explicit list when notes also discuss deferred or unrelated issues. The release notes are a maintainer-approved description of shipped work, not proof of a resolved bug.
+Use `<!-- mindwtr-confirmation-issues: -->` when a release intentionally sends no notices. Run `node scripts/ci/check-release-confirmation-notes.mjs docs/release-notes/<version>.md` before tagging. The explicit list takes precedence over references in the notes. For older release bodies without a list, the notifier still recognizes bare numbers and inline GitHub links on the same repository. It skips reference-style links and their definitions.
 
 ## Duplicate protection
 

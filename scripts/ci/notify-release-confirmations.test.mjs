@@ -1,6 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { LABEL, extractIssueNumbers, notify, marker, commentBody, createApi } from './notify-release-confirmations.mjs';
 
 const repo = 'dongdongbh/Mindwtr';
@@ -56,6 +60,12 @@ test('explicit allowlist wins over all other issue mentions', () => {
 test('empty allowlist disables notifications and malformed directives fail closed', () => {
   assert.deepEqual(extractIssueNumbers('#1460 <!-- mindwtr-confirmation-issues: -->', repo), []);
   assert.throws(() => extractIssueNumbers('<!-- mindwtr-confirmation-issues: #1460,nope -->', repo));
+});
+test('only whitespace denotes an intentionally empty confirmation list', () => {
+  for (const value of ['`1460`', '14`x`60', ', ,']) {
+    assert.throws(() => extractIssueNumbers(`<!-- mindwtr-confirmation-issues: ${value} -->`, repo));
+  }
+  assert.deepEqual(extractIssueNumbers('`<!-- mindwtr-confirmation-issues: 1460 -->` #1475', repo), [1475]);
 });
 test('dry run is the default and performs no writes', async () => {
   const f = fixture();
@@ -177,6 +187,52 @@ test('release integration requires publication success and skips prereleases', (
   assert.match(job, /!contains\(needs.validate.outputs.tag, '-'\)/);
   assert.match(job, /issues: write/);
   assert.match(job, /uses: \.\/\.github\/workflows\/notify-release-confirmations.yml/);
+});
+
+test('stable release preparation requires one valid confirmation list before exposing the publisher notes path', () => {
+  const workflow = readFileSync(new URL('../../.github/workflows/release.yml', import.meta.url), 'utf8');
+  const step = /      - name: Resolve and validate release notes\n([\s\S]*?)\n      - name:/.exec(workflow);
+  assert.ok(step);
+  const run = step[1].split('        run: |\n')[1];
+  assert.ok(run);
+  const publishCondition = /^  release:\n    if: (.+)$/m.exec(workflow)?.[1];
+  assert.ok(publishCondition);
+  assert.ok(step[1].includes(`PUBLISH_RELEASE: ${publishCondition}`));
+  const publish = workflow.split('      - name: Create Release\n')[1]?.split('\n  notify-confirmations:')[0];
+  assert.ok(publish);
+  assert.match(publish, /NOTES_FILE: \$\{\{ needs\.validate\.outputs\.release_notes_path \}\}/);
+  assert.match(publish, /--notes-file "\$NOTES_FILE"/);
+
+  const dir = mkdtempSync(join(tmpdir(), 'release-confirmation-notes-'));
+  try {
+    const notes = 'docs/release-notes/1.3.9.md';
+    const output = join(dir, 'output');
+    mkdirSync(join(dir, 'docs/release-notes'), { recursive: true });
+    symlinkSync(fileURLToPath(new URL('../../scripts', import.meta.url)), join(dir, 'scripts'));
+    const check = (body, publishRelease = 'true') => {
+      writeFileSync(join(dir, notes), `# Mindwtr 1.3.9\n\n${body}\n`);
+      writeFileSync(output, '');
+      return spawnSync('bash', ['-e', '-c', run.replace(/^ {10}/gm, '')], {
+        cwd: dir, env: { ...process.env, TAG: tag, VERSION: '1.3.9', GITHUB_OUTPUT: output, PUBLISH_RELEASE: publishRelease }, encoding: 'utf8',
+      });
+    };
+
+    for (const invalid of ['Fixed #1460.', '```html\n<!-- mindwtr-confirmation-issues: #1460 -->\n```',
+      '<!-- mindwtr-confirmation-issues: #0 -->', '<!-- mindwtr-confirmation-issues: #1460 -->\n<!-- mindwtr-confirmation-issues: -->']) {
+      const result = check(invalid);
+      assert.equal(result.status, 1, result.stdout + result.stderr);
+      assert.match(result.stderr, /confirmation-issues/);
+      assert.equal(readFileSync(output, 'utf8'), '');
+    }
+    for (const valid of ['<!-- mindwtr-confirmation-issues: #1460, 1575 -->', '#1460\n<!-- mindwtr-confirmation-issues: -->']) {
+      const result = check(valid);
+      assert.equal(result.status, 0, result.stdout + result.stderr);
+      assert.equal(readFileSync(output, 'utf8'), `body_path=${notes}\n`);
+    }
+    assert.equal(check('Historical release notes.', 'false').status, 0);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('reference-style Markdown is skipped instead of misreading its labels as local issues', () => {

@@ -180,6 +180,7 @@ jobs:
         env:
           TAG: ${{ steps.version.outputs.tag }}
           VERSION: ${{ steps.version.outputs.version }}
+          PUBLISH_RELEASE: ${{ github.event_name != 'workflow_dispatch' || (inputs.run_linux && inputs.run_macos && inputs.run_windows && inputs.run_android && inputs.run_android_foss) }}
         run: |
           set -euo pipefail
           for path in \
@@ -190,6 +191,9 @@ jobs:
             if [[ "$heading" != "# Mindwtr ${VERSION}" && "$heading" != "# Mindwtr ${TAG}" ]]; then
               echo "Stable release notes heading must be '# Mindwtr ${VERSION}' or '# Mindwtr ${TAG}': $path" >&2
               exit 1
+            fi
+            if [[ "$PUBLISH_RELEASE" == 'true' ]]; then
+              node scripts/ci/check-release-confirmation-notes.mjs "$path"
             fi
             echo "Using release notes at $path"
             echo "body_path=$path" >> "$GITHUB_OUTPUT"
