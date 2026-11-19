@@ -4274,21 +4274,8 @@ struct DiagnosticsCard: View {
     private var archiveRetentionContent: some View {
         let card = model.archiveRetentionCard
         return VStack(alignment: .leading, spacing: 0) {
-            Button { retentionOpen.toggle() } label: {
-                HStack(spacing: 12) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(card.text("title")).rnFont(16, .medium).foregroundStyle(palette.text)
-                        Text(card.text("current")).rnFont(13).foregroundStyle(palette.secondary)
-                    }
-                    .fixedSize(horizontal: false, vertical: true).frame(maxWidth: .infinity, alignment: .leading)
-                    AppIcon(name: "chevron", size: 18).rotationEffect(.degrees(retentionOpen ? 180 : 0)).foregroundStyle(palette.secondary)
-                }
-                .multilineTextAlignment(.leading).padding(.horizontal, 16).padding(.vertical, 14).frame(minHeight: 56).contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(card.text("title") + ", " + card.text("current"))
-            .accessibilityValue(model.label(retentionOpen ? "markdown.collapse" : "markdown.expand"))
-            .accessibilityIdentifier("archive-retention-disclosure")
+            disclosureHeader(title: card.text("title"), subtitle: card.text("current"), label: card.text("title") + ", " + card.text("current"),
+                open: retentionOpen, id: "archive-retention-disclosure") { retentionOpen.toggle() }
             if retentionOpen { archiveRetentionBody(card) }
         }
         .background(palette.card, in: RoundedRectangle(cornerRadius: 12))
@@ -4299,6 +4286,24 @@ struct DiagnosticsCard: View {
                     .accessibilityIdentifier("archive-retention-keyboard-done")
             }
         }
+    }
+
+    private func disclosureHeader(title: String, subtitle: String, label: String, open: Bool, id: String, toggle: @escaping () -> Void) -> some View {
+        Button(action: toggle) {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).rnFont(16, .medium).foregroundStyle(palette.text)
+                    if !subtitle.isEmpty { Text(subtitle).rnFont(13).foregroundStyle(palette.secondary) }
+                }
+                .fixedSize(horizontal: false, vertical: true).frame(maxWidth: .infinity, alignment: .leading)
+                AppIcon(name: "chevron", size: 18).rotationEffect(.degrees(open ? 180 : 0)).foregroundStyle(palette.secondary)
+            }
+            .multilineTextAlignment(.leading).padding(.horizontal, 16).padding(.vertical, 14).frame(minHeight: 56).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(label).accessibilityHint(label == title ? subtitle : "")
+        .accessibilityValue(model.label(open ? "markdown.collapse" : "markdown.expand"))
+        .accessibilityIdentifier(id)
     }
 
     private func archiveRetentionBody(_ card: CoreObject) -> some View {
@@ -4364,120 +4369,138 @@ struct DiagnosticsCard: View {
             VStack(alignment: .leading, spacing: 16) {
                 if owner == model.settingsDiagnosticsOwner {
                     let backup = model.dataSettings.object("backup")
-                    Button { backupOpen.toggle() } label: {
-                        HStack {
-                            Text(backup.text("title")).rnFont(18, .bold)
-                            Spacer()
-                            Image(systemName: backupOpen ? "chevron.down" : "chevron.forward")
-                                .foregroundStyle(palette.secondary).accessibilityHidden(true)
-                        }.frame(maxWidth: .infinity, minHeight: 44).contentShape(Rectangle())
+                    VStack(alignment: .leading, spacing: 0) {
+                        disclosureHeader(title: backup.text("title"), subtitle: backup.text("foldDescription"), label: backup.text("title"),
+                            open: backupOpen, id: "backup-disclosure") { backupOpen.toggle() }
+                        if backupOpen {
+                            VStack(alignment: .leading, spacing: 16) {
+                                Button { Task { await model.exportDataBackup() } } label: {
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(backup.text("exportLabel")).rnFont(15, .semibold)
+                                        Text(backup.text("description")).rnFont(13).foregroundStyle(palette.secondary)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                    }.multilineTextAlignment(.leading)
+                                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                                }
+                                .disabled(!model.backupExportEnabled)
+                                .accessibilityIdentifier("data-transfer-export")
+                                Button { Task { await model.exportDataBackup(format: .csv) } } label: {
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(backup.text("csvLabel")).rnFont(15, .semibold)
+                                        Text(backup.text("csvDescription")).rnFont(13).foregroundStyle(palette.secondary)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                    }.multilineTextAlignment(.leading)
+                                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                                }
+                                .disabled(!model.backupExportEnabled)
+                                .accessibilityIdentifier("data-transfer-export-csv")
+                                Button { Task { await model.exportDataBackup(format: .tasknotes) } } label: {
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(backup.text("tasknotesLabel")).rnFont(15, .semibold)
+                                        Text(backup.text("tasknotesDescription")).rnFont(13).foregroundStyle(palette.secondary)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                    }.multilineTextAlignment(.leading)
+                                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                                }
+                                .disabled(!model.backupExportEnabled)
+                                .accessibilityIdentifier("data-transfer-export-tasknotes")
+                                if model.backupExportBusy { ProgressView().accessibilityIdentifier("backup-export-progress") }
+                                if let failure = model.backupExportError {
+                                    Text(failure).rnFont(14).foregroundStyle(palette.danger)
+                                        .accessibilityIdentifier("backup-export-error")
+                                }
+                                backupTransferContent(backup)
+                                gettingStartedContent(backup.object("gettingStarted"))
+                            }
+                            .padding(16).overlay(alignment: .top) { palette.border.frame(height: 1) }
+                        }
                     }
-                    .accessibilityIdentifier("backup-disclosure")
-                    if backupOpen {
-                        Button { Task { await model.exportDataBackup() } } label: {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(backup.text("exportLabel")).rnFont(15, .semibold)
-                                Text(backup.text("description")).rnFont(13).foregroundStyle(palette.secondary)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }.multilineTextAlignment(.leading)
-                                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                        }
-                        .disabled(!model.backupExportEnabled)
-                        .accessibilityIdentifier("data-transfer-export")
-                        Button { Task { await model.exportDataBackup(format: .csv) } } label: {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(backup.text("csvLabel")).rnFont(15, .semibold)
-                                Text(backup.text("csvDescription")).rnFont(13).foregroundStyle(palette.secondary)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }.multilineTextAlignment(.leading)
-                                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                        }
-                        .disabled(!model.backupExportEnabled)
-                        .accessibilityIdentifier("data-transfer-export-csv")
-                        Button { Task { await model.exportDataBackup(format: .tasknotes) } } label: {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(backup.text("tasknotesLabel")).rnFont(15, .semibold)
-                                Text(backup.text("tasknotesDescription")).rnFont(13).foregroundStyle(palette.secondary)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }.multilineTextAlignment(.leading)
-                                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                        }
-                        .disabled(!model.backupExportEnabled)
-                        .accessibilityIdentifier("data-transfer-export-tasknotes")
-                        if model.backupExportBusy { ProgressView().accessibilityIdentifier("backup-export-progress") }
-                        if let failure = model.backupExportError {
-                            Text(failure).rnFont(14).foregroundStyle(palette.danger)
-                                .accessibilityIdentifier("backup-export-error")
-                        }
-                        backupTransferContent(backup)
-                        gettingStartedContent(backup.object("gettingStarted"))
-                    }
-                    Button { sandboxConfirm = true } label: {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(model.label("sandbox.open")).rnFont(15, .semibold)
-                            Text(model.label("sandbox.description")).rnFont(13).foregroundStyle(palette.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }.frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).multilineTextAlignment(.leading)
-                    }.disabled(!model.sandboxEntryEnabled || NativeAppModel.session.model !== model)
-                        .accessibilityIdentifier("sandbox-open")
+                    .background(palette.card, in: RoundedRectangle(cornerRadius: 12))
                 }
                 if owner == model.settingsDiagnosticsOwner, !model.archiveRetentionCard.isEmpty {
                     archiveRetentionContent
                 }
-                Text(model.diagnosticsLabels.text("title")).rnFont(18, .bold)
+                if owner == model.settingsDiagnosticsOwner {
+                    Button { sandboxConfirm = true } label: {
+                        HStack(spacing: 12) {
+                            AppIcon(name: "beaker", size: 22).foregroundStyle(palette.text)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(model.label("sandbox.open")).rnFont(17, .medium).foregroundStyle(palette.text)
+                                Text(model.label("sandbox.description")).rnFont(13).foregroundStyle(palette.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            AppIcon(name: "chevron", size: 18).rotationEffect(.degrees(-90)).foregroundStyle(palette.secondary)
+                        }
+                        .multilineTextAlignment(.leading).padding(16).frame(minHeight: 56)
+                        .background(palette.card, in: RoundedRectangle(cornerRadius: 12)).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain).disabled(!model.sandboxEntryEnabled || NativeAppModel.session.model !== model)
+                    .accessibilityIdentifier("sandbox-open")
+                }
+                Text(model.diagnosticsLabels.text("title")).rnFont(13, .semibold).textCase(.uppercase)
+                    .padding(.leading, 4).padding(.top, 8)
+                    .accessibilityLabel(model.diagnosticsLabels.text("title"))
                     .accessibilityAddTraits(.isHeader).accessibilityIdentifier("diagnostics-title")
-                if let analytics = model.diagnosticsLabels["analytics"] as? CoreObject {
-                    let confirm = analytics.object("confirm")
-                    Toggle(isOn: Binding(get: { analytics.flag("value") }, set: { optedOut in
-                        if optedOut { analyticsOptOutConfirm = true } else { Task { await model.setAnalyticsOptOut(false) } }
+                VStack(alignment: .leading, spacing: 0) {
+                    if let analytics = model.diagnosticsLabels["analytics"] as? CoreObject {
+                        let confirm = analytics.object("confirm")
+                        Toggle(isOn: Binding(get: { analytics.flag("value") }, set: { optedOut in
+                            if optedOut { analyticsOptOutConfirm = true } else { Task { await model.setAnalyticsOptOut(false) } }
+                        })) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(analytics.text("label")).rnFont(16, .medium)
+                                Text(analytics.text("description")).rnFont(13).foregroundStyle(palette.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                        .disabled(!model.diagnosticsToggleEnabled || owner != model.settingsDiagnosticsOwner)
+                        .padding(16)
+                        .accessibilityIdentifier("diagnostics-analytics-opt-out")
+                        .alert(confirm.text("title"), isPresented: $analyticsOptOutConfirm) {
+                            Button(confirm.text("keepLabel"), role: .cancel) {}
+                            Button(confirm.text("disableLabel")) { Task { await model.setAnalyticsOptOut(true) } }
+                        } message: {
+                            Text(confirm.text("message"))
+                        }
+                    }
+                    let logging = model.diagnosticsLabels.object("debugLogging")
+                    Toggle(isOn: Binding(get: { logging.flag("value") }, set: { value in
+                        Task { await model.setDiagnosticsDebugLogging(value) }
                     })) {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(analytics.text("label")).rnFont(15, .semibold)
-                            Text(analytics.text("description")).rnFont(13).foregroundStyle(palette.secondary)
+                            Text(logging.text("label")).rnFont(16, .medium)
+                            Text(logging.text("description")).rnFont(13).foregroundStyle(palette.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                     }
                     .disabled(!model.diagnosticsToggleEnabled || owner != model.settingsDiagnosticsOwner)
-                    .accessibilityIdentifier("diagnostics-analytics-opt-out")
-                    .alert(confirm.text("title"), isPresented: $analyticsOptOutConfirm) {
-                        Button(confirm.text("keepLabel"), role: .cancel) {}
-                        Button(confirm.text("disableLabel")) { Task { await model.setAnalyticsOptOut(true) } }
-                    } message: {
-                        Text(confirm.text("message"))
-                    }
-                }
-                let logging = model.diagnosticsLabels.object("debugLogging")
-                Toggle(isOn: Binding(get: { logging.flag("value") }, set: { value in
-                    Task { await model.setDiagnosticsDebugLogging(value) }
-                })) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(logging.text("label")).rnFont(15, .semibold)
-                        Text(logging.text("description")).rnFont(13).foregroundStyle(palette.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-                .disabled(!model.diagnosticsToggleEnabled || owner != model.settingsDiagnosticsOwner)
-                .accessibilityIdentifier("diagnostics-debug-logging")
-                if let share = model.diagnosticsLabels["shareLog"] as? CoreObject {
-                    Button { Task { await model.shareDiagnostics(owner: owner) } } label: {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(share.text("label")).rnFont(15, .semibold)
-                            Text(share.text("description")).rnFont(13).foregroundStyle(palette.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).contentShape(Rectangle())
-                    }
-                    .disabled(!model.diagnosticsFileActionsEnabled(owner: owner))
-                    .accessibilityIdentifier("diagnostics-share")
-                }
-                if let clear = model.diagnosticsLabels["clearLog"] as? CoreObject {
-                    Button { Task { await model.clearDiagnostics(owner: owner) } } label: {
-                        Text(clear.text("label")).rnFont(15, .semibold)
+                    .padding(16).overlay(alignment: .top) { if model.diagnosticsLabels["analytics"] is CoreObject { palette.border.frame(height: 1) } }
+                    .accessibilityIdentifier("diagnostics-debug-logging")
+                    if let share = model.diagnosticsLabels["shareLog"] as? CoreObject {
+                        Button { Task { await model.shareDiagnostics(owner: owner) } } label: {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(share.text("label")).rnFont(15, .semibold)
+                                Text(share.text("description")).rnFont(13).foregroundStyle(palette.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
                             .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).contentShape(Rectangle())
+                        }
+                        .disabled(!model.diagnosticsFileActionsEnabled(owner: owner))
+                        .padding(.horizontal, 16).padding(.vertical, 6).overlay(alignment: .top) { palette.border.frame(height: 1) }
+                        .accessibilityIdentifier("diagnostics-share")
                     }
-                    .disabled(!model.diagnosticsFileActionsEnabled(owner: owner))
-                    .accessibilityIdentifier("diagnostics-clear")
+                    if let clear = model.diagnosticsLabels["clearLog"] as? CoreObject {
+                        Button { Task { await model.clearDiagnostics(owner: owner) } } label: {
+                            Text(clear.text("label")).rnFont(15, .semibold)
+                                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).contentShape(Rectangle())
+                        }
+                        .disabled(!model.diagnosticsFileActionsEnabled(owner: owner))
+                        .padding(.horizontal, 16).overlay(alignment: .top) { palette.border.frame(height: 1) }
+                        .accessibilityIdentifier("diagnostics-clear")
+                    }
                 }
+                .background(palette.card, in: RoundedRectangle(cornerRadius: 12))
                 if let message = model.diagnosticsMessage {
                     Text(message).rnFont(14).fixedSize(horizontal: false, vertical: true)
                         .accessibilityIdentifier("diagnostics-message").accessibilityAddTraits(.updatesFrequently)
