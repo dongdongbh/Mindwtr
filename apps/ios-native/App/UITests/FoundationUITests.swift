@@ -8743,6 +8743,7 @@ final class FoundationUITests: XCTestCase {
         boardTap(app, "search-complete-" + taskID)
         expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: app.buttons["search-complete-" + taskID])
         waitForExpectations(timeout: 10)
+        boardTap(app, "reference-project-next-action-skip")
         replaceTextView(search, with: existingTitle)
         boardEnabled(app.buttons["search-task-" + selectedTaskID])
         boardTap(app, "search-complete-" + selectedTaskID)
@@ -9636,6 +9637,7 @@ final class FoundationUITests: XCTestCase {
         _ = revealTask(title + " changed")
         tap("task-status-" + taskID)
         tap("task-complete")
+        tap("reference-project-next-action-skip")
         enabled(app.buttons["review-start"])
         XCTAssertFalse(app.buttons[title + " changed"].exists)
     }
