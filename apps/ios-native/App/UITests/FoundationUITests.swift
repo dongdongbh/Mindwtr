@@ -8725,7 +8725,7 @@ final class FoundationUITests: XCTestCase {
         created.tap(); boardTap(app, "calendar-action-edit")
         let viewTitle = app.staticTexts.matching(identifier: "task-view-task-title").firstMatch
         XCTAssertTrue(viewTitle.waitForExistence(timeout: 10)); XCTAssertTrue(viewTitle.label.hasSuffix(title))
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@ AND label CONTAINS %@", "Project", project)).firstMatch.exists)
+        XCTAssertTrue(app.buttons["task-view-project-open"].label.contains(project))
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@ AND label CONTAINS %@", "Start Date", "2:00 PM")).firstMatch.exists)
         boardTap(app, "task-view-close")
         app.terminate(); app.launch(); openCalendar()
@@ -8735,7 +8735,7 @@ final class FoundationUITests: XCTestCase {
         boardEnabled(search); search.tap(); search.typeText(title)
         boardTap(app, "search-task-" + taskID)
         XCTAssertTrue(viewTitle.waitForExistence(timeout: 10)); XCTAssertTrue(viewTitle.label.hasSuffix(title))
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@ AND label CONTAINS %@", "Project", project)).firstMatch.exists)
+        XCTAssertTrue(app.buttons["task-view-project-open"].label.contains(project))
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@ AND label CONTAINS %@", "Start Date", "2:00 PM")).firstMatch.exists)
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Due Date")).firstMatch.exists)
         boardTap(app, "task-view-close")
@@ -15008,7 +15008,7 @@ final class FoundationUITests: XCTestCase {
         waitForExpectations(timeout: 15)
         boardTap(app, "projects-manage-areas")
         boardEnabled(name)
-        XCTAssertTrue(app.staticTexts["Native Area Green"].exists)
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "area-rename-open-", "Native Area Green")).firstMatch.exists)
         revealPagedElement(app, green, in: scroll)
         XCTAssertTrue(green.isSelected, "RN retains the selected creation color")
         revealPagedElement(app, name, in: scroll)
@@ -15040,8 +15040,8 @@ final class FoundationUITests: XCTestCase {
         boardEnabled(app.buttons[projectID])
         boardTap(app, "projects-manage-areas")
         boardEnabled(name)
-        XCTAssertTrue(app.staticTexts["Native Area Green"].exists)
-        XCTAssertFalse(app.staticTexts["Cancelled Area"].exists)
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "area-rename-open-", "Native Area Green")).firstMatch.exists)
+        XCTAssertFalse(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "area-rename-open-", "Cancelled Area")).firstMatch.exists)
         boardTap(app, "area-manager-close")
     }
 
