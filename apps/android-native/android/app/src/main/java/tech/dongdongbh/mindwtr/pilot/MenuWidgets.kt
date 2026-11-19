@@ -495,7 +495,7 @@ fun MenuDialogs(model: InboxViewModel) = with(model.menu) {
         "move" -> MoveDialog(model, open)
         "newSection", "addTask", "contextsSave" -> CreateDialog(model, open)
         "tokens" -> TokenPicker(model, open)
-        "startReview", "reviewMove", "reviewTag" -> ReviewDialog(model, open)
+        "startReview", "reviewScope", "reviewMove", "reviewTag" -> ReviewDialog(model, open)
         "projectTask" -> ProjectTaskPrompt(model, open)
         WEEKLY_COMPLETE_DIALOG -> WeeklyProjectCompletePrompt(model, open)
         "confirm" -> AlertDialog(

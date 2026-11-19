@@ -2097,6 +2097,7 @@ for (const name of labelKeys) assert(enKeys.has(name), `LABEL_KEYS: ${name} is n
         'ProjectDetails.kt: t(key)': [4, kotlinLiterals],
         'ProjectsScreen.kt: ::t': [1, kotlinLiterals],
         'ProjectsScreen.kt: t(heading)': [1, kotlinLiterals],
+        'ReviewScreen.kt: t(helpKey)': [1, kotlinLiterals],
         'TaskEditor.kt: ::t': [4, kotlinLiterals],
         'TaskEditor.kt: t("energyLevel.$it")': [1, energyKeys],
         'TaskEditor.kt: t("priority.$it")': [1, priorityKeys],
@@ -3962,7 +3963,8 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     assert.throws(() => checkDiagnosticFields('diagnosticsLog.append({ extra: { outcome: "lost" } });'));
     assert.throws(() => checkDiagnosticFields('diagnosticsLog.append({ message, extra });'));
     checkDiagnosticFields(hostEntry);
-    assert.match(hostEntry, /^\s+dataSettings: \(\) => contract\.getDataSettings\(\),$/m);
+    assert.match(hostEntry, /^\s+dataSettings: \(input\) => contract\.getDataSettings\(input\),$/m);
+    assert.match(source('SettingsModel.kt'), /screen == "data" -> "dataSettings" to JSONObject\(\)\.put\("archiveRetentionGuide", true\)/, 'only Android asks for the archive retention guide; the iOS data settings keys stay exact');
     assert.match(hostEntry, /^\s+dataSetting: \(input\) => contract\.setDataSetting\(input\),$/m);
 
 

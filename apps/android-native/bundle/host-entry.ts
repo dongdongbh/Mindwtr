@@ -1545,7 +1545,7 @@ const MENU_READS: Record<string, (input: never) => Reply> = {
             : { ok: false, error: { code: 'INVALID_INPUT', message: 'A bounded Person name is required' } };
     },
     somedaySections: (input) => contract.getSomedaySections(input),
-    dataSettings: () => contract.getDataSettings(),
+    dataSettings: (input) => contract.getDataSettings(input),
 
     archiveRetentionReview: (input) => contract.getArchiveRetentionReview(input),
 

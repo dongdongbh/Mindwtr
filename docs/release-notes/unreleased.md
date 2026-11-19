@@ -13,6 +13,7 @@ Changes collected since the latest stable release.
 - Mobile Dropbox: Disconnect during a sync now stays disconnected. Before, a token refresh still running at that moment saved the sign-in back, so Settings showed Dropbox as Connected again.
 - Mobile Dropbox: Disconnect now also revokes the app's access at Dropbox when the saved access token has expired. Before, the revoke failed quietly and the sign-in stayed valid at Dropbox.
 - Mobile voice capture: on-device Whisper now detects the spoken language when Settings › AI is set to Auto, and uses the language you picked otherwise. Before, it always transcribed as English. English-only (`.en`) models always use English.
+- Mobile: Review and Data settings take less space. Review's "Due for review" / "All open tasks" choice is now one small button next to Start Review; its menu explains each queue and links to Done. Settings › Data › Archive retention starts folded, shows the current setting, and opens to a short description with a Learn more link.
 - Mobile task Preview: Mark Done saves the current draft and completes the task directly, retaining Retry if saving fails. (#1514)
 - Desktop: a project's Review date uses the same date field as Start and Due. It is empty until you set it, follows your date format, and closes when you click elsewhere. (#1556)
 - Desktop: project task titles use the shared task-row typography. The Area selector summarizes the active scope and provides a direct reset to all areas. (#1532, #1525)

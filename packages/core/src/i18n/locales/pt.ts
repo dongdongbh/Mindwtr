@@ -894,7 +894,7 @@ export const ptOverrides: Record<string, string> = {
         'review.scopeAll': 'Todas as tarefas abertas',
         'review.dueHelp': 'Lembretes de revisão vencidos. Tarefas sem data de revisão continuam na visão geral.',
         'review.overviewHelp': 'Navegue pelas tarefas abertas de todo o seu sistema.',
-        'review.dueEmpty': 'Nenhum lembrete de revisão vencido.',
+        'review.dueEmpty': 'Nenhum lembrete de revisão vencido. Tarefas sem data de revisão estão em Todas as tarefas abertas.',
         'review.overviewEmpty': 'Nenhuma tarefa aberta para revisar.',
         'process.title': 'Item de processo',
         'process.refineTitle': 'Refinar a tarefa',

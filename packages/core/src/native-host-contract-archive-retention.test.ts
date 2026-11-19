@@ -175,6 +175,14 @@ describe('native host contract: separate Archive retention card', () => {
             saveFailed: t('settings.archiveRetentionSaveFailed'),
         });
         expect(Object.keys(value(host.getDataSettings())).sort()).toEqual(['archiveRetention', 'backup', 'diagnostics', 'importData', 'revision', 'title', 'version']);
+        expect(Object.keys(value(host.getDataSettings({}))).sort()).toEqual(['archiveRetention', 'backup', 'diagnostics', 'importData', 'revision', 'title', 'version']);
+        expect(value(host.getDataSettings({ archiveRetentionGuide: true })).archiveRetentionGuide).toEqual({
+            title: t('settings.archiveRetentionLearnMore'), description: t('settings.archiveRetention'),
+            url: 'https://docs.mindwtr.app/data-sync/data-lifecycle',
+        });
+        for (const input of [null, [], { archiveRetentionGuide: false }, { archiveRetentionGuide: true, extra: 1 }]) {
+            expect(host.getDataSettings(input as never)).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+        }
         const on = value((await openHost({ gtd: { archiveRetentionDays: 45 } })).host.getArchiveRetentionOptions()).card;
         expect([on.days, on.current]).toEqual([45, `${t('settings.archiveRetentionCurrent')}: 45 days`]);
     });

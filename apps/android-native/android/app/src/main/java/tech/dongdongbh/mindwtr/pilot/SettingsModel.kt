@@ -216,7 +216,7 @@ class SettingsModel(private val menu: MenuModel, private val saved: SavedStateHa
             .put("updateAvailable", runCatching { shell.coreHost()?.rnValue(UPDATE_AVAILABLE_KEY) == "true" }.getOrDefault(false))
         screen == "general" -> "generalSettings" to JSONObject().put("deviceTheme", prefs.getString(THEME_KEY, null) ?: JSONObject.NULL)
         screen == "manage" -> "manageSettings" to JSONObject().put("openSections", prefs.getString(MANAGE_SECTIONS_KEY, null) ?: JSONObject.NULL)
-        screen == "data" -> "dataSettings" to JSONObject()
+        screen == "data" -> "dataSettings" to JSONObject().put("archiveRetentionGuide", true)
         screen == "notifications" -> "notificationsSettings" to JSONObject()
         else -> "gtdSettings" to JSONObject().put("taskOpenMode", prefs.getString(TASK_OPEN_MODE_KEY, null) ?: JSONObject.NULL)
     }

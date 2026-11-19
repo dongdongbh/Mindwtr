@@ -152,8 +152,15 @@ const syncOff = async () => {
     }
 };
 const current = (days) => `${en['settings.archiveRetentionCurrent']}: ${days > 0 ? en['settings.archiveRetentionDays'].replace('{days}', String(days)) : en['settings.archiveRetentionNever']}`;
+const openArchive = async () => {
+    await openData();
+    const shown = (nodes) => Boolean(tagged(nodes, 'archive-retention-guide-link'));
+    const header = await reveal((next) => tagged(next, 'archive-retention-disclosure'), 'Archive retention');
+    const nodes = await screen();
+    return shown(nodes) ? nodes : tapExpecting(header, shown, 'the open Archive retention card');
+};
 const setNever = async () => {
-    const nodes = await openData();
+    const nodes = await openArchive();
     await reveal((next) => tagged(next, 'archive-retention-never'), 'Never');
     if (nodes.some((node) => node.text === current(0)) || (await screen()).some((node) => node.text === current(0))) return;
     await tapTag('archive-retention-never', (next) => next.some((node) => node.text === current(0)), 'Archive retention Never');
@@ -227,7 +234,7 @@ try {
     check(rows[OLD.id].status === 'archived' && rows[RECENT.id].status === 'archived', '(1) Sync now brought both archived tasks to the phone');
 
 
-    await openData();
+    await openArchive();
     await fill('archive-retention-days', String(DAYS));
     await hideKeyboard();
     nodes = await tapTag('archive-retention-save', (next) => Boolean(tagged(next, 'archive-retention-review')), 'Save and its review', 60_000);

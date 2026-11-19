@@ -151,6 +151,14 @@ export function buildArchiveRetentionCard(settings: AppSettings, t: Translate): 
 }
 
 
+export type DataSettingsGuide = { title: string; description: string; url: string };
+
+export const buildArchiveRetentionGuide = (t: Translate, language = 'en'): DataSettingsGuide => ({
+    title: t('settings.archiveRetentionLearnMore'),
+    description: t('settings.archiveRetention'),
+    url: getDocsGuideUrl('data-sync/data-lifecycle', language),
+});
+
 export type ArchiveRetentionReview = {
     days: number; title: string; description: string; counts: string; legacy: string; heading: string; lines: string[];
     cancel: string; confirm: string; edit: DataSettingsEdit;

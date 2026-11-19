@@ -432,7 +432,7 @@ private fun DataSettings(model: InboxViewModel, view: JSONObject) = with(model.m
     OnboardingHandoffCard(model)
     BackupCard(model, view.getJSONObject("backup"))
     ImportCard(model, view.getJSONObject("importData"))
-    ArchiveRetentionCard(model, view.getJSONObject("archiveRetention"))
+    ArchiveRetentionCard(model, view.getJSONObject("archiveRetention"), view.getJSONObject("archiveRetentionGuide"))
     val diagnostics = view.getJSONObject("diagnostics")
     SectionTitle(diagnostics.getString("title"), top = 24, color = c.text)
     Card {
@@ -458,7 +458,7 @@ private fun DataSettings(model: InboxViewModel, view: JSONObject) = with(model.m
 
 
 @Composable
-private fun ArchiveRetentionCard(model: InboxViewModel, card: JSONObject) = with(model.menu) {
+private fun ArchiveRetentionCard(model: InboxViewModel, card: JSONObject, guide: JSONObject) = with(model.menu) {
     val c = LocalTheme.current.colors
     val days = card.getInt("days")
     var draft by rememberSaveable(days) { mutableStateOf(if (days > 0) "$days" else "") }
@@ -469,12 +469,25 @@ private fun ArchiveRetentionCard(model: InboxViewModel, card: JSONObject) = with
     val never = card.getJSONObject("never")
     val shape = RoundedCornerShape(8.dp)
     val focus = LocalFocusManager.current
+    val open = settings.local.optBoolean("archiveOpen")
+    val toggle = { settings.editLocal { put("archiveOpen", !open) } }
+    val title = card.getString("title")
+    val current = card.getString("current")
     Card(top = 16) {
-        Column(Modifier.padding(16.dp)) {
-            Text(card.getString("title"), style = rnText(16, 500, 21), color = c.text)
-            Text(card.getString("description"), style = rnText(13, 400, 18), color = c.secondaryText, modifier = Modifier.padding(top = 8.dp))
+        Row(Modifier.fillMaxWidth().heightIn(min = 56.dp)
+            .clearAndSetSemantics { contentDescription = "$title, $current"; role = Role.Button; testTag = "archive-retention-disclosure"
+                onClick { toggle(); true }; if (open) collapse { toggle(); true } else expand { toggle(); true } }
+            .clickable(onClick = toggle).padding(horizontal = 16.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f).padding(end = 28.dp)) {
+                Text(title, style = rnText(16, 500, 21), color = c.text)
+                Text(current, style = rnText(13, 400, 18), color = c.secondaryText, modifier = Modifier.padding(top = 2.dp).testTag("archive-retention-current"))
+            }
+            Icon(if (open) SettingsIonicons.ChevronUp else SettingsIonicons.ChevronDown, null, tint = c.secondaryText, modifier = Modifier.size(18.dp))
+        }
+        if (open) Column(Modifier.fillMaxWidth().rnBorderTop(c.border).padding(16.dp)) {
+            Text(card.getString("description"), style = rnText(13, 400, 18), color = c.secondaryText)
             Text(card.getString("safety"), style = rnText(13, 400, 18), color = c.secondaryText, modifier = Modifier.padding(top = 8.dp))
-            Text(card.getString("current"), style = rnText(16, 500, 21), color = c.text, modifier = Modifier.padding(top = 12.dp))
+            Box(Modifier.padding(top = 8.dp)) { GuideLink(guide, "archive-retention-guide-link", bottom = 0) }
             val label = card.getString("daysLabel")
             Text(label, style = rnText(13, 400, 18), color = c.secondaryText, modifier = Modifier.padding(top = 12.dp))
             BasicTextField(draft, { draft = it; settings.archiveSaveFailed(false) }, singleLine = true, cursorBrush = SolidColor(c.tint), textStyle = rnText(14, 400).copy(color = c.text),

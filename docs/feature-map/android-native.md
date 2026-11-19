@@ -270,8 +270,8 @@ The native client is a Kotlin and Jetpack Compose app in `apps/android-native`. 
 
 ## Review, Weekly Review, and Daily Review
 
-- Reach: Tab bar › Review (the default quick-access tab) › Start Review › Weekly or Daily. Rows due for review have Mark reviewed and Review in 1 week.
-- Selectors: `review-list`, `weekly-review`, `daily-review`, `review-step-indicator`, `review-step-title`, `review-step-scroll`, `review-complete-project-prompt`, `review-share-card-button`, `share-card`, `share-card-preview`, `share-card-style-` (+ reflection, minimal or ripple), `share-card-reflection`, `share-card-export`, `share-card-close`
+- Reach: Tab bar › Review (the default quick-access tab) › Start Review › Weekly or Daily. Rows due for review have Mark reviewed and Review in 1 week. The toolbar row has Expand, the scope chip, and Start Review, as RN; the chip opens a menu with Due for review, All open tasks (each with its one-line meaning), and Done.
+- Selectors: `review-list`, `review-scope`, `review-scope-` (+ due or all), `review-scope-done`, `weekly-review`, `daily-review`, `review-step-indicator`, `review-step-title`, `review-step-scroll`, `review-complete-project-prompt`, `review-share-card-button`, `share-card`, `share-card-preview`, `share-card-style-` (+ reflection, minimal or ripple), `share-card-reflection`, `share-card-export`, `share-card-close`
 - Code: `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/ReviewScreen.kt`, `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/ReviewOrganize.kt`, `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/WeeklyReviewScreen.kt`, `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/DailyReviewScreen.kt`, `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/ShareCard.kt`, `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/ShareCardSvg.kt`, `apps/android-native/bundle/host-share-card.ts`
 - Checks: `apps/android-native/scripts/check-review-device.mjs`, `apps/android-native/scripts/check-review-organize-device.mjs`, `apps/android-native/scripts/check-weekly-complete-device.mjs`, `apps/android-native/bundle/host-share-card.test.ts`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/ShareCardSvgTest.kt`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/ShareCardStateTest.kt`, `packages/core/src/native-host-contract-review-organize.test.ts`
 - Notes: Close keeps the review step on the device, and Finish deletes it. Organize on Review sends the task revisions it showed, so a stale write is refused. In Weekly Review's Projects step, an open project card has Complete under Open project; it asks first while the project has unfinished tasks, and the step stays after the last project is completed.
@@ -455,11 +455,12 @@ The native client is a Kotlin and Jetpack Compose app in `apps/android-native`. 
 
 ## Archive retention
 
-- Reach: Settings › Data › Archive retention. Pick days or Never, then Save, review, and Apply or Cancel.
-- Selectors: `archive-retention-days`, `archive-retention-never`, `archive-retention-save`, `archive-retention-review`, `archive-retention-apply`, `archive-retention-cancel`, `archive-retention-save-failed`
+- Reach: Settings › Data › Archive retention. The card is folded, as RN; its subtitle shows the current setting. Open it, pick days or Never, then Save, review, and Apply or Cancel. Learn more opens docs.mindwtr.app data lifecycle in the app language.
+- Selectors: `archive-retention-disclosure`, `archive-retention-current`, `archive-retention-guide-link`, `archive-retention-days`, `archive-retention-never`, `archive-retention-save`, `archive-retention-review`, `archive-retention-apply`, `archive-retention-cancel`, `archive-retention-save-failed`
 - Code: `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/SettingsScreen.kt`
 - Checks: `apps/android-native/scripts/check-archive-retention-device.mjs`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/ArchiveRetentionRunTest.kt`
 - Notes: Apply stores the days and removes nothing by itself. The purge runs later, only after a sync in that session.
+- Notes: Only Android asks the `dataSettings` read for `archiveRetentionGuide`; without the flag the read keeps the exact keys native iOS checks.
 
 ## Diagnostics log
 

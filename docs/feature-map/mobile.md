@@ -224,7 +224,8 @@ Source: `apps/mobile`. Routes live in `apps/mobile/app` (expo-router). Labels be
 
 ## Review screen
 
-- Reach: Review tab. Toggle "Due for review" or "All open tasks". Start Review opens a picker: Daily Review or Weekly Review.
+- Reach: Review tab. The toolbar row has Expand, the scope chip, and Start Review. Tap the scope chip ("Due for review" or "All open tasks") for a menu with both queues, each with its one-line meaning, and Done (completed tasks). Start Review opens a picker: Daily Review or Weekly Review.
+- Notes: The scope chip hides while rows are selected. The empty Due queue says where tasks without a review date are.
 - Shortcuts: "Review in 1 week" on a row. Long press a row for bulk selection.
 - Code: `apps/mobile/app/(drawer)/review.tsx`, `apps/mobile/app/(drawer)/(tabs)/review-tab.tsx`
 - Checks: `apps/mobile/app/(drawer)/review.parity.test.tsx`, `apps/mobile/tests/review-screen-bulk-organize.test.tsx`
@@ -332,8 +333,8 @@ Source: `apps/mobile`. Routes live in `apps/mobile/app` (expo-router). Labels be
 
 ## Settings › Data (backup, import, export, diagnostics)
 
-- Reach: Settings › Data › Backup: Export Backup, Export CSV, Export as TaskNotes, Merge Backup, Restore Backup, and Import from Todoist, TickTick, OmniFocus, DGT GTD, Mindwtr CSV. Below: Apple Reminders import (iOS), archive retention, Open sandbox, Diagnostics.
-- Selectors: `backup-disclosure`, `data-transfer-export`, `data-transfer-export-csv`, `data-transfer-export-tasknotes`, `data-transfer-merge`, `data-transfer-restore`, `import-disclosure`, `data-transfer-import-todoist`, `data-transfer-import-ticktick`, `data-transfer-import-omnifocus`, `data-transfer-import-dgt`, `data-transfer-import-mindwtr-csv`, `import-guide-link`, `add-getting-started-content`, `sync-encryption-diagnostics-disclosure`, `apple-reminders-import-row`, `apple-reminders-list-row`, `apple-reminders-auto-import-switch`, `apple-reminders-delete-switch`
+- Reach: Settings › Data › Backup: Export Backup, Export CSV, Export as TaskNotes, Merge Backup, Restore Backup, and Import from Todoist, TickTick, OmniFocus, DGT GTD, Mindwtr CSV. Below: Apple Reminders import (iOS), Archive retention (a folded card whose subtitle shows the current setting; open it for a short description, Learn more to docs.mindwtr.app data lifecycle, the days field, Save, and Never), Open sandbox, Diagnostics.
+- Selectors: `backup-disclosure`, `data-transfer-export`, `data-transfer-export-csv`, `data-transfer-export-tasknotes`, `data-transfer-merge`, `data-transfer-restore`, `import-disclosure`, `data-transfer-import-todoist`, `data-transfer-import-ticktick`, `data-transfer-import-omnifocus`, `data-transfer-import-dgt`, `data-transfer-import-mindwtr-csv`, `import-guide-link`, `add-getting-started-content`, `sync-encryption-diagnostics-disclosure`, `apple-reminders-import-row`, `apple-reminders-list-row`, `apple-reminders-auto-import-switch`, `apple-reminders-delete-switch`, `archive-retention-disclosure`, `archive-retention-guide-link`
 - Code: `apps/mobile/components/settings/sync-settings-sections.tsx`, `apps/mobile/components/settings/use-sync-settings-backup-actions.ts`, `apps/mobile/lib/data-transfer.ts`, `apps/mobile/components/settings/apple-reminders-import-section.tsx`, `apps/mobile/components/settings/archive-retention-section.tsx`
 - Checks: `apps/mobile/components/settings/sync-settings-sections.test.tsx`, `apps/mobile/components/settings/use-sync-settings-backup-actions.test.tsx`, `apps/mobile/components/settings/sync-diagnostics-card.parity.test.tsx`, `apps/mobile/components/settings/apple-reminders-import-section.test.tsx`, `apps/mobile/components/settings/archive-retention-section.test.tsx`
 - Notes: The Data and Sync screens share one component; the `mode` prop picks the sections.

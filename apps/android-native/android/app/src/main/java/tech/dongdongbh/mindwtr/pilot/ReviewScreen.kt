@@ -62,45 +62,25 @@ fun ReviewList(model: InboxViewModel) = with(model.menu) {
     val bulk = view.optJSONObject("bulk")
     val selected = bulk?.optJSONArray("selectedIds").ids()
     val scope = view.optJSONObject("scope")
-    val due = scope?.optString("selected") == "due"
     BackHandler(enabled = bulk != null && dialog == null && model.failedAction == null) { endSelection(); reload() }
     LazyColumn(Modifier.fillMaxSize().testTag("review-list"), contentPadding = PaddingValues(bottom = 16.dp)) {
-        scope?.let {
-            item(key = "scope") {
-                FlowRow(Modifier.fillMaxWidth().rnBorderBottom(c.border).padding(12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    for (option in it.menuObjects("options")) {
-                        val on = option.getString("id") == it.getString("selected")
-                        Box(Modifier.heightIn(min = 44.dp).clip(RoundedCornerShape(8.dp)).background(if (on) c.tint else c.filterBg)
-                            .selectable(selected = on, enabled = idle, role = Role.Button) { if (!on) reviewScope(option.getString("id")) }
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
-                            contentAlignment = Alignment.Center) {
-                            Text(option.getString("label"), style = rnText(14, 400), color = if (on) c.onTint else c.text)
-                        }
-                    }
-
-                    if (!due) Box(Modifier.heightIn(min = 44.dp).widthIn(min = 44.dp).clickable(enabled = idle, role = Role.Button) { openRoute("/done") }
-                        .semantics { contentDescription = "${t("nav.done")} ${t("common.tasks")}" }, contentAlignment = Alignment.Center) {
-                        Text(t("nav.done"), style = rnText(14, 400), color = c.tint)
-                    }
-                    Text(it.getString("help"), style = rnText(12, 400), color = c.secondaryText, modifier = Modifier.fillMaxWidth())
-                }
-            }
-        }
         if (bulk == null) item(key = "actions") {
-            Row(Modifier.fillMaxWidth().background(c.cardBg).rnBorderBottom(c.border).padding(horizontal = 16.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+            FlowRow(Modifier.fillMaxWidth().background(c.cardBg).rnBorderBottom(c.border).padding(horizontal = 16.dp, vertical = 10.dp),
+                horizontalArrangement = Arrangement.SpaceBetween, verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 val expansion = view.getJSONObject("expansion")
                 val off = expansion.getBoolean("disabled")
                 val shape = RoundedCornerShape(10.dp)
                 val label = expansion.getString("label")
-                Box(Modifier.fade(if (off) 0.45f else 1f).size(42.dp).clip(shape).background(c.filterBg).rnBorder(1.dp, c.border, shape)
-                    .clickable(enabled = idle && !off, role = Role.Button) { reviewExpansion(JSONObject().put("type", "cycle")) }
-                    .semantics { contentDescription = label }, contentAlignment = Alignment.Center) {
-                    Icon(if (expansion.getBoolean("allExpanded")) Lucide.ChevronsUp else Lucide.ChevronsDown, null, tint = c.secondaryText, modifier = Modifier.size(20.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.fade(if (off) 0.45f else 1f).size(42.dp).clip(shape).background(c.filterBg).rnBorder(1.dp, c.border, shape)
+                        .clickable(enabled = idle && !off, role = Role.Button) { reviewExpansion(JSONObject().put("type", "cycle")) }
+                        .semantics { contentDescription = label }, contentAlignment = Alignment.Center) {
+                        Icon(if (expansion.getBoolean("allExpanded")) Lucide.ChevronsUp else Lucide.ChevronsDown, null, tint = c.secondaryText, modifier = Modifier.size(20.dp))
+                    }
+                    scope?.let { ReviewScopeChip(it, idle) { openDialog("reviewScope") } }
                 }
                 val start = view.getJSONObject("startReview")
-                Box(Modifier.widthIn(min = 152.dp).heightIn(min = 42.dp).clip(shape).background(theme.filledBg)
+                Box(Modifier.widthIn(min = 128.dp).heightIn(min = 42.dp).clip(shape).background(theme.filledBg)
                     .clickable(enabled = idle, role = Role.Button) { openDialog("startReview") }.padding(horizontal = 16.dp), contentAlignment = Alignment.Center) {
                     Text(start.getString("label"), style = rnText(15, 800), color = theme.filledText, textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 }
@@ -267,6 +247,34 @@ fun ReviewDialog(model: InboxViewModel, open: JSONObject) = with(model.menu) {
                         }
                     }
                 }
+                "reviewScope" -> {
+                    val scope = view.optJSONObject("scope") ?: return@Column
+                    cancel = view.getJSONObject("startReview").getString("cancelLabel")
+                    for (option in scope.menuObjects("options")) {
+                        val id = option.getString("id")
+                        val on = id == scope.getString("selected")
+                        val helpKey = if (id == "due") "review.dueHelp" else "review.overviewHelp"
+                        val shape = RoundedCornerShape(10.dp)
+                        Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).clip(shape).background(c.filterBg).rnBorder(1.dp, if (on) c.tint else c.border, shape)
+                            .selectable(selected = on, enabled = idle, role = Role.RadioButton) { keepDialog(null); if (!on) reviewScope(id) }
+                            .padding(12.dp).testTag("review-scope-$id"), verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Text(option.getString("label"), style = rnText(15, 700), color = c.text)
+                                Text(t(helpKey), style = rnText(12, 400), color = c.secondaryText)
+                            }
+                            if (on) Icon(Lucide.Check, null, tint = c.tint, modifier = Modifier.size(18.dp))
+                        }
+                    }
+                    val shape = RoundedCornerShape(10.dp)
+                    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).clip(shape).background(c.filterBg).rnBorder(1.dp, c.border, shape)
+                        .clearAndSetSemantics { contentDescription = "${t("nav.done")} ${t("common.tasks")}"; role = Role.Button; testTag = "review-scope-done"
+                            onClick { keepDialog(null); openRoute("/done"); true } }
+                        .clickable(enabled = idle, role = Role.Button) { keepDialog(null); openRoute("/done") }.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically) {
+                        Text(t("nav.done"), style = rnText(15, 700), color = c.text, modifier = Modifier.weight(1f))
+                        Icon(Lucide.ChevronRight, null, tint = c.secondaryText, modifier = Modifier.size(18.dp))
+                    }
+                }
                 "reviewMove" -> {
                     val move = bulk ?: return@Column
                     cancel = move.getString("cancelLabel")
@@ -313,6 +321,21 @@ fun ReviewDialog(model: InboxViewModel, open: JSONObject) = with(model.menu) {
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun ReviewScopeChip(scope: JSONObject, enabled: Boolean, open: () -> Unit) {
+    val c = LocalTheme.current.colors
+    val shape = RoundedCornerShape(10.dp)
+    val label = scope.menuObjects("options").firstOrNull { it.getString("id") == scope.getString("selected") }?.getString("label").orEmpty()
+    val help = scope.getString("help")
+    Row(Modifier.heightIn(min = 42.dp).clip(shape).background(c.filterBg).rnBorder(1.dp, c.border, shape)
+        .clickable(enabled = enabled, role = Role.Button, onClick = open)
+        .clearAndSetSemantics { contentDescription = "$label, $help"; role = Role.Button; testTag = "review-scope"; if (enabled) onClick { open(); true } else disabled() }
+        .padding(horizontal = 10.dp), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(label, style = rnText(14, 600), color = c.text)
+        Icon(Lucide.ChevronDown, null, tint = c.secondaryText, modifier = Modifier.size(16.dp))
     }
 }
 

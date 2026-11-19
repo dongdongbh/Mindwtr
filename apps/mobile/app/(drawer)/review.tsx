@@ -28,7 +28,7 @@ import { useFilledButtonColors } from '@/hooks/use-filled-button-colors';
 import { openContextsScreen, openProjectScreen } from '@/lib/task-meta-navigation';
 import { ReviewModal } from '../../components/review-modal';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ChevronDown, ChevronRight, ChevronsDown, ChevronsUp } from 'lucide-react-native';
+import { Check, ChevronDown, ChevronRight, ChevronsDown, ChevronsUp } from 'lucide-react-native';
 import { logError } from '../../lib/app-log';
 import { useToast } from '../../contexts/toast-context';
 
@@ -58,6 +58,7 @@ export default function ReviewScreen() {
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [showReviewModal, setShowReviewModal] = useState(false);
   const [reviewPickerVisible, setReviewPickerVisible] = useState(false);
+  const [scopePickerVisible, setScopePickerVisible] = useState(false);
   const [moveModalVisible, setMoveModalVisible] = useState(false);
   const [bulkOrganizeVisible, setBulkOrganizeVisible] = useState(false);
   const [expandedLaterProjectIds, setExpandedLaterProjectIds] = useState<Set<string>>(new Set());
@@ -136,7 +137,7 @@ export default function ReviewScreen() {
     toggleMultiSelect,
   } = useTaskListSelection({
 
-    backExitsSelection: !(isModalVisible || moveModalVisible || bulkOrganizeVisible || showReviewModal || reviewPickerVisible),
+    backExitsSelection: !(isModalVisible || moveModalVisible || bulkOrganizeVisible || showReviewModal || reviewPickerVisible || scopePickerVisible),
     batchDeleteTasks,
     batchMoveTasks,
     batchUpdateTasks,
@@ -284,42 +285,44 @@ export default function ReviewScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: tc.bg }]}>
-      <View style={[styles.scopeBar, { borderBottomColor: tc.border }]}>
-        {(['due', 'all'] as const).map((choice) => <TouchableOpacity
-          key={choice}
-          accessibilityRole="button"
-          accessibilityState={{ selected: scope === choice }}
-          onPress={() => { if (choice !== scope) { exitSelectionMode(); setScope(choice); } }}
-          style={[styles.scopeButton, { backgroundColor: scope === choice ? tc.tint : tc.filterBg }]}
-        ><Text style={{ color: scope === choice ? tc.onTint : tc.text }}>{choice === 'due' ? text.scopeDue : text.scopeAll}</Text></TouchableOpacity>)}
-        <Text style={[styles.scopeHelp, { color: tc.secondaryText }]}>{scope === 'due' ? text.dueHelp : text.overviewHelp}</Text>
-        {scope === 'all' && <TouchableOpacity accessibilityRole="button" accessibilityLabel={`${t('nav.done')} ${t('common.tasks')}`} onPress={() => router.push('/history')} style={styles.reviewTaskActionButton}><Text style={{ color: tc.tint }}>{t('nav.done')}</Text></TouchableOpacity>}
-      </View>
       {reviewSavePending && <TouchableOpacity accessibilityRole="button" accessibilityLabel={t('common.retry')} disabled={reviewWriteBusy} onPress={() => { void retryReviewSave(); }} style={styles.retryButton}>
         <Text style={{ color: tc.danger }}>{t('common.retry')}</Text>
       </TouchableOpacity>}
       {!selectionMode && (
         <View style={[styles.reviewActionBar, { backgroundColor: tc.cardBg, borderBottomColor: tc.border }]}>
-          <TouchableOpacity
-            accessibilityRole="button"
-            accessibilityLabel={expansionControl.label}
-            accessibilityState={{ disabled: expansionControl.disabled }}
-            style={[
-              styles.reviewExpansionButton,
-              {
-                backgroundColor: tc.filterBg,
-                borderColor: tc.border,
-                opacity: expansionControl.disabled ? 0.45 : 1,
-              },
-            ]}
-            onPress={cycleReviewExpansion}
-            disabled={expansionControl.disabled}
-            activeOpacity={0.75}
-          >
-            {expansionControl.allExpanded
-              ? <ChevronsUp size={20} color={tc.secondaryText} strokeWidth={2.4} />
-              : <ChevronsDown size={20} color={tc.secondaryText} strokeWidth={2.4} />}
-          </TouchableOpacity>
+          <View style={styles.reviewActionLeading}>
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel={expansionControl.label}
+              accessibilityState={{ disabled: expansionControl.disabled }}
+              style={[
+                styles.reviewExpansionButton,
+                {
+                  backgroundColor: tc.filterBg,
+                  borderColor: tc.border,
+                  opacity: expansionControl.disabled ? 0.45 : 1,
+                },
+              ]}
+              onPress={cycleReviewExpansion}
+              disabled={expansionControl.disabled}
+              activeOpacity={0.75}
+            >
+              {expansionControl.allExpanded
+                ? <ChevronsUp size={20} color={tc.secondaryText} strokeWidth={2.4} />
+                : <ChevronsDown size={20} color={tc.secondaryText} strokeWidth={2.4} />}
+            </TouchableOpacity>
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel={scope === 'due' ? text.scopeDue : text.scopeAll}
+              accessibilityHint={scope === 'due' ? text.dueHelp : text.overviewHelp}
+              onPress={() => setScopePickerVisible(true)}
+              style={[styles.scopeChip, { backgroundColor: tc.filterBg, borderColor: tc.border }]}
+              activeOpacity={0.75}
+            >
+              <Text style={[styles.scopeChipText, { color: tc.text }]}>{scope === 'due' ? text.scopeDue : text.scopeAll}</Text>
+              <ChevronDown size={16} color={tc.secondaryText} strokeWidth={2.4} />
+            </TouchableOpacity>
+          </View>
           <TouchableOpacity
             style={[styles.startReviewButton, { backgroundColor: filledButton.backgroundColor }]}
             onPress={() => setReviewPickerVisible(true)}
@@ -597,6 +600,59 @@ export default function ReviewScreen() {
       </Modal>
 
       <Modal
+        visible={scopePickerVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setScopePickerVisible(false)}
+      >
+        <Pressable style={styles.modalOverlay} onPress={() => setScopePickerVisible(false)}>
+          <Pressable
+            style={[styles.modalCard, { backgroundColor: tc.cardBg }]}
+            onPress={(e) => e.stopPropagation()}
+          >
+            {(['due', 'all'] as const).map((choice) => (
+              <TouchableOpacity
+                key={choice}
+                accessibilityRole="radio"
+                accessibilityState={{ selected: scope === choice }}
+                onPress={() => {
+                  setScopePickerVisible(false);
+                  if (choice !== scope) { exitSelectionMode(); setScope(choice); }
+                }}
+                style={[styles.reviewPickerOption, { backgroundColor: tc.filterBg, borderColor: scope === choice ? tc.tint : tc.border }]}
+              >
+                <View style={styles.scopeOptionBody}>
+                  <Text style={[styles.scopeOptionLabel, { color: tc.text }]}>{choice === 'due' ? text.scopeDue : text.scopeAll}</Text>
+                  <Text style={[styles.scopeOptionHelp, { color: tc.secondaryText }]}>{choice === 'due' ? text.dueHelp : text.overviewHelp}</Text>
+                </View>
+                {scope === choice && <Check size={18} color={tc.tint} strokeWidth={2.4} />}
+              </TouchableOpacity>
+            ))}
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel={`${t('nav.done')} ${t('common.tasks')}`}
+              onPress={() => {
+                setScopePickerVisible(false);
+                router.push('/history');
+              }}
+              style={[styles.reviewPickerOption, { backgroundColor: tc.filterBg, borderColor: tc.border }]}
+            >
+              <Text style={[styles.reviewPickerOptionText, { color: tc.text }]}>{t('nav.done')}</Text>
+              <ChevronRight size={18} color={tc.secondaryText} strokeWidth={2.4} />
+            </TouchableOpacity>
+            <View style={styles.modalButtons}>
+              <TouchableOpacity
+                onPress={() => setScopePickerVisible(false)}
+                style={styles.modalButton}
+              >
+                <Text style={[styles.modalButtonText, { color: tc.secondaryText }]}>{t('common.cancel')}</Text>
+              </TouchableOpacity>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      <Modal
         visible={moveModalVisible}
         transparent
         animationType="fade"
@@ -729,9 +785,12 @@ export default function ReviewScreen() {
 }
 
 const styles = StyleSheet.create({
-  scopeBar: { borderBottomWidth: 1, flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8, padding: 12 },
-  scopeButton: { borderRadius: 8, minHeight: 44, justifyContent: 'center', paddingHorizontal: 12, paddingVertical: 8 },
-  scopeHelp: { width: '100%', fontSize: 12 },
+  reviewActionLeading: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  scopeChip: { alignItems: 'center', borderRadius: 10, borderWidth: 1, flexDirection: 'row', gap: 4, minHeight: 42, paddingHorizontal: 10 },
+  scopeChipText: { fontSize: 14, fontWeight: '600' },
+  scopeOptionBody: { flex: 1, gap: 2 },
+  scopeOptionLabel: { fontSize: 15, fontWeight: '700' },
+  scopeOptionHelp: { fontSize: 12 },
   reviewTaskActions: { flexDirection: 'row', gap: 20, paddingHorizontal: 12, paddingVertical: 8 },
   reviewTaskActionButton: { minHeight: 44, minWidth: 44, justifyContent: 'center' },
   retryButton: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 12 },
@@ -742,6 +801,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderBottomWidth: 1,
     flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
     justifyContent: 'space-between',
     paddingHorizontal: 16,
     paddingVertical: 10,
@@ -758,7 +819,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderRadius: 10,
     justifyContent: 'center',
-    minWidth: 152,
+    minWidth: 128,
     minHeight: 42,
     paddingHorizontal: 16,
     maxWidth: '100%',

@@ -174,10 +174,8 @@ function observe(root: ReactTestInstance, seen: { alerts: number; toasts: number
   const sequenceLabel = harness.strings['projects.laterInSequence'];
   const isSequenceDisclosure = (label: unknown) => String(label ?? '').startsWith(`${sequenceLabel} (`);
   const allTexts = textsIn(root).filter((value) => !isSequenceDisclosure(value));
-  const scopeTexts = [
-    harness.strings['review.scopeDue'], harness.strings['review.scopeAll'],
-    harness.strings['review.overviewHelp'], harness.strings['nav.done'],
-  ];
+  const selecting = hostsOf(root, 'SwipeableTaskItem').some((row) => row.props.selectionMode === true);
+  const scopeTexts = selecting ? [] : [harness.strings['review.scopeAll']];
   expect(allTexts.slice(0, scopeTexts.length)).toEqual(scopeTexts);
   const headers = hostsOf(root, 'Pressable')
     .filter((node) => node.props.accessibilityState && 'expanded' in node.props.accessibilityState && !isSequenceDisclosure(node.props.accessibilityLabel))
@@ -301,7 +299,11 @@ async function runScenario(scenario: Scenario) {
   await seedStore(settings, scenarioTasks(scenario));
   let renderer!: ReactTestRenderer;
   await act(async () => { renderer = create(<ReviewScreen />); });
-  const allScope = findPressable(renderer.root, harness.strings['review.scopeAll']);
+  const scopeChip = findPressable(renderer.root, harness.strings['review.scopeDue']);
+  if (!scopeChip?.props.onPress) throw new Error('Missing review scope control');
+  await act(async () => { await scopeChip.props.onPress(); });
+  const allScope = visibleNodes(renderer.root).find((node) => node.props?.accessibilityRole === 'radio'
+    && textsIn(node)[0] === harness.strings['review.scopeAll']);
   if (!allScope?.props.onPress) throw new Error('Missing All open tasks scope');
   await act(async () => { await allScope.props.onPress(); });
   const seen = { alerts: 0, toasts: 0, writes: 0, pushes: 0, shares: 0 };

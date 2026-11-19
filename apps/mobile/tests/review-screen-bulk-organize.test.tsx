@@ -1,6 +1,6 @@
 import React from 'react';
-import { Pressable, TouchableOpacity } from 'react-native';
-import { act, create, type ReactTestRenderer } from 'react-test-renderer';
+import { Modal, Pressable, Text, TouchableOpacity } from 'react-native';
+import { act, create, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Area, Project, Task } from '@mindwtr/core';
 
@@ -15,9 +15,11 @@ const mocks = vi.hoisted(() => {
   const showToast = vi.fn();
   const flushPendingSave = vi.fn(async () => undefined);
   const backListeners: (() => boolean)[] = [];
+  const routerPush = vi.fn();
 
   return {
     backListeners,
+    routerPush,
     batchDeleteTasks,
     batchMoveTasks,
     batchUpdateTasks,
@@ -63,7 +65,7 @@ vi.mock('@mindwtr/core', async (importOriginal) => {
 
 vi.mock('expo-router', () => ({
   useRouter: () => ({
-    push: vi.fn(),
+    push: mocks.routerPush,
   }),
 }));
 
@@ -182,6 +184,7 @@ vi.mock('@/components/task-list/TaskListBulkOrganizeModal', () => ({
 }));
 
 vi.mock('lucide-react-native', () => ({
+  Check: (props: any) => React.createElement('Check', props),
   ChevronDown: (props: any) => React.createElement('ChevronDown', props),
   ChevronRight: (props: any) => React.createElement('ChevronRight', props),
   ChevronsDown: (props: any) => React.createElement('ChevronsDown', props),
@@ -280,6 +283,26 @@ describe('ReviewScreen bulk organize', () => {
     mocks.storeState.tasks = [makeTask('task-1', 'Loose next action')];
   });
 
+  it('shows the review scope as one compact control whose menu keeps both queues and Done reachable', async () => {
+    let tree!: ReactTestRenderer;
+    await act(async () => { tree = create(<ReviewScreen />); });
+    const shown = (node: ReactTestInstance): boolean => !node.parent || (!(node.type === Modal && !node.props.visible) && shown(node.parent));
+    const texts = () => tree.root.findAllByType(Text).filter(shown).map((node) => flattenText(node.props.children));
+    expect(texts()).not.toContain('Due reminders');
+    expect(texts()).toContain('No reminders due');
+    const chip = tree.root.findAllByType(TouchableOpacity).find((node) => node.props.accessibilityLabel === 'Due for review')!;
+    expect(chip.props.accessibilityHint).toBe('Due reminders');
+    pressButtonWithLabel(tree, 'Due for review');
+    const options = tree.root.findAllByType(TouchableOpacity).filter((node) => node.props.accessibilityRole === 'radio');
+    expect(options.map((node) => [flattenText(node.props.children), node.props.accessibilityState])).toEqual([
+      ['Due for reviewDue reminders', { selected: true }],
+      ['All open tasksAll open tasks', { selected: false }],
+    ]);
+    pressButtonWithLabel(tree, 'nav.done tasks');
+    expect(mocks.routerPush).toHaveBeenCalledWith('/history');
+    await act(async () => tree.unmount());
+  });
+
   it('keeps sequence tails collapsed, editable on expansion, and visible when explicitly due', async () => {
     const project: Project = {
       id: 'sequence', title: 'Sequence', status: 'active', color: '#2563eb', order: 0,
@@ -298,6 +321,7 @@ describe('ReviewScreen bulk organize', () => {
     pressButtonWithLabel(tree, 'Expand projects');
     const rows = () => tree.root.findAll((node) => (node.type as unknown) === 'SwipeableTaskItem');
     expect(rows().map((row) => row.props.task.id)).toEqual(['due-tail']);
+    pressButtonWithLabel(tree, 'Due for review');
     pressButtonWithText(tree, 'All open tasks');
     expect(rows().map((row) => row.props.task.id)).toEqual(['head']);
     const disclosure = () => tree.root.findAllByType(Pressable).find((node) => node.props.accessibilityLabel === 'projects.laterInSequence (2)')!;
@@ -317,6 +341,7 @@ describe('ReviewScreen bulk organize', () => {
       tree = create(<ReviewScreen />);
     });
 
+    pressButtonWithLabel(tree, 'Due for review');
     pressButtonWithText(tree, 'All open tasks');
 
     pressButtonWithLabel(tree, 'Expand areas');
@@ -354,6 +379,7 @@ describe('ReviewScreen bulk organize', () => {
     await act(async () => {
       tree = create(<ReviewScreen />);
     });
+    pressButtonWithLabel(tree, 'Due for review');
     pressButtonWithText(tree, 'All open tasks');
     pressButtonWithLabel(tree, 'Expand areas');
     pressButtonWithLabel(tree, 'Expand projects');
@@ -387,6 +413,7 @@ describe('ReviewScreen bulk organize', () => {
     await act(async () => {
       tree = create(<ReviewScreen />);
     });
+    pressButtonWithLabel(tree, 'Due for review');
     pressButtonWithText(tree, 'All open tasks');
     pressButtonWithLabel(tree, 'Expand areas');
     pressButtonWithLabel(tree, 'Expand projects');
@@ -418,6 +445,7 @@ describe('ReviewScreen bulk organize', () => {
     await act(async () => {
       tree = create(<ReviewScreen />);
     });
+    pressButtonWithLabel(tree, 'Due for review');
     pressButtonWithText(tree, 'All open tasks');
     pressButtonWithLabel(tree, 'Expand areas');
     pressButtonWithLabel(tree, 'Expand projects');
@@ -454,6 +482,7 @@ describe('ReviewScreen bulk organize', () => {
     const rows = () => tree.root.findAll((node) => (node.type as unknown) === 'SwipeableTaskItem');
     expect(rows().map((row) => row.props.task.id)).toEqual(['due']);
 
+    pressButtonWithLabel(tree, 'Due for review');
     pressButtonWithText(tree, 'All open tasks');
     expect(rows().map((row) => row.props.task.id)).toEqual(['due', 'future', 'undated']);
   });

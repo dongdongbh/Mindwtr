@@ -13,11 +13,13 @@ import { canUseJalaliCalendar, createDateFormatter, getSystemWeekStart, normaliz
 import { isArchiveRetentionDays } from './archive-retention';
 import {
     buildArchiveRetentionCard,
+    buildArchiveRetentionGuide,
     buildArchiveRetentionReview,
     buildDataSettingsModel,
     buildDataSettingsUpdate,
     isDataSettingStored,
     type ArchiveRetentionCard,
+    type DataSettingsGuide,
     type ArchiveRetentionReview,
     type DataSettingsEdit,
     type DataSettingsModel,
@@ -1014,11 +1016,16 @@ export function createSettingsMethods(deps: SettingsDeps) {
         },
 
 
-        getDataSettings(): NativeHostResult<NativeDataSettings> {
+        getDataSettings(input: { archiveRetentionGuide?: true } = {}): NativeHostResult<NativeDataSettings & { archiveRetentionGuide?: DataSettingsGuide }> {
+            if (!isObjectRecord(input) || Object.keys(input).some((key) => key !== 'archiveRetentionGuide')
+                || (input.archiveRetentionGuide !== undefined && input.archiveRetentionGuide !== true)) {
+                return fail('INVALID_INPUT', 'Data settings accept only the archive retention guide flag');
+            }
             const ready = deps.readiness();
             if (!ready.ok) return ready;
             const model = buildDataSettingsModel(useTaskStore.getState().settings, deps.t(), heartbeat() !== null, deps.language());
-            return { ok: true, value: { version: NATIVE_HOST_CONTRACT_VERSION, revision: manageRevision(), ...model } };
+            const guide = input.archiveRetentionGuide ? { archiveRetentionGuide: buildArchiveRetentionGuide(deps.t(), deps.language()) } : {};
+            return { ok: true, value: { version: NATIVE_HOST_CONTRACT_VERSION, revision: manageRevision(), ...model, ...guide } };
         },
 
         getArchiveRetentionOptions(): NativeHostResult<{ revision: string; card: ArchiveRetentionCard }> {

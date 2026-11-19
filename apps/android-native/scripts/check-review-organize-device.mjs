@@ -6,7 +6,7 @@ import { createHash, randomInt } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { EDGE_SAFE_X, box, button, check, chipOn, connect, evidenced, fail, inboxCount, isOn, mainList, owedRetry, Stopped, tab, tabSelected, tagged, taskRows, withDescription } from './device.mjs';
+import { EDGE_SAFE_X, box, button, check, chipOn, connect, evidenced, fail, inboxCount, mainList, owedRetry, Stopped, tab, tabSelected, tagged, taskRows, withDescription } from './device.mjs';
 
 const [serial, apkArg] = process.argv.slice(2);
 if (!serial) {
@@ -196,18 +196,6 @@ const rowLabel = (nodes, row) => row.text || row['content-desc']
 const rowTitles = (nodes) => taskRows(nodes).sort((a, b) => box(a)[1] - box(b)[1]).map((node) => rowLabel(nodes, node));
 const texts = (nodes) => new Set(nodes.map((node) => node.text).filter(Boolean));
 
-const around = (nodes, label) => {
-    if (!label) return undefined;
-    const [x1, y1, x2, y2] = box(label);
-    const [cx, cy] = [(x1 + x2) / 2, (y1 + y2) / 2];
-    const area = (node) => { const [l, t, r, b] = box(node); return (r - l) * (b - t); };
-    return nodes.filter((node) => node.focusable === 'true' || node.clickable === 'true').filter((node) => {
-        const [l, t, r, b] = box(node);
-        return l <= cx && cx <= r && t <= cy && cy <= b;
-    }).sort((a, b) => area(a) - area(b))[0];
-};
-
-const textOn = (nodes, text) => { const label = nodes.find((node) => node.text === text); return isOn(label) || isOn(around(nodes, label)); };
 
 const onLineOf = (nodes, anchor, text) => {
     if (!anchor) return undefined;
@@ -412,9 +400,10 @@ try {
     else await openTile(seen.tiles.review, onReview, 'Review');
     let nodes = await device.settle(await device.toTop());
 
-    if (!textOn(nodes, seen.scope.due)) {
-        const due = nodes.find((node) => node.text === seen.scope.due) ?? fail('no Due scope');
-        nodes = await tapExpecting(due, (current) => textOn(current, seen.scope.due), 'the Due scope');
+    const onDue = (current) => (tagged(current, 'review-scope')?.['content-desc'] ?? '').startsWith(`${seen.scope.due}, `);
+    if (!onDue(nodes)) {
+        nodes = await tapExpecting(tagged(nodes, 'review-scope') ?? fail('no Review scope'), (current) => Boolean(tagged(current, 'review-scope-due')), 'the Review scope menu');
+        nodes = await tapExpecting(tagged(nodes, 'review-scope-due'), onDue, 'the Due scope');
     }
     const ours = (current) => rowTitles(current).some((title) => names.tasks.includes(title));
 
