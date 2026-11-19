@@ -54,7 +54,7 @@ export type NativeReminderBindings = {
 const log = (message: string, context: Record<string, unknown>, warn = false) => {
     try {
 
-        (warn ? logWarn : logInfo)(`[Local Notifications] ${message}`, { scope: 'notifications', context, force: typeof context.releaseCheck === 'string' });
+        (warn ? logWarn : logInfo)(`[Local Notifications] ${message}`, { scope: 'notifications', context, force: message === 'Background reminder reconciliation' || typeof context.releaseCheck === 'string' });
     } catch {                                                    }
 };
 
