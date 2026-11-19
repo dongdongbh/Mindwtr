@@ -42,6 +42,9 @@ fi
 npx expo prebuild --clean --platform android
 
 if [[ "${FOSS_BUILD}" == "1" ]]; then
+  if [[ -d "${ROOT_DIR}/node_modules/react-native-fs" ]]; then
+    bash "${REPO_ROOT}/scripts/ci/apply_bun_patches.sh" "${ROOT_DIR}/node_modules"
+  fi
   node scripts/fdroid_patch_android_jvm_targets.js
 fi
 

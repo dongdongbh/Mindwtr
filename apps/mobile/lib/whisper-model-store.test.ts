@@ -236,12 +236,13 @@ describe('whisper-model-store', () => {
       expect(rnfsMock.hash).toHaveBeenCalled();
     });
 
-    it('falls back to the mirror host when the first host cannot be reached', async () => {
+    it('reports an RNFS download rejection and falls back to the mirror host', async () => {
       const urls: string[] = [];
       rnfsMock.downloadFile.mockImplementation((options: { fromUrl: string; toFile: string }) => {
         urls.push(options.fromUrl);
         if (options.fromUrl.includes('huggingface.co')) {
-          return { promise: Promise.reject(new Error('Unable to resolve host "huggingface.co"')) };
+          const error = Object.assign(new Error('Unable to resolve host "huggingface.co"'), { code: 'EUNSPECIFIED' });
+          return { promise: Promise.reject(error) };
         }
         fileSystemMock.fileUris.add(normalizeMockUri(`file://${options.toFile}`));
         fileSystemMock.fileSizes.set(normalizeMockUri(`file://${options.toFile}`), TINY_SIZE);
@@ -251,6 +252,11 @@ describe('whisper-model-store', () => {
       await expect(download(TINY_ID)).resolves.toBe(DOC_PREFERRED);
       expect(urls.map((url) => new URL(url).host)).toEqual(['huggingface.co', 'hf-mirror.com']);
       expect(rnfsMock.hash).toHaveBeenCalled();
+      expect(appLogMock.logWarn).toHaveBeenCalledWith('Whisper model download rejected by RNFS', {
+        scope: 'speech',
+        force: true,
+        extra: { releaseCheck: 'v1.3.10/android-whisper-download-rejected' },
+      });
     });
 
     it('reports the first host\'s error when every host fails', async () => {

@@ -60,6 +60,8 @@ The v1.3.6 task-editor correction is confirmed by the visible disappearance of t
 
 ## v1.3.10 (add before tagging, trim in the release after)
 
+- **`v1.3.10/android-whisper-download-rejected`** — `apps/mobile/lib/whisper-model-store.ts`. On the React Native F-Droid build, try downloading an offline Whisper model with the download host blocked. The app stays open and can try the mirror. If both hosts fail, Settings shows the download error. Settings › Diagnostics must show `Whisper model download rejected by RNFS` when RNFS returns its patched rejection to the app. The marker contains no URL, file path, or error text. (#1580)
+
 - **`v1.3.10/linux-calendar-refresh`** — Desktop Calendar (`use-calendar-external-events.ts`). Open Calendar on Linux with both system calendars and an ICS subscription, then change the Calendar view. If the subscription finishes first, `Linux system calendars kept visible during refresh` reports the number of switches retained as `calendarCount` and the number of events retained for an identical date range as `eventCount`. Check that the system switches stay visible. Counts only. This marker records the pending display and a separate system calendar diagnostic reports a completed native read. (#1508)
 
 ## v1.3.9 (add before tagging, trim in the release after)

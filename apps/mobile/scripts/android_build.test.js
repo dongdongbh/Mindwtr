@@ -22,4 +22,12 @@ describe('android_build FOSS guards', () => {
 
     expect(source).toContain('FDROID_EXPO_BUILD_FROM_SOURCE="${FDROID_EXPO_BUILD_FROM_SOURCE:-1}"');
   });
+
+  it('applies npm dependency patches between Expo prebuild and Gradle', () => {
+    const source = fs.readFileSync(path.join(__dirname, 'android_build.sh'), 'utf8');
+    const patchCommand = 'bash "${REPO_ROOT}/scripts/ci/apply_bun_patches.sh" "${ROOT_DIR}/node_modules"';
+
+    expect(source.indexOf(patchCommand)).toBeGreaterThan(source.indexOf('npx expo prebuild'));
+    expect(source.indexOf(patchCommand)).toBeLessThan(source.indexOf('./gradlew assembleRelease'));
+  });
 });

@@ -585,6 +585,15 @@ export const download = async (
             await File.downloadFileAsync(downloadUrl, destination, options);
             return destination;
           },
+        }).catch((error: unknown) => {
+          if (error instanceof Error && 'code' in error && error.code === 'EUNSPECIFIED') {
+            void logWarn('Whisper model download rejected by RNFS', {
+              scope: 'speech',
+              force: true,
+              extra: { releaseCheck: 'v1.3.10/android-whisper-download-rejected' },
+            });
+          }
+          throw error;
         });
 
         const downloadedInfo = probeModelPathSync(targetUri);
