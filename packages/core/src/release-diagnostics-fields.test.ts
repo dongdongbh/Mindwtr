@@ -129,6 +129,8 @@ const RELEASE_CHECK_FIELD_NAMES = [
 
     'owed',
 
+    'queued', 'saved', 'left',
+
     'slot',
 
     'found',

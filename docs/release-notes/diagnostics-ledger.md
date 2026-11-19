@@ -36,6 +36,8 @@ The v1.3.6 task-editor correction is confirmed by the visible disappearance of t
 
 ## v1.3.9 (add before tagging, trim in the release after)
 
+- **`v1.3.9/pending-capture-drain`** — RN mobile `apps/mobile/lib/pending-capture-drain.ts` (`drainPendingCapturesFromStore`, used when the app opens or returns to the front and by background sync). Forced line `Pending capture queue drained`, written only when the `Documents/pending-captures` queue held at least one file. It shows `outcome=drained` or `outcome=failed`, `queued` (files before the drain), `saved` (items imported) and `left` (files still queued after it). iOS "Add to Mindwtr" Shortcut captures and Android widget captures wait in this queue, and a successful iOS Shortcut import logged nothing before. Tester: run "Add to Mindwtr" from Shortcuts or Control Center, then open Mindwtr. Expect `outcome=drained queued=1 saved=1 left=0` and the task in the Inbox. `left` above 0 means a capture is still queued for retry. No task text or file names are logged. (#1576)
+
 - **`v1.3.9/calendar-subscriptions-ready`** — Desktop Calendar (`use-calendar-external-events.ts`) reports the subscribed event count when files or feeds finish loading ahead of the system calendars. Open a month containing subscribed events with a slow system calendar. The events appear while the system read is pending. (#1508)
 
 - **`v1.3.9/reminder-channel-settings`** — Android Settings › Notifications › Reminder sound and vibration opens the system reminder channel. Look for `releaseCheck=v1.3.9/reminder-channel-settings` from `CoreNotifications.kt` or `reminder-channel-settings.ts`. This confirms the settings handoff, not physical vibration. (#1573)

@@ -1,12 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMobileBackgroundSyncRunner } from '@mindwtr/core/mobile-background-sync';
 import { peekPendingNotificationCompletions } from '../modules/notification-open-intents';
-import { drainPendingCapturesInBackground } from './pending-capture-drain';
+import { drainPendingCapturesFromStore, drainPendingCapturesInBackground } from './pending-capture-drain';
 
 const order = vi.hoisted(() => [] as string[]);
 const noopStorage = vi.hoisted(() => ({ name: 'noop' }));
 const mobileStorage = vi.hoisted(() => ({ name: 'mobile' }));
 const logWarn = vi.hoisted(() => vi.fn(async () => undefined));
+const logInfo = vi.hoisted(() => vi.fn(async (_message: string, _context?: unknown) => undefined));
 
 const core = vi.hoisted(() => {
   const state = {
@@ -44,7 +45,7 @@ const reconcile = vi.hoisted(() => vi.fn(async (_reason: string) => { order.push
 
 vi.mock('react-native', () => reactNative);
 vi.mock('@mindwtr/core', () => ({ ...core, noopStorage }));
-vi.mock('./app-log', () => ({ logInfo: vi.fn(), logWarn }));
+vi.mock('./app-log', () => ({ logInfo, logWarn }));
 vi.mock('./file-system', () => fileSystem);
 vi.mock('./pending-capture-persistence', () => ({ flushPendingTaskActionSave: vi.fn() }));
 vi.mock('./pending-captures', () => ({ ...ingest, PENDING_CAPTURES_DIRECTORY: 'pending-captures' }));
@@ -154,5 +155,50 @@ describe('background capture drain (#1257)', () => {
     expect(order).toEqual(['setStorageAdapter', 'flush', 'fetchData', 'ingest', 'reminders', 'network']);
     finish({ success: true });
     await run;
+  });
+});
+
+describe('foreground capture drain diagnostics (#1576)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    order.length = 0;
+    fileSystem.getInfoAsync.mockResolvedValue({ exists: true });
+  });
+
+  it('logs a forced count of queued, saved and left captures after a drain that found files', async () => {
+    fileSystem.readDirectoryAsync
+      .mockResolvedValueOnce(['a.json', 'b.json', 'note.tmp'])
+      .mockResolvedValueOnce(['b.json']);
+    ingest.ingestPendingCaptures.mockResolvedValueOnce(1);
+
+    await expect(drainPendingCapturesFromStore()).resolves.toBe(1);
+
+    expect(logInfo).toHaveBeenCalledWith('Pending capture queue drained', {
+      scope: 'capture',
+      force: true,
+      extra: { releaseCheck: 'v1.3.9/pending-capture-drain', outcome: 'drained', queued: 2, saved: 1, left: 1 },
+    });
+  });
+
+  it('logs the failed drain and keeps its error when the import throws', async () => {
+    fileSystem.readDirectoryAsync.mockResolvedValue(['a.json']);
+    ingest.ingestPendingCaptures.mockRejectedValueOnce(new Error('store refused'));
+
+    await expect(drainPendingCapturesFromStore()).rejects.toThrow('store refused');
+
+    expect(logInfo).toHaveBeenCalledWith('Pending capture queue drained', {
+      scope: 'capture',
+      force: true,
+      extra: { releaseCheck: 'v1.3.9/pending-capture-drain', outcome: 'failed', queued: 1, saved: 0, left: 1 },
+    });
+  });
+
+  it('logs nothing when the queue is empty', async () => {
+    fileSystem.readDirectoryAsync.mockResolvedValue([]);
+    ingest.ingestPendingCaptures.mockResolvedValueOnce(0);
+
+    await expect(drainPendingCapturesFromStore()).resolves.toBe(0);
+
+    expect(logInfo).not.toHaveBeenCalled();
   });
 });

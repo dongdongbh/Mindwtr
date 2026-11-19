@@ -10,7 +10,7 @@ import {
 } from '@mindwtr/core';
 
 import { documentDirectory, getInfoAsync, readDirectoryAsync } from './file-system';
-import { logWarn } from './app-log';
+import { logInfo, logWarn } from './app-log';
 import { flushPendingTaskActionSave } from './pending-capture-persistence';
 import { ingestPendingCaptures, PENDING_CAPTURES_DIRECTORY } from './pending-captures';
 import { peekPendingNotificationCompletions } from '../modules/notification-open-intents';
@@ -22,47 +22,64 @@ type DrainExtras = Pick<IngestDeps, 'transcribeAudio' | 'applyPomodoroCommand'>;
 
 
 let drainChain: Promise<unknown> = Promise.resolve();
+const PENDING_CAPTURE_DRAIN_RELEASE_CHECK = 'v1.3.9/pending-capture-drain';
+
+const countQueuedCaptureFiles = async (): Promise<number> => {
+    if (!documentDirectory) return 0;
+    const dir = `${documentDirectory}${PENDING_CAPTURES_DIRECTORY}`;
+    try {
+        if (!(await getInfoAsync(dir)).exists) return 0;
+        return (await readDirectoryAsync(dir)).filter((name) => name.endsWith('.json')).length;
+    } catch {
+        return 0;
+    }
+};
 
 
 export function drainPendingCapturesFromStore(extras: DrainExtras = {}): Promise<number> {
-    const run = drainChain.then(() => {
-        const { addTask, updateTask, addProject, projects, areas, tasks, people, settings } = useTaskStore.getState();
-        return ingestPendingCaptures({
-            addTask,
-            updateTask,
-            addProject,
-            projects,
-            areas,
-            tasks,
-            people,
-            settings,
-            getTasks: () => useTaskStore.getState()._allTasks,
-            getProjects: () => useTaskStore.getState()._allProjects,
-            flushPendingSave: flushPendingTaskActionSave,
-            ...extras,
-        });
+    const run = drainChain.then(async () => {
+        const queued = await countQueuedCaptureFiles();
+        let saved = 0;
+        let outcome: 'drained' | 'failed' = 'failed';
+        try {
+            const { addTask, updateTask, addProject, projects, areas, tasks, people, settings } = useTaskStore.getState();
+            saved = await ingestPendingCaptures({
+                addTask,
+                updateTask,
+                addProject,
+                projects,
+                areas,
+                tasks,
+                people,
+                settings,
+                getTasks: () => useTaskStore.getState()._allTasks,
+                getProjects: () => useTaskStore.getState()._allProjects,
+                flushPendingSave: flushPendingTaskActionSave,
+                ...extras,
+            });
+            outcome = 'drained';
+            return saved;
+        } finally {
+            if (queued > 0) {
+                void logInfo('Pending capture queue drained', {
+                    scope: 'capture',
+                    force: true,
+                    extra: { releaseCheck: PENDING_CAPTURE_DRAIN_RELEASE_CHECK, outcome, queued, saved, left: await countQueuedCaptureFiles() },
+                });
+            }
+        }
     });
     drainChain = run.catch(() => undefined);
     return run;
 }
 
-const hasQueuedCaptureFiles = async (): Promise<boolean> => {
-    if (!documentDirectory) return false;
-    const dir = `${documentDirectory}${PENDING_CAPTURES_DIRECTORY}`;
-    try {
-        if (!(await getInfoAsync(dir)).exists) return false;
-        return (await readDirectoryAsync(dir)).some((name) => name.endsWith('.json'));
-    } catch {
-        return false;
-    }
-};
 
 
 export async function drainPendingCapturesInBackground(trigger: 'scheduled' | 'capture'): Promise<number> {
 
     if (AppState.currentState === 'active') return 0;
     if (isSandboxMode() || isWorkspaceTransitionActive()) return 0;
-    const hasCaptures = await hasQueuedCaptureFiles();
+    const hasCaptures = (await countQueuedCaptureFiles()) > 0;
     let hasCompletions = false;
     try {
         hasCompletions = (await peekPendingNotificationCompletions()).length > 0;
