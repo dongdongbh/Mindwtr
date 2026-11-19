@@ -154,6 +154,16 @@ jobs:
             exit 1
           fi
 
+      - name: Assert chrono remains limited to the reviewed IMAP dependency
+        run: |
+          set -euo pipefail
+          chrono_tree="$(cargo tree --locked --manifest-path apps/desktop/src-tauri/Cargo.toml --prefix none --depth 1 --invert chrono)"
+          if [ "$chrono_tree" != $'chrono v0.4.42\nimap v2.4.1' ]; then
+            echo "chrono dependency changed; review RUSTSEC-2026-0543 and remove or revise its exception." >&2
+            printf '%s\n' "$chrono_tree" >&2
+            exit 1
+          fi
+
       - name: Audit Rust dependencies
         run: |
           set -euo pipefail
@@ -186,6 +196,7 @@ jobs:
             --ignore RUSTSEC-2026-0370 \
             --ignore RUSTSEC-2026-0371 \
             --ignore RUSTSEC-2026-0372 \
+            --ignore RUSTSEC-2026-0543 \
             --file apps/desktop/src-tauri/Cargo.lock; then
             echo "cargo audit reported vulnerabilities or warnings, or failed." >&2
             exit 1

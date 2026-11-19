@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
@@ -11,6 +11,23 @@ import { AUDIT_EXCEPTIONS, validateBunAuditTopology, validateNpmAuditTopology, v
 import { UPSTREAM_GUARDS, bunLockedVersions, unwatchedLockedVersions, upstreamGuardFailure } from "./check-audit-exception-upstreams.js";
 
 const rootRequire = createRequire(import.meta.url);
+
+test("chrono maintenance exception rejects changed versions and additional consumers", () => {
+  const workflow = parse(readFileSync(".github/workflows/dependency-audit.yml", "utf8"));
+  const steps = workflow.jobs["cargo-audit"].steps;
+  const guard = steps.find((step) => step.name === "Assert chrono remains limited to the reviewed IMAP dependency");
+  expect(steps.find((step) => step.name === "Audit Rust dependencies").run).toContain("--ignore RUSTSEC-2026-0543");
+  for (const [tree, status] of [
+    ["chrono v0.4.42\nimap v2.4.1", 0],
+    ["chrono v0.4.43\nimap v2.4.1", 1],
+    ["chrono v0.4.42\nimap v2.4.1\nother v1.0.0", 1],
+  ]) {
+    const result = spawnSync("bash", ["-c", `cargo() { printf '%s\\n' "$CHRONO_TEST_TREE"; }; ${guard.run}`], {
+      env: { ...process.env, CHRONO_TEST_TREE: tree }, encoding: "utf8",
+    });
+    expect(result.status).toBe(status);
+  }
+});
 
 const IMAGE_SIZE_ADVISORIES = ["GHSA-5p2g-fcmc-qvqq", "GHSA-w3rx-r6r6-pgpr"];
 const DEEPMERGE_ADVISORY = "GHSA-gcqx-w48m-w2h4";
