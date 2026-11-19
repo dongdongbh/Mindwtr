@@ -406,11 +406,19 @@ private fun LazyListScope.somedayEntries(model: InboxViewModel, entries: List<Me
     val weekly = menu.own("weekly")
     val collapsed = weekly.optJSONObject("collapsedSomedaySections")
     val future = weekly.optJSONObject("somedayScheduledSections")
-    for ((sectionId, section) in entries.groupBy { it.json.getString("sectionId") }) {
-        val header = section.first().json
+    var nextHeader = 0
+    while (nextHeader < entries.size) {
+        val entry = entries[nextHeader]
+        val header = entry.json
+        val sectionId = header.getString("sectionId")
+        val start = nextHeader + 1
+        val count = header.getInt("count")
+        val futureCount = header.getInt("scheduledCount")
+        nextHeader = minOf(start + count, entries.size)
+        val scheduledStart = minOf(start + count - futureCount, nextHeader)
         val open = collapsed?.optBoolean(sectionId) != true
-        item(key = section.first().key) {
-            ReviewDisclosure("${header.getString("title")} (${header.getInt("count")})", open, menu.idle, "weekly-someday-section-$sectionId") { expand ->
+        item(key = entry.key) {
+            ReviewDisclosure("${header.getString("title")} ($count)", open, menu.idle, "weekly-someday-section-$sectionId") { expand ->
                 menu.editOwn("weekly") {
                     val sections = optJSONObject("collapsedSomedaySections") ?: JSONObject()
                     if (expand) sections.remove(sectionId) else sections.put(sectionId, true)
@@ -419,9 +427,8 @@ private fun LazyListScope.somedayEntries(model: InboxViewModel, entries: List<Me
             }
         }
         if (!open) continue
-        val (scheduled, due) = section.drop(1).partition { it.json.optBoolean("scheduled") }
-        somedayRows(model, due, reactivate)
-        if (header.optInt("scheduledCount") > 0) {
+        somedayRows(model, entries.subList(start, scheduledStart), reactivate)
+        if (futureCount > 0) {
             val expanded = future?.optBoolean(sectionId) == true
             item(key = "somedayScheduled:$sectionId") {
                 ReviewDisclosure(header.getString("scheduledLabel"), expanded, menu.idle, "weekly-someday-scheduled-$sectionId", Modifier.padding(start = 12.dp)) {
@@ -432,7 +439,7 @@ private fun LazyListScope.somedayEntries(model: InboxViewModel, entries: List<Me
                     }
                 }
             }
-            if (expanded) somedayRows(model, scheduled, reactivate)
+            if (expanded) somedayRows(model, entries.subList(scheduledStart, nextHeader), reactivate)
         }
     }
 }
