@@ -18,36 +18,17 @@ struct ReviewScreen: View {
     private var overview: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
-                VStack(alignment: .leading, spacing: 8) {
-                    AppChipFlow {
-                        let choices = view.object("scope").objects("options")
-                        ForEach(choices.indices, id: \.self) { index in
-                            let choice = choices[index]
-                            ReviewAction(title: choice.text("label"), selected: view.object("scope").text("selected") == choice.text("id"),
-                                enabled: { model.reviewActionsShown }, palette: palette, id: "review-scope-" + choice.text("id")) {
-                                Task { await model.editReviewOverview(scope: choice.text("id")) }
-                            }
-                        }
-                        if view.object("scope").text("selected") == "all" {
-                            ReviewAction(title: model.label("nav.history"), enabled: { model.reviewActionsShown }, palette: palette, id: "review-history") {
-                                Task { await model.openHistory() }
-                            }
-                        }
-                    }
-                    Text(view.object("scope").text("help")).rnFont(12).foregroundStyle(palette.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .padding(12).frame(maxWidth: .infinity, alignment: .leading)
-                .overlay(alignment: .bottom) { palette.border.frame(height: 1) }
                 AppChipFlow {
                     ReviewAction(title: view.object("expansion").text("label"),
                         enabled: { model.reviewActionsShown && !view.object("expansion").flag("disabled") }, palette: palette, id: "review-expand-cycle") {
                         Task { await model.editReviewOverview(expansion: ["type": "cycle"]) }
                     }
+                    ReviewScopeChip(scope: view.object("scope"), enabled: { model.reviewActionsShown }, palette: palette) { model.openReviewPicker(.scope) }
                     ReviewAction(title: view.object("startReview").text("label"), selected: true,
                         enabled: { model.reviewActionsShown }, palette: palette, id: "review-start") { model.openReviewPicker() }
                 }
                 .padding(12).frame(maxWidth: .infinity, alignment: .leading).background(palette.card)
+                .overlay(alignment: .bottom) { palette.border.frame(height: 1) }
                 Group {
                     ReviewFailure(model: model, palette: palette)
                     if let notice = model.reviewNotice {
@@ -172,6 +153,78 @@ struct ReviewStartPicker: View {
             .accessibilityElement(children: .contain).accessibilityAddTraits(.isModal)
             .accessibilityAction(.escape) { model.closeReviewPicker() }
         }
+    }
+}
+
+struct ReviewScopePicker: View {
+    let model: CoreModel
+    let palette: AppPalette
+
+    var body: some View {
+        let scope = model.reviewOverview.object("scope")
+        let choices = scope.objects("options")
+        let enabled = !model.busy && !model.retryNeeded
+        let options = VStack(alignment: .leading, spacing: 12) {
+            ForEach(choices.indices, id: \.self) { index in
+                let id = choices[index].text("id"), selected = scope.text("selected") == id
+                ReviewScopeOption(title: choices[index].text("label"),
+                    help: model.label(id == "due" ? "review.dueHelp" : "review.overviewHelp"),
+                    selected: selected, palette: palette, id: "review-scope-" + id) {
+                    Task { await model.chooseReviewScope(id) }
+                }
+            }
+            ReviewScopeOption(title: model.label("nav.done"), help: "", selected: false, palette: palette, id: "review-scope-done") {
+                Task { await model.openReviewDoneTasks() }
+            }
+            .accessibilityLabel(model.label("nav.done") + " " + model.label("common.tasks"))
+            HStack {
+                Spacer()
+                Button(model.reviewOverview.object("startReview").text("cancelLabel")) { model.closeReviewPicker() }
+                    .rnFont(16, .semibold).foregroundStyle(palette.secondary).frame(minWidth: 44, minHeight: 44)
+                    .accessibilityIdentifier("review-scope-cancel")
+            }
+        }
+        .padding(20).disabled(!enabled)
+        GeometryReader { geometry in
+            ZStack {
+                Color.black.opacity(0.35).ignoresSafeArea().onTapGesture { model.closeReviewPicker() }.accessibilityHidden(true)
+                ViewThatFits(in: .vertical) {
+                    options
+                    ScrollView { options }
+                }
+                .background(palette.card, in: RoundedRectangle(cornerRadius: 16))
+                .frame(maxWidth: 440, maxHeight: geometry.size.height * 0.7).padding(20)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .accessibilityElement(children: .contain).accessibilityAddTraits(.isModal)
+            .accessibilityAction(.escape) { model.closeReviewPicker() }
+        }
+    }
+}
+
+private struct ReviewScopeOption: View {
+    let title: String
+    let help: String
+    let selected: Bool
+    let palette: AppPalette
+    let id: String
+    let action: () -> Void
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).rnFont(15, .bold).foregroundStyle(palette.text)
+                    if !help.isEmpty { Text(help).rnFont(12).foregroundStyle(palette.secondary) }
+                }
+                .fixedSize(horizontal: false, vertical: true).frame(maxWidth: .infinity, alignment: .leading)
+                if selected { Image(systemName: "checkmark").foregroundStyle(palette.tint).accessibilityHidden(true) }
+                if help.isEmpty { AppIcon(name: "chevron", size: 18).rotationEffect(.degrees(-90)).foregroundStyle(palette.secondary) }
+            }
+            .multilineTextAlignment(.leading).padding(12).frame(minHeight: 48)
+            .background(palette.filter, in: RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).stroke(selected ? palette.tint : palette.border, lineWidth: 1)).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain).accessibilityIdentifier(id).accessibilityAddTraits(selected ? .isSelected : [])
     }
 }
 
@@ -715,6 +768,28 @@ private struct ReviewAction: View {
         }
         .buttonStyle(.plain).disabled(!isEnabled).opacity(isEnabled ? 1 : 0.5)
         .accessibilityIdentifier(id).accessibilityAddTraits(selected ? .isSelected : [])
+    }
+}
+
+private struct ReviewScopeChip: View {
+    let scope: CoreObject
+    let enabled: () -> Bool
+    let palette: AppPalette
+    let action: () -> Void
+    var body: some View {
+        let isEnabled = enabled()
+        let label = scope.objects("options").first(where: { $0.text("id") == scope.text("selected") })?.text("label") ?? ""
+        Button(action: action) {
+            HStack(spacing: 4) {
+                Text(label).rnFont(14, .semibold).foregroundStyle(palette.text).fixedSize(horizontal: false, vertical: true)
+                AppIcon(name: "chevron", size: 16).foregroundStyle(palette.secondary)
+            }
+            .padding(.horizontal, 10).frame(minHeight: 44)
+            .background(palette.filter, in: RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).stroke(palette.border, lineWidth: 1)).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain).disabled(!isEnabled).opacity(isEnabled ? 1 : 0.5)
+        .accessibilityLabel(label).accessibilityHint(scope.text("help")).accessibilityIdentifier("review-scope")
     }
 }
 

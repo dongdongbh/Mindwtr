@@ -29393,7 +29393,10 @@ private final class Engine: @unchecked Sendable {
                     }
                 }
             }
-            if ["dataSettings", "dataBackup", "dataCsvExport", "dataTaskNotesExport"].contains(name), !input.isEmpty { throw HostFailure("INVALID_INPUT: Unsupported Data settings read") }
+            if name == "dataSettings", !input.isEmpty, !(input.count == 1 && input["archiveRetentionGuide"] as? Bool == true) {
+                throw HostFailure("INVALID_INPUT: Unsupported Data settings read")
+            }
+            if ["dataBackup", "dataCsvExport", "dataTaskNotesExport"].contains(name), !input.isEmpty { throw HostFailure("INVALID_INPUT: Unsupported Data settings read") }
             if name == "bulk" {
                 let referenceSelection = input["list"] as? String == "reference"
                 let inboxSelection = input["list"] as? String == "inbox"

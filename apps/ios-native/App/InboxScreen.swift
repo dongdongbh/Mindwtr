@@ -262,8 +262,11 @@ struct InboxScreen: View {
                     .disabled(model.rowTaskDatesPresented || model.rowTaskDestinationPresented || model.taskChecklistMovePresented || model.rowTaskBackdatePresented || model.mindSweepPresented || model.processInboxPresented)
                     .accessibilityHidden(model.rowTaskDatesPresented || model.rowTaskDestinationPresented || model.taskChecklistMovePresented || model.rowTaskBackdatePresented || model.areaPickerPresented || model.taskPresented || model.mindSweepPresented || model.processInboxPresented)
             }
-            if model.selectedSurface == .review && model.reviewPickerPresented {
+            if model.selectedSurface == .review && model.reviewPicker == .start {
                 ReviewStartPicker(model: model, palette: palette)
+            }
+            if model.selectedSurface == .review && model.reviewPicker == .scope {
+                ReviewScopePicker(model: model, palette: palette)
             }
             if model.selectedSurface == .calendar && model.calendarItemPresented {
                 CalendarItemSheet(model: model, palette: palette)

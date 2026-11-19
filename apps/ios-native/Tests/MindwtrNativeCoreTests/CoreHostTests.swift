@@ -40453,6 +40453,14 @@ extension CoreHostTests {
         let before = try diagnostics197FullSnapshot()
         let data = try await diagnostics197Model(core)
         XCTAssertEqual(Set(data.keys), Set(["version", "revision", "title", "backup", "archiveRetention", "importData", "diagnostics"]))
+        let guided = try object(await core.call("menuRead", argumentsJSON: json(["dataSettings", json(["archiveRetentionGuide": true])])))
+        XCTAssertEqual(Set(guided.keys), Set(data.keys).union(["archiveRetentionGuide"]))
+        let guide = try XCTUnwrap(guided["archiveRetentionGuide"] as? [String: Any])
+        XCTAssertEqual(Set(guide.keys), Set(["title", "description", "url"]))
+        XCTAssertEqual(guide["url"] as? String, "https://docs.mindwtr.app/data-sync/data-lifecycle")
+        for input in [["archiveRetentionGuide": false], ["archiveRetentionGuide": 1], ["archiveRetentionGuide": true, "extra": true]] as [[String: Any]] {
+            await expectFailure { _ = try await core.call("menuRead", argumentsJSON: json(["dataSettings", json(input)])) }
+        }
         let options = try await archiveRetentionOptions(core)
         XCTAssertEqual(Set(options.keys), Set(["revision", "card"]))
         XCTAssertEqual(try json(XCTUnwrap(data["archiveRetention"])), try json(XCTUnwrap(options["card"])))

@@ -4263,6 +4263,7 @@ struct DiagnosticsCard: View {
     let owner: UUID
     @FocusState private var retentionDaysFocused: Bool
     @State private var backupOpen = false
+    @State private var retentionOpen = false
     @State private var backupPreviewPresented = false
     @State private var backupPreviewAnswered = false
     @State private var backupRestorePresented = false
@@ -4272,22 +4273,60 @@ struct DiagnosticsCard: View {
 
     private var archiveRetentionContent: some View {
         let card = model.archiveRetentionCard
-        return VStack(alignment: .leading, spacing: 12) {
-            Text(card.text("title")).rnFont(18, .bold).accessibilityAddTraits(.isHeader)
-            Text(card.text("description")).rnFont(14).foregroundStyle(palette.secondary)
+        return VStack(alignment: .leading, spacing: 0) {
+            Button { retentionOpen.toggle() } label: {
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(card.text("title")).rnFont(16, .medium).foregroundStyle(palette.text)
+                        Text(card.text("current")).rnFont(13).foregroundStyle(palette.secondary)
+                    }
+                    .fixedSize(horizontal: false, vertical: true).frame(maxWidth: .infinity, alignment: .leading)
+                    AppIcon(name: "chevron", size: 18).rotationEffect(.degrees(retentionOpen ? 180 : 0)).foregroundStyle(palette.secondary)
+                }
+                .multilineTextAlignment(.leading).padding(.horizontal, 16).padding(.vertical, 14).frame(minHeight: 56).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(card.text("title") + ", " + card.text("current"))
+            .accessibilityValue(model.label(retentionOpen ? "markdown.collapse" : "markdown.expand"))
+            .accessibilityIdentifier("archive-retention-disclosure")
+            if retentionOpen { archiveRetentionBody(card) }
+        }
+        .background(palette.card, in: RoundedRectangle(cornerRadius: 12))
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button(model.label("common.done")) { retentionDaysFocused = false }
+                    .accessibilityIdentifier("archive-retention-keyboard-done")
+            }
+        }
+    }
+
+    private func archiveRetentionBody(_ card: CoreObject) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(card.text("description")).rnFont(13).foregroundStyle(palette.secondary)
             Text(card.text("safety")).rnFont(13).foregroundStyle(palette.secondary)
-            Text(card.text("current")).rnFont(14).accessibilityIdentifier("archive-retention-current")
+            if let guide = model.archiveRetentionGuide {
+                Link(destination: guide.url) {
+                    HStack(spacing: 6) {
+                        Text(guide.title).rnFont(14, .semibold)
+                        AppIcon(name: "external-link", size: 16)
+                    }
+                    .foregroundStyle(palette.tint).frame(minHeight: 44)
+                }
+                .accessibilityIdentifier("archive-retention-guide-link")
+            }
+            Text(card.text("daysLabel")).rnFont(13).foregroundStyle(palette.secondary)
             TextField(card.text("daysLabel"), text: Bindable(model).archiveRetentionDaysDraft)
                 .keyboardType(.numberPad).focused($retentionDaysFocused).textFieldStyle(.roundedBorder).frame(minHeight: 44)
                 .accessibilityLabel(card.text("daysLabel"))
                 .accessibilityIdentifier("archive-retention-days")
                 .disabled(!model.diagnosticsToggleEnabled)
-            HStack {
+            HStack(spacing: 16) {
                 Button(card.text("save")) { retentionDaysFocused = false; Task { await model.saveArchiveRetention() } }
                     .frame(minHeight: 44).accessibilityIdentifier("archive-retention-save")
-                Spacer()
                 Button(card.object("never").text("label")) { retentionDaysFocused = false; Task { await model.saveArchiveRetention(never: true) } }
                     .frame(minHeight: 44).accessibilityIdentifier("archive-retention-never")
+                Spacer()
             }.disabled(!model.diagnosticsToggleEnabled)
             if let error = model.archiveRetentionError {
                 Text(error).rnFont(14).foregroundStyle(palette.danger)
@@ -4315,14 +4354,9 @@ struct DiagnosticsCard: View {
                     }.disabled(model.busy || model.retryNeeded)
                 }
             }
-        }.fixedSize(horizontal: false, vertical: true)
-            .toolbar {
-                ToolbarItemGroup(placement: .keyboard) {
-                    Spacer()
-                    Button(model.label("common.done")) { retentionDaysFocused = false }
-                        .accessibilityIdentifier("archive-retention-keyboard-done")
-                }
-            }
+        }
+        .fixedSize(horizontal: false, vertical: true).padding(16)
+        .overlay(alignment: .top) { palette.border.frame(height: 1) }
     }
 
     private var diagnosticsContent: some View {

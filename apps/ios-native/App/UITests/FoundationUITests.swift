@@ -8289,6 +8289,29 @@ final class FoundationUITests: XCTestCase {
         }
     }
 
+    private func reviewScopeLabel(_ id: String) -> String { id == "due" ? "Due for review" : "All open tasks" }
+
+    private func reviewScopeIs(_ app: XCUIApplication, _ id: String) -> Bool {
+        let chip = app.buttons["review-scope"]
+        return chip.waitForExistence(timeout: 10) && chip.label == reviewScopeLabel(id)
+    }
+
+    private func reviewChooseScope(_ app: XCUIApplication, _ id: String, tapChip: ((String) -> Void)? = nil) {
+        if let tapChip { tapChip("review-scope") } else { boardTap(app, "review-scope") }
+        boardTap(app, "review-scope-" + id)
+        XCTAssertTrue(app.buttons["review-scope-" + id].waitForNonExistence(timeout: 10), "Choosing a scope closes the menu")
+        let chosen = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", reviewScopeLabel(id)), object: app.buttons["review-scope"])
+        XCTAssertEqual(XCTWaiter.wait(for: [chosen], timeout: 15), .completed)
+    }
+
+    private func reviewAssertDoneInScopeMenu(_ app: XCUIApplication) {
+        boardTap(app, "review-scope")
+        boardEnabled(app.buttons["review-scope-done"])
+        XCTAssertEqual(app.buttons["review-scope-done"].label, "Done tasks")
+        boardTap(app, "review-scope-cancel")
+        XCTAssertTrue(app.buttons["review-scope-done"].waitForNonExistence(timeout: 10))
+    }
+
     private func boardTap(_ app: XCUIApplication, _ id: String) {
         let element = app.buttons.matching(identifier: id).firstMatch
         boardEnabled(element)
@@ -9370,7 +9393,7 @@ final class FoundationUITests: XCTestCase {
         }
 
         task159OpenReview(app)
-        XCTAssertTrue(app.buttons["review-scope-due"].isSelected)
+        XCTAssertTrue(reviewScopeIs(app, "due"))
         boardTap(app, "review-expand-cycle")
         boardTap(app, "review-expand-cycle")
         for id in ["task159-date", "task159-timed"] {
@@ -9394,8 +9417,8 @@ final class FoundationUITests: XCTestCase {
         XCTAssertFalse(app.buttons["task-title-task159-clear"].exists)
         XCTAssertFalse(app.buttons["task-title-task159-future"].exists)
 
-        boardTap(app, "review-scope-all")
-        XCTAssertTrue(app.buttons["review-scope-all"].isSelected)
+        reviewChooseScope(app, "all")
+        XCTAssertTrue(reviewScopeIs(app, "all"))
         for (id, title) in [("task159-date", "Task159 Date"), ("task159-timed", "Task159 Timed"),
                             ("task159-clear", "Task159 Clear"), ("task159-future", "Task159 Future")] {
             XCTAssertEqual(reveal("task-title-" + id).label, title)
@@ -9411,9 +9434,9 @@ final class FoundationUITests: XCTestCase {
         app.terminate()
         app.launch()
         task159OpenReview(app)
-        XCTAssertTrue(app.buttons["review-scope-due"].isSelected)
+        XCTAssertTrue(reviewScopeIs(app, "due"))
         XCTAssertTrue(app.staticTexts["review-empty"].waitForExistence(timeout: 30))
-        boardTap(app, "review-scope-all")
+        reviewChooseScope(app, "all")
         boardTap(app, "review-expand-cycle")
         boardTap(app, "review-expand-cycle")
         XCTAssertEqual(reveal("task-title-task159-date").label, "Task159 Date")
@@ -9430,7 +9453,7 @@ final class FoundationUITests: XCTestCase {
         app.launchArguments = ["--native-ui-test-library", "f0af43b0-2194-4b49-b1bc-72134198936c"]
         app.launch()
         task159OpenReview(app)
-        XCTAssertTrue(app.buttons["review-scope-due"].isSelected)
+        XCTAssertTrue(reviewScopeIs(app, "due"))
         boardTap(app, "review-expand-cycle")
         boardTap(app, "review-expand-cycle")
         let advance = app.buttons["review-task-advance-task159-date"]
@@ -9441,7 +9464,7 @@ final class FoundationUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["persistence-error"].waitForExistence(timeout: 30))
         boardEnabled(retry, timeout: 30)
         func assertBlocked() {
-            for id in ["review-task-advance-task159-date", "review-start", "review-scope-due", "tab-inbox", "tab-menu"] {
+            for id in ["review-task-advance-task159-date", "review-start", "review-scope", "tab-inbox", "tab-menu"] {
                 let control = app.buttons[id]
                 XCTAssertTrue(control.exists, "Missing blocked control: " + id)
                 XCTAssertFalse(control.isEnabled, "Control enabled with an owed Review write: " + id)
@@ -9463,10 +9486,10 @@ final class FoundationUITests: XCTestCase {
         app.launchArguments = ["--native-ui-test-library", "f0af43b0-2194-4b49-b1bc-72134198936c"]
         app.launch()
         task159OpenReview(app)
-        XCTAssertTrue(app.buttons["review-scope-due"].isSelected)
+        XCTAssertTrue(reviewScopeIs(app, "due"))
         XCTAssertTrue(app.staticTexts["review-empty"].waitForExistence(timeout: 30))
         XCTAssertFalse(app.buttons["persistence-retry"].exists)
-        boardTap(app, "review-scope-all")
+        reviewChooseScope(app, "all")
         boardTap(app, "review-expand-cycle")
         boardTap(app, "review-expand-cycle")
         let title = app.buttons["task-title-task159-date"]
@@ -9528,7 +9551,7 @@ final class FoundationUITests: XCTestCase {
         app.textViews["capture-input"].typeText(inboxTitle)
         tap("capture-save")
         openReview()
-        selected("review-scope-due")
+        XCTAssertTrue(reviewScopeIs(app, "due"))
         let initialCycle = app.buttons["review-expand-cycle"].label
         tap("review-expand-cycle")
         enabled(app.buttons["review-expand-cycle"])
@@ -9542,9 +9565,9 @@ final class FoundationUITests: XCTestCase {
         enabled(app.buttons["review-expand-cycle"])
         XCTAssertEqual(app.buttons["review-expand-cycle"].label, initialCycle)
         XCTAssertFalse(app.buttons[title].exists)
-        tap("review-scope-all")
-        selected("review-scope-all")
-        XCTAssertTrue(app.buttons["review-history"].exists)
+        reviewChooseScope(app, "all", tapChip: tap)
+        XCTAssertTrue(reviewScopeIs(app, "all"))
+        reviewAssertDoneInScopeMenu(app)
         tap("review-expand-cycle")
         tap("review-expand-cycle")
         revealTask(title).tap()
@@ -9553,7 +9576,7 @@ final class FoundationUITests: XCTestCase {
         replaceProjectNotesText(titleInput, with: title + " changed")
         tap("task-editor-save")
         enabled(app.buttons["review-start"])
-        selected("review-scope-all")
+        XCTAssertTrue(reviewScopeIs(app, "all"))
         _ = revealTask(title + " changed")
         let expandedCycle = app.buttons["review-expand-cycle"].label
         tap("search-open")
@@ -9564,7 +9587,7 @@ final class FoundationUITests: XCTestCase {
         enabled(app.buttons["search-task-" + taskID])
         tap("search-close")
         enabled(app.buttons["review-start"])
-        selected("review-scope-all")
+        XCTAssertTrue(reviewScopeIs(app, "all"))
         XCTAssertEqual(app.buttons["review-expand-cycle"].label, expandedCycle)
         _ = revealTask(title + " changed")
 
@@ -9596,7 +9619,7 @@ final class FoundationUITests: XCTestCase {
             }
             let first = stepTitle()
             XCTAssertFalse(app.buttons["review-guide-back"].isEnabled)
-            for id in ["tab-inbox", "tab-menu", "review-start", "review-scope-due"] {
+            for id in ["tab-inbox", "tab-menu", "review-start", "review-scope"] {
                 let background = app.buttons[id]
                 XCTAssertFalse(background.exists && background.isEnabled, "Review modal background enabled: " + id)
                 XCTAssertFalse(background.isHittable)
@@ -9623,7 +9646,7 @@ final class FoundationUITests: XCTestCase {
             app.launch()
             openReview()
 
-            selected("review-scope-due")
+            XCTAssertTrue(reviewScopeIs(app, "due"))
             XCTAssertEqual(app.buttons["review-expand-cycle"].label, initialCycle)
             startGuide(kind)
             XCTAssertEqual(stepTitle(), second)
@@ -15140,7 +15163,14 @@ final class FoundationUITests: XCTestCase {
             settings.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
             task192Reveal(app, "settings-data", buttons: true, scrollID: "settings-scroll")
             boardTap(app, "settings-data")
-            XCTAssertTrue(app.textFields["archive-retention-days"].waitForExistence(timeout: 15))
+            let disclosure = app.buttons["archive-retention-disclosure"]
+            XCTAssertTrue(disclosure.waitForExistence(timeout: 15))
+            XCTAssertFalse(app.textFields["archive-retention-days"].exists, "Archive retention starts folded")
+            XCTAssertFalse(app.links["archive-retention-guide-link"].exists)
+            revealPagedElement(app, disclosure, in: app.scrollViews.firstMatch)
+            disclosure.tap()
+            XCTAssertTrue(app.textFields["archive-retention-days"].waitForExistence(timeout: 10))
+            XCTAssertTrue(app.links["archive-retention-guide-link"].exists, app.debugDescription)
         }
         func tap(_ id: String) {
             let button = app.buttons[id]
@@ -15158,17 +15188,17 @@ final class FoundationUITests: XCTestCase {
         XCTAssertEqual(app.textFields["archive-retention-days"].value as? String, "0")
         draft("30"); tap("archive-retention-save")
         tap("archive-retention-cancel")
-        XCTAssertTrue(app.staticTexts["archive-retention-current"].label.contains("Never"))
+        XCTAssertTrue(app.buttons["archive-retention-disclosure"].label.contains("Never"))
         tap("archive-retention-save"); tap("archive-retention-confirm")
         let saved = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS '30'"),
-            object: app.staticTexts["archive-retention-current"])
+            object: app.buttons["archive-retention-disclosure"])
         XCTAssertEqual(XCTWaiter.wait(for: [saved], timeout: 15), .completed)
         task337NoRestartGate(app, timeout: 1)
         app.terminate(); open()
         XCTAssertEqual(app.textFields["archive-retention-days"].value as? String, "30")
         tap("archive-retention-never")
         let never = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS 'Never'"),
-            object: app.staticTexts["archive-retention-current"])
+            object: app.buttons["archive-retention-disclosure"])
         XCTAssertEqual(XCTWaiter.wait(for: [never], timeout: 15), .completed)
         task337NoRestartGate(app, timeout: 1)
         app.terminate()
@@ -25195,8 +25225,8 @@ final class FoundationUITests: XCTestCase {
         if app.buttons["tab-review"].exists { boardTap(app, "tab-review") }
         else { boardTap(app, "tab-menu"); boardTap(app, "menu-review") }
         boardEnabled(app.buttons["review-start"], timeout: 30)
-        boardTap(app, "review-scope-all")
-        XCTAssertTrue(app.buttons["review-scope-all"].isSelected)
+        reviewChooseScope(app, "all")
+        XCTAssertTrue(reviewScopeIs(app, "all"))
         let scroll = app.scrollViews.firstMatch
         XCTAssertTrue(scroll.waitForExistence(timeout: 30))
 
@@ -25289,8 +25319,8 @@ final class FoundationUITests: XCTestCase {
         XCTAssertTrue(scroll.waitForExistence(timeout: 10))
         XCTAssertGreaterThan(scroll.frame.height, app.frame.height * 0.45,
                              "Review rows need a useful viewport even when controls wrap")
-        boardTap(app, "review-scope-all")
-        XCTAssertTrue(app.buttons["review-scope-all"].isSelected)
+        reviewChooseScope(app, "all")
+        XCTAssertTrue(reviewScopeIs(app, "all"))
         boardTap(app, "review-expand-cycle")
         boardTap(app, "review-expand-cycle")
 
@@ -25302,7 +25332,7 @@ final class FoundationUITests: XCTestCase {
         XCTAssertGreaterThanOrEqual(future.frame.minY, viewport.minY - 1)
         XCTAssertLessThanOrEqual(future.frame.maxY, viewport.maxY + 1)
         if largestText {
-            XCTAssertFalse(app.buttons["review-scope-all"].isHittable,
+            XCTAssertFalse(app.buttons["review-scope"].isHittable,
                            "Large-text Review controls should scroll away to leave room for task rows")
         }
         let rowShot = XCTAttachment(screenshot: app.screenshot())
@@ -25315,14 +25345,13 @@ final class FoundationUITests: XCTestCase {
         XCTAssertTrue(advance.isEnabled)
         XCTAssertTrue(advance.label.contains("Task159 Clear"))
 
-        let all = app.buttons["review-scope-all"]
-        for _ in 0..<12 where !all.isHittable { scroll.swipeDown() }
-        XCTAssertTrue(all.isHittable, "The scope and Start Review controls must be reachable again")
-        boardTap(app, "review-scope-due")
-        XCTAssertTrue(app.buttons["review-scope-due"].isSelected)
-        boardTap(app, "review-scope-all")
-        XCTAssertTrue(all.isSelected)
-        boardEnabled(app.buttons["review-history"])
+        let chip = app.buttons["review-scope"]
+        for _ in 0..<12 where !chip.isHittable { scroll.swipeDown() }
+        XCTAssertTrue(chip.isHittable, "The scope and Start Review controls must be reachable again")
+        reviewChooseScope(app, "due")
+        XCTAssertTrue(reviewScopeIs(app, "due"))
+        reviewChooseScope(app, "all")
+        reviewAssertDoneInScopeMenu(app)
         boardTap(app, "review-start")
         boardEnabled(app.buttons["review-start-daily"])
         boardTap(app, "review-start-cancel")
@@ -25332,6 +25361,37 @@ final class FoundationUITests: XCTestCase {
         controlsShot.lifetime = .keepAlways
         add(controlsShot)
         app.terminate()
+    }
+
+    func testReviewScopeChipMenuChoosesScopeAndOpensDoneTasks() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = task192Arguments(UUID().uuidString.lowercased())
+        app.launch(); defer { app.terminate() }
+        task159OpenReview(app)
+        XCTAssertTrue(reviewScopeIs(app, "due"))
+        let empty = app.staticTexts["review-empty"]
+        XCTAssertTrue(empty.waitForExistence(timeout: 30))
+        XCTAssertEqual(empty.label, "No review reminders are due. Tasks without a review date are in All open tasks.")
+        XCTAssertFalse(app.buttons["review-scope-due"].exists, "The scope choices live in the chip menu")
+        boardTap(app, "review-scope")
+        boardEnabled(app.buttons["review-scope-due"])
+        XCTAssertTrue(app.buttons["review-scope-due"].isSelected)
+        XCTAssertFalse(app.buttons["review-scope-all"].isSelected)
+        XCTAssertTrue(app.staticTexts["Review reminders due now. Tasks without a review date stay in the overview."].exists)
+        XCTAssertTrue(app.staticTexts["Browse open tasks across your system."].exists)
+        XCTAssertFalse(app.buttons["review-start"].isHittable, "The menu covers the Review toolbar")
+        let menuShot = XCTAttachment(screenshot: app.screenshot()); menuShot.name = "Review scope menu"; menuShot.lifetime = .keepAlways; add(menuShot)
+        boardTap(app, "review-scope-cancel")
+        XCTAssertTrue(app.buttons["review-scope-due"].waitForNonExistence(timeout: 10))
+        XCTAssertTrue(reviewScopeIs(app, "due"))
+        reviewChooseScope(app, "all")
+        boardEnabled(app.buttons["review-start"])
+        boardTap(app, "review-scope")
+        XCTAssertTrue(app.buttons["review-scope-all"].isSelected)
+        boardTap(app, "review-scope-done")
+        boardEnabled(app.buttons["history-back"], timeout: 15)
+        XCTAssertFalse(app.buttons["review-scope-done"].exists)
     }
 
     func testTask161ReviewControlsScrollNormal() {
@@ -33081,7 +33141,7 @@ extension FoundationUITests {
         if prefix == "review" {
             if app.buttons["tab-review"].exists { boardTap(app, "tab-review") } else { boardTap(app, "tab-menu"); boardTap(app, "menu-review") }
             boardEnabled(app.buttons["review-start"])
-            boardTap(app, "review-scope-all"); boardTap(app, "review-expand-cycle"); boardTap(app, "review-expand-cycle")
+            reviewChooseScope(app, "all"); boardTap(app, "review-expand-cycle"); boardTap(app, "review-expand-cycle")
         } else {
             boardTap(app, "tab-menu")
             let menu = app.buttons["menu-contexts"]; boardEnabled(menu, timeout: 30)
@@ -33128,9 +33188,9 @@ extension FoundationUITests {
             again.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 0.8)
             statusListBulkCount(app, prefix, 1)
         } else {
-            boardTap(app, "review-scope-due")
+            reviewChooseScope(app, "due")
             XCTAssertTrue(app.staticTexts[prefix + "-bulk-count"].waitForNonExistence(timeout: 30))
-            boardTap(app, "review-scope-all")
+            reviewChooseScope(app, "all")
             let again = task192Reveal(app, "task-title-" + first, buttons: true, scrollID: scroll, scans: 60)
             again.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 0.8)
             statusListBulkCount(app, prefix, 1)
@@ -33173,7 +33233,7 @@ extension FoundationUITests {
         boardEnabled(app.buttons["tab-menu"], timeout: 40)
         if app.buttons["tab-review"].exists { boardTap(app, "tab-review") } else { boardTap(app, "tab-menu"); boardTap(app, "menu-review") }
         boardEnabled(app.buttons["review-start"])
-        boardTap(app, "review-scope-all"); boardTap(app, "review-expand-cycle"); boardTap(app, "review-expand-cycle")
+        reviewChooseScope(app, "all"); boardTap(app, "review-expand-cycle"); boardTap(app, "review-expand-cycle")
         let prefix = "review-organize", first = "shown-bulk-review-01", second = "shown-bulk-review-02"
         let title = task192Reveal(app, "task-title-" + first, buttons: true, scrollID: "review-scroll", scans: 60)
         title.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 0.8)
@@ -37526,7 +37586,7 @@ extension FoundationUITests {
         app.launchArguments = task192Arguments(library)
         app.launch(); defer { app.terminate() }
         reviewLaterOpenOverview(app)
-        reviewLaterTap(app, "review-scope-all")
+        reviewChooseScope(app, "all", tapChip: { self.reviewLaterTap(app, $0) })
         reviewLaterTap(app, "review-expand-cycle"); reviewLaterTap(app, "review-expand-cycle")
         let overviewLater = "review-later-project:" + fixture.projectID
         reviewLaterDisclosure(app, overviewLater, count: 2, expanded: false)
@@ -37545,13 +37605,13 @@ extension FoundationUITests {
         reviewLaterTap(app, overviewLater)
         reviewLaterDisclosure(app, overviewLater, count: 2, expanded: false)
         XCTAssertTrue(first.waitForNonExistence(timeout: 30)); XCTAssertFalse(due.exists)
-        reviewLaterTap(app, "review-scope-due")
+        reviewChooseScope(app, "due", tapChip: { self.reviewLaterTap(app, $0) })
         let dueCurrent = reviewLaterReveal(app, "task-title-" + fixture.dueTailID)
         XCTAssertEqual(dueCurrent.label, "UI13 A due tail")
         XCTAssertFalse(app.buttons[overviewLater].exists)
         XCTAssertFalse(app.buttons["task-title-" + fixture.firstTailID].exists)
         processEditorObserve(app, "UI13 explicitly review-due blocked Next remains current in Due overview")
-        reviewLaterTap(app, "review-scope-all")
+        reviewChooseScope(app, "all", tapChip: { self.reviewLaterTap(app, $0) })
         let sectionCard = reviewLaterReveal(app, "review-project-project:" + fixture.sectionProjectID)
         if !sectionCard.isSelected { reviewLaterTap(app, sectionCard.identifier) }
         let sectionsLater = "review-later-project:" + fixture.sectionProjectID
@@ -37635,7 +37695,7 @@ extension FoundationUITests {
         app.launchArguments = task192Arguments(library, largest: true)
         app.launch(); defer { app.terminate() }
         reviewLaterOpenOverview(app)
-        reviewLaterTap(app, "review-scope-all")
+        reviewChooseScope(app, "all", tapChip: { self.reviewLaterTap(app, $0) })
         reviewLaterTap(app, "review-expand-cycle"); reviewLaterTap(app, "review-expand-cycle")
         let overviewLater = "review-later-project:" + fixture.projectID
         reviewLaterDisclosure(app, overviewLater, count: 2, expanded: false)

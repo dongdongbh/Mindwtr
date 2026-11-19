@@ -169,10 +169,10 @@ App Intents and Siri belong to the RN app. They are not in `apps/ios-native`. Th
 
 ## Review and Mind Sweep
 
-- Reach: Quick Access tab › Review (or Menu › Review) › Daily Review or Weekly Review. Mind Sweep opens from Weekly Review and from Inbox.
-- Selectors: `review-guide-step`, `review-guide-count`, `review-guide-close`, `review-daily-process-inbox`, `review-weekly-process-inbox`, `review-mind-sweep-button`, `mind-sweep-input`, `mind-sweep-close`
+- Reach: Quick Access tab › Review (or Menu › Review) › Daily Review or Weekly Review. Mind Sweep opens from Weekly Review and from Inbox. The toolbar row has Expand, the scope chip, and Start Review, as RN; the chip opens a menu with Due for review, All open tasks (each with its one-line meaning), Done, and Cancel.
+- Selectors: `review-scope`, `review-scope-` (+ due or all), `review-scope-done`, `review-scope-cancel`, `review-start`, `review-guide-step`, `review-guide-count`, `review-guide-close`, `review-daily-process-inbox`, `review-weekly-process-inbox`, `review-mind-sweep-button`, `mind-sweep-input`, `mind-sweep-close`
 - Code: `apps/ios-native/App/ReviewScreen.swift`, `apps/ios-native/App/MindSweepSheet.swift`
-- Checks: `apps/ios-native/App/UITests/FoundationUITests.swift` (testGtdReview…, testReviewRow…, testWeeklyReviewMindSweep…, testMindSweep…)
+- Checks: `apps/ios-native/App/UITests/FoundationUITests.swift` (testGtdReview…, testReviewRow…, testReviewScopeChipMenu…, testWeeklyReviewMindSweep…, testMindSweep…)
 - Notes: Settings › GTD › Review turns the Daily Focus and Weekly Contexts steps on or off.
 
 ## Search and saved searches
@@ -328,10 +328,11 @@ App Intents and Siri belong to the RN app. They are not in `apps/ios-native`. Th
 ## Settings › Data
 
 - Reach: Settings › Data › Backup. Export Backup, Export CSV, Export as TaskNotes, Restore Backup, Merge Backup, and Import from Mindwtr CSV, Todoist, TickTick, DGT GTD and OmniFocus. Diagnostics sits below Backup.
-- Selectors: `backup-disclosure`, `data-transfer-export`, `data-transfer-export-csv`, `data-transfer-export-tasknotes`, `data-transfer-restore`, `data-transfer-merge`, `data-transfer-import-csv`, `data-transfer-import-todoist`, `data-transfer-import-ticktick`, `data-transfer-import-dgt`, `data-transfer-import-omnifocus`, `backup-restore-confirm`, `backup-result-undo`
+- Selectors: `backup-disclosure`, `data-transfer-export`, `data-transfer-export-csv`, `data-transfer-export-tasknotes`, `data-transfer-restore`, `data-transfer-merge`, `data-transfer-import-csv`, `data-transfer-import-todoist`, `data-transfer-import-ticktick`, `data-transfer-import-dgt`, `data-transfer-import-omnifocus`, `backup-restore-confirm`, `backup-result-undo`, `archive-retention-disclosure`, `archive-retention-guide-link`, `archive-retention-days`, `archive-retention-save`, `archive-retention-never`, `archive-retention-confirm`, `archive-retention-cancel`
 - Code: `apps/ios-native/App/SettingsScreen.swift`, `apps/ios-native/Sources/MindwtrNativeCore/NativeBackupExportFile.swift`, `apps/ios-native/Sources/MindwtrNativeCore/NativeBackupImportFile.swift`
-- Checks: `apps/ios-native/App/UITests/FoundationUITests.swift` (testTask198Backup…, testTask199CSVExport…, testTask202BackupRecovery…, testTask203CSVImport…, testTask204JSONRestore…, testTask205TodoistImport…, testTask207TickTickImport…, testTask208DGTImport…, testTask209OmniFocusImport…)
+- Checks: `apps/ios-native/App/UITests/FoundationUITests.swift` (testTask198Backup…, testTask199CSVExport…, testTask202BackupRecovery…, testTask203CSVImport…, testTask204JSONRestore…, testTask205TodoistImport…, testTask207TickTickImport…, testTask208DGTImport…, testTask209OmniFocusImport…, testArchiveRetentionReviewCancelSaveNeverAndRestart)
 - Notes: JSON export holds attachment metadata, not file bytes. Exports go to the system share sheet.
+- Notes: Archive retention is a folded card, as RN; its subtitle shows the current setting. Open it for the description, the safety line, Learn more (docs.mindwtr.app data lifecycle in the app language), the days field, Save and Never. iOS asks the `dataSettings` read for `archiveRetentionGuide`; the read without the flag keeps its exact keys.
 
 ## Diagnostics
 

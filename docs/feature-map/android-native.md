@@ -460,7 +460,7 @@ The native client is a Kotlin and Jetpack Compose app in `apps/android-native`. 
 - Code: `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/SettingsScreen.kt`
 - Checks: `apps/android-native/scripts/check-archive-retention-device.mjs`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/ArchiveRetentionRunTest.kt`
 - Notes: Apply stores the days and removes nothing by itself. The purge runs later, only after a sync in that session.
-- Notes: Only Android asks the `dataSettings` read for `archiveRetentionGuide`; without the flag the read keeps the exact keys native iOS checks.
+- Notes: Android and native iOS ask the `dataSettings` read for `archiveRetentionGuide`; without the flag the read keeps its exact keys.
 
 ## Diagnostics log
 

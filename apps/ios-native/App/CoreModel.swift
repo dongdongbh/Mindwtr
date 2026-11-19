@@ -549,7 +549,9 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     private(set) var reviewNotice: String?
     private(set) var reviewProjectCompletionOptions: CoreObject = [:]
     private var reviewTaskWritePending = false
-    private(set) var reviewPickerPresented = false { didSet { if reviewPickerPresented { retireReviewAI() } } }
+    enum ReviewPicker: Equatable { case start, scope }
+    private(set) var reviewPicker: ReviewPicker? { didSet { if reviewPicker != nil { retireReviewAI() } } }
+    var reviewPickerPresented: Bool { reviewPicker != nil }
     private(set) var reviewGuidePresented = false { didSet { if oldValue != reviewGuidePresented { retireReviewAI() } } }
     private(set) var reviewAIWorking = false
     private(set) var reviewAIRan = false
@@ -1203,6 +1205,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     private(set) var settingsDataPresented = false
     private(set) var dataSettings: CoreObject = [:]
     private(set) var archiveRetentionCard: CoreObject = [:]
+    private(set) var archiveRetentionGuide: (title: String, url: URL)?
     var archiveRetentionDaysDraft = ""
     private(set) var archiveRetentionReview: CoreObject = [:]
     private(set) var archiveRetentionError: String?
@@ -15086,6 +15089,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
             diagnosticsCacheHost = nil
             dataSettings = [:]
             archiveRetentionCard = [:]
+            archiveRetentionGuide = nil
             archiveRetentionDaysDraft = ""
             settingsDataPresented = false
         }
@@ -15533,7 +15537,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
 
     private func readDataSettings() async throws {
         guard let currentHost = host, let session = diagnosticsSession, !appLock.concealed else { throw CocoaError(.coderInvalidValue) }
-        let result = try await query("menuRead", ["dataSettings", "{}"])
+        let result = try await query("menuRead", ["dataSettings", #"{"archiveRetentionGuide":true}"#])
         let labels = result.object("diagnostics")
         let backup = result.object("backup")
         let gettingStarted = backup.object("gettingStarted")
@@ -15556,6 +15560,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
               !card.object("never").text("label").isEmpty else { throw CocoaError(.coderReadCorrupt) }
         guard host === currentHost, !appLock.concealed, session == diagnosticsSession else { return }
         archiveRetentionCard = card
+        archiveRetentionGuide = Self.docsGuide(result.object("archiveRetentionGuide"))
         archiveRetentionDaysDraft = String(days.intValue)
         archiveRetentionReview = [:]
         archiveRetentionError = nil
@@ -15564,6 +15569,14 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         diagnosticsReadError = nil
         dataSettingAwaitingRefresh = false
         await readBackupTransferModels(currentHost, session: session)
+    }
+
+    private static func docsGuide(_ guide: CoreObject) -> (title: String, url: URL)? {
+        guard Set(guide.keys) == Set(["title", "description", "url"]),
+              guide.values.allSatisfy({ ($0 as? String).map { !$0.isEmpty && $0.utf16.count <= 4000 } == true }),
+              let parts = URLComponents(string: guide.text("url")), parts.scheme == "https", parts.host == "docs.mindwtr.app",
+              parts.user == nil, parts.password == nil, parts.port == nil, parts.query == nil, let url = parts.url else { return nil }
+        return (guide.text("title"), url)
     }
 
     func retryDataSettingsRead() async {
@@ -26998,14 +27011,26 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         NSLog("Native iOS Review row action confirmed releaseCheck=v1.3.4/ios-review-row-actions outcome=confirmed")
     }
 
-    func openReviewPicker() {
+    func openReviewPicker(_ picker: ReviewPicker = .start) {
         guard reviewActionsEnabled else { return }
-        reviewPickerPresented = true
+        reviewPicker = picker
     }
 
     func closeReviewPicker() {
         guard !busy, !retryNeeded else { return }
-        reviewPickerPresented = false
+        reviewPicker = nil
+    }
+
+    func chooseReviewScope(_ scope: String) async {
+        guard reviewPicker == .scope, !busy, !retryNeeded else { return }
+        reviewPicker = nil
+        if reviewOverviewParams.text("scope") != scope { await editReviewOverview(scope: scope) }
+    }
+
+    func openReviewDoneTasks() async {
+        guard reviewPicker == .scope, !busy, !retryNeeded else { return }
+        reviewPicker = nil
+        await openHistory()
     }
 
     func editReviewOverview(scope: String? = nil, expansion: CoreObject? = nil) async {
@@ -27043,7 +27068,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         reviewKind = kind
         reviewCheckpointInput = preferenceDefaults.string(forKey: reviewPreferencePrefix + kind)
         reviewFinishPending = false
-        reviewPickerPresented = false
+        reviewPicker = nil
         reviewGuidePresented = true
         busy = true
         defer { finishOperation() }
