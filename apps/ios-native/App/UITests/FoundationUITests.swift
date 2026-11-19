@@ -9542,8 +9542,7 @@ final class FoundationUITests: XCTestCase {
         revealTask(title).tap()
         tap("task-mode-edit")
         let titleInput = app.descendants(matching: .any).matching(identifier: "task-editor-title").firstMatch
-        titleInput.coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: 0.8)).tap()
-        titleInput.typeText(" changed")
+        replaceProjectNotesText(titleInput, with: title + " changed")
         tap("task-editor-save")
         enabled(app.buttons["review-start"])
         selected("review-scope-all")
@@ -9957,8 +9956,7 @@ final class FoundationUITests: XCTestCase {
         app.buttons[title].tap()
         tap("task-mode-edit")
         let titleInput = app.descendants(matching: .any).matching(identifier: "task-editor-title").firstMatch
-        titleInput.coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: 0.8)).tap()
-        titleInput.typeText(" changed")
+        replaceProjectNotesText(titleInput, with: title + " changed")
         tap("task-editor-save")
         enabled(app.buttons[title + " changed"])
         tap("search-open")
@@ -20091,10 +20089,9 @@ final class FoundationUITests: XCTestCase {
         enabled(app.buttons["task-mode-edit"])
         app.buttons["task-mode-edit"].tap()
         let titleInput = app.descendants(matching: .any).matching(identifier: "task-editor-title").firstMatch
-        titleInput.coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: 0.8)).tap()
-        titleInput.typeText(" changed")
+        replaceProjectNotesText(titleInput, with: title + " changed")
         app.buttons["task-editor-save"].tap()
-        enabled(app.buttons[title + " changed"])
+        enabled(detail.buttons[title + " changed"])
         enabled(app.buttons["project-back"])
         app.buttons["project-back"].tap()
         enabled(app.buttons["search-open"])
