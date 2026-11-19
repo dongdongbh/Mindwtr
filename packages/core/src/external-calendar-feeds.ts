@@ -47,6 +47,7 @@ export interface SystemCalendarInfo {
 export type ExternalCalendarFetchOptions = {
     signal?: AbortSignal;
     timeoutMs?: number;
+    deviceCalendars?: 'exclude' | { onError: (error: unknown) => void };
 
     onFeedError?: (calendarId: string) => void;
 
@@ -698,10 +699,38 @@ export function createExternalCalendarFeeds(host: ExternalCalendarFeedsHost) {
         const { signal, cleanup } = createLinkedAbortSignal(options.signal, options.timeoutMs);
 
         try {
+            const subscriptions = fetchIcsCalendarEvents(rangeStart, rangeEnd, signal, options.onFeedError, options.sources);
+            const deviceCalendars = options.deviceCalendars;
+            if (deviceCalendars === 'exclude') {
+                const result = await subscriptions;
+                throwIfAborted(signal);
+                return result;
+            }
+
             const [icsData, systemData] = await Promise.all([
-                fetchIcsCalendarEvents(rangeStart, rangeEnd, signal, options.onFeedError, options.sources),
-                fetchSystemCalendarEvents(rangeStart, rangeEnd, signal, options.sources),
+                subscriptions,
+                fetchSystemCalendarEvents(rangeStart, rangeEnd, signal, options.sources).catch((error: unknown) => {
+                    if (!deviceCalendars) throw error;
+                    throwIfAborted(signal);
+                    return { error };
+                }),
             ]);
+
+            if ('error' in systemData) {
+                throwIfAborted(signal);
+                deviceCalendars?.onError(systemData.error);
+                if (icsData.events.length > 0) {
+                    void host.logInfo('Calendar subscription events loaded after device calendar read failed', {
+                        scope: 'calendar',
+                        extra: {
+                            releaseCheck: 'v1.3.10/calendar-subscriptions-after-device-error',
+                            platform: host.platform(),
+                            eventCount: String(icsData.events.length),
+                        },
+                    });
+                }
+                return icsData;
+            }
 
             return mergeExternalCalendarSources([icsData, systemData]);
         } finally {

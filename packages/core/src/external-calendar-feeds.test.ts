@@ -136,6 +136,33 @@ describe('external calendar feeds behind the host ports', () => {
         expect(failed).toEqual(['broken', 'missing-file']);
     });
 
+    it('keeps local ICS events and reports that the device calendar read failed when requested', async () => {
+        const url = 'content://downloads/42';
+        const { feeds, host, logs, storage } = device({
+            storage: {
+                [EXTERNAL_CALENDARS_KEY]: JSON.stringify([feed('local', url)]),
+                [SYSTEM_CALENDAR_SETTINGS_KEY]: JSON.stringify({ enabled: true, selectedCalendarIds: ['work'] }),
+            },
+            files: { [url]: ics([['l1', '20260911T090000Z', 'Local event']]) },
+        });
+        const providerError = new Error('Calendars could not be found');
+        host.calendars.getCalendars = vi.fn().mockRejectedValue(providerError);
+        const originalSettings = storage.get(SYSTEM_CALENDAR_SETTINGS_KEY);
+        const onError = vi.fn();
+
+        const result = await feeds.fetchExternalCalendarEvents(...SEPT, { deviceCalendars: { onError } });
+
+        expect(result.events.map((event) => event.title)).toEqual(['Local event']);
+        expect(onError).toHaveBeenCalledExactlyOnceWith(providerError);
+        expect(logs).toContainEqual(['Calendar subscription events loaded after device calendar read failed', {
+            scope: 'calendar',
+            extra: { releaseCheck: 'v1.3.10/calendar-subscriptions-after-device-error', platform: 'android', eventCount: '1' },
+        }]);
+        await expect(feeds.fetchExternalCalendarEvents(...SEPT)).rejects.toThrow(providerError);
+        await expect(feeds.getSystemCalendars()).rejects.toThrow('Calendar provider unavailable');
+        expect(storage.get(SYSTEM_CALENDAR_SETTINGS_KEY)).toBe(originalSettings);
+    });
+
     it('refuses a feed or local file over 20 MiB and still loads the others', async () => {
         const oversized = ics([['big', '20260910T090000Z', 'Big']]) + ' '.repeat(20 * 1024 * 1024);
         const { feeds } = device({

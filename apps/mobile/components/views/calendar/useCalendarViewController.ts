@@ -427,7 +427,16 @@ export function useCalendarViewController() {
     const rangeStart = new Date(externalRangeStartMs);
     const rangeEnd = new Date(externalRangeEndMs);
 
-    fetchExternalCalendarEvents(rangeStart, rangeEnd, { signal: controller?.signal })
+    fetchExternalCalendarEvents(rangeStart, rangeEnd, {
+      signal: controller?.signal,
+      deviceCalendars: {
+        onError: (error) => {
+          if (cancelled) return;
+          logCalendarError(error);
+          setExternalError(String(error));
+        },
+      },
+    })
       .then(({ calendars, events }) => {
         if (cancelled) return;
         setExternalCalendars(calendars);

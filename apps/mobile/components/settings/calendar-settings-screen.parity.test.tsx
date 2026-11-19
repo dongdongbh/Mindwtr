@@ -4,6 +4,7 @@
 import React from 'react';
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
+import { getCalendarsAsync, getEventsAsync } from 'expo-calendar';
 import { act, create, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import {
@@ -123,12 +124,12 @@ vi.mock('expo-calendar', () => {
       harness.permission = harness.requestAnswer;
       return { status: harness.requestAnswer };
     },
-    getCalendarsAsync: async () => harness.calendars.map((calendar) => ({ ...calendar })),
+    getCalendarsAsync: vi.fn(async () => harness.calendars.map((calendar) => ({ ...calendar }))),
     getSourcesAsync: async () => [],
-    getEventsAsync: async (ids: string[]) => {
+    getEventsAsync: vi.fn(async (ids: string[]) => {
       if (harness.failEvents) throw new Error('Calendar provider unavailable');
       return ids.flatMap((id) => harness.events[id] ?? []);
-    },
+    }),
     createCalendarAsync: async (details: Record<string, unknown>) => {
       harness.nextCalendar += 1;
       const id = `created-${harness.nextCalendar}`;
@@ -283,6 +284,11 @@ type Device = {
 
 
 type Scenario = { name: string; settings: string; device: Device; actions: [string, ...unknown[]][] };
+
+const rnSubscriptionTestToasts: Partial<Record<string, { step: number; toasts: unknown[][] }>> = {
+  'feeds: a local file, a cancelled pick, a failed test': { step: 3, toasts: [['Success', 'Loaded 1 events', 'success', null]] },
+  'in Chinese: push on and a test': { step: 2, toasts: [['成功', '已加载 2 个日程', 'success', null]] },
+};
 
 const systemSettings = (value: Record<string, unknown>) => JSON.stringify(value);
 
@@ -687,10 +693,43 @@ describe('React Native Calendar settings screen parity fixture', () => {
     const { observations, provenance: _provenance, ...frozenInputs } = JSON.parse(readFileSync(FIXTURE_PATH, 'utf8'));
     expect(frozenInputs).toEqual(inputs());
     for (const name of Object.keys(captured)) {
-      expect({ [name]: captured[name] }).toEqual({ [name]: observations[name] });
+      const change = rnSubscriptionTestToasts[name];
+      const expected = observations[name].map((frame: object, step: number) =>
+        change && step === change.step ? { ...frame, toasts: change.toasts } : frame);
+      expect({ [name]: captured[name] }).toEqual({ [name]: expected });
     }
     expect(Object.keys(observations)).toEqual(Object.keys(captured));
   }, 180_000);
+
+  it('tests the chosen ICS file without reading device events and warns if the file is unreadable', async () => {
+    const scenario = scenarios.find((entry) => entry.name === 'feeds: a local file, a cancelled pick, a failed test')!;
+    await seedStore(scenario);
+    setDevice(scenario.device);
+    let renderer!: ReactTestRenderer;
+    await act(async () => { renderer = create(<CalendarSettingsScreen />); });
+    try {
+      await settle();
+      await perform(renderer, ['press', 'k:settings.calendarMobile.chooseLocalIcsFile']);
+      await settle();
+
+      vi.mocked(getCalendarsAsync).mockClear();
+      vi.mocked(getEventsAsync).mockClear();
+      await perform(renderer, ['press', 'k:settings.calendarMobile.test']);
+      await settle();
+      expect(harness.toasts.at(-1)).toEqual(['Success', 'Loaded 1 events', 'success', null]);
+
+      harness.feeds = { ...harness.feeds, [LOCAL_URI]: { error: 'File permission revoked' } };
+      await perform(renderer, ['press', 'k:settings.calendarMobile.test']);
+      await settle();
+      expect(harness.toasts.at(-1)).toEqual(['Error', 'Failed to load events', 'warning', null]);
+      expect(getCalendarsAsync).not.toHaveBeenCalled();
+      expect(getEventsAsync).not.toHaveBeenCalled();
+    } finally {
+      await act(async () => { renderer.unmount(); });
+      stopCalendarPushSync();
+      await flushPendingSave();
+    }
+  });
 
   it('announces the Area choice state without reading the check glyphs (#1305)', async () => {
     const scenario = scenarios.find((entry) => entry.name === 'device calendars: turn on, grant, choose calendars and areas')!;

@@ -1,8 +1,9 @@
 import React from 'react';
-import { act, create } from 'react-test-renderer';
+import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Task } from '@mindwtr/core';
 
+import { fetchExternalCalendarEvents } from '../../../lib/external-calendar';
 import { useCalendarViewController } from './useCalendarViewController';
 
 type MockAppStateStatus = 'active' | 'background' | 'inactive';
@@ -147,6 +148,29 @@ describe('useCalendarViewController cadence', () => {
 
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it('shows subscribed events alongside a device calendar load error', async () => {
+    const error = new Error('Calendars could not be found');
+    const event = {
+      id: 'ics-event', sourceId: 'subscription', title: 'Subscribed event', allDay: false,
+      start: '2026-04-03T15:00:00.000Z', end: '2026-04-03T16:00:00.000Z',
+    };
+    vi.mocked(fetchExternalCalendarEvents).mockImplementationOnce(async (_start, _end, options) => {
+      if (!options?.deviceCalendars || options.deviceCalendars === 'exclude') throw error;
+      options.deviceCalendars.onError(error);
+      return { calendars: [{ id: 'subscription', name: 'Feed', enabled: true, url: 'file:///feed.ics' }], events: [event] };
+    });
+    const onResult = vi.fn<(value: ReturnType<typeof useCalendarViewController>) => void>();
+    let renderer!: ReactTestRenderer;
+    await act(async () => { renderer = create(<ControllerHost onResult={onResult} />); });
+    try {
+      const controller = onResult.mock.lastCall?.[0];
+      expect(controller?.externalError).toBe(String(error));
+      expect(controller?.getDayLists(new Date(event.start)).events).toEqual([event]);
+    } finally {
+      await act(async () => { renderer.unmount(); });
+    }
   });
 
   it('clears the now-tick interval when backgrounded and restores it on foreground', async () => {

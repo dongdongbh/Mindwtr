@@ -474,6 +474,7 @@ export function CalendarSettingsScreen() {
             const range = getCalendarTestRange(new Date());
             let failedFeeds = 0;
             const { events } = await fetchExternalCalendarEvents(range.start, range.end, {
+                deviceCalendars: 'exclude',
                 onFeedError: () => { failedFeeds += 1; },
             });
             showToast(calendarSettingsToasts(tr, t).testResult(events.length, failedFeeds, language));
