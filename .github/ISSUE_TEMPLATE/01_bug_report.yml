@@ -68,7 +68,7 @@ body:
         - "APT"
         - "AUR"
         - "Nix (community flake)"
-        - "Snap Store (snapcraft)
+        - "Snap Store (snapcraft)"
         - "Distro package"
         - "Release file (.deb / .rpm / AppImage / .dmg / .exe / .msi / APK)"
         - "Source / dev build"
