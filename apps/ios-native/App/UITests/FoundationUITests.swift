@@ -8378,6 +8378,7 @@ final class FoundationUITests: XCTestCase {
 
     func testCalendarPopulatedDayRemainsHittableAfterClosingDetails() {
         let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", UUID().uuidString.lowercased()]
         app.launch()
         func tap(_ id: String) {
             let button = app.buttons.matching(identifier: id).firstMatch
@@ -8464,6 +8465,7 @@ final class FoundationUITests: XCTestCase {
 
     func testCalendarExistingTaskComposerValidationSaveAndRestart() {
         let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", UUID().uuidString.lowercased()]
         app.launch()
         boardEnabled(app.buttons["capture-open"], timeout: 30)
         boardSelectAllAreas(app)
@@ -8632,6 +8634,7 @@ final class FoundationUITests: XCTestCase {
 
     func testCalendarNewTaskComposerProjectModeSwitchSaveAndRestart() {
         let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", UUID().uuidString.lowercased()]
         app.launch()
         boardEnabled(app.buttons["capture-open"], timeout: 30)
         boardSelectAllAreas(app)
@@ -8753,6 +8756,7 @@ final class FoundationUITests: XCTestCase {
         defer { XCUIDevice.shared.orientation = originalOrientation }
         XCUIDevice.shared.orientation = .portrait
         let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", UUID().uuidString.lowercased()]
         app.launch()
         func enabled(_ element: XCUIElement, timeout: TimeInterval = 10) {
             XCTAssertTrue(element.waitForExistence(timeout: timeout))
@@ -9017,6 +9021,7 @@ final class FoundationUITests: XCTestCase {
 
     func testCalendarPreferencesPersistCompletedVisibilityDensityAndMode() {
         let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", UUID().uuidString.lowercased()]
         app.launch()
         func enabled(_ element: XCUIElement, timeout: TimeInterval = 10) {
             XCTAssertTrue(element.waitForExistence(timeout: timeout))
@@ -9143,6 +9148,7 @@ final class FoundationUITests: XCTestCase {
 
     func testReviewFoldedContextsScheduledGroupsAndFocusStatus() {
         let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", UUID().uuidString.lowercased()]
         app.launch()
         func enabled(_ element: XCUIElement, timeout: TimeInterval = 10) {
             XCTAssertTrue(element.waitForExistence(timeout: timeout))
@@ -9464,6 +9470,7 @@ final class FoundationUITests: XCTestCase {
 
     func testReviewOverviewEditSearchAndGuideCheckpointRestart() {
         let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", UUID().uuidString.lowercased()]
         app.launch()
         func enabled(_ element: XCUIElement, timeout: TimeInterval = 10) {
             XCTAssertTrue(element.waitForExistence(timeout: timeout))
@@ -9880,6 +9887,7 @@ final class FoundationUITests: XCTestCase {
 
     func testFocusControlsTokensSortEditSearchAndRestart() {
         let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", UUID().uuidString.lowercased()]
         app.launch()
         func enabled(_ element: XCUIElement, timeout: TimeInterval = 10) {
             XCTAssertTrue(element.waitForExistence(timeout: timeout))
@@ -10241,6 +10249,7 @@ final class FoundationUITests: XCTestCase {
 
     func testHistoryDoneFilterEditSearchArchiveAndRestart() {
         let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", UUID().uuidString.lowercased()]
         app.launch()
         func enabled(_ element: XCUIElement, timeout: TimeInterval = 10) {
             XCTAssertTrue(element.waitForExistence(timeout: timeout))
@@ -20044,6 +20053,7 @@ final class FoundationUITests: XCTestCase {
 
     func testProjectsMenuTaskEditSearchAndRestart() {
         let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", UUID().uuidString.lowercased()]
         app.launch()
         func enabled(_ element: XCUIElement, timeout: TimeInterval = 10) {
             XCTAssertTrue(element.waitForExistence(timeout: timeout))
@@ -20111,6 +20121,7 @@ final class FoundationUITests: XCTestCase {
 
     func testSearchEditCompleteFilterAndReturnToFocus() {
         let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", UUID().uuidString.lowercased()]
         app.launch()
         func enabled(_ element: XCUIElement, timeout: TimeInterval = 10) {
             XCTAssertTrue(element.waitForExistence(timeout: timeout))
@@ -21576,6 +21587,7 @@ final class FoundationUITests: XCTestCase {
 
     func testTaskViewShowsSavedNoteWithoutCompletingTask() {
         let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", UUID().uuidString.lowercased()]
         app.launch()
         let capture = app.buttons["capture-open"]
         XCTAssertTrue(capture.waitForExistence(timeout: 30))
@@ -21652,6 +21664,7 @@ final class FoundationUITests: XCTestCase {
 
     func testAreaScopeCycleAndPersistence() {
         let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", UUID().uuidString.lowercased()]
         app.launch()
         let capture = app.buttons["capture-open"]
         let area = app.buttons["area-open"]
@@ -21828,6 +21841,7 @@ final class FoundationUITests: XCTestCase {
 
     func testCaptureNoteAndContextPreserveDraftAndSave() {
         let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", UUID().uuidString.lowercased()]
         app.launch()
         let capture = app.buttons["capture-open"]
         XCTAssertTrue(capture.waitForExistence(timeout: 30))
@@ -21914,6 +21928,7 @@ final class FoundationUITests: XCTestCase {
 
     func testCaptureAndCompleteSurviveRelaunch() {
         let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", UUID().uuidString.lowercased()]
         app.launch()
         let capture = app.buttons["capture-open"]
         XCTAssertTrue(capture.waitForExistence(timeout: 30))
