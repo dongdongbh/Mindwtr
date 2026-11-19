@@ -20083,7 +20083,7 @@ final class FoundationUITests: XCTestCase {
         XCTAssertFalse(underlyingTask.isEmpty)
         app.buttons["tab-menu"].tap()
         enabled(app.buttons["menu-projects"])
-        XCTAssertFalse(app.buttons[underlyingTask].exists)
+        XCTAssertFalse(app.buttons[underlyingTask].isHittable)
         XCTAssertTrue(app.buttons["menu-dismiss"].exists)
         app.buttons["menu-projects"].tap()
         XCTAssertTrue(app.staticTexts["projects-title"].waitForExistence(timeout: 10))

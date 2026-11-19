@@ -670,7 +670,7 @@ private struct KeptTabSurfaces: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(palette.bg)
-        .background(KeptTabListAccessibility(listID: "\(surface)-scroll", covered: surface != selected))
+        .background(KeptTabListAccessibility(listID: "\(surface)-scroll", covered: surface != selected || model.morePresented))
         .opacity(surface == selected ? 1 : 0)
         .zIndex(surface == selected ? 1 : 0)
         .accessibilityElement(children: surface != selected ? .ignore : .contain)
