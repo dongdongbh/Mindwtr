@@ -4070,6 +4070,7 @@ final class FoundationUITests: XCTestCase {
     override func setUpWithError() throws {
         try super.setUpWithError()
         continueAfterFailure = false
+        XCUIDevice.shared.orientation = .portrait
     }
 
     override func tearDownWithError() throws {
