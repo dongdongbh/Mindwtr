@@ -199,6 +199,9 @@ jobs:
         with:
           bun-version-file: ".bun-version"
 
+      - name: Install schema check dependencies
+        run: bun install --frozen-lockfile --filter @mindwtr/core
+
       - name: Native synced field parity check
         run: bun run schema:check
 
