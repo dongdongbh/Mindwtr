@@ -2,7 +2,7 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { getExternalCalendarColorForId, isCalendarSlotFree, type Area, type ExternalCalendarEvent } from '@mindwtr/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { fetchExternalCalendarEvents } from '../../../lib/external-calendar-events';
+import { fetchExternalCalendarEvents, type ExternalCalendarRead } from '../../../lib/external-calendar-events';
 import { dayKey } from './calendar-primitives';
 import { defaultExternalCalendarColor, useCalendarExternalEvents } from './use-calendar-external-events';
 
@@ -13,6 +13,10 @@ vi.mock('../../../lib/external-calendar-events', () => ({
         if (warnings.length === 1) return warnings[0];
         return `${warnings[0]} (+${warnings.length - 1} more)`;
     },
+}));
+
+vi.mock('../../../lib/system-calendar', () => ({
+    getSystemCalendarPlatform: () => 'linux',
 }));
 
 const HIDDEN_KEY = 'mindwtr.calendar.hiddenExternalCalendars';
@@ -209,6 +213,43 @@ describe('useCalendarExternalEvents', () => {
 
         await waitFor(() => expect(result.current.externalError).toBe('network down'));
         expect(result.current.visibleExternalEvents).toHaveLength(0);
+        expect(result.current.isExternalLoading).toBe(false);
+    });
+
+    it('keeps Linux calendar switches visible while subscriptions finish ahead of a refresh', async () => {
+        const systemCalendar = { id: 'system:work', name: 'Work', url: 'system://work', enabled: true };
+        const systemEvent = makeEvent({ sourceId: systemCalendar.id });
+        const subscription = { id: 'feed', name: 'Feed', url: 'https://calendar.example/feed', enabled: true };
+        const subscriptionEvent = makeEvent({ id: 'subscription-event', sourceId: subscription.id });
+        const subscriptions = { calendars: [subscription], events: [subscriptionEvent], warnings: [] };
+        const maySubscriptionEvent = { ...subscriptionEvent, start: '2026-05-03T09:00:00', end: '2026-05-03T10:00:00' };
+        const maySubscriptions = { ...subscriptions, events: [maySubscriptionEvent] };
+        const settled = { calendars: [systemCalendar], events: [systemEvent], warnings: [] };
+        const completions: Array<(result: ExternalCalendarRead) => void> = [];
+        vi.mocked(fetchExternalCalendarEvents)
+            .mockResolvedValueOnce(settled)
+            .mockImplementation((start, _end, onSubscriptionsReady) => {
+                onSubscriptionsReady?.(start.getMonth() === 3 ? subscriptions : maySubscriptions);
+                return new Promise(resolve => { completions.push(resolve); });
+            });
+        const { result, rerender } = renderExternalEvents();
+        await waitFor(() => expect(result.current.visibleExternalEvents).toEqual([systemEvent]));
+
+        rerender({ query: '', range: { ...APRIL } });
+        await waitFor(() => expect(result.current.externalCalendars).toContain(subscription));
+        expect(result.current.externalCalendars).toContain(systemCalendar);
+        expect(result.current.visibleExternalEvents).toHaveLength(2);
+        expect(result.current.visibleExternalEvents).toEqual(expect.arrayContaining([subscriptionEvent, systemEvent]));
+
+        const may = { start: new Date(2026, 4, 1), end: new Date(2026, 4, 31) };
+        rerender({ query: '', range: may });
+        await waitFor(() => expect(result.current.visibleExternalEvents).toEqual([maySubscriptionEvent]));
+        expect(result.current.externalCalendars).toContain(systemCalendar);
+
+        await act(async () => completions[0]?.(settled));
+        expect(result.current.visibleExternalEvents).toEqual([maySubscriptionEvent]);
+        await act(async () => completions[1]?.(maySubscriptions));
+        expect(result.current.externalCalendars).toEqual([subscription]);
         expect(result.current.isExternalLoading).toBe(false);
     });
 

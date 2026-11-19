@@ -5,11 +5,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
     isSandboxMode,
     filterCalendarEventsForAreas,
+    mergeExternalCalendarSources,
     resolveExternalCalendarColor,
     safeParseDate,
     themeExternalCalendarDisplayColor,
     useTaskStore,
     type ExternalCalendarEvent,
+    type ExternalCalendarSourceResult,
     type ExternalCalendarSubscription,
     type Area,
     type AreaFilterSelection,
@@ -17,6 +19,7 @@ import {
 
 import { logError, logInfo } from '../../../lib/app-log';
 import { type ExternalCalendarRead, fetchExternalCalendarEvents, summarizeExternalCalendarWarnings } from '../../../lib/external-calendar-events';
+import { getSystemCalendarPlatform } from '../../../lib/system-calendar';
 import { dayKey } from './calendar-primitives';
 import { getWorkspaceCache } from '../../../lib/workspace-cache';
 
@@ -89,6 +92,7 @@ export function useCalendarExternalEvents({ filterQuery, visibleRange, areas = [
     const theme = useTaskStore((state) => state.settings?.theme);
     const [externalCalendars, setExternalCalendars] = useState<ExternalCalendarSubscription[]>([]);
     const [externalEvents, setExternalEvents] = useState<ExternalCalendarEvent[]>([]);
+    const lastLinuxSystemRead = useRef<(ExternalCalendarSourceResult & { rangeStart: number; rangeEnd: number }) | null>(null);
     const hiddenExternalCalendarIdsStorageRef = useRef<string | null>(null);
     const [hiddenExternalCalendarIds, setHiddenExternalCalendarIds] = useState<Set<string>>(() => {
         const { serialized, value } = readHiddenExternalCalendarIds();
@@ -108,6 +112,7 @@ export function useCalendarExternalEvents({ filterQuery, visibleRange, areas = [
 
     useEffect(() => {
         if (sandboxMode) {
+            lastLinuxSystemRead.current = null;
             setExternalCalendars([]);
             setExternalEvents([]);
             setExternalError(null);
@@ -130,15 +135,45 @@ export function useCalendarExternalEvents({ filterQuery, visibleRange, areas = [
                     setExternalEvents(events);
                     setExternalError(summarizeExternalCalendarWarnings(warnings));
                 };
-                display(await fetchExternalCalendarEvents(rangeStart, rangeEnd, result => {
+                const completed = await fetchExternalCalendarEvents(rangeStart, rangeEnd, result => {
                     if (cancelled) return;
-                    display(result);
+                    const previous = lastLinuxSystemRead.current;
+                    if (previous?.calendars.length) {
+                        const sameRange = previous.rangeStart === rangeStart.getTime()
+                            && previous.rangeEnd === rangeEnd.getTime();
+                        const events = sameRange ? previous.events : [];
+                        const merged = mergeExternalCalendarSources([result, { calendars: previous.calendars, events }]);
+                        display({ ...merged, warnings: result.warnings });
+                        void logInfo('Linux system calendars kept visible during refresh', {
+                            scope: 'calendar',
+                            extra: {
+                                releaseCheck: 'v1.3.10/linux-calendar-refresh',
+                                calendarCount: previous.calendars.length,
+                                eventCount: events.length,
+                            },
+                        });
+                    } else {
+                        display(result);
+                    }
                     void logInfo('Calendar subscriptions loaded while system calendars are pending', {
                         scope: 'calendar', extra: { releaseCheck: 'v1.3.9/calendar-subscriptions-ready', eventCount: result.events.length },
                     });
-                }));
+                });
+                if (cancelled) return;
+                if (getSystemCalendarPlatform() === 'linux') {
+                    const calendars = completed.calendars.filter(calendar => calendar.url.startsWith('system://'));
+                    const sourceIds = new Set(calendars.map(calendar => calendar.id));
+                    lastLinuxSystemRead.current = {
+                        rangeStart: rangeStart.getTime(),
+                        rangeEnd: rangeEnd.getTime(),
+                        calendars,
+                        events: completed.events.filter(event => sourceIds.has(event.sourceId)),
+                    };
+                }
+                display(completed);
             } catch (error) {
                 if (cancelled) return;
+                lastLinuxSystemRead.current = null;
                 const message = error instanceof Error && error.message.trim()
                     ? error.message.trim()
                     : 'Failed to load external calendars.';
