@@ -8496,6 +8496,13 @@ final class FoundationUITests: XCTestCase {
         if returnKey.exists && returnKey.isHittable { returnKey.tap() }
         let candidate = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "calendar-candidate-", title)).firstMatch
         boardEnabled(candidate)
+        var lastFrame = CGRect.null
+        expectation(for: NSPredicate { _, _ in
+            let frame = candidate.frame
+            defer { lastFrame = frame }
+            return frame == lastFrame
+        }, evaluatedWith: candidate)
+        waitForExpectations(timeout: 10)
         let taskID = String(candidate.identifier.dropFirst("calendar-candidate-".count))
         let identity = XCTAttachment(string: taskID)
         identity.name = "Calendar composer scheduled task ID"; identity.lifetime = .keepAlways; add(identity)
