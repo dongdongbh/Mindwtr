@@ -8,7 +8,7 @@ import { SettingsWorkspacesSection } from './SettingsWorkspacesSection';
 
 export function SettingsDataPage(props: SettingsDataPageProps) {
     return (
-        <div className="space-y-8">
+        <div className="space-y-6">
             {props.isTauri && <SettingsWorkspacesSection />}
             <BackupSection {...props} />
             <ImportSection {...props} />

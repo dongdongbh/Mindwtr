@@ -36,6 +36,7 @@ describe('DiagnosticsSection', () => {
             />
         );
 
+        fireEvent.click(getByRole('button', { name: /^Diagnostics/ }));
         const optOutSwitch = getByRole('switch', { name: 'Opt out of diagnostics' });
 
         expect(optOutSwitch).toHaveAttribute('aria-checked', 'false');
@@ -53,6 +54,7 @@ describe('DiagnosticsSection', () => {
             />
         );
 
+        fireEvent.click(getByRole('button', { name: /^Diagnostics/ }));
         const optOutSwitch = getByRole('switch', { name: 'Opt out of diagnostics' });
 
         expect(optOutSwitch).toHaveAttribute('aria-checked', 'true');
@@ -65,6 +67,7 @@ describe('DiagnosticsSection', () => {
         const onSaveLog = vi.fn();
         const { getByRole } = render(<DiagnosticsSection {...baseProps} onSaveLog={onSaveLog} />);
 
+        fireEvent.click(getByRole('button', { name: /^Diagnostics/ }));
         fireEvent.click(getByRole('button', { name: 'Save log' }));
         expect(onSaveLog).toHaveBeenCalledTimes(1);
     });

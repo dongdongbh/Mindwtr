@@ -76,7 +76,10 @@ describe('SettingsWorkspacesSection', () => {
         deleteMock.mockResolvedValue(undefined);
         const { container } = renderWithLanguage(<SettingsWorkspacesSection />);
 
-        await screen.findByText('Work');
+        const toggle = await screen.findByRole('button', { name: /^Workspaces/ });
+        expect(toggle).toHaveAttribute('aria-expanded', 'false');
+        expect(screen.queryByText('Work')).not.toBeInTheDocument();
+        fireEvent.click(toggle);
         const deleteButtons = container.querySelectorAll('[data-workspace-delete]');
         expect(deleteButtons).toHaveLength(1);
         expect(container.querySelector(`[data-workspace-row="${WORK}"] [data-workspace-delete]`)).not.toBeNull();

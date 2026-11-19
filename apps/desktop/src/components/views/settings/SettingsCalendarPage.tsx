@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import type { SystemCalendarPermissionStatus, SystemCalendarPushTarget } from '../../../lib/system-calendar';
 import {
     EXTERNAL_CALENDAR_COLORS,
@@ -13,10 +14,10 @@ import { useDocumentationLanguage } from '../../../contexts/language-context';
 
 import { cn } from '../../../lib/utils';
 import { Switch } from '../../ui/Switch';
+import { SettingRow, SettingsDisclosureCard } from './SettingRow';
 
 type Labels = {
     calendarIntegrationGuideTitle: string;
-    calendar: string;
     calendarDesc: string;
     calendarName: string;
     calendarUrl: string;
@@ -102,6 +103,8 @@ export function SettingsCalendarPage({
 }: SettingsCalendarPageProps) {
     const language = useDocumentationLanguage();
     const areas = useTaskStore((state) => state.areas).filter((area) => !area.deletedAt);
+    const [systemOpen, setSystemOpen] = useState(false);
+    const [externalOpen, setExternalOpen] = useState(false);
 
     const toggleArea = (calendar: ExternalCalendarSubscription, areaId: string) => {
         void updateSettingsFromLatest((latest) => ({
@@ -120,18 +123,22 @@ export function SettingsCalendarPage({
     })();
 
     return (
-        <div className="space-y-6">
+        <>
             {showSystemCalendarSection && (
-                <div className="bg-card border border-border rounded-lg p-6 space-y-4">
-                    <div data-settings-key="calendarSystemTitle" className="space-y-1">
-                        <div className="text-sm font-semibold">{t.calendarSystemTitle}</div>
-                        <p className="text-sm text-muted-foreground">{t.calendarSystemDesc}</p>
-                    </div>
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                        <div className="text-sm">
-                            <span className="text-muted-foreground">{t.calendarSystemStatus}: </span>
-                            <span className="font-medium">{permissionLabel}</span>
-                        </div>
+                <SettingsDisclosureCard
+                    sectionKey="calendarSystemTitle"
+                    title={t.calendarSystemTitle}
+                    description={t.calendarSystemDesc}
+                    open={systemOpen}
+                    onToggle={() => setSystemOpen((previous) => !previous)}
+                >
+                    <SettingRow
+                        padded
+                        settingsKey={null}
+                        title={`${t.calendarSystemStatus}: ${permissionLabel}`}
+                        description={systemCalendarPermission === 'denied' ? t.calendarSystemDeniedHint : undefined}
+                        className="flex-wrap"
+                    >
                         {(systemCalendarPermission === 'undetermined' || systemCalendarPermission === 'denied') && (
                             <button
                                 type="button"
@@ -141,205 +148,205 @@ export function SettingsCalendarPage({
                                 {t.calendarSystemRequestAccess}
                             </button>
                         )}
-                    </div>
-                    {systemCalendarPermission === 'denied' && (
-                        <p className="text-xs text-muted-foreground">{t.calendarSystemDeniedHint}</p>
-                    )}
-                    <div className="border-t border-border pt-4 space-y-3">
-                        <div className="flex items-start justify-between gap-4">
-                            <div data-settings-key="calendarPushTitle" className="space-y-1">
-                                <div className="text-sm font-medium">{t.calendarPushTitle}</div>
-                                <p className="text-xs text-muted-foreground">{t.calendarPushDesc}</p>
-                            </div>
-                            <Switch
-                                aria-label={t.calendarPushTitle}
-                                checked={calendarPushEnabled}
-                                disabled={calendarPushLoading}
-                                onCheckedChange={onToggleCalendarPush}
-                            />
-                        </div>
-
-                        {calendarPushEnabled && systemCalendarPermission === 'granted' && (
-                            <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
-                                <label data-settings-key="calendarPushTarget" className="space-y-1">
-                                    <span className="text-sm font-medium">{t.calendarPushTarget}</span>
-                                    <select
-                                        value={calendarPushTargetCalendarId ?? ''}
-                                        onChange={(event) => onCalendarPushTargetChange(event.target.value || null)}
-                                        disabled={calendarPushLoading}
-                                        className="w-full text-sm px-3 py-2 rounded border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/30"
-                                    >
-                                        <option value="">{t.calendarPushManagedTarget}</option>
-                                        {calendarPushTargets.map((target) => (
-                                            <option key={target.id} value={target.id}>
-                                                {target.sourceName ? `${target.name} (${target.sourceName})` : target.name}
-                                            </option>
-                                        ))}
-                                    </select>
-                                    <span className="block text-xs text-muted-foreground">{t.calendarPushTargetHint}</span>
-                                </label>
-                                <button
-                                    type="button"
-                                    onClick={onRefreshCalendarPushTargets}
+                    </SettingRow>
+                    <SettingRow padded settingsKey="calendarPushTitle" title={t.calendarPushTitle} description={t.calendarPushDesc}>
+                        <Switch
+                            aria-label={t.calendarPushTitle}
+                            checked={calendarPushEnabled}
+                            disabled={calendarPushLoading}
+                            onCheckedChange={onToggleCalendarPush}
+                        />
+                    </SettingRow>
+                    {calendarPushEnabled && systemCalendarPermission === 'granted' && (
+                        <div className="grid gap-3 p-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
+                            <label data-settings-key="calendarPushTarget" className="space-y-1">
+                                <span className="text-sm font-medium">{t.calendarPushTarget}</span>
+                                <select
+                                    value={calendarPushTargetCalendarId ?? ''}
+                                    onChange={(event) => onCalendarPushTargetChange(event.target.value || null)}
                                     disabled={calendarPushLoading}
-                                    className="text-sm px-3 py-2 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors disabled:opacity-60"
+                                    className="w-full text-sm px-3 py-2 rounded border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/30"
                                 >
-                                    {calendarPushLoading ? t.calendarPushLoading : t.calendarPushRefresh}
-                                </button>
-                            </div>
-                        )}
-                    </div>
-                </div>
-            )}
-
-            <div className="bg-card border border-border rounded-lg p-6 space-y-4">
-                <div data-settings-key="calendar" className="space-y-1">
-                    <div className="text-sm font-medium">{t.calendar}</div>
-                    <p className="text-xs text-muted-foreground">{t.calendarDesc}</p>
-                </div>
-                <a
-                    href={getDocsGuideUrl('use/calendar-integration', language)}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline"
-                >
-                    {t.calendarIntegrationGuideTitle}
-                    <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
-                </a>
-
-                <div className="grid gap-3 md:grid-cols-2">
-                    <div data-settings-key="calendarName" className="space-y-1">
-                        <div className="text-sm font-medium">{t.calendarName}</div>
-                        <input
-                            value={newCalendarName}
-                            aria-label={t.calendarName}
-                            onChange={(e) => onCalendarNameChange(e.target.value)}
-                            placeholder={t.calendarName}
-                            className="w-full text-sm px-3 py-2 rounded border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/30"
-                        />
-                    </div>
-                    <div data-settings-key="calendarUrl" className="space-y-1">
-                        <div className="text-sm font-medium">{t.calendarUrl}</div>
-                        <input
-                            value={newCalendarUrl}
-                            aria-label={t.calendarUrl}
-                            onChange={(e) => onCalendarUrlChange(e.target.value)}
-                            placeholder="https://... or file:///..."
-                            className="w-full text-sm px-3 py-2 rounded border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/30"
-                        />
-                    </div>
-                </div>
-
-                <div data-settings-key="calendarChooseLocalFile" className="flex items-center justify-between gap-4">
-                    <div className="flex flex-wrap items-center gap-2">
-                        <button
-                            disabled={!newCalendarUrl.trim()}
-                            onClick={onAddCalendar}
-                            className={cn(
-                                "text-sm px-3 py-2 rounded-md transition-colors",
-                                newCalendarUrl.trim()
-                                    ? "bg-primary text-primary-foreground hover:bg-primary/90"
-                                    : "bg-muted text-muted-foreground cursor-not-allowed"
-                            )}
-                        >
-                            {t.calendarAdd}
-                        </button>
-                        {onChooseLocalCalendarFile && (
+                                    <option value="">{t.calendarPushManagedTarget}</option>
+                                    {calendarPushTargets.map((target) => (
+                                        <option key={target.id} value={target.id}>
+                                            {target.sourceName ? `${target.name} (${target.sourceName})` : target.name}
+                                        </option>
+                                    ))}
+                                </select>
+                                <span className="block text-xs text-muted-foreground">{t.calendarPushTargetHint}</span>
+                            </label>
                             <button
                                 type="button"
-                                onClick={onChooseLocalCalendarFile}
-                                className="text-sm px-3 py-2 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+                                onClick={onRefreshCalendarPushTargets}
+                                disabled={calendarPushLoading}
+                                className="text-sm px-3 py-2 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors disabled:opacity-60"
                             >
-                                {t.calendarChooseLocalFile}
+                                {calendarPushLoading ? t.calendarPushLoading : t.calendarPushRefresh}
                             </button>
-                        )}
-                    </div>
-                    {calendarError && (
-                        <div className="text-xs text-destructive">{calendarError}</div>
+                        </div>
                     )}
-                </div>
-            </div>
+                </SettingsDisclosureCard>
+            )}
 
-            {externalCalendars.length > 0 && (
-                <div className="bg-card border border-border rounded-lg overflow-hidden">
-                    <div data-settings-key="externalCalendars" className="px-4 py-3 text-sm font-medium border-b border-border">{t.externalCalendars}</div>
-                    <div className="divide-y divide-border">
-                        {externalCalendars.map((calendar) => (
-                            <div key={calendar.id} className="p-4 flex items-start justify-between gap-4">
-                                <div className="min-w-0">
-                                    <div className="text-sm font-medium truncate">{calendar.name}</div>
-                                            <div className="text-xs text-muted-foreground truncate mt-1">{maskCalendarUrl(calendar.url)}</div>
-                                            <div className="mt-2 flex flex-wrap gap-1.5" aria-label={`${calendar.name} color`}>
-                                                {(() => {
-                                                    const explicit = hasExplicitExternalCalendarColor(calendar.id, calendar.color);
-                                                    return (
-                                                        <>
-                                                            <button
-                                                                type="button"
-                                                                aria-label={`${calendar.name} ${t.calendarColorAuto}`}
-                                                                aria-pressed={!explicit}
-                                                                title={t.calendarColorAuto}
-                                                                onClick={() => onCalendarColorChange(calendar.id, undefined)}
-                                                                className={cn(
-                                                                    "flex h-5 w-5 items-center justify-center rounded-full border bg-card transition focus:outline-none focus:ring-2 focus:ring-primary/40",
-                                                                    !explicit
-                                                                        ? "border-background ring-2 ring-primary ring-offset-2 ring-offset-background"
-                                                                        : "border-border hover:border-foreground/40"
-                                                                )}
-                                                            >
-                                                                <Ban className="h-3 w-3 text-muted-foreground" />
-                                                            </button>
-                                                            {EXTERNAL_CALENDAR_COLORS.map((color) => {
-                                                                const selected = explicit && calendar.color === color;
-                                                                return (
-                                                                    <button
-                                                                        key={color}
-                                                                        type="button"
-                                                                        aria-label={`${calendar.name} ${color}`}
-                                                                        aria-pressed={selected}
-                                                                        onClick={() => onCalendarColorChange(calendar.id, color)}
-                                                                        className={cn(
-                                                                            "h-5 w-5 rounded-full border transition focus:outline-none focus:ring-2 focus:ring-primary/40",
-                                                                            selected
-                                                                                ? "border-background ring-2 ring-primary ring-offset-2 ring-offset-background"
-                                                                                : "border-border hover:border-foreground/40"
-                                                                        )}
-                                                                        style={{ backgroundColor: themeExternalCalendarDisplayColor(color, theme) }}
-                                                                    />
-                                                                );
-                                                            })}
-                                                        </>
-                                                    );
-                                                })()}
-                                            </div>
-                                            {areas.length > 0 && (
-                                                <details className="mt-3 text-xs">
-                                                    <summary className="cursor-pointer">{t.calendarShowInAreas}: {(calendar.areaIds ?? []).length === 0 ? t.calendarAllAreas : areas.filter((area) => calendar.areaIds?.includes(area.id)).map((area) => area.name).join(', ') || t.calendarAllAreas}</summary>
-                                                    <div className="mt-2 flex flex-wrap gap-2">
-                                                        {areas.map((area) => <label key={area.id} className="flex items-center gap-1"><input type="checkbox" checked={calendar.areaIds?.includes(area.id) ?? false} onChange={() => toggleArea(calendar, area.id)} />{area.name}</label>)}
-                                                    </div>
-                                                </details>
-                                            )}
-                                </div>
-                                <div className="flex items-center gap-3">
-                                    <input
-                                        type="checkbox"
-                                        checked={calendar.enabled}
-                                        onChange={(e) => onToggleCalendar(calendar.id, e.target.checked)}
-                                        className="h-4 w-4 accent-blue-600"
-                                    />
-                                    <button
-                                        onClick={() => onRemoveCalendar(calendar.id)}
-                                        className="text-sm text-destructive hover:text-destructive/80"
-                                    >
-                                        {t.calendarRemove}
-                                    </button>
-                                </div>
-                            </div>
-                        ))}
+            {calendarError && <p role="alert" className="text-sm text-destructive">{calendarError}</p>}
+
+            <SettingsDisclosureCard
+                sectionKey="calendar"
+                title={t.externalCalendars}
+                description={t.calendarDesc}
+                open={externalOpen}
+                onToggle={() => setExternalOpen((previous) => !previous)}
+            >
+                <div
+                    data-settings-key={externalCalendars.length === 0 ? 'externalCalendars' : undefined}
+                    className="p-4 space-y-4"
+                >
+                    <a
+                        href={getDocsGuideUrl('use/calendar-integration', language)}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline"
+                    >
+                        {t.calendarIntegrationGuideTitle}
+                        <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+                    </a>
+
+                    <div className="grid gap-3 md:grid-cols-2">
+                        <label data-settings-key="calendarName" className="space-y-1">
+                            <span className="text-sm font-medium">{t.calendarName}</span>
+                            <input
+                                value={newCalendarName}
+                                onChange={(e) => onCalendarNameChange(e.target.value)}
+                                placeholder={t.calendarName}
+                                className="w-full text-sm px-3 py-2 rounded border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/30"
+                            />
+                        </label>
+                        <label data-settings-key="calendarUrl" className="space-y-1">
+                            <span className="text-sm font-medium">{t.calendarUrl}</span>
+                            <input
+                                value={newCalendarUrl}
+                                onChange={(e) => onCalendarUrlChange(e.target.value)}
+                                placeholder="https://... or file:///..."
+                                className="w-full text-sm px-3 py-2 rounded border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/30"
+                            />
+                        </label>
+                    </div>
+
+                    <div data-settings-key="calendarChooseLocalFile" className="flex flex-wrap items-center justify-between gap-3">
+                        <div className="flex flex-wrap items-center gap-2">
+                            <button
+                                type="button"
+                                disabled={!newCalendarUrl.trim()}
+                                onClick={onAddCalendar}
+                                className={cn(
+                                    "text-sm px-3 py-2 rounded-md transition-colors",
+                                    newCalendarUrl.trim()
+                                        ? "bg-primary text-primary-foreground hover:bg-primary/90"
+                                        : "bg-muted text-muted-foreground cursor-not-allowed"
+                                )}
+                            >
+                                {t.calendarAdd}
+                            </button>
+                            {onChooseLocalCalendarFile && (
+                                <button
+                                    type="button"
+                                    onClick={onChooseLocalCalendarFile}
+                                    className="text-sm px-3 py-2 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+                                >
+                                    {t.calendarChooseLocalFile}
+                                </button>
+                            )}
+                        </div>
                     </div>
                 </div>
-            )}
-        </div>
+
+                {externalCalendars.length > 0 && (
+                    <ul data-settings-key="externalCalendars" className="divide-y divide-border">
+                        {externalCalendars.map((calendar) => {
+                            const explicitColor = hasExplicitExternalCalendarColor(calendar.id, calendar.color);
+                            const areaNames = areas.filter((area) => calendar.areaIds?.includes(area.id)).map((area) => area.name);
+                            return (
+                                <li key={calendar.id} className="p-4 flex items-start justify-between gap-4">
+                                    <div className="min-w-0">
+                                        <div className="text-sm font-medium truncate">{calendar.name}</div>
+                                        <div className="text-xs text-muted-foreground truncate mt-1">{maskCalendarUrl(calendar.url)}</div>
+                                        <div className="mt-2 flex flex-wrap gap-1.5">
+                                            <button
+                                                type="button"
+                                                aria-label={`${calendar.name} ${t.calendarColorAuto}`}
+                                                aria-pressed={!explicitColor}
+                                                title={t.calendarColorAuto}
+                                                onClick={() => onCalendarColorChange(calendar.id, undefined)}
+                                                className={cn(
+                                                    'flex h-5 w-5 items-center justify-center rounded-full border bg-card transition focus:outline-none focus:ring-2 focus:ring-primary/40',
+                                                    !explicitColor
+                                                        ? 'border-background ring-2 ring-primary ring-offset-2 ring-offset-background'
+                                                        : 'border-border hover:border-foreground/40',
+                                                )}
+                                            >
+                                                <Ban className="h-3 w-3 text-muted-foreground" aria-hidden="true" />
+                                            </button>
+                                            {EXTERNAL_CALENDAR_COLORS.map((color) => {
+                                                const selected = explicitColor && calendar.color === color;
+                                                return (
+                                                    <button
+                                                        key={color}
+                                                        type="button"
+                                                        aria-label={`${calendar.name} ${color}`}
+                                                        aria-pressed={selected}
+                                                        onClick={() => onCalendarColorChange(calendar.id, color)}
+                                                        className={cn(
+                                                            'h-5 w-5 rounded-full border transition focus:outline-none focus:ring-2 focus:ring-primary/40',
+                                                            selected
+                                                                ? 'border-background ring-2 ring-primary ring-offset-2 ring-offset-background'
+                                                                : 'border-border hover:border-foreground/40',
+                                                        )}
+                                                        style={{ backgroundColor: themeExternalCalendarDisplayColor(color, theme) }}
+                                                    />
+                                                );
+                                            })}
+                                        </div>
+                                        {areas.length > 0 && (
+                                            <details className="mt-3 text-xs">
+                                                <summary className="cursor-pointer">{t.calendarShowInAreas}: {areaNames.join(', ') || t.calendarAllAreas}</summary>
+                                                <div className="mt-2 flex flex-wrap gap-2">
+                                                    {areas.map((area) => (
+                                                        <label key={area.id} className="flex items-center gap-1">
+                                                            <input
+                                                                type="checkbox"
+                                                                checked={calendar.areaIds?.includes(area.id) ?? false}
+                                                                onChange={() => toggleArea(calendar, area.id)}
+                                                            />
+                                                            {area.name}
+                                                        </label>
+                                                    ))}
+                                                </div>
+                                            </details>
+                                        )}
+                                    </div>
+                                    <div className="flex shrink-0 items-center gap-3">
+                                        <input
+                                            type="checkbox"
+                                            aria-label={calendar.name}
+                                            checked={calendar.enabled}
+                                            onChange={(e) => onToggleCalendar(calendar.id, e.target.checked)}
+                                            className="h-4 w-4 accent-blue-600"
+                                        />
+                                        <button
+                                            type="button"
+                                            onClick={() => onRemoveCalendar(calendar.id)}
+                                            className="text-sm text-destructive hover:text-destructive/80"
+                                        >
+                                            {t.calendarRemove}
+                                        </button>
+                                    </div>
+                                </li>
+                            );
+                        })}
+                    </ul>
+                )}
+            </SettingsDisclosureCard>
+        </>
     );
 }

@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import { FolderOpen } from 'lucide-react';
 
 import { useLanguage } from '../../../contexts/language-context';
 import { reportError } from '../../../lib/report-error';
@@ -12,6 +11,7 @@ import {
     type WorkspaceInfo,
 } from '../../../lib/workspaces';
 import { useWorkspaces } from '../../workspaces/use-workspaces';
+import { SettingsDisclosureCard } from './SettingRow';
 
 const WORKSPACE_COLORS = ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#a855f7', '#14b8a6'];
 
@@ -43,6 +43,7 @@ type EditState = { id: string; name: string; color: string | null };
 export function SettingsWorkspacesSection() {
     const { t } = useLanguage();
     const { list, refresh, nameOf, requestSwitch, requestConfirmation, confirmModal, switching } = useWorkspaces();
+    const [open, setOpen] = useState(false);
     const [newName, setNewName] = useState('');
     const [newColor, setNewColor] = useState<string | null>(null);
     const [editing, setEditing] = useState<EditState | null>(null);
@@ -102,15 +103,8 @@ export function SettingsWorkspacesSection() {
 
     const disabled = busy || switching;
 
-    return (
-        <section className="space-y-3" data-settings-workspaces>
-            <div>
-                <h3 className="flex items-center gap-2 text-sm font-semibold">
-                    <FolderOpen className="h-4 w-4 text-primary" aria-hidden="true" />
-                    {t('workspaces.title')}
-                </h3>
-                <p className="mt-1 text-xs leading-5 text-muted-foreground">{t('workspaces.description')}</p>
-            </div>
+    const workspaceSettings = (
+        <div className="space-y-3 p-4">
             {!list.available ? (
                 <p className="text-xs text-muted-foreground" role="status">
                     {t(list.unreadable ? 'workspaces.unreadable' : 'workspaces.unavailable')}
@@ -244,7 +238,22 @@ export function SettingsWorkspacesSection() {
                     <p className="text-[11px] leading-5 text-muted-foreground">{t('workspaces.cliHint')}</p>
                 </>
             )}
+        </div>
+    );
+
+    return (
+        <div data-settings-workspaces>
+            <SettingsDisclosureCard
+                sectionKey="workspaces"
+                settingsKey={null}
+                title={t('workspaces.title')}
+                description={t('workspaces.description')}
+                open={open}
+                onToggle={() => setOpen((prev) => !prev)}
+            >
+                {workspaceSettings}
+            </SettingsDisclosureCard>
             {confirmModal}
-        </section>
+        </div>
     );
 }

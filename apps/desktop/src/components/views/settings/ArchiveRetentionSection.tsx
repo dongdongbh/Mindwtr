@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { getArchiveRetentionPreview, isArchiveRetentionDays, useTaskStore } from '@mindwtr/core';
 import { useConfirmDialog } from '../../../hooks/useConfirmDialog';
+import { SettingsDisclosureCard } from './SettingRow';
 import type { SettingsSyncLabels } from './sync/types';
 
 export function ArchiveRetentionSection({ t }: { t: SettingsSyncLabels }) {
@@ -9,6 +10,7 @@ export function ArchiveRetentionSection({ t }: { t: SettingsSyncLabels }) {
         return isArchiveRetentionDays(value) ? value : 0;
     });
     const [draft, setDraft] = useState(days > 0 ? String(days) : '');
+    const [open, setOpen] = useState(false);
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState('');
     const { requestConfirmation, confirmModal } = useConfirmDialog();
@@ -58,38 +60,45 @@ export function ArchiveRetentionSection({ t }: { t: SettingsSyncLabels }) {
     };
 
     const valid = /^[1-9]\d*$/.test(draft) && Number.isSafeInteger(Number(draft)) && Number(draft) <= 36500;
+    const currentValue = days > 0 ? t.archiveRetentionDays.replace('{days}', String(days)) : t.archiveRetentionNever;
     return (
-        <section className="space-y-3">
-            <h2 data-settings-key="archiveRetention" className="text-lg font-semibold">{t.archiveRetention}</h2>
-            <div className="bg-card border border-border rounded-lg p-6 space-y-3 text-sm">
-                <p className="text-muted-foreground">{t.archiveRetentionDesc}</p>
-                <p className="text-muted-foreground">{t.archiveRetentionSafety}</p>
-                <p>{t.archiveRetentionCurrent}: {days > 0 ? t.archiveRetentionDays.replace('{days}', String(days)) : t.archiveRetentionNever}</p>
-                <div className="flex flex-wrap items-end gap-2">
-                    <label className="space-y-1">
-                        <span className="block">{t.archiveRetentionDaysLabel}</span>
-                        <input
-                            type="number"
-                            min="1"
-                            max="36500"
-                            step="1"
-                            inputMode="numeric"
-                            value={draft}
-                            onChange={(event) => { setDraft(event.target.value); setError(''); }}
-                            className="w-28 rounded-md border border-border bg-background px-2 py-1.5"
-                        />
-                    </label>
-                    <button type="button" disabled={!valid || busy || Number(draft) === days} onClick={() => void save(Number(draft))} className="rounded-md bg-muted px-3 py-1.5 disabled:opacity-50">
-                        {t.archiveRetentionSave}
-                    </button>
-                    <button type="button" disabled={days === 0 || busy} onClick={() => void save(0)} className="rounded-md bg-muted px-3 py-1.5 disabled:opacity-50">
-                        {t.archiveRetentionNever}
-                    </button>
+        <>
+            <SettingsDisclosureCard
+                sectionKey="archiveRetention"
+                title={t.archiveRetention}
+                description={`${t.archiveRetentionCurrent}: ${currentValue}`}
+                open={open}
+                onToggle={() => setOpen((prev) => !prev)}
+            >
+                <div className="space-y-3 p-4 text-sm">
+                    <p className="text-muted-foreground">{t.archiveRetentionDesc}</p>
+                    <p className="text-muted-foreground">{t.archiveRetentionSafety}</p>
+                    <div className="flex flex-wrap items-end gap-2">
+                        <label className="space-y-1">
+                            <span className="block">{t.archiveRetentionDaysLabel}</span>
+                            <input
+                                type="number"
+                                min="1"
+                                max="36500"
+                                step="1"
+                                inputMode="numeric"
+                                value={draft}
+                                onChange={(event) => { setDraft(event.target.value); setError(''); }}
+                                className="w-28 rounded-md border border-border bg-background px-2 py-1.5"
+                            />
+                        </label>
+                        <button type="button" disabled={!valid || busy || Number(draft) === days} onClick={() => void save(Number(draft))} className="rounded-md bg-muted px-3 py-1.5 disabled:opacity-50">
+                            {t.archiveRetentionSave}
+                        </button>
+                        <button type="button" disabled={days === 0 || busy} onClick={() => void save(0)} className="rounded-md bg-muted px-3 py-1.5 disabled:opacity-50">
+                            {t.archiveRetentionNever}
+                        </button>
+                    </div>
+                    {draft && !valid && <p role="alert" className="text-destructive">{t.archiveRetentionInvalid}</p>}
+                    {error && <p role="alert" className="text-destructive">{error}</p>}
                 </div>
-                {draft && !valid && <p role="alert" className="text-destructive">{t.archiveRetentionInvalid}</p>}
-                {error && <p role="alert" className="text-destructive">{error}</p>}
-            </div>
+            </SettingsDisclosureCard>
             {confirmModal}
-        </section>
+        </>
     );
 }

@@ -339,6 +339,7 @@ export const SETTINGS_LABEL_KEYS = [
     'manage',
     'cancel',
     'sandboxWorkspace',
+    'sandboxLabel',
     'sandboxDescription',
     'sandboxSwitching',
     'sandboxSwitchFailed',
@@ -770,6 +771,7 @@ export type SettingsLabels = Record<(typeof SETTINGS_LABEL_KEYS)[number], string
 export const labelKeyOverrides: Partial<Record<keyof SettingsLabels, string>> = {
     cancel: 'common.cancel',
     sandboxWorkspace: 'sandbox.open',
+    sandboxLabel: 'sandbox.label',
     sandboxDescription: 'sandbox.description',
     sandboxSwitching: 'sandbox.switching',
     sandboxSwitchFailed: 'sandbox.switchFailed',

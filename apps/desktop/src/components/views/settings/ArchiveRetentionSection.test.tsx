@@ -47,6 +47,7 @@ describe('ArchiveRetentionSection', () => {
 
     it('rejects empty, fractional and out-of-range days without writing', () => {
         render(<ArchiveRetentionSection t={t} />);
+        fireEvent.click(screen.getByRole('button', { name: /^Archive retention/ }));
         const input = screen.getByRole('spinbutton', { name: 'Remove after days' });
         expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
         for (const value of ['0', '1.5', '36501']) {
@@ -58,7 +59,14 @@ describe('ArchiveRetentionSection', () => {
 
     it('reviews candidates and legacy clocks before enabling, and cancel leaves the policy unchanged', async () => {
         render(<ArchiveRetentionSection t={t} />);
+        const toggle = screen.getByRole('button', { name: /^Archive retention/ });
+        expect(toggle).toHaveAttribute('aria-expanded', 'false');
+        expect(screen.queryByRole('spinbutton')).not.toBeInTheDocument();
+        fireEvent.click(toggle);
         fireEvent.change(screen.getByRole('spinbutton'), { target: { value: '30' } });
+        fireEvent.click(toggle);
+        fireEvent.click(toggle);
+        expect(screen.getByRole('spinbutton')).toHaveValue(30);
         fireEvent.click(screen.getByRole('button', { name: 'Save' }));
         expect(screen.getByText(/1 tasks, 1 projects, 1 sections/)).toBeTruthy();
         expect(screen.getByText(/Old project/)).toBeTruthy();
@@ -75,6 +83,7 @@ describe('ArchiveRetentionSection', () => {
     it('requires review when shortening an existing policy', () => {
         harness.days = 90;
         render(<ArchiveRetentionSection t={t} />);
+        fireEvent.click(screen.getByRole('button', { name: /^Archive retention/ }));
         fireEvent.change(screen.getByRole('spinbutton'), { target: { value: '30' } });
         fireEvent.click(screen.getByRole('button', { name: 'Save' }));
         expect(screen.getByText('Change archive retention?')).toBeTruthy();

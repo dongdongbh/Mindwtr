@@ -1,4 +1,3 @@
-import { FlaskConical } from 'lucide-react';
 import { useState } from 'react';
 import { useTaskStore } from '@mindwtr/core';
 import { getCurrentUiLanguage } from '../../contexts/language-context';
@@ -6,6 +5,7 @@ import { openDesktopSandbox } from '../../lib/sandbox-session';
 import { coerceDesktopThemeMode, THEME_STORAGE_KEY } from '../../lib/theme';
 import { coerceDesktopTextSize, TEXT_SIZE_STORAGE_KEY } from '../../lib/text-size';
 import { Dialog } from '../ui/Dialog';
+import { SettingRow, SettingsCard } from '../views/settings/SettingRow';
 import type { SettingsSyncLabels } from '../views/settings/sync/types';
 import type { AppSettings } from '@mindwtr/core';
 
@@ -14,6 +14,7 @@ type OpenSandboxSettingProps = {
         SettingsSyncLabels,
         | 'cancel'
         | 'sandboxWorkspace'
+        | 'sandboxLabel'
         | 'sandboxDescription'
         | 'sandboxSwitching'
         | 'sandboxSwitchFailed'
@@ -57,29 +58,28 @@ export function OpenSandboxSetting({ t, onEnterSandbox = openDesktopSandbox, dis
 
     return (
         <>
-            <div className="rounded-lg border border-primary/25 bg-primary/5 p-4" data-settings-key="sandboxWorkspace">
-                <div className="flex items-start justify-between gap-4">
-                    <div className="min-w-0">
-                        <div className="flex items-center gap-2 text-sm font-medium">
-                            <FlaskConical className="h-4 w-4 text-primary" aria-hidden="true" />
-                            {t.sandboxWorkspace}
-                        </div>
-                        <p className="mt-1 text-xs leading-5 text-muted-foreground">{t.sandboxDescription}</p>
-                    </div>
+            <SettingsCard>
+                <SettingRow
+                    settingsKey="sandboxWorkspace"
+                    title={t.sandboxLabel}
+                    description={t.sandboxDescription}
+                    className="flex-wrap"
+                    padded
+                >
                     <button
                         type="button"
                         onClick={() => {
                             if (!disabled) setConfirming(true);
                         }}
                         disabled={switching || disabled}
-                        className="shrink-0 rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-wait"
+                        className="rounded-md bg-muted px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted/80 disabled:opacity-50"
                         data-open-sandbox
                     >
                         {switching ? t.sandboxSwitching : t.sandboxWorkspace}
                     </button>
-                </div>
-                {error ? <p className="mt-2 text-xs text-destructive" role="alert">{error}</p> : null}
-            </div>
+                </SettingRow>
+                {error ? <p className="px-4 py-3 text-xs text-destructive" role="alert">{error}</p> : null}
+            </SettingsCard>
             {confirming ? (
                 <Dialog
                     onClose={() => setConfirming(false)}

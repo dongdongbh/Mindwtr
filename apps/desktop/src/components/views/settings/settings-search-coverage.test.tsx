@@ -22,6 +22,7 @@ import { SettingsMainPage } from './SettingsMainPage';
 import { SettingsManagePage } from './SettingsManagePage';
 import { SettingsNotificationsPage } from './SettingsNotificationsPage';
 import { SettingsSyncPage } from './SettingsSyncPage';
+import { buildDesktopSettingsSearchResults, expandSettingsSection, findSettingsRow } from './settings-search';
 
 vi.mock('../../../lib/gmail-capture', async (original) => ({
     ...(await original<typeof import('../../../lib/gmail-capture')>()),
@@ -463,6 +464,32 @@ describe('desktop settings search coverage', () => {
         }
         return keys;
     };
+
+    it('reveals Debug logging from its search result in the collapsed Data page', () => {
+        const { getByRole } = render(<LanguageProvider><SettingsDataPage {...dataProps} /></LanguageProvider>);
+        const results = buildDesktopSettingsSearchResults((key) => en[key] ?? '');
+        const result = results.find(({ key }) => key === 'debugLogging');
+        const diagnostics = getByRole('button', { name: /^Diagnostics/ });
+
+        expect(diagnostics).toHaveAttribute('aria-expanded', 'false');
+        expect(findSettingsRow('debugLogging')).toBeNull();
+        act(() => expect(expandSettingsSection(result?.sectionKey)).toBe(true));
+        expect(diagnostics).toHaveAttribute('aria-expanded', 'true');
+        expect(findSettingsRow('debugLogging')).toContainElement(getByRole('switch', { name: t.debugLogging }));
+    });
+
+    it('keeps native-only actions gated and sandbox available on the browser Data page', () => {
+        const { getByRole, queryByRole } = render(
+            <LanguageProvider><SettingsDataPage {...dataProps} isTauri={false} /></LanguageProvider>,
+        );
+        expect(queryByRole('button', { name: /^Workspaces/ })).not.toBeInTheDocument();
+        expect(queryByRole('button', { name: /^Diagnostics/ })).not.toBeInTheDocument();
+        expect(getByRole('button', { name: t.sandboxWorkspace })).toBeEnabled();
+
+        fireEvent.click(getByRole('button', { name: /^Attachment cleanup/ }));
+        expect(getByRole('button', { name: t.attachmentsCleanupRun })).toBeDisabled();
+        expect(getByRole('button', { name: t.attachmentsCleanupPendingDeletesClear })).toBeDisabled();
+    });
 
     it.each(SETTINGS_SEARCH_PAGE_IDS)('indexes every rendered row on the %s page', async (pageId) => {
         const rosterKeys = new Set(getSettingsSearchEntryKeys(pageId));

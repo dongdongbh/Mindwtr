@@ -26,7 +26,11 @@ export const SETTINGS_PAGE_SYNONYMS: Record<SettingsSearchPageId, readonly strin
 export function buildDesktopSettingsSearchResults(
     translate: (key: string) => string,
 ): SettingsSearchResult[] {
-    return buildSettingsSearchResults(translate, SETTINGS_PAGE_SYNONYMS);
+    return buildSettingsSearchResults(translate, SETTINGS_PAGE_SYNONYMS).map((result) => (
+        result.pageId === 'integrations' && (result.key === 'calendar' || result.key === 'externalCalendars')
+            ? { ...result, sectionKey: 'calendar' }
+            : result
+    ));
 }
 
 

@@ -6,6 +6,7 @@ import { OpenSandboxSetting } from './OpenSandboxSetting';
 const labels = {
     cancel: 'Cancel',
     sandboxWorkspace: 'Open sandbox',
+    sandboxLabel: 'Sandbox',
     sandboxDescription: 'Try fictional sample data.',
     sandboxSwitching: 'Switching workspace…',
     sandboxSwitchFailed: 'Could not switch workspaces.',

@@ -10,6 +10,7 @@ import type {
 export type SettingsSyncLabels = {
     cancel: string;
     sandboxWorkspace: string;
+    sandboxLabel: string;
     sandboxDescription: string;
     sandboxSwitching: string;
     sandboxSwitchFailed: string;

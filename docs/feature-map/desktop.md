@@ -397,7 +397,7 @@ Source: `apps/desktop/src` (Tauri + React). Labels come from `packages/core/src/
 
 ## Settings › Data
 
-- Reach: Settings › Data. Open sandbox, Backup (Export Backup, Export CSV, Export as TaskNotes, Restore Backup, Merge Backup), Import Data (Import from Todoist, TickTick, DGT GTD, OmniFocus, Mindwtr CSV), Attachment cleanup, Archive retention, Diagnostics, Workspaces.
+- Reach: Settings › Data. Expand Workspaces to add, rename, or switch workspaces. Backup contains Export Backup, Export CSV, Export as TaskNotes, Restore Backup, and Merge Backup. Expand Import Data for Todoist, TickTick, DGT GTD, OmniFocus, and Mindwtr CSV. Expand Archive retention, Attachment cleanup, or Diagnostics for their controls. Open sandbox is available directly.
 - Code: `apps/desktop/src/components/views/settings/SettingsDataPage.tsx`, `apps/desktop/src/components/views/settings/sync/DataTransferSections.tsx`, `apps/desktop/src/components/views/settings/sync/AttachmentsCleanupSection.tsx`, `apps/desktop/src/components/views/settings/ArchiveRetentionSection.tsx`, `apps/desktop/src/lib/data-transfer.ts`
 - Checks: `apps/desktop/src/components/views/settings/sync/DataTransferSections.test.tsx`, `apps/desktop/src/components/views/settings/useSettingsDataPage.test.tsx`, `apps/desktop/src/components/views/settings/ArchiveRetentionSection.test.tsx`
 
@@ -410,7 +410,7 @@ Source: `apps/desktop/src` (Tauri + React). Labels come from `packages/core/src/
 
 ## Settings › Integrations
 
-- Reach: Settings › Integrations. External Calendar (ICS URL, Choose local .ics file), System calendar (Push tasks to system calendar), Obsidian vault import, Email capture (IMAP), Gmail, Local MCP server (advanced).
+- Reach: Settings › Integrations › External calendars to add an ICS URL, choose a local .ics file, or manage existing feeds. Expand System calendar for access and task push settings. Other entries include Obsidian vault import, Email capture (IMAP), Gmail, and Local MCP server (advanced).
 - Code: `apps/desktop/src/components/views/settings/SettingsIntegrationsPage.tsx`, `apps/desktop/src/components/views/settings/SettingsCalendarPage.tsx`, `apps/desktop/src/components/views/settings/SettingsObsidianSection.tsx`, `apps/desktop/src/components/views/settings/SettingsEmailCaptureSection.tsx`, `apps/desktop/src/components/views/settings/SettingsGmailCaptureSection.tsx`
 - Checks: `e2e/docs-links.spec.ts`, `apps/desktop/src/components/views/settings/SettingsCalendarPage.test.tsx`, `apps/desktop/src/components/views/settings/useCalendarSettings.test.tsx`, `apps/desktop/src/components/views/settings/SettingsObsidianSection.test.tsx`, `apps/desktop/src/components/views/settings/SettingsGmailCaptureSection.test.tsx`
 - Notes: System calendar push is offered on macOS and Linux only. Gmail can be missing from a build.
