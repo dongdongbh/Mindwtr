@@ -291,14 +291,25 @@ def default_platform(*); end
 def platform(*); yield; end
 def lane(*); yield; end
 def app_store_connect_api_key(**); nil; end
-def update_app_age_rating(**options); $age_rating = JSON.parse(File.read(options.fetch(:age_rating_config_path))); end
-def deliver(options); puts JSON.generate(options.merge(age_rating: $age_rating)); end
+module Spaceship
+  module ConnectAPI
+    class App
+      def self.find(identifier); raise 'unexpected app' unless identifier == ENV.fetch('EXPECTED_BUNDLE_ID'); new; end
+      def ensure_version!(version, platform:); $ensured_version = { version: version, platform: platform }; end
+    end
+  end
+end
+def update_app_age_rating(**options)
+  raise 'no editable app info before age rating' unless $ensured_version || ENV['SKIP_APP_VERSION_UPDATE'] == 'true'
+  $age_rating = JSON.parse(File.read(options.fetch(:age_rating_config_path)))
+end
+def deliver(options); puts JSON.generate(options.merge(age_rating: $age_rating, ensured_version: $ensured_version)); end
 `;
-    for (const [phased, skipMetadata] of [['true', 'false'], ['false', 'false'], ['true', 'true']]) {
+    for (const [phased, skipMetadata, skipVersion] of [['true', 'false', 'false'], ['false', 'false', 'false'], ['true', 'true', 'false'], ['true', 'false', 'true']]) {
       const result = spawnSync('ruby', ['-'], {
         input: stubs + fastfile,
         encoding: 'utf8',
-        env: { ...process.env, PHASED_RELEASE: phased, SKIP_METADATA: skipMetadata,
+        env: { ...process.env, PHASED_RELEASE: phased, SKIP_METADATA: skipMetadata, SKIP_APP_VERSION_UPDATE: skipVersion,
           GITHUB_WORKSPACE: process.cwd(),
           EXPECTED_BUNDLE_ID: 'tech.dongdongbh.mindwtr', APP_VERSION: '1.0.5',
           IPA_PATH: 'fixture.ipa', PKG_PATH: 'fixture.pkg', FASTLANE_METADATA_PATH: 'fixture',
@@ -308,6 +319,9 @@ def deliver(options); puts JSON.generate(options.merge(age_rating: $age_rating))
       expect(result.status).toBe(0);
       const options = JSON.parse(result.stdout);
       expect(options.automatic_release).toBe(true);
+      expect(options.ensured_version).toEqual(skipMetadata === 'true' || skipVersion === 'true' ? null : {
+        version: '1.0.5', platform: name === 'release-ios-appstore' ? 'IOS' : 'MAC_OS',
+      });
       expect(options.age_rating).toEqual(skipMetadata === 'true' ? null : { socialMedia: false, socialMediaAgeRestricted: false });
       expect(options.phased_release).toBe(skipMetadata === 'true' ? undefined : phased === 'true');
     }
