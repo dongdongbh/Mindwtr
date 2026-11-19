@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 
 export const AUDIT_EXCEPTIONS = {
-  deepmerge: { versions: ["4.3.1"], advisories: { "GHSA-gcqx-w48m-w2h4": { range: ">=4.2.0 <=4.3.1", severity: "low" } } },
+  deepmerge: { versions: ["4.3.1"], advisories: {} },
   glob: { versions: ["6.0.4", "7.2.3", "10.5.0", "13.0.1", "13.0.6"], advisories: {
     "GHSA-3g3m-2fjr-6pw4": { range: ">=9.0.0 <=14.0.1", severity: "moderate" },
   } },

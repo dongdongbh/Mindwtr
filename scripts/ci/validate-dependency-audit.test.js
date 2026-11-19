@@ -33,7 +33,7 @@ const IMAGE_SIZE_ADVISORIES = ["GHSA-5p2g-fcmc-qvqq", "GHSA-w3rx-r6r6-pgpr"];
 const DEEPMERGE_ADVISORY = "GHSA-gcqx-w48m-w2h4";
 const GLOB_ADVISORY = "GHSA-3g3m-2fjr-6pw4";
 const MINIMATCH_ADVISORY = "GHSA-g3hv-75wg-m249";
-const BUN_ADVISORIES = [...IMAGE_SIZE_ADVISORIES, DEEPMERGE_ADVISORY, GLOB_ADVISORY, MINIMATCH_ADVISORY];
+const BUN_ADVISORIES = [...IMAGE_SIZE_ADVISORIES, GLOB_ADVISORY, MINIMATCH_ADVISORY];
 const profiles = {mobile: "apps/mobile", eas: "tools/eas-cli", desktop: "apps/desktop"};
 const npmLock = (profile) => JSON.parse(readFileSync(`${profiles[profile]}/package-lock.json`, "utf8"));
 const bunLock = () => {
@@ -211,7 +211,6 @@ const allowedReport = (profile) => {
     minimatch: {name: "minimatch", severity: "moderate", via: [advisory("minimatch", MINIMATCH_ADVISORY, ">=7.0.0 <11.0.1", "moderate")], nodes: ["node_modules/minimatch"]},
   };
   if (profile !== "desktop") {
-    vulnerabilities.deepmerge = {name: "deepmerge", severity: "low", via: [advisory("deepmerge", DEEPMERGE_ADVISORY, ">=4.2.0 <=4.3.1", "low")], nodes: ["node_modules/deepmerge"]};
     vulnerabilities.glob = {name: "glob", severity: "moderate", via: [advisory("glob", GLOB_ADVISORY, ">=9.0.0 <=14.0.1", "moderate"), "minimatch"], nodes: ["node_modules/glob"]};
   }
   if (profile === "mobile") vulnerabilities["image-size"] = {
@@ -272,17 +271,17 @@ test("npm exceptions reject malformed reports, API errors, unknown records, and 
     (r) => { delete r.metadata; },
     (r) => { r.metadata.vulnerabilities.total = 999; },
     (r) => { r.metadata.vulnerabilities.high = -1; },
-    (r) => { r.vulnerabilities.deepmerge.name = "unrelated"; },
-    (r) => { r.vulnerabilities.deepmerge.severity = "unknown"; },
-    (r) => { r.vulnerabilities.deepmerge.nodes = ["node_modules/unknown"]; },
-    (r) => { r.vulnerabilities.deepmerge.via[0].dependency = "unrelated"; },
-    (r) => { r.vulnerabilities.deepmerge.via[0].url = `https://evil.example/advisories/${DEEPMERGE_ADVISORY}`; },
-    (r) => { r.vulnerabilities.deepmerge.via[0].range = "*"; },
-    (r) => { r.vulnerabilities.deepmerge.via[0].severity = "critical"; },
-    (r) => { delete r.vulnerabilities.deepmerge.via[0].severity; },
-    (r) => { r.vulnerabilities.deepmerge.via.push(null); },
-    (r) => { r.vulnerabilities.deepmerge.via.push("unrelated"); },
-    (r) => { r.vulnerabilities.deepmerge.via.push(r.vulnerabilities.deepmerge.via[0]); },
+    (r) => { r.vulnerabilities.glob.name = "unrelated"; },
+    (r) => { r.vulnerabilities.glob.severity = "unknown"; },
+    (r) => { r.vulnerabilities.glob.nodes = ["node_modules/unknown"]; },
+    (r) => { r.vulnerabilities.glob.via[0].dependency = "unrelated"; },
+    (r) => { r.vulnerabilities.glob.via[0].url = `https://evil.example/advisories/${GLOB_ADVISORY}`; },
+    (r) => { r.vulnerabilities.glob.via[0].range = "*"; },
+    (r) => { r.vulnerabilities.glob.via[0].severity = "critical"; },
+    (r) => { delete r.vulnerabilities.glob.via[0].severity; },
+    (r) => { r.vulnerabilities.glob.via.push(null); },
+    (r) => { r.vulnerabilities.glob.via.push("unrelated"); },
+    (r) => { r.vulnerabilities.glob.via.push(r.vulnerabilities.glob.via[0]); },
   ]) {
     const report = allowedReport("mobile");
     mutate(report);
@@ -290,16 +289,27 @@ test("npm exceptions reject malformed reports, API errors, unknown records, and 
   }
 });
 
+test("withdrawn deepmerge advisory no longer has an audit exception", () => {
+  const report = allowedReport("mobile");
+  report.vulnerabilities.deepmerge = {
+    name: "deepmerge", severity: "low", nodes: ["node_modules/deepmerge"],
+    via: [advisory("deepmerge", DEEPMERGE_ADVISORY, ">=4.2.0 <=4.3.1", "low")],
+  };
+  report.metadata.vulnerabilities.low += 1;
+  report.metadata.vulnerabilities.total += 1;
+  expect(() => validateMobileAuditReport(report)).toThrow(/unexpected direct advisories/);
+});
+
 test("npm advisory closure rejects missing dependencies and unrelated cycles", () => {
   const missing = allowedReport("mobile");
-  missing.vulnerabilities["@expo/config"] = {
-    name: "@expo/config", severity: "low", via: ["deepmerge"], nodes: ["node_modules/@expo/config"],
+  missing.vulnerabilities["@expo/cli"] = {
+    name: "@expo/cli", severity: "moderate", via: ["glob"], nodes: ["node_modules/@expo/cli"],
   };
-  missing.metadata.vulnerabilities.low += 1;
+  missing.metadata.vulnerabilities.moderate += 1;
   missing.metadata.vulnerabilities.total += 1;
   expect(() => validateMobileAuditReport(missing)).not.toThrow();
-  delete missing.vulnerabilities.deepmerge;
-  missing.metadata.vulnerabilities.low -= 1;
+  delete missing.vulnerabilities.glob;
+  missing.metadata.vulnerabilities.moderate -= 1;
   missing.metadata.vulnerabilities.total -= 1;
   expect(() => validateMobileAuditReport(missing)).toThrow(/unexpected direct advisories/);
   const unrelated = allowedReport("mobile");
@@ -343,12 +353,12 @@ const buildToolImportNames = [
 
 const EXPO_CONFIG_BUILD_TOOLS = ["@expo/cli", "@expo/metro-config", "@expo/prebuild-config", "eas-cli"];
 const EXPO_CONFIG_RUNTIME_PACKAGES = ["expo", "expo-constants", "expo-manifests"];
-test("deepmerge stays a build-time dependency of @expo/config only, at the excepted version", () => {
+test("deepmerge retains its build-only topology without the withdrawn advisory exception", () => {
   const workflow = readFileSync(".github/workflows/dependency-audit.yml", "utf8");
   const excepted = AUDIT_EXCEPTIONS.deepmerge;
-  expect(excepted.advisories).toEqual({[DEEPMERGE_ADVISORY]: {range: ">=4.2.0 <=4.3.1", severity: "low"}});
+  expect(excepted.advisories).toEqual({});
   expect(excepted.versions).toEqual(["4.3.1"]);
-  expect(workflow).toContain(`if [ "$deepmerge_latest" != "${excepted.versions[0]}" ]; then`);
+  expect(workflow).not.toContain(DEEPMERGE_ADVISORY);
   const consumers = new Set();
   const configUsers = new Set();
   for (const profile of Object.keys(profiles)) {
@@ -442,7 +452,7 @@ test("glob and minimatch exceptions name only the reviewed advisories and fail o
   const upstream = steps.at(-1);
   expect(upstream.name).toBe("Check upstream fixes for audit exceptions");
   expect(upstream.if).toBe("always()");
-  expect(upstream.run).toContain('if [ "$deepmerge_latest" != "4.3.1" ]; then');
+  expect(upstream.run).not.toContain("deepmerge");
   expect(upstream.run.trim().endsWith("bun scripts/ci/check-audit-exception-upstreams.js")).toBe(true);
   expect(steps.slice(0, -1).some((step) => /check-audit-exception-upstreams|npm view deepmerge/.test(step.run ?? ""))).toBe(false);
   expect(UPSTREAM_GUARDS.filter((guard) => guard.dependency === "glob").map((guard) => [guard.consumer, guard.fixed, guard.advisory]))
