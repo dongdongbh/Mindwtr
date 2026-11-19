@@ -18,6 +18,7 @@ import {
     getReviewOverviewText,
     getWeeklyReviewLabels,
     getWeeklyReviewProjects,
+    getWeeklyReviewRecapPage,
     planDailyReviewFollowUp,
     restoreReviewSession,
 } from './review-views-model';
@@ -86,6 +87,23 @@ describe('review views parity with the frozen React Native fixture', () => {
 });
 
 describe('review view models', () => {
+    it('pages completed actions across group boundaries with full group counts', () => {
+        const makeGroup = (id: string, count: number) => ({
+            id, title: id, tasks: Array.from({ length: count }, (_, index) => ({ id: `${id}-${index}`, title: `${id} ${index}` })),
+        });
+        const groups = [makeGroup('first', 20), makeGroup('second', 27), makeGroup('third', 4)];
+        const firstPage = getWeeklyReviewRecapPage(groups, 0);
+        const secondPage = getWeeklyReviewRecapPage(groups, 1);
+        const lastPage = getWeeklyReviewRecapPage(groups, 10);
+
+        expect([firstPage.pageCount, secondPage.pageCount, lastPage.pageCount]).toEqual([3, 3, 3]);
+        expect([...firstPage.groups, ...secondPage.groups, ...lastPage.groups].flatMap((group) => group.tasks))
+            .toEqual(groups.flatMap((group) => group.tasks));
+        expect(firstPage.groups.map(({ count, tasks }) => [count, tasks.length])).toEqual([[20, 20], [27, 4]]);
+        expect(secondPage.groups.map(({ count, tasks }) => [count, tasks.length])).toEqual([[27, 23], [4, 1]]);
+        expect(lastPage.page).toBe(2);
+    });
+
     it('keeps every Weekly Review label on a typed key, with English when a key is missing', async () => {
         const keys: string[] = [];
         const translated = getWeeklyReviewLabels((key) => {

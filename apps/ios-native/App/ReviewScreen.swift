@@ -241,8 +241,9 @@ struct ReviewGuideScreen: View {
     private var content: CoreObject { view.object("content") }
     private var labels: CoreObject { view.object("labels") }
     private var daily: Bool { model.reviewKind == "daily" }
+    private var someday: Bool { !daily && content.text("step") == "someday" }
     private var scheduledGroup: Bool {
-        !daily && ["waiting", "someday"].contains(content.text("step")) && content.object("scheduled").number("count") > 0
+        !daily && content.text("step") == "waiting" && content.object("scheduled").number("count") > 0
     }
     private var scheduledExpanded: Bool { model.reviewExpandedScheduled.contains(content.text("step")) }
     private var title: String {
@@ -313,9 +314,13 @@ struct ReviewGuideScreen: View {
                     if !daily && content.text("step") == "calendar" { calendarTasks }
                     let items = view.objects("items")
                     let visibleItems = scheduledGroup ? items.filter { !$0.flag("scheduled") } : items
-                    ForEach(visibleItems.indices, id: \.self) { index in
-                        guideItem(visibleItems[index])
-                        openProjectLink(after: index, in: visibleItems)
+                    if someday {
+                        somedayItems(visibleItems)
+                    } else if content.text("step") != "completed" {
+                        ForEach(visibleItems.indices, id: \.self) { index in
+                            guideItem(visibleItems[index])
+                            openProjectLink(after: index, in: visibleItems)
+                        }
                     }
                     if scheduledGroup {
                         scheduledToggle
@@ -325,16 +330,17 @@ struct ReviewGuideScreen: View {
                         }
                     }
 
+                    if content.text("step") == "completed" {
+                        completed
+                        if !daily { recap(items) }
+                    }
                     let visibleTotal = view.number("total") - (scheduledGroup && !scheduledExpanded ? content.object("scheduled").number("count") : 0)
                     if items.count < visibleTotal {
                         ReviewAction(title: model.label("common.more"), enabled: { model.reviewActionsEnabled }, palette: palette, id: "review-guide-more") {
                             Task { await model.loadMoreReview() }
                         }
                     }
-                    if content.text("step") == "completed" {
-                        completed
-                        if !daily { completedMindSweepNudge }
-                    }
+                    if !daily && content.text("step") == "completed" { completedMindSweepNudge }
                     if model.busy { ProgressView().frame(maxWidth: .infinity).padding(12) }
                 }
                 .padding(16)
@@ -467,6 +473,109 @@ struct ReviewGuideScreen: View {
         .accessibilityValue(model.label(scheduledExpanded ? "markdown.collapse" : "markdown.expand"))
         .accessibilityAddTraits(scheduledExpanded ? .isSelected : [])
         .accessibilityIdentifier("review-scheduled-toggle-" + content.text("step"))
+    }
+
+    private func somedayItems(_ entries: [CoreObject]) -> some View {
+        let headers = entries.filter { $0.text("type") == "somedaySection" }
+        let groups = Dictionary(grouping: entries.filter { $0.text("type") != "somedaySection" }) { Data($0.text("sectionId").utf8) }
+        return ForEach(headers.indices, id: \.self) { index in
+            let header = headers[index]
+            let sectionID = header.text("sectionId")
+            let key = Data(sectionID.utf8)
+            let expanded = !model.reviewCollapsedSomedaySections.contains(key)
+            reviewDisclosure("\(header.text("title")) (\(header.number("count")))", expanded: expanded,
+                             id: "weekly-someday-section-" + sectionID) {
+                model.toggleReviewSomedaySection(sectionID)
+            }
+            if expanded {
+                let rows = groups[key] ?? []
+                somedayRows(rows.filter { !$0.flag("scheduled") })
+                if header.number("scheduledCount") > 0 {
+                    let scheduledExpanded = model.reviewExpandedSomedayScheduledSections.contains(key)
+                    reviewDisclosure(header.text("scheduledLabel"), expanded: scheduledExpanded,
+                                     id: "weekly-someday-scheduled-" + sectionID) {
+                        model.toggleReviewSomedaySection(sectionID, scheduled: true)
+                    }
+                    .padding(.leading, 12)
+                    if scheduledExpanded { somedayRows(rows.filter { $0.flag("scheduled") }) }
+                }
+            }
+        }
+    }
+
+    private func somedayRows(_ rows: [CoreObject]) -> some View {
+        ForEach(rows.indices, id: \.self) { index in
+            let row = rows[index]
+            if row.text("type") == "somedayProject" { somedayProject(row) }
+            else { guideItem(row) }
+        }
+    }
+
+    private func somedayProject(_ project: CoreObject) -> some View {
+        let id = project.text("id")
+        return SwipeActionCard(
+            palette: palette, enabled: model.reviewActionsEnabled, id: "weekly-someday-project-" + id,
+            leftLabel: labels.text("reactivate"), rightLabel: "", leftSystemImage: "arrow.uturn.backward",
+            open: { Task { await model.openProject(project) } },
+            swipe: { _ in Task { await model.activateDeferredProject(id) } },
+            content: HStack(spacing: 10) {
+                AppIcon(name: "folder", size: 18)
+                    .foregroundStyle(project.text("color").isEmpty ? palette.secondary : palette.einkSafe(Color(hex: project.text("color"))))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(project.text("title")).rnFont(14, .semibold)
+                    if !project.text("areaName").isEmpty {
+                        Text(project.text("areaName")).rnFont(12).foregroundStyle(palette.secondary)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(.vertical, 10).padding(.horizontal, 12).frame(minHeight: 44)
+            .background(palette.card, in: RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).stroke(palette.border, lineWidth: 1)).contentShape(Rectangle())
+        )
+    }
+
+    private func reviewDisclosure(_ title: String, expanded: Bool, id: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Image(systemName: expanded ? "chevron.down" : "chevron.right").accessibilityHidden(true)
+                Text(title).rnFont(14, .semibold).fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain).disabled(!model.reviewActionsEnabled)
+        .accessibilityValue(model.label(expanded ? "markdown.collapse" : "markdown.expand"))
+        .accessibilityIdentifier(id)
+    }
+
+    @ViewBuilder private func recap(_ items: [CoreObject]) -> some View {
+        let week = content.object("week")
+        if !week.text("rangeLabel").isEmpty {
+            let grouping = model.reviewShownRecapGroup
+            reviewDisclosure(labels.text("details"), expanded: grouping != nil, id: "weekly-review-recap") {
+                Task { await model.setReviewRecapGroup(grouping == nil ? .project : nil) }
+            }
+            if let grouping {
+                Text(week.text("rangeLabel")).rnFont(14).foregroundStyle(palette.secondary)
+                    .accessibilityIdentifier("weekly-review-recap-range")
+                AppChipFlow {
+                    ForEach(CoreModel.ReviewRecapGroup.allCases, id: \.self) { group in
+                        ReviewAction(title: labels.text(group == .project ? "groupByProject" : "groupByArea"), selected: grouping == group,
+                                     enabled: { model.reviewActionsEnabled }, palette: palette, id: "weekly-review-recap-" + group.rawValue) {
+                            Task { await model.setReviewRecapGroup(group) }
+                        }
+                    }
+                }
+                ForEach(items.indices, id: \.self) { index in
+                    let entry = items[index]
+                    if entry.text("type") == "recapGroup" {
+                        Text("\(entry.text("title")) (\(entry.number("count")))").rnFont(14, .bold).accessibilityAddTraits(.isHeader)
+                    } else {
+                        Text(entry.text("title")).rnFont(14).padding(.leading, 12)
+                    }
+                }
+            }
+        }
     }
 
     @ViewBuilder private func guideItem(_ item: CoreObject) -> some View {

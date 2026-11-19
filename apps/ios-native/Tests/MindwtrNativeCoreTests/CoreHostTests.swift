@@ -5389,6 +5389,60 @@ final class CoreHostTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
     }
 
+    func testWeeklyReviewSomedayAndRecapThroughNativeReadAlias() async throws {
+        let source = try await seedReviewReadFixture(count: 1)
+        let sqlite = try SQLiteBridge(url: database)
+        let now = "2026-09-27T12:00:00.000Z"
+        _ = try sqlite.execute("DELETE FROM tasks WHERE id = 'review-someday'")
+        _ = try sqlite.execute("INSERT INTO projects (id, title, status, color, reviewAt, createdAt, updatedAt, rev) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                               parametersJSON: json(["review-parked", "Parked project", "someday", "#94a3b8", "2036-01-01", now, now, 1]))
+        _ = try sqlite.execute("UPDATE tasks SET status = 'done', completedAt = ? WHERE id = 'review-project-task'", parametersJSON: json([now]))
+        sqlite.close()
+        let core = host(bundleURL: source)
+        _ = try await core.start()
+        let before = try reviewReadSnapshot()
+
+        func read(_ step: String, _ options: [String: Any] = [:]) async throws -> [String: Any] {
+            var input: [String: Any] = ["checkpoint": try json(["step": step, "startedAt": now]), "offset": 0, "limit": 1]
+            input.merge(options) { _, new in new }
+            return try object(await core.call("menuRead", argumentsJSON: json(["weeklyReview", json(input)])))
+        }
+        func firstItem(_ page: [String: Any]) throws -> [String: Any] {
+            try XCTUnwrap((page["items"] as? [[String: Any]])?.first)
+        }
+
+        let someday = try await read("someday")
+        XCTAssertEqual((someday["step"] as? [String: Any])?["id"] as? String, "someday")
+        let section = try firstItem(someday)
+        XCTAssertEqual(section["type"] as? String, "somedaySection")
+        XCTAssertEqual(section["count"] as? Int, 1)
+        XCTAssertEqual(section["scheduledCount"] as? Int, 1)
+        XCTAssertFalse(try XCTUnwrap(section["scheduledLabel"] as? String).isEmpty)
+        let projectPage = try await read("someday", ["offset": 1, "revision": try XCTUnwrap(someday["revision"])])
+        let project = try firstItem(projectPage)
+        XCTAssertEqual(project["type"] as? String, "somedayProject")
+        XCTAssertEqual(project["id"] as? String, "review-parked")
+        XCTAssertEqual(project["scheduled"] as? Bool, true)
+        XCTAssertEqual(project["sectionId"] as? String, section["sectionId"] as? String)
+        XCTAssertEqual(project["projectRevision"] as? String, "1::" + now)
+
+        let collapsed = try await read("completed")
+        XCTAssertEqual(collapsed["total"] as? Int, 0)
+        let week = try XCTUnwrap((collapsed["content"] as? [String: Any])?["week"] as? [String: Any])
+        XCTAssertFalse(try XCTUnwrap(week["rangeLabel"] as? String).isEmpty)
+        let recap = try await read("completed", ["recapGroupBy": "project"])
+        let group = try firstItem(recap)
+        XCTAssertEqual(group["type"] as? String, "recapGroup")
+        XCTAssertEqual(group["title"] as? String, "Review project 000")
+        XCTAssertEqual(group["count"] as? Int, 1)
+        let revision = try XCTUnwrap(recap["revision"])
+        let next = try await read("completed", ["recapGroupBy": "project", "offset": 1, "revision": revision])
+        XCTAssertEqual(try firstItem(next)["id"] as? String, "review-project-task")
+        await expectFailure("STALE_REVISION") { _ = try await read("completed", ["recapGroupBy": "area", "offset": 1, "revision": revision]) }
+        await expectFailure("INVALID_INPUT") { _ = try await read("completed", ["recapGroupBy": "day"]) }
+        XCTAssertEqual(try reviewReadSnapshot(), before)
+    }
+
     private func calendarPreferenceSettings() throws -> [String: Any] {
         let sqlite = try SQLiteBridge(url: database)
         defer { sqlite.close() }

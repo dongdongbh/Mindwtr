@@ -79,13 +79,14 @@ export function DeferredProjectRow({
   onMoveToSection,
 }: DeferredProjectRowProps) {
   const projectArea = project.areaId ? areaById.get(project.areaId) : undefined;
+  const activateLabel = t('projects.reactivate');
   const moveLabel = tFallback(t, 'viewSections.moveToSection', 'Move to section…');
   const themePreset = useThemePreset();
   return (
     <Swipeable
       renderLeftActions={() => (
         <View style={[styles.activateAction, { backgroundColor: tc.tint, borderColor: tc.border }]}>
-          <Text style={[styles.activateActionText, { color: tc.onTint }]}>{t('projects.reactivate')}</Text>
+          <Text style={[styles.activateActionText, { color: tc.onTint }]}>{activateLabel}</Text>
         </View>
       )}
       onSwipeableLeftOpen={() => onActivateProject(project.id)}
@@ -94,10 +95,15 @@ export function DeferredProjectRow({
         style={[styles.projectRow, { borderColor: tc.border, backgroundColor: tc.cardBg }]}
         onPress={() => onOpenProject(project.id)}
         onLongPress={onMoveToSection ? () => onMoveToSection(project) : undefined}
-        accessibilityActions={onMoveToSection ? [{ name: 'moveToSection', label: moveLabel }] : undefined}
-        onAccessibilityAction={onMoveToSection
-          ? (event) => { if (event.nativeEvent.actionName === 'moveToSection') onMoveToSection(project); }
-          : undefined}
+        accessibilityRole="button"
+        accessibilityActions={[
+          { name: 'activateProject', label: activateLabel },
+          ...(onMoveToSection ? [{ name: 'moveToSection', label: moveLabel }] : []),
+        ]}
+        onAccessibilityAction={({ nativeEvent }) => {
+          if (nativeEvent.actionName === 'activateProject') onActivateProject(project.id);
+          if (nativeEvent.actionName === 'moveToSection') onMoveToSection?.(project);
+        }}
       >
         <Folder size={18} color={getProjectAccentColor(project, areaById, themePreset) || tc.secondaryText} />
         <View style={styles.projectText}>

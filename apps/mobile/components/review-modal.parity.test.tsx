@@ -4,7 +4,7 @@
 import React from 'react';
 import { act, create, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { configureDateFormatting, flushPendingSave, getStorageAdapter, loadTranslations, resetForTests, setSaveRetrySleepForTests, setStorageAdapter, useTaskStore, type AppSettings } from '@mindwtr/core';
+import { configureDateFormatting, flushPendingSave, getStorageAdapter, loadTranslations, resetForTests, safeFormatDate, setSaveRetrySleepForTests, setStorageAdapter, useTaskStore, type AppSettings } from '@mindwtr/core';
 
 import {
   CAPTURE,
@@ -66,7 +66,10 @@ vi.mock('@mindwtr/core', async (importOriginal) => {
 vi.mock('../contexts/language-context', () => ({
   useLanguage: () => ({ t: (key: string) => harness.strings[key] ?? key, language: 'en' }),
 }));
-vi.mock('../contexts/theme-context', () => ({ useTheme: () => ({ isDark: false }) }));
+vi.mock('../contexts/theme-context', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../contexts/theme-context')>(),
+  useTheme: () => ({ isDark: false }),
+}));
 vi.mock('../contexts/quick-capture-context', () => ({
   useQuickCapture: () => ({ openQuickCapture: (options: unknown) => { harness.captures.push(options); } }),
 }));
@@ -109,6 +112,7 @@ vi.mock('react-native-safe-area-context', () => ({
 }));
 vi.mock('react-native-gesture-handler', () => ({
   GestureHandlerRootView: (props: any) => React.createElement('GestureHandlerRootView', props, props.children),
+  Swipeable: (props: any) => React.createElement('Swipeable', props, props.children),
 }));
 vi.mock('lucide-react-native', () => {
   const icons = new Map<string, unknown>();
@@ -377,6 +381,129 @@ describe('React Native Weekly Review parity fixture', () => {
     resetForTests();
     if (originalTz === undefined) delete process.env.TZ;
     else process.env.TZ = originalTz;
+  });
+
+  it('keeps Someday eligible for a parked empty project and preserves the task editor and future disclosure', async () => {
+    harness.storage = new Map();
+    harness.calendar = 'none';
+    const project = projects.find((entry) => entry.id === 'p-parked')!;
+    const futureTask = tasks.find((entry) => entry.id === 's-japan')!;
+    await seedStore({
+      gtd: { viewSections: { someday: [
+        { id: 'travel', title: 'Travel', order: 2 },
+        { id: 'ideas', title: 'Ideas', order: 1 },
+      ] } },
+    }, [{ ...futureTask, viewSectionIds: { someday: 'travel' } }], [{ ...project, viewSectionIds: { someday: 'ideas' } }]);
+    let renderer!: ReactTestRenderer;
+    await act(async () => { renderer = create(<Host />); });
+    const root = renderer.root;
+    const text = () => textsIn(root);
+    expect(text()).toContain(harness.strings['review.somedayHint']);
+    expect(text().indexOf('Ideas (1)')).toBeLessThan(text().indexOf('Travel (1)'));
+    expect(text()).toContain('Parked plan');
+    expect(hostsOf(root, 'SwipeableTaskItem')).toHaveLength(0);
+    await perform(root, ['press', 'Ideas (1)']);
+    expect(text()).not.toContain('Parked plan');
+    await perform(root, ['press', 'Ideas (1)']);
+    await perform(root, ['press', 'Not due yet (1)']);
+    await perform(root, ['row', futureTask.id, 'edit']);
+    expect(hostsOf(root, 'TaskEditModal')[0]?.props).toMatchObject({ task: { id: futureTask.id }, visible: true });
+    await perform(root, ['closeEditor']);
+    expect(useTaskStore.getState()._allProjects[0].status).toBe('someday');
+
+    const projectButton = hostsOf(root, 'TouchableOpacity').find((node) => textsIn(node).includes('Parked plan'))!;
+    await act(async () => projectButton.props.onAccessibilityAction({ nativeEvent: { actionName: 'activateProject' } }));
+    await act(async () => { await flushPendingSave(); });
+    expect(useTaskStore.getState()._allProjects[0].status).toBe('active');
+    await act(async () => renderer.unmount());
+  });
+
+  it('shows the date range, counts, and task titles only when recap details are opened', async () => {
+    harness.storage = new Map([[SESSION_KEY, session('completed', NOW)]]);
+    harness.calendar = 'none';
+    const grouped = tasks.find((entry) => entry.id === 'd-invoice')!;
+    const ungrouped = { ...grouped, id: 'ungrouped', title: 'Standalone action', projectId: undefined };
+    await seedStore(settingsVariants.mondayWeek, [grouped, ungrouped]);
+    let renderer!: ReactTestRenderer;
+    await act(async () => { renderer = create(<Host />); });
+    const root = renderer.root;
+    const text = () => textsIn(root);
+    expect(text()).toContain('2 action(s) completed this week');
+    expect(text()).not.toContain(grouped.title);
+    await perform(root, ['press', 'Details']);
+    const range = [new Date(2026, 8, 21), new Date(2026, 8, 23)].map((day) => safeFormatDate(day, 'PP')).join(' – ');
+    expect(text()).toEqual(expect.arrayContaining([range, 'Launch (1)', 'No Project (1)', grouped.title, ungrouped.title]));
+    await perform(root, ['press', 'Area']);
+    expect(text()).toEqual(expect.arrayContaining(['Work (1)', 'No area (1)', grouped.title, ungrouped.title]));
+    expect(text()).not.toContain('Launch (1)');
+    await perform(root, ['press', 'Details']);
+    expect(text()).not.toContain(grouped.title);
+    expect(text()).toContain('2 action(s) completed this week');
+    await act(async () => renderer.unmount());
+  });
+
+  it('refreshes the recap when the mounted review reopens in a new week', async () => {
+    harness.storage = new Map([[SESSION_KEY, session('completed', NOW)]]);
+    harness.calendar = 'none';
+    const old = tasks.find((entry) => entry.id === 'd-invoice')!;
+    const monday = new Date(2026, 8, 28, 8);
+    const tuesday = new Date(2026, 8, 29, 10);
+    await seedStore(settingsVariants.mondayWeek, [
+      { ...old, projectId: undefined },
+      { ...old, id: 'another-last-week', title: 'Close last week', projectId: undefined },
+      { ...old, id: 'new-week', title: 'Plan the new week', projectId: undefined, completedAt: monday.toISOString() },
+    ], []);
+    let renderer!: ReactTestRenderer;
+    await act(async () => { renderer = create(<Host />); });
+    try {
+      const root = renderer.root;
+      await perform(root, ['press', 'Details']);
+      expect(textsIn(root)).toContain('2 action(s) completed this week');
+      expect(textsIn(root)).toContain(old.title);
+      expect(textsIn(root)).not.toContain('Plan the new week');
+      await perform(root, ['close']);
+
+      vi.setSystemTime(tuesday);
+      await perform(root, ['reopen']);
+      await perform(root, ['press', 'Details']);
+      const range = [monday, tuesday].map((day) => safeFormatDate(day, 'PP')).join(' – ');
+      expect(textsIn(root)).toEqual(expect.arrayContaining([range, '1 action(s) completed this week', 'Plan the new week']));
+      expect(textsIn(root)).not.toContain(old.title);
+    } finally {
+      await act(async () => renderer.unmount());
+      vi.setSystemTime(new Date(NOW));
+    }
+  });
+
+  it('bounds expanded recap rows and resets to the first page when grouping changes', async () => {
+    harness.storage = new Map([[SESSION_KEY, session('completed', NOW)]]);
+    harness.calendar = 'none';
+    const completed = tasks.find((entry) => entry.id === 'd-invoice')!;
+    const seeded = Array.from({ length: 30 }, (_, index) => ({
+      ...completed, id: `paged-${index}`, title: `Completed action ${String(index).padStart(2, '0')}`,
+    }));
+    await seedStore(settingsVariants.mondayWeek, seeded, [projects[0]]);
+    let renderer!: ReactTestRenderer;
+    await act(async () => { renderer = create(<Host />); });
+    try {
+      const root = renderer.root;
+      const text = () => textsIn(root);
+      await perform(root, ['press', 'Details']);
+      expect(text()).toEqual(expect.arrayContaining(['Launch (30)', 'Completed action 00']));
+      expect(text()).not.toContain('Completed action 29');
+
+      await perform(root, ['press', 'Next']);
+      expect(text()).toEqual(expect.arrayContaining(['Launch (30)', 'Completed action 29']));
+      expect(text()).not.toContain('Completed action 00');
+      await perform(root, ['press', 'Back']);
+      expect(text()).toContain('Completed action 00');
+      await perform(root, ['press', 'Next']);
+      await perform(root, ['press', 'Area']);
+      expect(text()).toEqual(expect.arrayContaining(['Work (30)', 'Completed action 00']));
+      expect(text()).not.toContain('Completed action 29');
+    } finally {
+      await act(async () => renderer.unmount());
+    }
   });
 
   it('completes a project through the real store after confirmation and keeps the Projects step', async () => {

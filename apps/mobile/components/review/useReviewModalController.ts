@@ -24,6 +24,7 @@ import {
     resolveReviewStepSession,
     restoreReviewSession,
     serializeReviewSession,
+    tFallback,
     titleWeeklyReviewSteps,
     type AIProviderId,
     type ExternalCalendarEvent,
@@ -50,12 +51,14 @@ import {
 import { useTheme } from '../../contexts/theme-context';
 import { useLanguage } from '../../contexts/language-context';
 import { useQuickCapture } from '../../contexts/quick-capture-context';
+import { getLocalDayKey } from '@/hooks/use-local-day-key';
 import { useThemeColors } from '@/hooks/use-theme-colors';
 import { openContextsScreen, openProjectScreen } from '@/lib/task-meta-navigation';
 import { buildAIConfig, isAIKeyRequired, loadAIKey } from '../../lib/ai-config';
 import { logError, logInfo } from '../../lib/app-log';
 import { fetchExternalCalendarEvents } from '../../lib/external-calendar';
 import { maybeRequestStoreReviewAfterPositiveMoment } from '../../lib/store-review-prompt';
+import { settleStoreAction } from '../store-action-result';
 
 export type ReviewStep = WeeklyReviewStepId;
 
@@ -125,7 +128,7 @@ export function useReviewModalController({
     useEffect(() => () => { pendingNavigationRef.current = null; }, []);
     const [expandedProject, setExpandedProject] = useState<string | null>(null);
     const [projectCompletionPrompt, setProjectCompletionPrompt] = useState<{ id: string; title: string } | null>(null);
-    const [projectCompletionError, setProjectCompletionError] = useState<string | null>(null);
+    const [projectActionError, setProjectActionError] = useState<string | null>(null);
     const [completingProjectId, setCompletingProjectId] = useState<string | null>(null);
     const completingProjectRef = useRef(false);
     const [keepProjectsStep, setKeepProjectsStep] = useState(false);
@@ -133,7 +136,7 @@ export function useReviewModalController({
     useEffect(() => {
         if (!visible) {
             setProjectCompletionPrompt(null);
-            setProjectCompletionError(null);
+            setProjectActionError(null);
             setKeepProjectsStep(false);
         }
     }, [visible]);
@@ -283,7 +286,7 @@ export function useReviewModalController({
             setProjectCompletionPrompt(null);
             return;
         }
-        setProjectCompletionError(null);
+        setProjectActionError(null);
         const sectionIds = new Set(state._allSections.filter((section) => section.projectId === projectId).map((section) => section.id));
         const hasUnfinishedTasks = state._allTasks.some((task) => (
             (task.projectId === projectId || (!task.projectId && task.sectionId && sectionIds.has(task.sectionId)))
@@ -309,11 +312,21 @@ export function useReviewModalController({
             });
         } catch (error) {
             setProjectCompletionPrompt(null);
-            setProjectCompletionError(t('projects.archiveFailed'));
+            setProjectActionError(t('projects.archiveFailed'));
             void logError(error, { scope: 'review', extra: { message: 'Failed to complete project during weekly review' } });
         } finally {
             completingProjectRef.current = false;
             setCompletingProjectId(null);
+        }
+    }, [t, visible]);
+
+    const reactivateSomedayProject = useCallback(async (projectId: string) => {
+        const state = useTaskStore.getState();
+        if (!visible || !state.projects.some((project) => project.id === projectId && project.status === 'someday' && !project.deletedAt)) return;
+        setProjectActionError(null);
+        const outcome = await settleStoreAction(() => state.updateProject(projectId, { status: 'active' }));
+        if (!outcome.ok) {
+            setProjectActionError(tFallback(t, 'projects.reactivateFailed', 'Failed to reactivate project'));
         }
     }, [t, visible]);
 
@@ -388,9 +401,14 @@ export function useReviewModalController({
     }, [handleClose]);
 
 
+    const somedayDefinitions = settings?.gtd?.viewSections?.someday;
+    const localDayKey = getLocalDayKey();
     const weeklyBuckets = useMemo(
-        () => getWeeklyReviewBuckets(tasks, projects, { weekStart: settings?.weekStart, sections }),
-        [projects, sections, settings?.weekStart, tasks],
+        () => {
+            void localDayKey;
+            return getWeeklyReviewBuckets(tasks, projects, { weekStart: settings?.weekStart, sections, somedaySections: somedayDefinitions, areas });
+        },
+        [areas, localDayKey, projects, sections, settings?.weekStart, somedayDefinitions, tasks],
     );
     const staleItems = weeklyBuckets.staleItems;
     const completion = getWeeklyReviewCompletion(weeklyBuckets, settings, labels);
@@ -465,7 +483,6 @@ export function useReviewModalController({
 
     const inboxTasks = weeklyBuckets.inbox;
     const waitingList = useMemo(() => getWeeklyReviewScheduledList(weeklyBuckets.waitingGroups, labels), [labels, weeklyBuckets]);
-    const somedayList = useMemo(() => getWeeklyReviewScheduledList(weeklyBuckets.somedayGroups, labels), [labels, weeklyBuckets]);
     const calendarReviewItems = weeklyBuckets.calendarItems;
     const externalCalendarReviewItems = useMemo(
         () => getExternalCalendarDaySummaries(externalCalendarEvents),
@@ -577,6 +594,7 @@ export function useReviewModalController({
         aiSelectedIds,
         aiSuggestions,
         applyAiSuggestions,
+        areaById,
         calendarReviewItems,
         canGoBack: previousStepId !== null,
         closeEditModal,
@@ -585,7 +603,7 @@ export function useReviewModalController({
         completeProject,
         completingProjectId,
         projectCompletionPrompt,
-        projectCompletionError,
+        projectActionError,
         completion,
         contextReviewGroups,
         currentStep: displayedStep,
@@ -622,11 +640,12 @@ export function useReviewModalController({
         projectReviewEntries,
         projectTaskPrompt,
         projectTaskTitle,
+        reactivateSomedayProject,
         runAiAnalysis,
         safeStepIndex,
         setProjectTaskTitle,
         showEditModal,
-        somedayList,
+        somedaySections: weeklyBuckets.somedaySections,
         staleProjectItems,
         staleTasks,
         stepRail,
@@ -638,5 +657,6 @@ export function useReviewModalController({
         toggleExternalDayExpanded,
         toggleSuggestion,
         waitingList,
+        weekRecap: weeklyBuckets.weekRecap,
     };
 }

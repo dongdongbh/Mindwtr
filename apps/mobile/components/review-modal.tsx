@@ -8,6 +8,7 @@ import {
     getWeeklyReviewCalendar,
     getWeeklyReviewCalendarNotice,
     getWeeklyReviewContextMoreLabel,
+    getWeeklyReviewRecapPage,
     safeFormatDate,
     type Task,
     type WeeklyReviewCalendarDay,
@@ -42,6 +43,7 @@ import { InboxProcessingModal } from './inbox-processing-modal';
 import { MindSweepModalContent } from './mind-sweep-modal-content';
 import { ErrorBoundary } from './ErrorBoundary';
 import { type ContextReviewGroup, useReviewModalController } from './review/useReviewModalController';
+import { WeeklyReviewSomedayList } from './review/WeeklyReviewSomedayList';
 import { styles } from './review-modal.styles';
 import { SandboxWorkspaceCue } from './sandbox-workspace-cue';
 import { ShareCardModal } from './share-card-modal';
@@ -61,7 +63,9 @@ export function ReviewModal({ visible, onClose }: ReviewModalProps) {
     const [showMindSweep, setShowMindSweep] = useState(false);
     const [showShareCard, setShowShareCard] = useState(false);
     const [showScheduledWaiting, setShowScheduledWaiting] = useState(false);
-    const [showScheduledSomeday, setShowScheduledSomeday] = useState(false);
+    const [showWeekRecap, setShowWeekRecap] = useState(false);
+    const [recapByArea, setRecapByArea] = useState(false);
+    const [weekRecapPage, setWeekRecapPage] = useState(0);
     const {
         aiEnabled,
         aiError,
@@ -70,6 +74,7 @@ export function ReviewModal({ visible, onClose }: ReviewModalProps) {
         aiSelectedIds,
         aiSuggestions,
         applyAiSuggestions,
+        areaById,
         calendarReviewItems,
         canGoBack,
         closeEditModal,
@@ -78,7 +83,7 @@ export function ReviewModal({ visible, onClose }: ReviewModalProps) {
         completeProject,
         completingProjectId,
         projectCompletionPrompt,
-        projectCompletionError,
+        projectActionError,
         completion,
         contextReviewGroups,
         currentStep,
@@ -111,6 +116,7 @@ export function ReviewModal({ visible, onClose }: ReviewModalProps) {
         openReviewQuickAdd,
         prevStep,
         progress,
+        reactivateSomedayProject,
         projectReviewEntries,
         projectTaskPrompt,
         projectTaskTitle,
@@ -120,7 +126,7 @@ export function ReviewModal({ visible, onClose }: ReviewModalProps) {
         safeStepIndex,
         setProjectTaskTitle,
         showEditModal,
-        somedayList,
+        somedaySections,
         stepRail,
         steps,
         submitProjectTask,
@@ -130,6 +136,7 @@ export function ReviewModal({ visible, onClose }: ReviewModalProps) {
         toggleExternalDayExpanded,
         toggleSuggestion,
         waitingList,
+        weekRecap,
     } = useReviewModalController({ visible, onClose });
     const [expandedLaterProjects, setExpandedLaterProjects] = useState<Set<string>>(new Set());
     const closeLabel = t('common.close');
@@ -156,6 +163,14 @@ export function ReviewModal({ visible, onClose }: ReviewModalProps) {
             setShowShareCard(false);
         }
     }, [showInboxProcessing, showMindSweep, showShareCard, visible]);
+
+    useEffect(() => {
+        if (!visible) {
+            setShowWeekRecap(false);
+            setRecapByArea(false);
+            setWeekRecapPage(0);
+        }
+    }, [visible]);
 
 
     const calendarView = getWeeklyReviewCalendar(externalCalendarReviewItems, calendarReviewItems, labels, safeFormatDate);
@@ -311,6 +326,91 @@ export function ReviewModal({ visible, onClose }: ReviewModalProps) {
                         actions={rowActions}
                     />
                 ))}
+            </View>
+        );
+    };
+
+    const renderWeekRecap = () => {
+        const groups = recapByArea ? weekRecap.areas : weekRecap.projects;
+        const visiblePage = showWeekRecap ? getWeeklyReviewRecapPage(groups, weekRecapPage) : null;
+        const fallback = recapByArea ? t('review.noArea') : t('taskEdit.noProjectOption');
+        const Chevron = showWeekRecap ? ChevronDown : ChevronRight;
+        return (
+            <View style={styles.weekRecap}>
+                <AppPressable
+                    accessibilityRole="button"
+                    accessibilityLabel={t('list.details')}
+                    accessibilityState={{ expanded: showWeekRecap }}
+                    onPress={() => setShowWeekRecap((previous) => !previous)}
+                    style={styles.weekRecapToggle}
+                    testID="review-week-recap-toggle"
+                >
+                    <Chevron size={16} color={tc.tint} />
+                    <Text style={[styles.weekRecapHeading, { color: tc.tint }]}>{t('list.details')}</Text>
+                </AppPressable>
+                {visiblePage && (
+                    <View style={styles.weekRecap}>
+                        <Text style={{ color: tc.secondaryText }}>
+                            {safeFormatDate(weekRecap.start, 'PP')} {'–'} {safeFormatDate(weekRecap.end, 'PP')}
+                        </Text>
+                        <View style={styles.weekRecapGrouping}>
+                            {(['project', 'area'] as const).map((groupBy) => {
+                                const area = groupBy === 'area';
+                                const selected = area === recapByArea;
+                                const label = t(area ? 'list.groupByArea' : 'list.groupByProject');
+                                return (
+                                    <AppPressable
+                                        key={groupBy}
+                                        accessibilityRole="button"
+                                        accessibilityLabel={label}
+                                        accessibilityState={{ selected }}
+                                        onPress={() => {
+                                            if (selected) return;
+                                            setRecapByArea(area);
+                                            setWeekRecapPage(0);
+                                        }}
+                                        style={[styles.weekRecapGroupButton, { borderColor: selected ? tc.tint : tc.border }]}
+                                    >
+                                        <Text style={{ color: tc.text, fontWeight: selected ? '600' : '400' }}>{label}</Text>
+                                    </AppPressable>
+                                );
+                            })}
+                        </View>
+                        {visiblePage.pageCount > 1 && (
+                            <View style={styles.weekRecapGrouping}>
+                                {[-1, 1].map((direction) => {
+                                    const page = visiblePage.page + direction;
+                                    const disabled = page < 0 || page >= visiblePage.pageCount;
+                                    const label = t(direction < 0 ? 'common.back' : 'common.next');
+                                    return (
+                                        <AppPressable
+                                            key={direction}
+                                            accessibilityRole="button"
+                                            accessibilityLabel={label}
+                                            accessibilityState={{ disabled }}
+                                            disabled={disabled}
+                                            onPress={() => setWeekRecapPage(page)}
+                                            style={[styles.weekRecapGroupButton, { borderColor: tc.border, opacity: disabled ? 0.5 : 1 }]}
+                                        >
+                                            <Text style={{ color: tc.text }}>{label}</Text>
+                                        </AppPressable>
+                                    );
+                                })}
+                                <Text accessibilityLiveRegion="polite" style={{ color: tc.secondaryText }}>
+                                    {visiblePage.page + 1} {t('review.of')} {visiblePage.pageCount}
+                                </Text>
+                            </View>
+                        )}
+                        {visiblePage.groups.map((group) => (
+                            <View key={group.id} style={styles.weekRecapGroup}>
+                                <Text accessibilityRole="header" style={[styles.weekRecapHeading, { color: tc.text }]}>
+                                    {group.title ?? fallback} ({group.count})
+                                </Text>
+                                {group.tasks.map((task) => <Text key={task.id} style={{ color: tc.secondaryText }}>{task.title}</Text>)}
+                            </View>
+                        ))}
+                    </View>
+                )}
             </View>
         );
     };
@@ -842,21 +942,24 @@ export function ReviewModal({ visible, onClose }: ReviewModalProps) {
                         <Text style={[styles.hint, { color: tc.secondaryText }]}>
                             {labels.somedayGuide}
                         </Text>
-                        {somedayList.total === 0 ? (
+                        {somedaySections.length === 0 ? (
                             <View style={styles.emptyState}>
                                 <Text style={[styles.emptyText, { color: tc.secondaryText }]}>
                                     {labels.listEmpty}
                                 </Text>
                             </View>
                         ) : (
-                            renderTaskList(
-                                somedayList.visible,
-                                renderScheduledGroup(
-                                    somedayList,
-                                    showScheduledSomeday,
-                                    () => setShowScheduledSomeday((prev) => !prev),
-                                ),
-                            )
+                            <WeeklyReviewSomedayList
+                                sections={somedaySections}
+                                areaById={areaById}
+                                onOpenProject={handleOpenProject}
+                                onActivateProject={reactivateSomedayProject}
+                                actions={rowActions}
+                                isDark={isDark}
+                                tc={tc}
+                                t={t}
+                                notDueYet={labels.notDueYet}
+                            />
                         )}
                     </View>
                 );
@@ -885,6 +988,7 @@ export function ReviewModal({ visible, onClose }: ReviewModalProps) {
                                     {completion.week.rows.map((row) => (
                                         <React.Fragment key={row}>{renderSummaryRow(true, row)}</React.Fragment>
                                     ))}
+                                    {weekRecap.projects.length > 0 && renderWeekRecap()}
                                 </View>
                             )}
                             {completion.checks.map((check) => (
@@ -937,9 +1041,9 @@ export function ReviewModal({ visible, onClose }: ReviewModalProps) {
                     {renderStepRail()}
 
                     <View style={styles.content}>
-                        {projectCompletionError && (
+                        {projectActionError && (
                             <Text accessibilityRole="alert" style={[styles.hint, { color: tc.danger }]}>
-                                {projectCompletionError}
+                                {projectActionError}
                             </Text>
                         )}
                         {renderStepContent()}

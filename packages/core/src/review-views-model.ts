@@ -28,6 +28,7 @@ import {
     type StoredReviewStepSession,
     type WeeklyReviewBuckets,
     type WeeklyReviewProjectEntry,
+    type WeeklyReviewRecapGroup,
 } from './review-utils';
 import { resolveNonDoneTaskSortBy } from './task-list-sort-options';
 import { isTaskFinished } from './task-status';
@@ -705,6 +706,26 @@ export function getWeeklyReviewCompletion(
     return { week, checks };
 }
 
+const WEEKLY_RECAP_PAGE_SIZE = 24;
+
+export function getWeeklyReviewRecapPage(groups: readonly WeeklyReviewRecapGroup[], requestedPage: number) {
+    const taskCount = groups.reduce((count, group) => count + group.tasks.length, 0);
+    const pageCount = Math.max(1, Math.ceil(taskCount / WEEKLY_RECAP_PAGE_SIZE));
+    const page = Math.max(0, Math.min(requestedPage, pageCount - 1));
+    const start = page * WEEKLY_RECAP_PAGE_SIZE;
+    const end = start + WEEKLY_RECAP_PAGE_SIZE;
+    const visibleGroups: (WeeklyReviewRecapGroup & { count: number })[] = [];
+    let offset = 0;
+    for (const group of groups) {
+        const count = group.tasks.length;
+        if (count > 0 && offset + count > start) {
+            visibleGroups.push({ ...group, count, tasks: group.tasks.slice(Math.max(0, start - offset), end - offset) });
+        }
+        offset += count;
+        if (offset >= end) break;
+    }
+    return { groups: visibleGroups, page, pageCount };
+}
 
 export const isActionableReviewSuggestion = (suggestion: Pick<ReviewSuggestion, 'id' | 'action'>) => (
     !suggestion.id.startsWith('project:') && (suggestion.action === 'someday' || suggestion.action === 'archive')

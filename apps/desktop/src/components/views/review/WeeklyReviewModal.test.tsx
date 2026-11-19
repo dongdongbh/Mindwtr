@@ -1,6 +1,6 @@
 import { act, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { resetForTests, useTaskStore, type Project, type Task } from '@mindwtr/core';
+import { resetForTests, safeFormatDate, useTaskStore, type Project, type Task } from '@mindwtr/core';
 
 import { WeeklyReviewGuideModal } from './WeeklyReviewModal';
 import { fetchExternalCalendarEvents } from '../../../lib/external-calendar-events';
@@ -23,12 +23,18 @@ vi.mock('../../../contexts/language-context', () => ({
             'review.contexts': 'Contexts',
             'review.projectsStep': 'Projects',
             'review.somedayStep': 'Someday',
+            'review.notDueYet': 'Not due yet',
+            'viewSections.noSection': 'No section',
             'review.allDone': 'All Done',
             'review.allDoneDesc': 'Nice work.',
             'review.complete': 'Review Complete!',
             'review.completeDesc': 'Nice work this week.',
             'review.summaryInboxEmpty': 'Inbox is empty.',
             'review.weekHeading': 'This week',
+            'review.noArea': 'No area',
+            'list.details': 'Details',
+            'list.groupByArea': 'Area',
+            'taskEdit.noProjectOption': 'No Project',
             'review.weekCompletedCount': '{{count}} action(s) completed this week',
             'review.weekProjectsMovedCount': '{{count}} project(s) moved forward',
             'review.weekEstimatedTasksCount': '{{count}} completed task(s) had an estimate',
@@ -42,10 +48,13 @@ vi.mock('../../../contexts/language-context', () => ({
             'mindSweep.intro': 'Capture anything on your mind.',
             'common.close': 'Close',
             'common.cancel': 'Cancel',
+            'common.back': 'Back',
+            'common.next': 'Next',
             'projects.addTask': 'Add task',
             'projects.nextActionPromptComplete': 'Complete project',
             'projects.completeConfirm': 'Mark this project completed and finish all its tasks?',
             'projects.archiveFailed': 'Failed to archive project',
+            'projects.reactivate': 'Reactivate',
         }[key] ?? key),
     }),
 }));
@@ -135,6 +144,45 @@ describe('WeeklyReviewGuideModal', () => {
 
         expect(screen.getByRole('heading', { level: 2, name: 'Review Complete!' })).toBeInTheDocument();
         expect(screen.queryByText('This week')).not.toBeInTheDocument();
+    });
+
+    it('shows empty Someday projects in section order and keeps future actions under their section disclosure', async () => {
+        vi.useFakeTimers({ toFake: ['Date'] });
+        vi.setSystemTime(new Date(2026, 2, 4, 12));
+        const updateProject = vi.fn(initialTaskState.updateProject);
+        useTaskStore.setState({
+            _allProjects: [{
+                id: 'parked', title: 'Empty Someday project', status: 'someday', color: '#3B82F6',
+                order: 0, tagIds: [], createdAt: now, updatedAt: now, viewSectionIds: { someday: 'trips' },
+            }],
+            _allTasks: [
+                makeTask({ id: 'future', title: 'Read in April', status: 'someday', reviewAt: '2026-04-01', viewSectionIds: { someday: 'books' } }),
+                makeTask({ id: 'fallback', title: 'Unsectioned action', status: 'someday', viewSectionIds: { someday: 'missing' } }),
+            ],
+            settings: { gtd: { viewSections: { someday: [
+                { id: 'books', title: 'Books', order: 2 },
+                { id: 'trips', title: 'Trips', order: 1 },
+            ] } } },
+            updateProject,
+        });
+        render(<WeeklyReviewGuideModal onClose={vi.fn()} />);
+
+        const summary = screen.getByText('Trips (1)');
+        expect(Array.from(screen.getByRole('dialog').querySelectorAll('details > summary')).map((node) => node.textContent))
+            .toEqual(['Trips (1)', 'Books (1)', 'Not due yet (1)', 'No section (1)']);
+        expect(screen.getByText('Unsectioned action')).toBeVisible();
+        expect(screen.getByText('Empty Someday project')).toBeVisible();
+        expect(screen.queryByText('Read in April')).not.toBeInTheDocument();
+
+        fireEvent.click(summary);
+        expect(screen.getByText('Empty Someday project')).not.toBeVisible();
+        fireEvent.click(summary);
+        fireEvent.click(screen.getByText('Not due yet (1)'));
+        expect(await screen.findByText('Read in April')).toBeVisible();
+        expect(updateProject).not.toHaveBeenCalled();
+
+        fireEvent.click(screen.getByRole('button', { name: 'Reactivate' }));
+        await waitFor(() => expect(useTaskStore.getState()._allProjects[0].status).toBe('active'));
     });
 
     const seedProjects = (tasks: Task[] = []) => {
@@ -440,13 +488,14 @@ describe('WeeklyReviewGuideModal', () => {
         );
     });
 
-    it('shows this week\'s completion, project, estimate, and tracked totals', () => {
-        vi.useFakeTimers();
+    it('shows this week\'s completion, project, estimate, and tracked totals', async () => {
+        vi.useFakeTimers({ toFake: ['Date'] });
         vi.setSystemTime(new Date(2026, 2, 4, 12, 0, 0));
         useTaskStore.setState({
             _allTasks: [
                 makeTask({
                     id: 'done-with-estimate',
+                    title: 'File invoices',
                     status: 'done',
                     completedAt: new Date(2026, 2, 3, 9, 0, 0).toISOString(),
                     projectId: 'archived-project',
@@ -455,9 +504,9 @@ describe('WeeklyReviewGuideModal', () => {
                 }),
                 makeTask({
                     id: 'done-without-estimate',
+                    title: 'Renew membership',
                     status: 'done',
                     completedAt: new Date(2026, 2, 3, 10, 0, 0).toISOString(),
-                    projectId: 'archived-project',
                 }),
             ],
             _allProjects: [{
@@ -467,9 +516,11 @@ describe('WeeklyReviewGuideModal', () => {
                 color: '#3B82F6',
                 order: 0,
                 tagIds: [],
+                areaId: 'work',
                 createdAt: now,
                 updatedAt: now,
             }],
+            _allAreas: [{ id: 'work', name: 'Work', order: 0, createdAt: now, updatedAt: now }],
             settings: {
                 weekStart: 'monday',
                 features: { timeEstimates: true, pomodoro: true },
@@ -488,6 +539,42 @@ describe('WeeklyReviewGuideModal', () => {
         expect(screen.getByText('1 completed task(s) had an estimate')).toBeInTheDocument();
         expect(screen.getByText('Estimated: 1h')).toBeInTheDocument();
         expect(screen.getByText('Tracked on those tasks: 45m')).toBeInTheDocument();
+        expect(screen.queryByText('File invoices')).not.toBeInTheDocument();
+        fireEvent.click(screen.getByText('Details'));
+        const range = [new Date(2026, 2, 2), new Date(2026, 2, 4)].map((day) => safeFormatDate(day, 'PP')).join(' – ');
+        expect(await screen.findByText(range)).toBeVisible();
+        expect(screen.getByRole('heading', { name: 'Archived project (1)' })).toBeVisible();
+        expect(screen.getByRole('heading', { name: 'No Project (1)' })).toBeVisible();
+        expect(screen.getByText('File invoices')).toBeVisible();
+        fireEvent.click(screen.getByRole('button', { name: 'Area' }));
+        expect(screen.getByRole('heading', { name: 'Work (1)' })).toBeVisible();
+        expect(screen.getByRole('heading', { name: 'No area (1)' })).toBeVisible();
+        expect(screen.getByText('Renew membership')).toBeVisible();
+    });
+
+    it('keeps completed titles reachable with bounded pages and full counts', async () => {
+        vi.useFakeTimers({ toFake: ['Date'] });
+        vi.setSystemTime(new Date(2026, 2, 4, 12));
+        const completedAt = new Date(2026, 2, 3, 9).toISOString();
+        useTaskStore.setState({
+            _allTasks: Array.from({ length: 30 }, (_, index) => makeTask({
+                id: `paged-${index}`, title: `Completed action ${String(index).padStart(2, '0')}`, status: 'done', completedAt,
+            })),
+        });
+        render(<WeeklyReviewGuideModal onClose={vi.fn()} />);
+
+        fireEvent.click(screen.getByText('Details'));
+        expect(await screen.findByText('Completed action 00')).toBeVisible();
+        expect(screen.getByRole('heading', { name: 'No Project (30)' })).toBeVisible();
+        expect(screen.queryByText('Completed action 29')).not.toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+        expect(screen.getByText('Completed action 29')).toBeVisible();
+        expect(screen.getByRole('heading', { name: 'No Project (30)' })).toBeVisible();
+        expect(screen.queryByText('Completed action 00')).not.toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', { name: 'Area' }));
+        expect(screen.getByText('Completed action 00')).toBeVisible();
+        expect(screen.getByRole('heading', { name: 'No area (30)' })).toBeVisible();
+        expect(screen.queryByText('Completed action 29')).not.toBeInTheDocument();
     });
 
     it('keeps estimate lines hidden until time estimates are enabled', () => {

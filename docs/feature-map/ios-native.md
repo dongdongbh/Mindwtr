@@ -170,7 +170,8 @@ App Intents and Siri belong to the RN app. They are not in `apps/ios-native`. Th
 ## Review and Mind Sweep
 
 - Reach: Quick Access tab › Review (or Menu › Review) › Daily Review or Weekly Review. Mind Sweep opens from Weekly Review and from Inbox. The toolbar row has the Expand chevrons icon, the scope chip, and Start Review on one row at normal text size, as RN; the chip opens a menu with Due for review, All open tasks (each with its one-line meaning), Done, and Cancel.
-- Selectors: `review-expand-cycle`, `review-scope`, `review-scope-` (+ due or all), `review-scope-done`, `review-scope-cancel`, `review-start`, `review-guide-step`, `review-guide-count`, `review-guide-close`, `review-daily-process-inbox`, `review-weekly-process-inbox`, `review-mind-sweep-button`, `mind-sweep-input`, `mind-sweep-close`
+- Weekly Review: Expand a Someday section to see its tasks and parked projects, including empty projects. Future review dates appear under Not due yet. At Review Complete, open the weekly recap details to see task titles and counts by project or Area for the displayed dates.
+- Selectors: `weekly-review-recap`, `weekly-review-recap-range`, `weekly-someday-section-` (+ section id), `weekly-someday-scheduled-` (+ section id), `review-expand-cycle`, `review-scope`, `review-scope-` (+ due or all), `review-scope-done`, `review-scope-cancel`, `review-start`, `review-guide-step`, `review-guide-count`, `review-guide-close`, `review-daily-process-inbox`, `review-weekly-process-inbox`, `review-mind-sweep-button`, `mind-sweep-input`, `mind-sweep-close`
 - Code: `apps/ios-native/App/ReviewScreen.swift`, `apps/ios-native/App/MindSweepSheet.swift`
 - Checks: `apps/ios-native/App/UITests/FoundationUITests.swift` (testGtdReview…, testReviewRow…, testReviewScopeChipMenu…, testWeeklyReviewMindSweep…, testMindSweep…)
 - Notes: Settings › GTD › Review turns the Daily Focus and Weekly Contexts steps on or off.

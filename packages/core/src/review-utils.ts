@@ -2,7 +2,7 @@ import { addDays, format } from 'date-fns';
 
 import type { ReviewSnapshotItem } from './ai/types';
 import type { ExternalCalendarEvent } from './ics';
-import type { AppSettings, Area, Project, Section, Task, TaskSortBy } from './types';
+import type { AppSettings, Area, Project, Section, Task, TaskSortBy, ViewSectionDefinition } from './types';
 import { getWeekStartsOnIndex, hasTimeComponent, isDueForReview, safeParseDate, safeParseDueDate } from './date';
 import { timeEstimateToMinutes } from './calendar-scheduling';
 import {
@@ -12,9 +12,10 @@ import {
     type AreaVisibilityContext,
 } from './area-filter';
 import { isTaskInActiveProject } from './project-utils';
-import { compareTasksByProjectOrder, getSequentialFirstTaskIds, getTaskSequencing, isSequentialChainStatus, isTaskSequenceBlocked, shouldShowTaskForStart, sortTasksBy } from './task-utils';
+import { compareProjectsByOrder, compareTasksByProjectOrder, getSequentialFirstTaskIds, getTaskAreaId, getTaskSequencing, isSequentialChainStatus, isTaskSequenceBlocked, shouldShowTaskForStart, sortTasksBy } from './task-utils';
 import { isTaskActionable, isTaskCompleted } from './task-status';
 import { normalizeTimeSpentMinutes } from './time-spent';
+import { groupProjectsByViewSection, groupTasksByViewSection, sortViewSectionDefinitions } from './view-sections';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -164,12 +165,86 @@ export type WeeklyReviewLookBack = {
     trackedMinutes: number;
 };
 
+export type WeeklyReviewRecapGroup = {
+    id: string;
+    title?: string;
+    tasks: Pick<Task, 'id' | 'title'>[];
+};
+
+export type WeeklyReviewRecap = {
+    start: Date;
+    end: Date;
+    projects: WeeklyReviewRecapGroup[];
+    areas: WeeklyReviewRecapGroup[];
+};
+
+function addWeeklyRecapTask(
+    groups: Map<string, WeeklyReviewRecapGroup>,
+    id: string,
+    title: string | undefined,
+    task: Pick<Task, 'id' | 'title'>,
+): void {
+    const group = groups.get(id) ?? { id, title, tasks: [] };
+    group.tasks.push(task);
+    groups.set(id, group);
+}
+
+function getWeeklyReviewLookBack(
+    tasks: readonly Task[],
+    projectMap: Map<string, Project>,
+    now: Date,
+    options: Pick<ReviewBucketOptions, 'weekStart' | 'areas'>,
+): { lookBack: WeeklyReviewLookBack; weekRecap: WeeklyReviewRecap } {
+    const reviewWindowStart = getLocalReviewWindowStart(now, 'weekly', options.weekStart);
+    const reviewWindowEnd = now.getTime();
+    const liveAreas = new Map(options.areas?.filter((area) => !area.deletedAt).map((area) => [area.id, area]));
+    const recapProjects = new Map<string, WeeklyReviewRecapGroup>();
+    const recapAreas = new Map<string, WeeklyReviewRecapGroup>();
+    const lookBack: WeeklyReviewLookBack = {
+        completedCount: 0,
+        projectsMovedCount: 0,
+        estimatedTaskCount: 0,
+        estimatedMinutes: 0,
+        trackedMinutes: 0,
+    };
+
+    for (const task of tasks) {
+        if (task.deletedAt || task.purgedAt || !isTaskCompleted(task)) continue;
+        const completedAt = safeParseDate(task.completedAt)?.getTime() ?? NaN;
+        if (!(completedAt >= reviewWindowStart && completedAt <= reviewWindowEnd)) continue;
+
+        lookBack.completedCount += 1;
+        if (task.timeEstimate) {
+            lookBack.estimatedTaskCount += 1;
+            lookBack.estimatedMinutes += timeEstimateToMinutes(task.timeEstimate);
+            lookBack.trackedMinutes += normalizeTimeSpentMinutes(task.timeSpentMinutes) ?? 0;
+        }
+        const project = task.projectId ? projectMap.get(task.projectId) : undefined;
+        const liveProject = project && !project.deletedAt && !project.purgedAt ? project : undefined;
+        const areaId = getTaskAreaId(task, liveProject ? projectMap : undefined);
+        const area = areaId ? liveAreas.get(areaId) : undefined;
+        const recapTask = { id: task.id, title: task.title };
+        addWeeklyRecapTask(recapProjects, `project:${liveProject?.id ?? ''}`, liveProject?.title, recapTask);
+        addWeeklyRecapTask(recapAreas, `area:${area?.id ?? ''}`, area?.name, recapTask);
+    }
+
+    lookBack.projectsMovedCount = recapProjects.size - Number(recapProjects.has('project:'));
+    return {
+        lookBack,
+        weekRecap: {
+            start: new Date(reviewWindowStart),
+            end: new Date(getLocalReviewWindowStart(now, 'daily')),
+            projects: [...recapProjects.values()],
+            areas: [...recapAreas.values()],
+        },
+    };
+}
+
 type WeeklyReviewDerivation = {
     inbox: Task[];
     projectEntries: WeeklyReviewProjectEntry[];
     staleItems: ReviewSnapshotItem[];
     summary: WeeklyReviewSummary;
-    lookBack: WeeklyReviewLookBack;
 };
 
 function deriveWeeklyReview(
@@ -177,7 +252,6 @@ function deriveWeeklyReview(
     projects: Project[],
     staleThresholdDays: number,
     now: Date,
-    weekStart?: AppSettings['weekStart'],
     sections: readonly Section[] = [],
 ): WeeklyReviewDerivation {
     const sequence = reviewSequence(tasks, projects, sections);
@@ -186,38 +260,7 @@ function deriveWeeklyReview(
     const projectTasksById = new Map(activeProjects.map((project) => [project.id, [] as Task[]]));
     const inbox: Task[] = [];
     const staleItems: ReviewSnapshotItem[] = [];
-    const lookBack: WeeklyReviewLookBack = {
-        completedCount: 0,
-        projectsMovedCount: 0,
-        estimatedTaskCount: 0,
-        estimatedMinutes: 0,
-        trackedMinutes: 0,
-    };
-    const movedProjectIds = new Set<string>();
-    const reviewWindowStart = getLocalReviewWindowStart(now, 'weekly', weekStart);
-    const reviewWindowEnd = now.getTime();
-
     tasks.forEach((task) => {
-        const completedAt = isTaskCompleted(task) && !task.deletedAt
-            ? safeParseDate(task.completedAt)
-            : null;
-        if (
-            completedAt
-            && completedAt.getTime() >= reviewWindowStart
-            && completedAt.getTime() <= reviewWindowEnd
-        ) {
-            lookBack.completedCount += 1;
-            const completedProject = task.projectId ? projectMap.get(task.projectId) : undefined;
-            if (task.projectId && completedProject && !completedProject.deletedAt) {
-                movedProjectIds.add(task.projectId);
-            }
-            if (task.timeEstimate) {
-                lookBack.estimatedTaskCount += 1;
-                lookBack.estimatedMinutes += timeEstimateToMinutes(task.timeEstimate);
-                lookBack.trackedMinutes += normalizeTimeSpentMinutes(task.timeSpentMinutes) ?? 0;
-            }
-        }
-
         const belongsToActiveProject = isTaskInActiveProject(task, projectMap);
         if (!task.deletedAt && belongsToActiveProject && task.status === 'inbox') {
             inbox.push(task);
@@ -288,9 +331,7 @@ function deriveWeeklyReview(
         projectsWithoutNextAction: projectEntries.filter((entry) => entry.nextActionState === 'none').length,
         staleWaitingCount: staleItems.filter((item) => item.status === 'waiting').length,
     };
-    lookBack.projectsMovedCount = movedProjectIds.size;
-
-    return { inbox, projectEntries, staleItems, summary, lookBack };
+    return { inbox, projectEntries, staleItems, summary };
 }
 
 
@@ -300,7 +341,7 @@ export function getWeeklyReviewSummary(
     now: Date = new Date(),
     sections: readonly Section[] = [],
 ): WeeklyReviewSummary {
-    return deriveWeeklyReview(tasks, projects, 14, now, undefined, sections).summary;
+    return deriveWeeklyReview(tasks, projects, 14, now, sections).summary;
 }
 
 export function getStaleItems(
@@ -310,7 +351,7 @@ export function getStaleItems(
     now: Date = new Date(),
     sections: readonly Section[] = [],
 ): ReviewSnapshotItem[] {
-    return deriveWeeklyReview(tasks, projects, staleThresholdDays, now, undefined, sections).staleItems;
+    return deriveWeeklyReview(tasks, projects, staleThresholdDays, now, sections).staleItems;
 }
 
 
@@ -320,6 +361,8 @@ export type ReviewBucketOptions = {
     showFutureStarts?: boolean;
     sortBy?: TaskSortBy;
     sections?: readonly Section[];
+    somedaySections?: readonly ViewSectionDefinition[];
+    areas?: readonly Area[];
 
 
     areaVisibility?: Pick<AreaVisibilityContext, 'areaById' | 'resolvedAreaFilter'>;
@@ -435,14 +478,46 @@ export type ExternalCalendarDaySummary = {
     totalCount: number;
 };
 
+export type WeeklyReviewSomedaySection = {
+    id: string;
+    title?: string;
+    tasks: ReviewSchedulePartition<Task>;
+    projects: ReviewSchedulePartition<Project>;
+};
+
+function getWeeklyReviewSomedaySections(
+    tasks: readonly Task[],
+    projects: readonly Project[],
+    definitions: readonly ViewSectionDefinition[] | undefined,
+    now: Date,
+): WeeklyReviewSomedaySection[] {
+    const sectionPrefix = 'view-section:someday:';
+    const sections = sortViewSectionDefinitions(definitions);
+    const tasksByGroup = new Map(groupTasksByViewSection(tasks, 'someday', sections, '').map((group) => [group.id, group.tasks]));
+    const projectsByGroup = groupProjectsByViewSection(projects, 'someday', sections);
+    const groups: { id: string; title?: string }[] = sections.map(({ id, title }) => ({ id: `${sectionPrefix}${id}`, title }));
+    groups.push({ id: sectionPrefix });
+    return groups.flatMap((group) => {
+        const sectionTasks = tasksByGroup.get(group.id) ?? [];
+        const sectionProjects = projectsByGroup.get(group.id) ?? [];
+        return sectionTasks.length > 0 || sectionProjects.length > 0 ? [{
+            ...group,
+            tasks: partitionByReviewDate(sectionTasks, now),
+            projects: partitionByReviewDate(sectionProjects, now),
+        }] : [];
+    });
+}
+
 export type WeeklyReviewBuckets = {
     inbox: Task[];
     waitingGroups: ReviewSchedulePartition<Task>;
     somedayGroups: ReviewSchedulePartition<Task>;
+    somedaySections: WeeklyReviewSomedaySection[];
     projectEntries: WeeklyReviewProjectEntry[];
     staleItems: ReviewSnapshotItem[];
     summary: WeeklyReviewSummary;
     lookBack: WeeklyReviewLookBack;
+    weekRecap: WeeklyReviewRecap;
     contextGroups: ContextReviewGroup[];
     calendarItems: CalendarReviewEntry[];
 };
@@ -454,7 +529,7 @@ export function getWeeklyReviewBuckets(
     opts: ReviewBucketOptions = {},
 ): WeeklyReviewBuckets {
     const now = opts.now ?? new Date();
-    const weekly = deriveWeeklyReview(tasks, projects, 14, now, opts.weekStart, opts.sections);
+    const weekly = deriveWeeklyReview(tasks, projects, 14, now, opts.sections);
     const projectMap = new Map(projects.map((project) => [project.id, project]));
     const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const upcomingEnd = new Date(startOfToday);
@@ -469,9 +544,12 @@ export function getWeeklyReviewBuckets(
 
     const inboxTasks = weekly.inbox;
     const waitingTasks = tasks.filter((task) => task.status === 'waiting' && !task.deletedAt && isTaskInActiveProject(task, projectMap));
-    const somedayTasks = tasks.filter((task) => task.status === 'someday' && !task.deletedAt && isTaskInActiveProject(task, projectMap));
+    const somedayTasks = tasks.filter((task) => task.status === 'someday' && !task.purgedAt && isReviewable(task));
+    const somedayProjects = projects.filter((project) => project.status === 'someday' && !project.deletedAt && !project.purgedAt)
+        .sort(compareProjectsByOrder);
     const waitingGroups = partitionByReviewDate(waitingTasks, now, getWaitingReviewDate);
     const somedayGroups = partitionByReviewDate(somedayTasks, now);
+    const somedaySections = getWeeklyReviewSomedaySections(somedayTasks, somedayProjects, opts.somedaySections, now);
 
     const contextGroupsByName = new Map<string, Task[]>();
     tasks.forEach((task) => {
@@ -507,10 +585,11 @@ export function getWeeklyReviewBuckets(
         inbox: inboxTasks,
         waitingGroups,
         somedayGroups,
+        somedaySections,
         projectEntries: weekly.projectEntries,
         staleItems: weekly.staleItems,
         summary: weekly.summary,
-        lookBack: weekly.lookBack,
+        ...getWeeklyReviewLookBack(tasks, projectMap, now, opts),
         contextGroups,
         calendarItems,
     };
@@ -832,7 +911,8 @@ export function buildReviewSteps(
         || Boolean(opts.externalCalendarLoading);
 
     const waitingHasWork = b.waitingGroups.due.length + b.waitingGroups.unscheduled.length > 0;
-    const somedayHasWork = b.somedayGroups.due.length + b.somedayGroups.unscheduled.length > 0;
+    const somedayHasWork = b.somedayGroups.due.length + b.somedayGroups.unscheduled.length > 0
+        || b.somedaySections.some(({ projects }) => projects.due.length + projects.scheduled.length + projects.unscheduled.length > 0);
     const steps: ReviewStepFlags[] = [
         { id: 'inbox', hasWork: b.inbox.length > 0 },
         { id: 'stale', hasWork: b.staleItems.length > 0 },

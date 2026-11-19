@@ -428,6 +428,55 @@ describe('getDailyReviewBuckets', () => {
 describe('getWeeklyReviewBuckets', () => {
     const weeklyNow = new Date(2026, 2, 1);
 
+    it('groups live Someday tasks and projects in section order and separates future review dates', () => {
+        const due = createTask({ id: 'due', status: 'someday', reviewAt: '2026-02-28', viewSectionIds: { someday: 'first' } });
+        const scheduled = createTask({ id: 'scheduled', status: 'someday', reviewAt: '2026-03-02', viewSectionIds: { someday: 'first' } });
+        const unsectioned = createTask({ id: 'unsectioned', status: 'someday', viewSectionIds: { someday: 'removed' } });
+        const emptyProject = createProject({ id: 'empty-project', status: 'someday', viewSectionIds: { someday: 'second' } });
+        const futureProject = createProject({ id: 'future-project', status: 'someday', reviewAt: '2026-03-02' });
+        const deletedProject = createProject({ id: 'deleted-project', status: 'someday', deletedAt: staleUpdatedAt });
+        const waitingProject = createProject({ id: 'waiting-project', status: 'waiting' });
+        const buckets = getWeeklyReviewBuckets(
+            [due, scheduled, unsectioned, createTask({ status: 'someday', projectId: waitingProject.id })],
+            [emptyProject, futureProject, deletedProject, waitingProject],
+            {
+                now: weeklyNow,
+                somedaySections: [
+                    { id: 'second', title: 'Second', order: 1 },
+                    { id: 'first', title: 'First', order: 0 },
+                ],
+            },
+        );
+
+        expect(buckets.somedaySections).toEqual([
+            {
+                id: 'view-section:someday:first',
+                title: 'First',
+                tasks: { due: [due], scheduled: [scheduled], unscheduled: [] },
+                projects: { due: [], scheduled: [], unscheduled: [] },
+            },
+            {
+                id: 'view-section:someday:second',
+                title: 'Second',
+                tasks: { due: [], scheduled: [], unscheduled: [] },
+                projects: { due: [], scheduled: [], unscheduled: [emptyProject] },
+            },
+            {
+                id: 'view-section:someday:',
+                tasks: { due: [], scheduled: [], unscheduled: [unsectioned] },
+                projects: { due: [], scheduled: [futureProject], unscheduled: [] },
+            },
+        ]);
+    });
+
+    it('shows Someday review for a project alone even when the project is scheduled for later', () => {
+        const project = createProject({ status: 'someday', reviewAt: '2026-03-02' });
+        const buckets = getWeeklyReviewBuckets([], [project], { now: weeklyNow });
+
+        expect(buildReviewSteps(buckets, { kind: 'weekly' })).toContainEqual({ id: 'someday', hasWork: true });
+        expect(buckets.somedaySections[0].projects.scheduled).toEqual([project]);
+    });
+
     it('derives the completed-task look-back from the configured review-week window', () => {
         const reviewNow = new Date(2026, 2, 4, 12, 0, 0);
         const mondayStart = new Date(2026, 2, 2, 0, 0, 0).toISOString();
@@ -508,6 +557,44 @@ describe('getWeeklyReviewBuckets', () => {
             estimatedTaskCount: 2,
             estimatedMinutes: 90,
             trackedMinutes: 90,
+        });
+    });
+
+    it('recaps the calendar week by project or area, including completed tasks without a live assignment', () => {
+        const reviewNow = new Date(2026, 2, 4, 12);
+        const completedAt = new Date(2026, 2, 3, 12).toISOString();
+        const project = createProject({ id: 'shared', title: 'Shared project', status: 'archived' });
+        const deletedProject = createProject({ id: 'deleted', deletedAt: staleUpdatedAt });
+        const area = createArea({ id: 'work', name: 'Work' });
+        const deletedArea = createArea({ id: 'removed', deletedAt: staleUpdatedAt });
+        const tasks = [
+            createTask({ id: 'one', title: 'Task one', status: 'done', completedAt, projectId: project.id, areaId: area.id }),
+            createTask({ id: 'two', title: 'Task two', status: 'archived', completedAt, projectId: project.id, areaId: deletedArea.id }),
+            createTask({ id: 'three', title: 'Task three', status: 'done', completedAt, projectId: deletedProject.id }),
+            createTask({ id: 'purged', status: 'done', completedAt, purgedAt: staleUpdatedAt }),
+            createTask({ id: 'yesterday-last-week', status: 'done', completedAt: new Date(2026, 2, 1, 23).toISOString() }),
+            createTask({ id: 'later-this-week', status: 'done', completedAt: new Date(2026, 2, 5, 9).toISOString() }),
+        ];
+
+        const { weekRecap, lookBack } = getWeeklyReviewBuckets(tasks, [project, deletedProject], {
+            now: reviewNow, weekStart: 'monday', areas: [area, deletedArea],
+        });
+
+        const one = { id: 'one', title: 'Task one' };
+        const two = { id: 'two', title: 'Task two' };
+        const three = { id: 'three', title: 'Task three' };
+        expect(lookBack.completedCount).toBe(3);
+        expect(weekRecap).toEqual({
+            start: new Date(2026, 2, 2),
+            end: new Date(2026, 2, 4),
+            projects: [
+                { id: 'project:shared', title: 'Shared project', tasks: [one, two] },
+                { id: 'project:', tasks: [three] },
+            ],
+            areas: [
+                { id: 'area:work', title: 'Work', tasks: [one] },
+                { id: 'area:', tasks: [two, three] },
+            ],
         });
     });
 

@@ -27,6 +27,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -35,6 +36,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -132,7 +134,12 @@ fun WeeklyReview(model: InboxViewModel) = with(model.menu) {
         Box(Modifier.weight(1f).fillMaxWidth()) {
             if (shown != null && labels != null) LazyColumn(Modifier.fillMaxSize().testTag("review-step-scroll"), contentPadding = PaddingValues(20.dp)) {
                 weeklyContent(model, shown, labels)
-                if (shown.items.size < shown.total) item(key = "more") { MoreRow(model) }
+                if (shown.items.size < shown.total) item(key = "more") {
+                    if (current?.optString("id") == "someday" || current?.optString("id") == "completed") {
+                        TextButton(onClick = { loadMore() }, enabled = idle, modifier = Modifier.testTag("weekly-review-more")) { Text(t("common.more")) }
+                    } else MoreRow(model)
+                }
+                if (current?.optString("id") == "completed") item(key = "completedMindSweep") { CompletedMindSweep(model, labels) }
             }
             ToastCard(model, Modifier.align(Alignment.BottomCenter).padding(bottom = 16.dp))
         }
@@ -349,10 +356,8 @@ private fun LazyListScope.weeklyContent(model: InboxViewModel, shown: MenuPage, 
                 }
             }
         }
-        "waiting", "someday" -> {
-            val waiting = content.getString("step") == "waiting"
-            stepHeading(if (waiting) Lucide.Clock else Lucide.Lightbulb, labels.getString(if (waiting) "waitingDesc" else "somedayDesc"),
-                labels.getString(if (waiting) "waitingGuide" else "somedayGuide"))
+        "waiting" -> {
+            stepHeading(Lucide.Clock, labels.getString("waitingDesc"), labels.getString("waitingGuide"))
             content.menuText("empty")?.let { emptyLine(it) }
 
             val split = shown.items.indexOfFirst { it.json.optBoolean("scheduled") }.takeIf { it >= 0 } ?: shown.items.size
@@ -373,6 +378,11 @@ private fun LazyListScope.weeklyContent(model: InboxViewModel, shown: MenuPage, 
                 if (open) rows(later)
             }
         }
+        "someday" -> {
+            stepHeading(Lucide.Lightbulb, labels.getString("somedayDesc"), labels.getString("somedayGuide"))
+            content.menuText("empty")?.let { emptyLine(it) }
+            somedayEntries(model, shown.items, labels.getString("reactivate"))
+        }
         "contexts" -> {
             stepHeading(Lucide.Tag, labels.getString("contexts"), labels.getString("contextsDesc"))
             content.menuText("empty")?.let { emptyLine(it) }
@@ -383,7 +393,105 @@ private fun LazyListScope.weeklyContent(model: InboxViewModel, shown: MenuPage, 
             content.menuText("empty")?.let { emptyLine(it) }
             projectEntries(model, shown.items, labels)
         }
-        else -> item(key = "completed") { CompletedStep(model, content, labels) }
+        else -> {
+            item(key = "completed") { CompletedStep(content, labels) }
+            content.optJSONObject("week")?.let { week -> reviewRecap(menu, shown, week, labels) }
+        }
+    }
+}
+
+
+private fun LazyListScope.somedayEntries(model: InboxViewModel, entries: List<MenuItem>, reactivate: String) {
+    val menu = model.menu
+    val weekly = menu.own("weekly")
+    val collapsed = weekly.optJSONObject("collapsedSomedaySections")
+    val future = weekly.optJSONObject("somedayScheduledSections")
+    for ((sectionId, section) in entries.groupBy { it.json.getString("sectionId") }) {
+        val header = section.first().json
+        val open = collapsed?.optBoolean(sectionId) != true
+        item(key = section.first().key) {
+            ReviewDisclosure("${header.getString("title")} (${header.getInt("count")})", open, menu.idle, "weekly-someday-section-$sectionId") { expand ->
+                menu.editOwn("weekly") {
+                    val sections = optJSONObject("collapsedSomedaySections") ?: JSONObject()
+                    if (expand) sections.remove(sectionId) else sections.put(sectionId, true)
+                    put("collapsedSomedaySections", sections)
+                }
+            }
+        }
+        if (!open) continue
+        val (scheduled, due) = section.drop(1).partition { it.json.optBoolean("scheduled") }
+        somedayRows(model, due, reactivate)
+        if (header.optInt("scheduledCount") > 0) {
+            val expanded = future?.optBoolean(sectionId) == true
+            item(key = "somedayScheduled:$sectionId") {
+                ReviewDisclosure(header.getString("scheduledLabel"), expanded, menu.idle, "weekly-someday-scheduled-$sectionId", Modifier.padding(start = 12.dp)) {
+                    menu.editOwn("weekly") {
+                        val sections = optJSONObject("somedayScheduledSections") ?: JSONObject()
+                        if (it) sections.put(sectionId, true) else sections.remove(sectionId)
+                        put("somedayScheduledSections", sections)
+                    }
+                }
+            }
+            if (expanded) somedayRows(model, scheduled, reactivate)
+        }
+    }
+}
+
+
+private fun LazyListScope.somedayRows(model: InboxViewModel, entries: List<MenuItem>, reactivate: String) {
+    items(entries, key = { it.key }) { entry ->
+        if (entry.type == "somedayProject") ParkedProject(model, entry.json, reactivate)
+        else entry.row?.let { ReviewRow(model, it) }
+    }
+}
+
+
+@Composable
+private fun ReviewDisclosure(label: String, open: Boolean, enabled: Boolean, tag: String, modifier: Modifier = Modifier, change: (Boolean) -> Unit) {
+    val c = LocalTheme.current.colors
+    Row(modifier.fillMaxWidth().heightIn(min = 48.dp).toggleable(open, enabled = enabled, role = Role.Button, onValueChange = change)
+        .testTag(tag).padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Icon(if (open) Lucide.ChevronDown else Lucide.ChevronRight, null, tint = c.secondaryText, modifier = Modifier.size(18.dp))
+        Text(label, style = rnText(14, 600), color = c.text)
+    }
+}
+
+
+@OptIn(ExperimentalLayoutApi::class)
+private fun LazyListScope.reviewRecap(menu: MenuModel, page: MenuPage, week: JSONObject, labels: JSONObject) {
+    val groupBy = page.params.menuText("recapGroupBy")
+    item(key = "recap") {
+        val c = LocalTheme.current.colors
+        Column(Modifier.fillMaxWidth()) {
+            ReviewDisclosure(labels.getString("details"), groupBy != null, menu.idle, "weekly-review-recap") {
+                menu.setRecapGroupBy(if (it) "project" else null)
+            }
+            if (groupBy != null) {
+                Text(week.getString("rangeLabel"), style = rnText(14, 400), color = c.secondaryText, modifier = Modifier.testTag("weekly-review-recap-range"))
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    for ((axis, label) in listOf("project" to "groupByProject", "area" to "groupByArea")) {
+                        val active = groupBy == axis
+                        TextButton(onClick = { menu.setRecapGroupBy(axis) }, enabled = menu.idle,
+                            colors = ButtonDefaults.textButtonColors(containerColor = if (active) c.tint else c.filterBg,
+                                contentColor = if (active) c.onTint else c.text),
+                            modifier = Modifier.semantics { selected = active }.testTag("weekly-review-recap-$axis")) {
+                            Text(labels.getString(label))
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if (groupBy != null) items(page.items, key = { it.key }) { entry ->
+        val c = LocalTheme.current.colors
+        val title = entry.json.getString("title")
+        if (entry.type == "recapGroup") {
+            Text("$title (${entry.json.getInt("count")})", style = rnText(14, 700), color = c.text,
+                modifier = Modifier.padding(top = 12.dp, bottom = 4.dp).semantics { heading() })
+        } else {
+            Text(title, style = rnText(14, 400), color = c.text, modifier = Modifier.padding(start = 12.dp, top = 4.dp, bottom = 4.dp))
+        }
     }
 }
 
@@ -583,7 +691,7 @@ private fun ExpandedTask(content: @Composable () -> Unit) {
 
 
 @Composable
-private fun CompletedStep(model: InboxViewModel, content: JSONObject, labels: JSONObject) {
+private fun CompletedStep(content: JSONObject, labels: JSONObject) {
     val c = LocalTheme.current.colors
     Column(Modifier.fillMaxWidth().padding(vertical = 12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         Icon(Lucide.PartyPopper, null, tint = c.tint, modifier = Modifier.padding(bottom = 20.dp).size(64.dp))
@@ -601,15 +709,20 @@ private fun CompletedStep(model: InboxViewModel, content: JSONObject, labels: JS
             }
             for (check in content.menuObjects("checks")) SummaryRow(check.getBoolean("good"), check.getString("text"))
         }
-        val card = RoundedCornerShape(12.dp)
-        Column(Modifier.padding(bottom = 16.dp).fillMaxWidth().clip(card).background(c.cardBg).rnBorder(1.dp, c.border, card).padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(labels.getString("mindSweepTitle"), style = rnText(15, 700), color = c.text)
-                Text(labels.getString("mindSweepIntro"), style = rnText(13, 400, 19), color = c.secondaryText)
-            }
-            MindSweepLink(labels.getString("mindSweep"), bordered = true, enabled = model.menu.idle) { model.menu.openMindSweep() }
+    }
+}
+
+@Composable
+private fun CompletedMindSweep(model: InboxViewModel, labels: JSONObject) {
+    val c = LocalTheme.current.colors
+    val card = RoundedCornerShape(12.dp)
+    Column(Modifier.padding(vertical = 16.dp).fillMaxWidth().clip(card).background(c.cardBg).rnBorder(1.dp, c.border, card).padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(labels.getString("mindSweepTitle"), style = rnText(15, 700), color = c.text)
+            Text(labels.getString("mindSweepIntro"), style = rnText(13, 400, 19), color = c.secondaryText)
         }
+        MindSweepLink(labels.getString("mindSweep"), bordered = true, enabled = model.menu.idle) { model.menu.openMindSweep() }
     }
 }
 
@@ -690,6 +803,7 @@ private fun PromptButton(label: String, color: Color, enabled: Boolean, filled: 
 
 internal fun MenuModel.step(checkpoint: String) {
     val key = page?.view?.optString("storageKey")?.ifEmpty { null } ?: return
+    if (screen == MenuScreen.Weekly) editOwn("weekly") { remove("recapGroupBy") }
     prefs.edit().putString(key, checkpoint).apply()
     reload(fresh = true)
 }
@@ -699,7 +813,19 @@ internal fun MenuModel.finishReview() {
     val view = page?.view ?: return
     view.optJSONObject("finish")?.let { finish -> finish.menuText("lastReviewKey")?.let { prefs.edit().putString(it, finish.getString("lastReviewAt")).apply() } }
     prefs.edit().remove(view.getString("storageKey")).apply()
+    if (screen == MenuScreen.Weekly) editOwn("weekly") {
+        remove("recapGroupBy")
+        remove("somedayScheduledSections")
+        remove("collapsedSomedaySections")
+    }
     closeScreen()
+}
+
+
+private fun MenuModel.setRecapGroupBy(groupBy: String?) {
+    if (!idle || page?.view?.optJSONObject("content")?.optString("step") != "completed" || own("weekly").menuText("recapGroupBy") == groupBy) return
+    editOwn("weekly") { put("recapGroupBy", groupBy) }
+    reload(fresh = true)
 }
 
 

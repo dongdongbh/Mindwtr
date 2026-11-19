@@ -29690,8 +29690,8 @@ private final class Engine: @unchecked Sendable {
             let reviewFields: [String: Set<String>] = [
                 "reviewOverview": ["expandedLaterProjectIds", "scope", "expandedAreaIds", "expandedProjectIds", "expansionEdit", "offset", "limit", "revision"],
                 "dailyReview": ["checkpoint", "offset", "limit", "revision"],
-                "weeklyReview": ["expandedLaterProjectIds", "checkpoint", "expandedProjectId", "keepProjectsStep", "keepStaleStep", "includeStaleProjectCards", "offset", "limit", "revision"],
-                "weeklyReviewList": ["expandedLaterProjectIds", "checkpoint", "expandedProjectId", "keepProjectsStep", "keepStaleStep", "includeStaleProjectCards", "list", "key", "offset", "limit", "revision"],
+                "weeklyReview": ["expandedLaterProjectIds", "checkpoint", "expandedProjectId", "keepProjectsStep", "keepStaleStep", "includeStaleProjectCards", "recapGroupBy", "offset", "limit", "revision"],
+                "weeklyReviewList": ["expandedLaterProjectIds", "checkpoint", "expandedProjectId", "keepProjectsStep", "keepStaleStep", "includeStaleProjectCards", "recapGroupBy", "list", "key", "offset", "limit", "revision"],
             ]
             if let fields = reviewFields[name], !Set(input.keys).isSubset(of: fields) {
                 throw HostFailure("Unsupported native Review browsing input")

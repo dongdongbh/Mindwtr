@@ -18822,6 +18822,9 @@
       "All Done!",
       "Review projects you might want to start.",
       "Review your Someday/Maybe list. Is there anything here you want to make active now? Or delete?",
+      "No section (4)",
+      "Parked plan",
+      "Home",
       "Not due yet (1)",
       "← Back",
       "Next →"
@@ -18902,6 +18905,7 @@
       "2 project(s) moved forward",
       "2 completed task(s) had an estimate",
       "Estimated: 1h 30m",
+      "Details",
       "2 remaining in Inbox",
       "2 project(s) have no next action",
       "1 waiting item(s) untouched for more than two weeks",
@@ -20523,6 +20527,9 @@
       "All Done!",
       "Review projects you might want to start.",
       "Review your Someday/Maybe list. Is there anything here you want to make active now? Or delete?",
+      "No section (4)",
+      "Parked plan",
+      "Home",
       "Not due yet (1)",
       "← Back",
       "Next →"
@@ -20599,6 +20606,9 @@
       "All Done!",
       "Review projects you might want to start.",
       "Review your Someday/Maybe list. Is there anything here you want to make active now? Or delete?",
+      "No section (4)",
+      "Parked plan",
+      "Home",
       "Not due yet (1)",
       "← Back",
       "Next →"
@@ -24208,6 +24218,9 @@
       "All Done!",
       "Review projects you might want to start.",
       "Review your Someday/Maybe list. Is there anything here you want to make active now? Or delete?",
+      "No section (4)",
+      "Parked plan",
+      "Home",
       "Not due yet (1)",
       "← Back",
       "Next →"
@@ -26020,6 +26033,9 @@
       "All Done!",
       "Review projects you might want to start.",
       "Review your Someday/Maybe list. Is there anything here you want to make active now? Or delete?",
+      "No section (4)",
+      "Parked plan",
+      "Home",
       "Not due yet (1)",
       "← Back",
       "Next →"
@@ -26100,6 +26116,7 @@
       "2 project(s) moved forward",
       "2 completed task(s) had an estimate",
       "Estimated: 1h 30m",
+      "Details",
       "2 remaining in Inbox",
       "2 project(s) have no next action",
       "1 waiting item(s) untouched for more than two weeks",
@@ -26185,6 +26202,7 @@
       "2 completed task(s) had an estimate",
       "Estimated: 1h 30m",
       "Tracked on those tasks: 25m",
+      "Details",
       "2 remaining in Inbox",
       "2 project(s) have no next action",
       "1 waiting item(s) untouched for more than two weeks",
@@ -26271,6 +26289,7 @@
       "This week",
       "2 action(s) completed this week",
       "2 project(s) moved forward",
+      "Details",
       "2 remaining in Inbox",
       "2 project(s) have no next action",
       "1 waiting item(s) untouched for more than two weeks",
@@ -26464,6 +26483,7 @@
       "Contexts",
       "6",
       "Projects",
+      "7",
       "Someday/Maybe",
       "8",
       "All Done!",
@@ -26504,7 +26524,7 @@
       ],
       [
        "Someday/Maybe",
-       "complete"
+       "pending"
       ],
       [
        "All Done!",
@@ -26557,6 +26577,7 @@
       "Contexts",
       "6",
       "Projects",
+      "7",
       "Someday/Maybe",
       "8",
       "All Done!",
@@ -26597,7 +26618,7 @@
       ],
       [
        "Someday/Maybe",
-       "complete"
+       "pending"
       ],
       [
        "All Done!",

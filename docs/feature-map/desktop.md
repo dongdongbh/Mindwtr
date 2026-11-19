@@ -292,6 +292,7 @@ Source: `apps/desktop/src` (Tauri + React). Labels come from `packages/core/src/
 ## Weekly Review
 
 - Reach: Sidebar › Review › Start weekly review. Steps: Process Inbox, Stale items, Review Calendar, Waiting For, Contexts (optional), Review Projects, Someday/Maybe, All Done!. All Done! has Share my reflection.
+- Weekly Review: Expand a Someday section to see its tasks and parked projects, including empty projects. Future review dates appear under Not due yet. At Review Complete, open the weekly recap details to see task titles and counts by project or Area for the displayed dates.
 - Shortcuts: `gr` opens Review (Vim, Standard), `Alt+R` (Emacs).
 - Code: `apps/desktop/src/components/views/ReviewView.tsx`, `apps/desktop/src/components/views/review/WeeklyReviewModal.tsx`, `apps/desktop/src/components/views/review/ReviewHeader.tsx`, `apps/desktop/src/components/views/review/ReviewTaskList.tsx`, `apps/desktop/src/components/views/review/ReviewFiltersBar.tsx`, `apps/desktop/src/components/ShareCardDialog.tsx`
 - Checks: `e2e/review.spec.ts`, `e2e/share-card.spec.ts`, `e2e/person-review.spec.ts`, `apps/desktop/src/components/views/ReviewView.test.tsx`, `apps/desktop/src/components/views/review/WeeklyReviewModal.test.tsx`, `apps/desktop/src/components/ShareCardDialog.test.tsx`

@@ -180,6 +180,35 @@ export const styles = StyleSheet.create({
     taskListContent: {
         paddingBottom: 16,
     },
+    weekRecap: {
+        gap: 10,
+    },
+    weekRecapToggle: {
+        minHeight: 44,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+    },
+    weekRecapHeading: {
+        fontSize: 14,
+        fontWeight: '600',
+    },
+    weekRecapGrouping: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        flexWrap: 'wrap',
+        gap: 8,
+    },
+    weekRecapGroupButton: {
+        paddingHorizontal: 12,
+        minHeight: 44,
+        justifyContent: 'center',
+        borderWidth: 1,
+        borderRadius: 6,
+    },
+    weekRecapGroup: {
+        gap: 4,
+    },
     scheduledSection: {
         marginTop: 12,
     },

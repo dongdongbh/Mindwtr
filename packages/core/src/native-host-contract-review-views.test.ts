@@ -182,7 +182,7 @@ describe('native host contract: Review, Weekly Review and Daily Review', () => {
         expect(weekly.rail.map((step) => [step.id, step.title])).toEqual(steps.map((step) => [step.id, step.title]));
         expect(weekly.items.map((item) => item.type === 'task' && item.row.id)).toEqual(buckets.inbox.map((task) => task.id));
         const someday = value(host.getWeeklyReview({ checkpoint: JSON.stringify({ step: 'someday', startedAt: part.now }), ...page }));
-        expect(someday.items.map((item) => item.type === 'task' && [item.row.id, item.scheduled])).toEqual([
+        expect(someday.items.filter(item => item.type === 'task').map(item => [item.row.id, item.scheduled])).toEqual([
             ...[...buckets.somedayGroups.due, ...buckets.somedayGroups.unscheduled].map((task) => [task.id, false]),
             ...buckets.somedayGroups.scheduled.map((task) => [task.id, true]),
         ]);
@@ -251,6 +251,59 @@ describe('native host contract: Review, Weekly Review and Daily Review', () => {
         expect(held.revision).not.toBe(released.revision);
         expect(host.getWeeklyReview({ checkpoint, keepProjectsStep: 'true', ...page } as never))
             .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+    });
+
+    it('keeps a project-only Someday section reachable and supplies a revision for activation', async () => {
+        freezeClock();
+        const project = { ...part.projects[0], id: 'parked', title: 'Build a desk', status: 'someday' as const };
+        const { host } = await openHost(scenario(), undefined, { ...part, tasks: [], projects: [project] });
+        const checkpoint = JSON.stringify({ step: 'someday', startedAt: part.now });
+        const first = value(host.getWeeklyReview({ checkpoint, offset: 0, limit: 1 }));
+        expect(first).toMatchObject({ step: { id: 'someday' }, total: 2, items: [{ type: 'somedaySection', count: 1 }] });
+        const next = value(host.getWeeklyReview({ checkpoint, revision: first.revision, offset: 1, limit: 1 }));
+        expect(next.items).toMatchObject([{ type: 'somedayProject', title: project.title, projectRevision: expect.any(String) }]);
+    });
+
+    it('preserves section order across pages when the first section holds only a future project', async () => {
+        freezeClock();
+        const defs = [{ id: 'first', title: 'First', order: 1 }, { id: 'second', title: 'Second', order: 2 }];
+        const projects = defs.map((section, index) => ({
+            ...part.projects[0], id: section.id, title: section.title, status: 'someday' as const,
+            viewSectionIds: { someday: section.id }, reviewAt: index === 0 ? '2099-01-01' : undefined,
+        }));
+        const settings = { ...part.settings, base: { gtd: { viewSections: { someday: defs } } } };
+        const { host } = await openHost(scenario(), undefined, { ...part, tasks: [], projects, settings });
+        const input = { checkpoint: JSON.stringify({ step: 'someday', startedAt: part.now }), limit: 1 };
+        const first = value(host.getWeeklyReview({ ...input, offset: 0 }));
+        const items = [...first.items];
+        while (items.length < first.total) {
+            items.push(...value(host.getWeeklyReview({ ...input, offset: items.length, revision: first.revision })).items);
+        }
+        expect(items).toMatchObject([
+            { type: 'somedaySection', title: 'First', scheduledCount: 1, count: 1 },
+            { type: 'somedayProject', id: 'first', scheduled: true },
+            { type: 'somedaySection', title: 'Second', scheduledCount: 0, count: 1 },
+            { type: 'somedayProject', id: 'second', scheduled: false },
+        ]);
+    });
+
+    it('pages recap titles on demand and invalidates the old page when grouping changes', async () => {
+        freezeClock();
+        const project = part.projects[0];
+        const task = { ...part.tasks[0], id: 'recap', title: 'Send drawings', status: 'done' as const, projectId: project.id, completedAt: part.now };
+        const { host } = await openHost(scenario(), undefined, { ...part, tasks: [task], projects: [project] });
+        const checkpoint = JSON.stringify({ step: 'completed', startedAt: part.now });
+        const input = { checkpoint, offset: 0, limit: 1 };
+        const closed = value(host.getWeeklyReview(input));
+        expect(closed.content).toMatchObject({ week: { rangeLabel: expect.stringContaining(' – ') } });
+        expect(closed.items).toEqual([]);
+        const projects = value(host.getWeeklyReview({ ...input, recapGroupBy: 'project' }));
+        expect(projects).toMatchObject({ total: 2, items: [{ type: 'recapGroup', title: project.title, count: 1 }] });
+        const next = { ...input, offset: 1, revision: projects.revision };
+        expect(value(host.getWeeklyReview({ ...next, recapGroupBy: 'project' })).items).toMatchObject([{ type: 'recapTask', id: task.id, title: task.title }]);
+        expect(host.getWeeklyReview({ ...next, recapGroupBy: 'area' })).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+        expect(value(host.getWeeklyReview({ ...input, recapGroupBy: 'area' })).items).toMatchObject([{ type: 'recapGroup', count: 1 }]);
+        expect(host.getWeeklyReview({ ...input, recapGroupBy: 'day' } as never)).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
     });
 
     it('moves through the Weekly Review by checkpoints and resumes where it stopped', async () => {

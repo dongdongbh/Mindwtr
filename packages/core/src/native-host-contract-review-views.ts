@@ -31,6 +31,7 @@ import {
     isRevisions,
     refuseStaleTasks,
     runStoreWrite,
+    revisionOf,
     settleWrite,
     taskRevisionOf,
     taskRevisionsOf,
@@ -38,6 +39,7 @@ import {
     type NativeUnsavedWrite,
 } from './native-request-receipts';
 import { isSelectableProjectForTaskAssignment } from './project-utils';
+import { getProjectAccentColor } from './task-accent-color';
 import { getTrashUndoLabel } from './trash-view-model';
 import {
     buildReviewSteps,
@@ -247,7 +249,11 @@ export type NativeWeeklyReviewList = 'staleProjects' | 'aiItems' | 'dayEvents' |
 
 export type NativeWeeklyReviewItem =
     | { type: 'later'; id: string; projectId: string; label: string; expanded: boolean }
-    | { type: 'task'; row: NativeTaskRow; scheduled: boolean; projectId: string | null }
+    | { type: 'task'; row: NativeTaskRow; scheduled: boolean; projectId: string | null; sectionId?: string }
+    | { type: 'somedaySection'; id: string; sectionId: string; title: string; count: number; scheduled: false; scheduledCount: number; scheduledLabel: string }
+    | { type: 'somedayProject'; id: string; sectionId: string; title: string; scheduled: boolean; projectRevision: string; areaName: string | null; color: string | null }
+    | { type: 'recapGroup'; id: string; title: string; count: number }
+    | { type: 'recapTask'; id: string; title: string; groupId: string }
 
     | { type: 'context'; context: string; moreLabel: string | null; tasks: NativeReviewWindow<{ id: string; title: string }> }
     | {
@@ -279,7 +285,7 @@ export type NativeWeeklyReview = {
     next: { label: string; checkpoint: string } | null;
 
     finish: { label: string; shareLabel: string; lastReviewKey: string; lastReviewAt: string } | null;
-    labels: WeeklyReviewLabels & { closeLabel: string; processInbox: string; inboxHint: string; mindSweep: string; mindSweepTitle: string; mindSweepIntro: string };
+    labels: WeeklyReviewLabels & { reactivate: string; details: string; groupByProject: string; groupByArea: string; closeLabel: string; processInbox: string; inboxHint: string; mindSweep: string; mindSweepTitle: string; mindSweepIntro: string };
     content:
         | { step: 'inbox'; countLabel: string | null; empty: string | null }
 
@@ -298,7 +304,7 @@ export type NativeWeeklyReview = {
         | { step: 'waiting' | 'someday'; empty: string | null; scheduled: { label: string; count: number } | null }
         | { step: 'contexts'; empty: string | null; previewCount: number }
         | { step: 'projects'; empty: string | null }
-        | { step: 'completed'; week: { heading: string; rows: string[] } | null; checks: { good: boolean; text: string }[] };
+        | { step: 'completed'; week: { heading: string; rows: string[]; rangeLabel: string } | null; checks: { good: boolean; text: string }[] };
     total: number;
     items: NativeWeeklyReviewItem[];
 };
@@ -678,14 +684,14 @@ export function createReviewViewMethods(deps: ReviewViewDeps) {
 
 
     const buildWeekly = (base: string, checkpoint: string | null, calendar: NonNullable<ReturnType<typeof readCalendar>>, expandedProjectId: string | null, expandedLaterProjectIds: string[], now: Date,
-        keepProjectsStep: boolean, keepStaleStep: boolean) => (
-        cached('weekly', `${base}:${paramsKey([checkpoint, calendar, expandedProjectId, ...(expandedLaterProjectIds.length ? [expandedLaterProjectIds] : []), ...(keepProjectsStep ? ['keepProjectsStep'] : []), ...(keepStaleStep ? ['keepStaleStep'] : [])])}`, () => {
+        keepProjectsStep: boolean, keepStaleStep: boolean, recapGroupBy?: 'project' | 'area') => (
+        cached('weekly', `${base}:${paramsKey([checkpoint, calendar, expandedProjectId, ...(expandedLaterProjectIds.length ? [expandedLaterProjectIds] : []), ...(keepProjectsStep ? ['keepProjectsStep'] : []), ...(keepStaleStep ? ['keepStaleStep'] : []), ...(recapGroupBy ? [recapGroupBy] : [])])}`, () => {
             const state = useTaskStore.getState();
             const t = deps.t();
             const formatDate = deps.formatDate();
             const labels = getWeeklyReviewLabels(t);
             const { aiEnabled, includeContextStep, weekStart } = getWeeklyReviewSettings(state.settings);
-            const buckets = getWeeklyReviewBuckets(state.tasks, state.projects, { now, weekStart, sections: state.sections });
+            const buckets = getWeeklyReviewBuckets(state.tasks, state.projects, { now, weekStart, sections: state.sections, somedaySections: state.settings.gtd?.viewSections?.someday, areas: state.areas });
             const days = getExternalCalendarDaySummaries(calendar.events, 7, now);
             const flags = buildReviewSteps(buckets, {
                 kind: 'weekly', includeContextStep, externalCalendarDayCount: days.length, externalCalendarHasError: Boolean(calendar.error),
@@ -699,10 +705,10 @@ export function createReviewViewMethods(deps: ReviewViewDeps) {
             const at = (id: WeeklyReviewStepId) => serializeReviewSession({ step: id, startedAt: session.startedAt });
             const title = steps[resolved.currentStepIndex].title;
 
-            type Entry = { kind: 'task'; task: Task; scheduled: boolean; projectId: string | null } | { kind: 'item'; item: NativeWeeklyReviewItem };
+            type Entry = { kind: 'task'; task: Task; scheduled: boolean; projectId: string | null; sectionId?: string } | { kind: 'item'; item: NativeWeeklyReviewItem };
             const entries: Entry[] = [];
-            const pushTask = (task: Task, scheduled = false, projectId: string | null = null) => {
-                entries.push({ kind: 'task', task, scheduled, projectId });
+            const pushTask = (task: Task, scheduled = false, projectId: string | null = null, sectionId?: string) => {
+                entries.push({ kind: 'task', task, scheduled, projectId, sectionId });
             };
 
             const lists = new Map<string, readonly unknown[]>();
@@ -766,15 +772,36 @@ export function createReviewViewMethods(deps: ReviewViewDeps) {
                     tasks: view.tasks.map(({ key, task, title: taskTitle, meta }) => ({ key, taskId: task.id, title: taskTitle, meta })),
                     tasksEmpty: view.tasks.length === 0 ? labels.calendarTasksEmpty : null,
                 };
-            } else if (step === 'waiting' || step === 'someday') {
-                const list = getWeeklyReviewScheduledList(step === 'waiting' ? buckets.waitingGroups : buckets.somedayGroups, labels);
+            } else if (step === 'someday') {
+                const areas = new Map(state.areas.filter(area => !area.deletedAt).map(area => [area.id, area]));
+                for (const section of buckets.somedaySections) {
+                    const visibleProjects = [...section.projects.due, ...section.projects.unscheduled];
+                    const visibleTasks = [...section.tasks.due, ...section.tasks.unscheduled];
+                    const scheduledCount = section.projects.scheduled.length + section.tasks.scheduled.length;
+                    entries.push({ kind: 'item', item: {
+                        type: 'somedaySection', id: section.id, sectionId: section.id,
+                        title: section.title ?? t('viewSections.noSection'), scheduled: false,
+                        count: visibleProjects.length + visibleTasks.length + scheduledCount,
+                        scheduledCount, scheduledLabel: `${labels.notDueYet} (${scheduledCount})`,
+                    } });
+                    for (const scheduled of [false, true]) {
+                        for (const project of scheduled ? section.projects.scheduled : visibleProjects) entries.push({ kind: 'item', item: {
+                            type: 'somedayProject', id: project.id, sectionId: section.id, title: project.title, scheduled, projectRevision: revisionOf(project),
+                            areaName: (project.areaId && areas.get(project.areaId)?.name) || null, color: getProjectAccentColor(project, areas) ?? null,
+                        } });
+                        for (const task of scheduled ? section.tasks.scheduled : visibleTasks) pushTask(task, scheduled, null, section.id);
+                    }
+                }
+                content = { step, empty: entries.length ? null : labels.listEmpty, scheduled: null };
+            } else if (step === 'waiting') {
+                const list = getWeeklyReviewScheduledList(buckets.waitingGroups, labels);
                 if (list.total > 0) {
                     list.visible.forEach((task) => pushTask(task));
                     list.scheduled.forEach((task) => pushTask(task, true));
                 }
                 content = {
                     step,
-                    empty: list.total === 0 ? (step === 'waiting' ? labels.nothingWaiting : labels.listEmpty) : null,
+                    empty: list.total === 0 ? labels.nothingWaiting : null,
                     scheduled: list.total > 0 && list.scheduled.length > 0 ? { label: list.scheduledLabel, count: list.scheduled.length } : null,
                 };
             } else if (step === 'contexts') {
@@ -790,7 +817,23 @@ export function createReviewViewMethods(deps: ReviewViewDeps) {
                 content = { step, empty: buckets.projectEntries.length === 0 ? labels.noActiveProjects : null };
             } else {
                 const completion = getWeeklyReviewCompletion(buckets, state.settings, labels);
-                content = { step: 'completed', week: completion.week, checks: completion.checks };
+                const recap = buckets.weekRecap;
+                if (completion.week && recapGroupBy) {
+                    const groups = recapGroupBy === 'area' ? recap.areas : recap.projects;
+                    for (const group of groups) {
+                        entries.push({ kind: 'item', item: {
+                            type: 'recapGroup', id: group.id, title: group.title ?? t(recapGroupBy === 'area' ? 'review.noArea' : 'taskEdit.noProjectOption'),
+                            count: group.tasks.length,
+                        } });
+                        for (const task of group.tasks) entries.push({ kind: 'item', item: {
+                            type: 'recapTask', id: task.id, title: task.title, groupId: group.id,
+                        } });
+                    }
+                }
+                content = {
+                    step: 'completed', checks: completion.checks,
+                    week: completion.week && { ...completion.week, rangeLabel: `${formatDate(recap.start, 'PP')} – ${formatDate(recap.end, 'PP')}` },
+                };
             }
             return {
                 checkpoint: at(step),
@@ -804,6 +847,7 @@ export function createReviewViewMethods(deps: ReviewViewDeps) {
                 } : null,
                 labels: {
                     ...labels,
+                    reactivate: t('projects.reactivate'), details: t('list.details'), groupByProject: t('list.groupByProject'), groupByArea: t('list.groupByArea'),
                     closeLabel: tFallback(t, 'common.close', 'Close'),
                     processInbox: t('inbox.processButton'),
                     inboxHint: t('dailyReview.inboxDesc'),
@@ -821,7 +865,9 @@ export function createReviewViewMethods(deps: ReviewViewDeps) {
 
     const readWeekly = (input: Record<string, unknown>) => {
         const calendar = readCalendar(input.calendar);
+        const recapGroupBy = input.recapGroupBy;
         if (!calendar
+            || (recapGroupBy !== undefined && recapGroupBy !== 'project' && recapGroupBy !== 'area')
             || (input.checkpoint !== undefined && input.checkpoint !== null && !isText(input.checkpoint, 1000))
             || (input.expandedProjectId !== undefined && input.expandedProjectId !== null && !isText(input.expandedProjectId))
             || (input.expandedLaterProjectIds !== undefined && !isIdList(input.expandedLaterProjectIds, true))
@@ -835,8 +881,8 @@ export function createReviewViewMethods(deps: ReviewViewDeps) {
         const keepProjectsStep = input.keepProjectsStep === true;
         const keepStaleStep = input.keepStaleStep === true;
         const view = buildWeekly(base, (input.checkpoint as string | null | undefined) ?? null, calendar, (input.expandedProjectId as string | null | undefined) ?? null, (input.expandedLaterProjectIds as string[] | undefined) ?? [], now,
-            keepProjectsStep, keepStaleStep);
-        return { now, view, revision: `${base}:${paramsKey([view.checkpoint, calendar, input.expandedProjectId ?? null, ...((input.expandedLaterProjectIds as string[] | undefined)?.length ? [input.expandedLaterProjectIds] : []), ...(keepProjectsStep ? ['keepProjectsStep'] : []), ...(keepStaleStep ? ['keepStaleStep'] : [])])}` };
+            keepProjectsStep, keepStaleStep, recapGroupBy);
+        return { now, view, revision: `${base}:${paramsKey([view.checkpoint, calendar, input.expandedProjectId ?? null, ...((input.expandedLaterProjectIds as string[] | undefined)?.length ? [input.expandedLaterProjectIds] : []), ...(keepProjectsStep ? ['keepProjectsStep'] : []), ...(keepStaleStep ? ['keepStaleStep'] : []), ...(recapGroupBy ? [recapGroupBy] : [])])}` };
     };
 
     const weeklyReview = (input: Record<string, unknown>): NativeHostResult<NativeWeeklyReview> => {
@@ -859,7 +905,7 @@ export function createReviewViewMethods(deps: ReviewViewDeps) {
                 ...rest,
                 total: view.entries.length,
                 items: windowEntries.map((entry): NativeWeeklyReviewItem => (entry.kind === 'task'
-                    ? { type: 'task', row: rows[rowIndex++], scheduled: entry.scheduled, projectId: entry.projectId }
+                    ? { type: 'task', row: rows[rowIndex++], scheduled: entry.scheduled, projectId: entry.projectId, ...(entry.sectionId === undefined ? {} : { sectionId: entry.sectionId }) }
                     : entry.item)),
             },
         };
@@ -1191,6 +1237,7 @@ export function createReviewViewMethods(deps: ReviewViewDeps) {
             keepProjectsStep?: boolean;
             keepStaleStep?: boolean;
             includeStaleProjectCards?: boolean;
+            recapGroupBy?: 'project' | 'area';
             offset: number;
             limit: number;
             revision?: string;
@@ -1225,6 +1272,7 @@ export function createReviewViewMethods(deps: ReviewViewDeps) {
             keepProjectsStep?: boolean;
             keepStaleStep?: boolean;
             includeStaleProjectCards?: boolean;
+            recapGroupBy?: 'project' | 'area';
             list: NativeWeeklyReviewList;
             key?: string;
             offset: number;

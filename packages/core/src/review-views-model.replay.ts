@@ -408,7 +408,8 @@ async function replayWeekly(contract: Contract, part: ReviewFixturePart, scenari
     let expandedProjectId: string | null = null;
     let expandedDays = new Set<string>();
     let expandedContexts = new Set<string>();
-    const showScheduled = { waiting: false, someday: false };
+    let showScheduledWaiting = false;
+    const scheduledSomedaySections = new Set<string>();
     let prompt: { projectId: string; projectTitle: string } | null = null;
     let promptTitle = '';
     let editor: [string, 'view' | 'task'] | null = null;
@@ -521,9 +522,31 @@ async function replayWeekly(contract: Contract, part: ReviewFixturePart, scenari
             texts.push(...(content.step === 'waiting' ? [labels.waitingDesc, labels.waitingGuide] : [labels.somedayDesc, labels.somedayGuide]));
             if (content.empty) texts.push(content.empty);
             else {
-                const expanded = showScheduled[content.step];
-                rows.push(...tasks.filter((item) => !item.scheduled || expanded).map((item) => item.row.id));
-                if (content.scheduled) texts.push(content.scheduled.label);
+                if (content.step === 'waiting') {
+                    rows.push(...tasks.filter(item => !item.scheduled || showScheduledWaiting).map(item => item.row.id));
+                    if (content.scheduled) texts.push(content.scheduled.label);
+                } else {
+                    let pendingLabel: string | undefined;
+                    for (const item of items) {
+                        if (item.type === 'somedaySection') {
+                            if (pendingLabel) texts.push(pendingLabel);
+                            texts.push(`${item.title} (${item.count})`);
+                            pendingLabel = item.scheduledCount ? item.scheduledLabel : undefined;
+                        } else if (item.type === 'somedayProject' || item.type === 'task') {
+                            if (item.scheduled && pendingLabel) {
+                                texts.push(pendingLabel);
+                                pendingLabel = undefined;
+                            }
+                            if (item.scheduled && !scheduledSomedaySections.has(item.sectionId ?? '')) continue;
+                            if (item.type === 'task') rows.push(item.row.id);
+                            else {
+                                texts.push(item.title);
+                                if (item.areaName) texts.push(item.areaName);
+                            }
+                        }
+                    }
+                    if (pendingLabel) texts.push(pendingLabel);
+                }
             }
         } else if (content.step === 'contexts') {
             texts.push(labels.contexts, labels.contextsDesc);
@@ -542,7 +565,7 @@ async function replayWeekly(contract: Contract, part: ReviewFixturePart, scenari
             projectCards();
         } else if (content.step === 'completed') {
             texts.push(labels.reviewComplete, labels.completeDesc);
-            if (content.week) texts.push(content.week.heading, ...content.week.rows);
+            if (content.week) texts.push(content.week.heading, ...content.week.rows, labels.details);
             texts.push(...content.checks.map((check) => check.text), labels.mindSweepTitle, labels.mindSweepIntro, labels.mindSweep);
         }
         texts.push(...(view.finish ? [view.finish.shareLabel, view.finish.label] : [`← ${view.back.label}`, `${view.next!.label} →`]));
@@ -655,8 +678,14 @@ async function replayWeekly(contract: Contract, part: ReviewFixturePart, scenari
                         && (label === labels.less ? expandedContexts.has(item.context) : !expandedContexts.has(item.context) && item.moreLabel === label));
                     const key = (context as Extract<NativeWeeklyReviewItem, { type: 'context' }>).context;
                     expandedContexts = new Set(expandedContexts.has(key) ? [...expandedContexts].filter((entry) => entry !== key) : [...expandedContexts, key]);
-                } else if ((content.step === 'waiting' || content.step === 'someday') && label === content.scheduled?.label) {
-                    showScheduled[content.step] = !showScheduled[content.step];
+                } else if (content.step === 'waiting' && label === content.scheduled?.label) {
+                    showScheduledWaiting = !showScheduledWaiting;
+                } else if (content.step === 'someday' && items.some(item => item.type === 'somedaySection' && item.scheduledLabel === label)) {
+                    const header = items.find(item => item.type === 'somedaySection' && item.scheduledLabel === label);
+                    if (header?.type === 'somedaySection') {
+                        if (scheduledSomedaySections.has(header.sectionId)) scheduledSomedaySections.delete(header.sectionId);
+                        else scheduledSomedaySections.add(header.sectionId);
+                    }
                 } else if (content.step === 'calendar' && label === labels.addTask) {
                     captures.push({ initialProps: { status: 'inbox' } });
                 } else if (view.finish && label === view.finish.label) {

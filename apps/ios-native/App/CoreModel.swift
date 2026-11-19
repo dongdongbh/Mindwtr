@@ -581,6 +581,11 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     private(set) var reviewNested: [String: CoreObject] = [:]
     private(set) var reviewExpandedContexts: Set<String> = []
     private(set) var reviewExpandedScheduled: Set<String> = []
+    private(set) var reviewCollapsedSomedaySections: Set<Data> = []
+    private(set) var reviewExpandedSomedayScheduledSections: Set<Data> = []
+    enum ReviewRecapGroup: String, CaseIterable { case project, area }
+    private var reviewRecapGroupBy: ReviewRecapGroup?
+    var reviewShownRecapGroup: ReviewRecapGroup? { ReviewRecapGroup(rawValue: reviewGuide.text("recapGroupBy")) }
     private(set) var boardView: CoreObject = [:] { didSet { boardViewRevision &+= 1 } }
     private(set) var boardViewRevision = 0
     private(set) var boardCurrent = false
@@ -21357,10 +21362,23 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
 
     func activateDeferredProject(_ id: String) async {
         let origin = selectedSurface
-        guard (origin == .waiting && waitingActionsEnabled) || (origin == .someday && somedayActionsEnabled),
+        let enabled: Bool
+        let isCurrent: () -> Bool
+        switch origin {
+        case .waiting:
+            enabled = waitingActionsEnabled
+            isCurrent = { self.waitingCurrent }
+        case .someday:
+            enabled = somedayActionsEnabled
+            isCurrent = { self.somedayCurrent }
+        case .review:
+            enabled = reviewActionsEnabled
+            isCurrent = { self.reviewCurrent }
+        default: return
+        }
+        guard enabled,
               projectStatusRequest == nil,
-              let row = (origin == .waiting ? waiting.object("deferred").object("rows").objects("items") : somedayProjectRows)
-                .first(where: { Data($0.text("id").utf8) == Data(id.utf8) }),
+              let row = deferredProjectRow(id, on: origin),
               !id.isEmpty, let title = row["title"] as? String else { return }
         busy = true
         defer { finishOperation() }
@@ -21368,13 +21386,12 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
             let options = try await query("projectStatusOptions", [try json(["projectId": id])])
             let canChange = try validatedProjectStatusOptions(options, id: id)
             let project = options.object("project")
-            let current = (origin == .waiting ? waiting.object("deferred").object("rows").objects("items") : somedayProjectRows)
-                .first(where: { Data($0.text("id").utf8) == Data(id.utf8) })
-            guard canChange, selectedSurface == origin,
-                  (origin == .waiting ? waitingCurrent : somedayCurrent),
-                  let current, let currentTitle = current["title"] as? String,
+            let revision = "\(project.number("rev")):\(project.text("revBy")):\(project.text("updatedAt"))"
+            guard canChange, selectedSurface == origin, isCurrent(),
+                  let current = deferredProjectRow(id, on: origin), let currentTitle = current["title"] as? String,
                   Data(currentTitle.utf8) == Data(title.utf8),
                   Data(project.text("title").utf8) == Data(title.utf8),
+                  origin != .review || revision.utf8.elementsEqual(row.text("projectRevision").utf8),
                   project.text("status") == (origin == .waiting ? "waiting" : "someday") else {
                 throw CocoaError(.coderReadCorrupt)
             }
@@ -21401,6 +21418,19 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         catch { await handleProjectStatusWriteError(error); return }
         do { try await refreshProjectStatusAfterWrite() }
         catch { self.error = error.localizedDescription }
+    }
+
+    private func deferredProjectRow(_ id: String, on surface: Surface) -> CoreObject? {
+        let rows: [CoreObject]
+        switch surface {
+        case .waiting: rows = waiting.object("deferred").object("rows").objects("items")
+        case .someday: rows = somedayProjectRows
+        case .review:
+            guard reviewGuidePresented, reviewKind == "weekly", reviewGuide.object("content").text("step") == "someday" else { return nil }
+            rows = reviewGuide.objects("items").filter { $0.text("type") == "somedayProject" }
+        default: return nil
+        }
+        return rows.first { $0.text("id").utf8.elementsEqual(id.utf8) }
     }
 
     func changeProjectStatus(_ status: String) async {
@@ -21473,7 +21503,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         projectStatusError = nil
         projectStatusReadError = nil
         error = nil
-        if selectedSurface == .waiting || selectedSurface == .someday {
+        if [.waiting, .someday, .review].contains(selectedSurface) {
             if blocked { error = label("settings.feedback.actionFailed") }
             else { NSLog("Native iOS deferred Project reactivated releaseCheck=v1.3.4/ios-deferred-reactivate outcome=confirmed") }
         }
@@ -21487,7 +21517,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
             projectStatusOptionsCurrent = false
             retryNeeded = false
             projectStatusError = failure.localizedDescription
-            error = selectedSurface == .waiting || selectedSurface == .someday ? failure.localizedDescription : nil
+            error = [.waiting, .someday, .review].contains(selectedSurface) ? failure.localizedDescription : nil
             do { try await refreshProjectStatusAfterWrite() }
             catch { projectStatusReadError = error.localizedDescription }
         } else {
@@ -21502,7 +21532,8 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         guard (selectedSurface == .project && projectCurrent &&
                 projectDetail.text("projectId") == projectHeader.text("id")) ||
               (selectedSurface == .waiting && waitingCurrent) ||
-              (selectedSurface == .someday && somedayCurrent) else {
+              (selectedSurface == .someday && somedayCurrent) ||
+              (selectedSurface == .review && reviewCurrent) else {
             throw CocoaError(.coderReadCorrupt)
         }
     }
@@ -27096,6 +27127,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
               let checkpoint = reviewGuide.object(direction)["checkpoint"] as? String else { return }
         retireReviewAI()
         reviewCheckpointInput = checkpoint
+        reviewRecapGroupBy = nil
         reviewKeepProjectsStep = false
         reviewKeepStaleStep = false
         reviewProjectTaskEditor = nil
@@ -27310,9 +27342,27 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         let content = reviewGuide.object("content")
         let step = content.text("step")
         guard reviewActionsEnabled, reviewGuidePresented, reviewKind == "weekly",
-              ["waiting", "someday"].contains(step), content.object("scheduled").number("count") > 0 else { return }
+              step == "waiting", content.object("scheduled").number("count") > 0 else { return }
         if reviewExpandedScheduled.contains(step) { reviewExpandedScheduled.remove(step) }
         else { reviewExpandedScheduled.insert(step) }
+    }
+
+    func toggleReviewSomedaySection(_ id: String, scheduled: Bool = false) {
+        guard reviewActionsEnabled, reviewGuidePresented, reviewGuide.object("content").text("step") == "someday" else { return }
+        let key = Data(id.utf8)
+        if scheduled {
+            if !reviewExpandedSomedayScheduledSections.insert(key).inserted { reviewExpandedSomedayScheduledSections.remove(key) }
+        } else if !reviewCollapsedSomedaySections.insert(key).inserted {
+            reviewCollapsedSomedaySections.remove(key)
+        }
+    }
+
+    func setReviewRecapGroup(_ group: ReviewRecapGroup?) async {
+        guard reviewActionsEnabled, reviewGuidePresented, reviewKind == "weekly",
+              reviewGuide.object("content").text("step") == "completed", group != reviewRecapGroupBy else { return }
+        reviewRecapGroupBy = group
+        reviewGuideDepth = pageSize
+        await retryReview()
     }
 
     func finishReview() async {
@@ -27336,6 +27386,9 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
             if reviewKind == "weekly" {
                 reviewExpandedContexts = []
                 reviewExpandedScheduled = []
+                reviewCollapsedSomedaySections = []
+                reviewExpandedSomedayScheduledSections = []
+                reviewRecapGroupBy = nil
             }
             reviewNested = [:]
             reviewNestedDepth = [:]
@@ -27446,6 +27499,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
             input["includeStaleProjectCards"] = true
             if reviewKeepStaleStep { input["keepStaleStep"] = true }
             if reviewKeepProjectsStep { input["keepProjectsStep"] = true }
+            input["recapGroupBy"] = reviewRecapGroupBy?.rawValue
         }
         let name = reviewKind == "daily" ? "dailyReview" : "weeklyReview"
         var view = try await query("menuRead", [name, try json(input)])
@@ -27465,6 +27519,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
             items += window.objects("items")
         }
         view["items"] = items
+        view["recapGroupBy"] = input["recapGroupBy"]
         var nested: [String: CoreObject] = [:]
         if reviewKind == "weekly" {
             var lists: [(String, String, CoreObject)] = []
@@ -36375,6 +36430,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
             let stale = reviewGuidePresented ? reviewNested["staleProjects:"]?.objects("items") ?? [] : []
             guard reviewActionsEnabled, entries.contains(where: { $0.text("type") == "project"
                 && ($0.text("projectId") == row.text("id") || (reviewGuidePresented && $0.text("id") == row.text("id"))) })
+                || deferredProjectRow(row.text("id"), on: .review) != nil
                 || stale.contains(where: { $0.text("id") == row.text("id") })
                 || reviewRows.contains(where: { $0.object("meta").objects("parts").contains(where: {
                     $0.text("kind") == "project" && $0.text("projectId") == row.text("id")

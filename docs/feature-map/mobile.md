@@ -241,8 +241,9 @@ Source: `apps/mobile`. Routes live in `apps/mobile/app` (expo-router). Labels be
 ## Weekly Review and share card
 
 - Reach: Review › Start Review › Weekly Review. The share card button opens "My weekly reflection".
-- Selectors: `review-completed-scroll`, `review-complete-project-` (+ project id), `review-confirm-complete-project`, `review-share-card-button`, `share-card-preview`, `share-card-message`, `share-card-reflection`, `share-card-style-` (+ style), `share-card-export`, `share-card-close`
-- Code: `apps/mobile/components/review-modal.tsx`, `apps/mobile/components/review/useReviewModalController.ts`, `apps/mobile/components/share-card-modal.tsx`, `apps/mobile/app/weekly-review.tsx`
+- Weekly Review: Expand a Someday section to see its tasks and parked projects, including empty projects. Future review dates appear under Not due yet. At Review Complete, open the weekly recap details to see task titles and counts by project or Area for the displayed dates.
+- Selectors: `review-someday-list`, `review-week-recap-toggle`, `review-completed-scroll`, `review-complete-project-` (+ project id), `review-confirm-complete-project`, `review-share-card-button`, `share-card-preview`, `share-card-message`, `share-card-reflection`, `share-card-style-` (+ style), `share-card-export`, `share-card-close`
+- Code: `apps/mobile/components/review-modal.tsx`, `apps/mobile/components/review/useReviewModalController.ts`, `apps/mobile/components/review/WeeklyReviewSomedayList.tsx`, `apps/mobile/components/share-card-modal.tsx`, `apps/mobile/app/weekly-review.tsx`
 - Checks: `apps/mobile/components/review-modal.test.tsx`, `apps/mobile/components/review-modal.parity.test.tsx`, `apps/mobile/components/share-card-modal.test.tsx`
 - Notes: The Start Review picker opens the review in place. Only a review notification opens the `/weekly-review` route. Waiting For follows a valid review date, falling back to the task's start date; future dates stay under Not due yet.
 

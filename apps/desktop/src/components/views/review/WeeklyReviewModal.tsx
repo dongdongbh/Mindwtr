@@ -1,5 +1,5 @@
 import { getProjectCalendarReferenceSummary } from '@mindwtr/core';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
     buildQuickAddParseOptions,
     buildReviewSteps,
@@ -11,6 +11,7 @@ import {
     getExternalCalendarDaySummaries,
     getUsedTaskTokens,
     getWeeklyReviewBuckets,
+    getWeeklyReviewRecapPage,
     getProjectAccentColor,
     einkSafeColor,
     isSandboxMode,
@@ -23,6 +24,7 @@ import {
     safeFormatDate,
     safeParseDate,
     shallow,
+    tFallback,
     type CalendarReviewEntry,
     type ExternalCalendarDaySummary,
     type ExternalCalendarEvent,
@@ -41,6 +43,7 @@ import { Dialog, DialogHeader } from '../../ui/Dialog';
 import { MindSweepLauncher } from '../../MindSweepModal';
 import { PromptModal } from '../../PromptModal';
 import { InboxProcessor } from '../InboxProcessor';
+import { DeferredProjectRow } from '../list/DeferredProjectRow';
 import { cn } from '../../../lib/utils';
 import { isImeComposing } from '../../../lib/ime';
 import { useLanguage } from '../../../contexts/language-context';
@@ -83,6 +86,22 @@ function SummaryRow({ good, text }: { good: boolean; text: string }) {
     );
 }
 
+function ReviewDetails({ label, summaryClassName, children }: {
+    label: string;
+    summaryClassName: string;
+    children: () => ReactNode;
+}) {
+    const [hasOpened, setHasOpened] = useState(false);
+    return (
+        <details className="text-sm" onToggle={(event) => {
+            if (event.currentTarget.open) setHasOpened(true);
+        }}>
+            <summary className={cn('cursor-pointer py-1 font-medium', summaryClassName)}>{label}</summary>
+            {hasOpened && children()}
+        </details>
+    );
+}
+
 export function WeeklyReviewGuideModal({ onClose }: WeeklyReviewGuideModalProps) {
     const { t, language } = useLanguage();
     const closeReview = useCallback(() => runAfterTaskEditExit(onClose), [onClose]);
@@ -107,7 +126,8 @@ export function WeeklyReviewGuideModal({ onClose }: WeeklyReviewGuideModalProps)
     const [expandedContextGroups, setExpandedContextGroups] = useState<Set<string>>(new Set());
     const [expandedLaterProjects, setExpandedLaterProjects] = useState<Set<string>>(new Set());
     const [showScheduledWaiting, setShowScheduledWaiting] = useState(false);
-    const [showScheduledSomeday, setShowScheduledSomeday] = useState(false);
+    const [recapByArea, setRecapByArea] = useState(false);
+    const [weekRecapPage, setWeekRecapPage] = useState(0);
     const [shareCardOpen, setShareCardOpen] = useState(false);
     const [projectTaskPrompt, setProjectTaskPrompt] = useState<{ projectId: string; projectTitle: string } | null>(null);
     const [completingProjectId, setCompletingProjectId] = useState<string | null>(null);
@@ -198,9 +218,10 @@ export function WeeklyReviewGuideModal({ onClose }: WeeklyReviewGuideModalProps)
     const aiProvider = (settings?.ai?.provider ?? 'openai') as AIProviderId;
 
 
+    const somedayDefinitions = settings?.gtd?.viewSections?.someday;
     const weeklyBuckets = useMemo(
-        () => getWeeklyReviewBuckets(tasks, projects, { weekStart: settings?.weekStart, sections }),
-        [projects, sections, settings?.weekStart, tasks],
+        () => getWeeklyReviewBuckets(tasks, projects, { weekStart: settings?.weekStart, sections, somedaySections: somedayDefinitions, areas }),
+        [areas, projects, sections, settings?.weekStart, somedayDefinitions, tasks],
     );
     const staleItems = weeklyBuckets.staleItems;
     const staleItemTitleMap = useMemo(() => {
@@ -236,7 +257,7 @@ export function WeeklyReviewGuideModal({ onClose }: WeeklyReviewGuideModalProps)
     );
     const inboxTasks = weeklyBuckets.inbox;
     const waitingGroups = weeklyBuckets.waitingGroups;
-    const somedayGroups = weeklyBuckets.somedayGroups;
+    const { somedaySections, weekRecap } = weeklyBuckets;
     const projectEntries = weeklyBuckets.projectEntries;
     const projectEntryById = useMemo(
         () => new Map(projectEntries.map((entry) => [entry.project.id, entry])),
@@ -248,6 +269,17 @@ export function WeeklyReviewGuideModal({ onClose }: WeeklyReviewGuideModalProps)
         useUiStore.getState().setProjectView({ selectedProjectId: projectId });
         dispatchNavigateEvent('projects');
     });
+    const reactivateSomedayProject = async (projectId: string) => {
+        if (!useTaskStore.getState().projects.some((project) => project.id === projectId && project.status === 'someday' && !project.deletedAt)) return;
+        try {
+            const result = await updateProject(projectId, { status: 'active' });
+            if (result && !result.success) throw new Error(result.error || 'Failed to reactivate project');
+        } catch (error) {
+            reportError('Failed to reactivate project during weekly review', error, {
+                userMessage: tFallback(t, 'projects.reactivateFailed', 'Failed to reactivate project'),
+            });
+        }
+    };
     const contextReviewGroups = weeklyBuckets.contextGroups;
     const calendarReviewItems = weeklyBuckets.calendarItems;
 
@@ -255,10 +287,6 @@ export function WeeklyReviewGuideModal({ onClose }: WeeklyReviewGuideModalProps)
     const waitingTasks = useMemo(
         () => [...waitingGroups.due, ...waitingGroups.scheduled, ...waitingGroups.unscheduled],
         [waitingGroups],
-    );
-    const somedayTasks = useMemo(
-        () => [...somedayGroups.due, ...somedayGroups.scheduled, ...somedayGroups.unscheduled],
-        [somedayGroups],
     );
     const externalCalendarReviewItems = useMemo(
         () => getExternalCalendarDaySummaries(externalCalendarEvents),
@@ -614,6 +642,92 @@ export function WeeklyReviewGuideModal({ onClose }: WeeklyReviewGuideModalProps)
             <MindSweepLauncher t={t} addTask={addTask} />
         </div>
     );
+
+    const renderSomedayRows = (tasks: Task[], projects: Project[]) => (
+        <>
+            {projects.map((project) => (
+                <DeferredProjectRow
+                    key={project.id}
+                    project={project}
+                    area={project.areaId ? areaById.get(project.areaId) : undefined}
+                    t={t}
+                    theme={settings?.theme}
+                    onOpen={openProject}
+                    onReactivate={(projectId) => void reactivateSomedayProject(projectId)}
+                />
+            ))}
+            {tasks.map((task) => <TaskItem key={task.id} task={task} showProjectBadgeInActions={false} />)}
+        </>
+    );
+
+    const renderWeekRecap = () => {
+        const groups = recapByArea ? weekRecap.areas : weekRecap.projects;
+        const fallback = recapByArea ? t('review.noArea') : t('taskEdit.noProjectOption');
+        return (
+            <ReviewDetails label={t('list.details')} summaryClassName="text-primary">
+                {() => {
+                    const visiblePage = getWeeklyReviewRecapPage(groups, weekRecapPage);
+                    return (
+                        <div className="mt-2 space-y-3">
+                            <p className="text-muted-foreground">
+                                {safeFormatDate(weekRecap.start, 'PP')} {'–'} {safeFormatDate(weekRecap.end, 'PP')}
+                            </p>
+                            <div className="flex flex-wrap gap-2">
+                                {(['project', 'area'] as const).map((groupBy) => {
+                                    const area = groupBy === 'area';
+                                    const selected = area === recapByArea;
+                                    return (
+                                        <button
+                                            key={groupBy}
+                                            type="button"
+                                            aria-pressed={selected}
+                                            className={cn('rounded border border-border px-2.5 py-1 hover:bg-muted', selected && 'bg-muted font-semibold')}
+                                            onClick={() => {
+                                                if (selected) return;
+                                                setRecapByArea(area);
+                                                setWeekRecapPage(0);
+                                            }}
+                                        >
+                                            {t(area ? 'list.groupByArea' : 'list.groupByProject')}
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                            {visiblePage.pageCount > 1 && (
+                                <div className="flex flex-wrap items-center gap-2">
+                                    {[-1, 1].map((direction) => {
+                                        const page = visiblePage.page + direction;
+                                        return (
+                                            <button
+                                                key={direction}
+                                                type="button"
+                                                disabled={page < 0 || page >= visiblePage.pageCount}
+                                                className="rounded border border-border px-2.5 py-1 enabled:hover:bg-muted disabled:opacity-50"
+                                                onClick={() => setWeekRecapPage(page)}
+                                            >
+                                                {t(direction < 0 ? 'common.back' : 'common.next')}
+                                            </button>
+                                        );
+                                    })}
+                                    <span role="status" className="text-muted-foreground">
+                                        {visiblePage.page + 1} {t('review.of')} {visiblePage.pageCount}
+                                    </span>
+                                </div>
+                            )}
+                            {visiblePage.groups.map((group) => (
+                                <div key={group.id}>
+                                    <h3 className="break-words font-semibold">{group.title ?? fallback} ({group.count})</h3>
+                                    <ul className="list-disc space-y-1 ps-5 pt-1 text-muted-foreground">
+                                        {group.tasks.map((task) => <li key={task.id} className="break-words">{task.title}</li>)}
+                                    </ul>
+                                </div>
+                            ))}
+                        </div>
+                    );
+                }}
+            </ReviewDetails>
+        );
+    };
 
     const renderCalendarList = (items: CalendarReviewEntry[]) => {
         if (items.length === 0) {
@@ -1123,31 +1237,35 @@ export function WeeklyReviewGuideModal({ onClose }: WeeklyReviewGuideModalProps)
                             {t('review.somedayHint')}
                         </p>
                         <div className="space-y-2">
-                            {somedayTasks.length === 0 ? (
+                            {somedaySections.length === 0 ? (
                                 <div className="text-center py-12 text-muted-foreground">
                                     <p>{t('review.listEmpty')}</p>
                                 </div>
                             ) : (
-                                <>
-                                    {[...somedayGroups.due, ...somedayGroups.unscheduled].map((task) => (
-                                        <TaskItem key={task.id} task={task} showProjectBadgeInActions={false} />
-                                    ))}
-                                    {somedayGroups.scheduled.length > 0 && (
-                                        <div className="pt-4">
-                                            <button
-                                                type="button"
-                                                onClick={() => setShowScheduledSomeday((prev) => !prev)}
-                                                className="mb-2 flex items-center gap-1 text-xs uppercase tracking-wider text-muted-foreground hover:text-foreground"
-                                            >
-                                                {showScheduledSomeday ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-                                                {t('review.notDueYet')} ({somedayGroups.scheduled.length})
-                                            </button>
-                                            {showScheduledSomeday && somedayGroups.scheduled.map((task) => (
-                                                <TaskItem key={task.id} task={task} showProjectBadgeInActions={false} />
-                                            ))}
-                                        </div>
-                                    )}
-                                </>
+                                somedaySections.map(({ id, title, tasks, projects }) => {
+                                    const scheduledCount = tasks.scheduled.length + projects.scheduled.length;
+                                    const count = scheduledCount + tasks.due.length + tasks.unscheduled.length + projects.due.length + projects.unscheduled.length;
+                                    return (
+                                        <details key={id} open className="rounded-md border border-border px-3">
+                                            <summary className="cursor-pointer break-words py-2 text-sm font-semibold">
+                                                {title ?? t('viewSections.noSection')} ({count})
+                                            </summary>
+                                            <div className="space-y-2 pb-3">
+                                                {renderSomedayRows([...tasks.due, ...tasks.unscheduled], [...projects.due, ...projects.unscheduled])}
+                                                {scheduledCount > 0 && (
+                                                    <ReviewDetails
+                                                        label={`${t('review.notDueYet')} (${scheduledCount})`}
+                                                        summaryClassName="text-muted-foreground hover:text-foreground"
+                                                    >
+                                                        {() => <div className="space-y-2 pt-1">
+                                                            {renderSomedayRows(tasks.scheduled, projects.scheduled)}
+                                                        </div>}
+                                                    </ReviewDetails>
+                                                )}
+                                            </div>
+                                        </details>
+                                    );
+                                })
                             )}
                         </div>
                     </div>
@@ -1200,6 +1318,7 @@ export function WeeklyReviewGuideModal({ onClose }: WeeklyReviewGuideModalProps)
                                             )}
                                         </>
                                     )}
+                                    {weekRecap.projects.length > 0 && renderWeekRecap()}
                                 </div>
                             )}
                             <SummaryRow
