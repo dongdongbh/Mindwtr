@@ -368,7 +368,7 @@ describe('ReviewView', () => {
         fireEvent.click(getByRole('button', { name: 'Mark reviewed' }));
         await waitFor(() => expect(batchUpdateTasks).toHaveBeenCalledWith([{ id: 'due', updates: { reviewAt: undefined } }]));
         await waitFor(() => expect(queryByText('Due reminder')).not.toBeInTheDocument());
-        expect(getByText('No review reminders are due.')).toBeInTheDocument();
+        expect(getByText('No review reminders are due. Tasks without a review date are in All open tasks.')).toBeInTheDocument();
     });
 
     it('auto-skips an empty weekly review to the all-clear state while showing checked stages', async () => {
