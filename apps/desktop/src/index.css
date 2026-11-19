@@ -874,8 +874,10 @@
     border-radius: 50%;
     color: hsl(var(--primary));
   }
-  .project-workspace--list [data-task-complete] svg { opacity: 0; }
-  .project-workspace--list [data-task-complete]:is(:hover, :focus-visible) svg { opacity: 1; }
+  .project-workspace--list [data-task-complete] svg { display: none; }
+  .project-workspace--list [data-task-complete]:is(:hover, :focus-visible) {
+    background-color: hsl(var(--primary) / 0.2);
+  }
 
   .project-progress {
     appearance: none;

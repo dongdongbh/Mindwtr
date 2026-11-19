@@ -94,7 +94,7 @@ Source: `apps/desktop/src` (Tauri + React). Labels come from `packages/core/src/
 ## Projects
 
 - Repeat after completion: In project details, enter the count in `project-repeat-after-count`, choose days, weeks, months, or years in `project-repeat-after-unit`, then use `project-repeat-after-save`. Clear the count and save to turn repeating off. Turn off repeats on active tasks in the project before enabling it. Complete the project to schedule its next run.
-- Completion buttons retain concentric hover/focus rings at every density. Check: `e2e/task-completion-alignment.spec.ts`.
+- The project task completion circle fills on hover or keyboard focus at every density. Check: `e2e/task-completion-alignment.spec.ts`.
 
 - Reach: Sidebar › Projects. The projects panel has New project, Active Projects, Someday / Waiting, and Closed groups, plus a Tag filter. When the panel is collapsed, use Expand projects panel beside the selected project title to reopen it. Select a project to open its workspace (Project Notes, Add Section, Add Task, Columns layout, Complete, Duplicate, Cancel project, Convert to section…).
 - Shortcuts: `gp` (Vim, Standard), `Alt+P` (Emacs). `j`/`k` move through the project list when it has focus.
