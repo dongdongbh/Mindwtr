@@ -6517,8 +6517,9 @@ final class FoundationUITests: XCTestCase {
         func openReference() {
             boardTap(app, "tab-menu")
             boardTap(app, "menu-reference")
-            boardEnabled(app.buttons["Reference checklist"])
-            app.buttons["Reference checklist"].tap()
+            let row = app.descendants(matching: .any).matching(identifier: "reference-scroll").firstMatch.buttons["Reference checklist"]
+            boardEnabled(row)
+            row.tap()
         }
 
 
@@ -9237,6 +9238,7 @@ final class FoundationUITests: XCTestCase {
             tap("search-close")
             enabled(app.buttons["review-guide-close"])
         }
+        let guide = app.scrollViews.matching(NSPredicate(format: "identifier BEGINSWITH %@", "review-guide-content-")).firstMatch
         start("daily")
         let area = app.buttons["review-guide-area"]
         XCTAssertGreaterThanOrEqual(area.frame.width, 44)
@@ -9247,37 +9249,37 @@ final class FoundationUITests: XCTestCase {
         expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: app.staticTexts["area-title"])
         waitForExpectations(timeout: 10)
         goTo("today")
-        let todayTask = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "task-title-", prefix + " context")).firstMatch
+        let todayTask = guide.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "task-title-", prefix + " context")).firstMatch
         reveal(todayTask)
         let todayID = String(todayTask.identifier.dropFirst("task-title-".count))
-        XCTAssertTrue(app.buttons["task-status-" + todayID].exists)
+        XCTAssertTrue(guide.buttons["task-status-" + todayID].exists)
         goTo("inbox")
-        let inboxTask = app.buttons[prefix + " inbox"]
+        let inboxTask = guide.buttons[prefix + " inbox"]
         reveal(inboxTask)
         let inboxID = String(inboxTask.identifier.dropFirst("task-title-".count))
-        XCTAssertTrue(app.buttons["task-status-" + inboxID].exists)
+        XCTAssertTrue(guide.buttons["task-status-" + inboxID].exists)
         goTo("waiting")
-        let waitingTask = app.buttons[prefix + " waiting visible"]
+        let waitingTask = guide.buttons[prefix + " waiting visible"]
         reveal(waitingTask)
         let waitingID = String(waitingTask.identifier.dropFirst("task-title-".count))
-        XCTAssertTrue(app.buttons["task-status-" + waitingID].exists)
+        XCTAssertTrue(guide.buttons["task-status-" + waitingID].exists)
         goTo("focus")
-        reveal(app.buttons["task-title-" + todayID])
-        XCTAssertFalse(app.buttons["task-status-" + todayID].exists)
-        XCTAssertEqual(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "task-status-")).count, 0)
+        reveal(guide.buttons["task-title-" + todayID])
+        XCTAssertFalse(guide.buttons["task-status-" + todayID].exists)
+        XCTAssertEqual(guide.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "task-status-")).count, 0)
         tap("review-guide-close")
 
         start("weekly")
         goTo("waiting")
         func scheduledGroup(_ kind: String) {
             let toggle = "review-scheduled-toggle-" + kind
-            let visible = app.buttons[prefix + " " + kind + " visible"]
+            let visible = guide.buttons[prefix + " " + kind + " visible"]
             reveal(visible)
-            XCTAssertFalse(app.buttons[prefix + " " + kind + " scheduled"].exists)
+            XCTAssertFalse(guide.buttons[prefix + " " + kind + " scheduled"].exists)
             selection(toggle, false)
             tap(toggle)
             selection(toggle, true)
-            let scheduled = app.buttons[prefix + " " + kind + " scheduled"]
+            let scheduled = guide.buttons[prefix + " " + kind + " scheduled"]
             reveal(scheduled)
             scheduled.tap()
             tap("task-view-close")
@@ -9330,7 +9332,7 @@ final class FoundationUITests: XCTestCase {
         scheduledGroup("someday")
         goTo("waiting", direction: "back")
         selection("review-scheduled-toggle-waiting", true)
-        reveal(app.buttons[prefix + " waiting scheduled"])
+        reveal(guide.buttons[prefix + " waiting scheduled"])
         tap("review-guide-close")
     }
 
@@ -10281,14 +10283,15 @@ final class FoundationUITests: XCTestCase {
         filter.tap()
         filter.typeText(title)
         tap("done-filters-close")
-        enabled(app.buttons[title])
-        app.buttons[title].tap()
+        let done = app.collectionViews["done-scroll"]
+        enabled(done.buttons[title])
+        done.buttons[title].tap()
         tap("task-mode-edit")
         let titleInput = app.descendants(matching: .any).matching(identifier: "task-editor-title").firstMatch
         titleInput.coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: 0.8)).tap()
         titleInput.typeText(" changed")
         tap("task-editor-save")
-        enabled(app.buttons[title + " changed"])
+        enabled(done.buttons[title + " changed"])
         tap("search-open")
         let query = app.textFields["search-input"]
         XCTAssertTrue(query.waitForExistence(timeout: 5))
@@ -10299,7 +10302,7 @@ final class FoundationUITests: XCTestCase {
         tap("search-filters-close")
         enabled(app.buttons["search-task-" + id])
         tap("search-close")
-        enabled(app.buttons[title + " changed"])
+        enabled(done.buttons[title + " changed"])
         tap("history-tab-archived")
         let archiveQuery = app.textFields["archive-search"]
 
@@ -10312,7 +10315,7 @@ final class FoundationUITests: XCTestCase {
         tap("archive-segment-projects")
         XCTAssertTrue(app.buttons["archive-segment-projects"].isSelected)
         tap("history-tab-done")
-        enabled(app.buttons[title + " changed"])
+        enabled(done.buttons[title + " changed"])
         tap("done-overflow-button")
         tap("done-filter-action")
         XCTAssertEqual(filter.value as? String, title)
@@ -10334,8 +10337,8 @@ final class FoundationUITests: XCTestCase {
         filter.tap()
         filter.typeText(title)
         tap("done-filters-close")
-        enabled(app.buttons[title + " changed"])
-        app.buttons[title + " changed"].tap()
+        enabled(done.buttons[title + " changed"])
+        done.buttons[title + " changed"].tap()
         tap("task-view-close")
     }
 
@@ -20082,8 +20085,9 @@ final class FoundationUITests: XCTestCase {
         let id = String(project.identifier.dropFirst("project-open-".count))
         project.tap()
         XCTAssertTrue(app.staticTexts["project-detail-title"].waitForExistence(timeout: 10))
-        enabled(app.buttons[title])
-        app.buttons[title].tap()
+        let detail = app.scrollViews["project-detail-scroll"]
+        enabled(detail.buttons[title])
+        detail.buttons[title].tap()
         enabled(app.buttons["task-mode-edit"])
         app.buttons["task-mode-edit"].tap()
         let titleInput = app.descendants(matching: .any).matching(identifier: "task-editor-title").firstMatch
@@ -20102,7 +20106,7 @@ final class FoundationUITests: XCTestCase {
         let searchProject = app.buttons["search-project-" + id]
         enabled(searchProject)
         searchProject.tap()
-        enabled(app.buttons[title + " changed"])
+        enabled(detail.buttons[title + " changed"])
         app.buttons["project-back"].tap()
         enabled(searchProject)
         XCTAssertEqual(query.value as? String, projectTitle)
@@ -20116,7 +20120,7 @@ final class FoundationUITests: XCTestCase {
         app.buttons["menu-projects"].tap()
         enabled(app.buttons["project-open-" + id])
         app.buttons["project-open-" + id].tap()
-        enabled(app.buttons[title + " changed"])
+        enabled(detail.buttons[title + " changed"])
     }
 
     func testSearchEditCompleteFilterAndReturnToFocus() {
