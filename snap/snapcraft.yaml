@@ -20,7 +20,12 @@ apps:
     command: usr/bin/mindwtr
     desktop: usr/share/applications/Mindwtr.desktop
     extensions: [gnome]
+    environment:
+      ALSA_CONFIG_PATH: $SNAP/etc/mindwtr-asound.conf
+      ALSA_PLUGIN_DIR: $SNAP/usr/lib/alsa-lib
     plugs:
+      - audio-playback
+      - audio-record
       - home
       - network
       - network-bind
@@ -34,3 +39,16 @@ parts:
     plugin: dump
     source: apps/desktop/src-tauri/target/release/bundle/deb/mindwtr_1.3.9_amd64.deb
     source-type: deb
+
+  alsa-pulse:
+    plugin: dump
+    source: snap/local/alsa-pulse
+    stage-packages:
+      - libasound2-plugins
+    organize:
+      asound.conf: etc/mindwtr-asound.conf
+      usr/lib/*/alsa-lib/libasound_module_pcm_pulse.so: usr/lib/alsa-lib/
+    stage:
+      - etc/mindwtr-asound.conf
+      - usr/lib/alsa-lib/libasound_module_pcm_pulse.so
+      - usr/share/doc/libasound2-plugins/copyright

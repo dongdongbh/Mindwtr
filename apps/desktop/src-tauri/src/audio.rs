@@ -787,6 +787,16 @@ fn stop_audio_recording_blocking(
          total={} count={nonzero_samples}",
         samples.len()
     );
+    #[cfg(target_os = "linux")]
+    if crate::install::is_snap() {
+        let sample_count = samples.len();
+        let line = format!(
+            "Snap microphone capture saved extra.releaseCheck=v1.3.10/snap-microphone-capture \
+             total={sample_count} count={nonzero_samples}"
+        );
+        log::info!("{line}");
+        crate::logging::append_native_log_line(&app, &line);
+    }
 
     Ok(AudioCaptureResult {
         path: target_path.to_string_lossy().to_string(),
