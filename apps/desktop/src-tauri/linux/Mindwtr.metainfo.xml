@@ -88,6 +88,25 @@
   <url type="bugtracker">https://github.com/dongdongbh/Mindwtr/issues</url>
   <url type="vcs-browser">https://github.com/dongdongbh/Mindwtr</url>
   <releases>
+    <release version="1.3.9" date="2026-11-18">
+      <url type="details">https://github.com/dongdongbh/Mindwtr/releases/tag/v1.3.9</url>
+      <description>
+        <p>More reliable sync, flexible reminders and clearer task organization.</p>
+        <p xml:lang="de">Zuverlässigerer Sync, flexible Erinnerungen und übersichtlichere Aufgabenverwaltung.</p>
+        <ul>
+          <li>Preserve partial Pomodoro work and choose reminder times for date-only tasks.</li>
+          <li xml:lang="de">Teilweise Pomodoro-Arbeit behalten und Erinnerungszeiten für reine Datumsangaben wählen.</li>
+          <li>Link calendar commitments to projects, organize Focus tasks together and copy task details.</li>
+          <li xml:lang="de">Kalendertermine mit Projekten verknüpfen, Fokus-Aufgaben gemeinsam ordnen und Aufgabendetails kopieren.</li>
+          <li>Keep edits made during sync and retry deferred uploads automatically.</li>
+          <li xml:lang="de">Änderungen während des Syncs behalten und aufgeschobene Uploads automatisch wiederholen.</li>
+          <li>Upgrade encrypted sync after updating every device; open attachments more safely.</li>
+          <li xml:lang="de">Nach dem Update aller Geräte die Sync-Verschlüsselung aktualisieren; Anhänge sicherer öffnen.</li>
+          <li>Find Data and calendar controls in expandable Settings cards.</li>
+          <li xml:lang="de">Daten- und Kalenderoptionen in aufklappbaren Einstellungskarten finden.</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.3.8" date="2026-11-04">
       <url type="details">https://github.com/dongdongbh/Mindwtr/releases/tag/v1.3.8</url>
       <description>

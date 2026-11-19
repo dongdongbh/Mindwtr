@@ -3,7 +3,7 @@ kind: MCPServer
 metadata:
   name: mindwtr
 spec:
-  image: ghcr.io/dongdongbh/mindwtr-mcp:1.1.14
+  image: ghcr.io/dongdongbh/mindwtr-mcp:1.1.15
   transport: stdio
   proxyPort: 8080
   env:

@@ -1,0 +1,19 @@
+<en-US>
+Keep partial Pomodoro work, choose date-only or Start/Due reminders, and see capture destinations. Link calendar events to projects, organize Focus tasks, and copy task details. More reliable sync and safer attachments. Encrypted sync: update every device, then choose Upgrade sync encryption once in Settings > Sync.
+</en-US>
+
+<de-DE>
+Teilweise Pomodoro-Arbeit bleibt erhalten. Erinnerungen für reine Datumsangaben oder nur Start/Fälligkeit wählen, Ziele beim Erfassen sehen und Kalenderereignisse mit Projekten verknüpfen. Fokus-Aufgaben gemeinsam ordnen, Aufgabendetails kopieren. Zuverlässigerer Sync und sicherere Anhänge. Verschlüsselter Sync: alle Geräte aktualisieren, dann einmal unter Einstellungen > Sync die Verschlüsselung aktualisieren.
+</de-DE>
+
+<es-ES>
+Conserva el trabajo parcial de Pomodoro. Elige avisos para fechas sin hora o solo inicio/vencimiento. Ve el destino al capturar, vincula eventos a proyectos, organiza tareas de Enfoque y copia detalles. Sincronización más fiable y adjuntos más seguros. Sync cifrado: actualiza todos los dispositivos y usa Actualizar cifrado una vez en Ajustes > Sincronización.
+</es-ES>
+
+<fr-FR>
+Conservez le travail Pomodoro partiel. Choisissez des rappels sans heure ou début/échéance uniquement. Voyez la destination à la capture, liez des événements aux projets, organisez les tâches Focus et copiez leurs détails. Sync plus fiable, pièces jointes plus sûres. Sync chiffrée : mettez tous les appareils à jour, puis choisissez une fois Mettre à niveau le chiffrement dans Réglages > Sync.
+</fr-FR>
+
+<zh-CN>
+保留未完成番茄钟的有效工作时间。可为无具体时间的日期设置提醒，或只提醒开始/截止时间。收集时显示目标位置，日历事件可关联项目，支持批量整理聚焦任务和复制任务详情。同步更可靠，附件打开更安全。加密同步用户：先更新所有设备，再到设置 > 同步中执行一次「升级同步加密」。
+</zh-CN>

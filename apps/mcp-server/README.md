@@ -95,14 +95,14 @@ The npm package is read-only by default. Add `--write` only when you explicitly 
 
 ### Container (Cloud/API only)
 
-Use `ghcr.io/dongdongbh/mindwtr-mcp:1.1.14`. Image tags follow the **MCP helper version**, not the desktop version. The image supports Linux amd64 and arm64, runs as a non-root user, and needs no writable volume. It omits the optional SQLite addon: direct database mode is unsupported. Connect to Cloud through its API; never mount the Cloud data directory into this container.
+Use `ghcr.io/dongdongbh/mindwtr-mcp:1.1.15`. Image tags follow the **MCP helper version**, not the desktop version. The image supports Linux amd64 and arm64, runs as a non-root user, and needs no writable volume. It omits the optional SQLite addon: direct database mode is unsupported. Connect to Cloud through its API; never mount the Cloud data directory into this container.
 
 Set `MINDWTR_MCP_CLOUD_URL` and `MINDWTR_MCP_CLOUD_TOKEN` in the launching environment, then let your MCP client run:
 
 ```bash
 docker run --rm -i --read-only --cap-drop=ALL --security-opt=no-new-privileges \
   -e MINDWTR_MCP_CLOUD_URL -e MINDWTR_MCP_CLOUD_TOKEN \
-  ghcr.io/dongdongbh/mindwtr-mcp:1.1.14
+  ghcr.io/dongdongbh/mindwtr-mcp:1.1.15
 ```
 
 Podman accepts the same arguments. Keep stdin open with `-i`; do not allocate a TTY (`-t`). Stdio needs no published port. Add `--write` after the image name only to enable mutations. HTTPS is the default; trusted private HTTP Cloud deployments must explicitly add `--cloud-allow-insecure-http=true`. Backend errors never switch to a local database. Local API mode retains its loopback-only URL restriction, so a separate container network cannot reach a desktop API through an arbitrary service hostname.
@@ -116,7 +116,7 @@ docker run --rm --read-only --cap-drop=ALL --security-opt=no-new-privileges \
   -p 127.0.0.1:8722:8722 \
   -e MINDWTR_MCP_CLOUD_URL -e MINDWTR_MCP_CLOUD_TOKEN \
   -e MINDWTR_MCP_HTTP_TOKEN \
-  ghcr.io/dongdongbh/mindwtr-mcp:1.1.14 --http --http-host 0.0.0.0
+  ghcr.io/dongdongbh/mindwtr-mcp:1.1.15 --http --http-host 0.0.0.0
 ```
 
 Clients connect to `/mcp` with the HTTP token. The Cloud token authenticates outgoing requests; the HTTP token authenticates incoming MCP clients. Keep them distinct. Use a TLS reverse proxy for remote access. The host port above is published only on loopback.

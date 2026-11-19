@@ -1,0 +1,1 @@
+Keep partial Pomodoro work, choose date-only or Start/Due reminders, and see capture destinations. Link calendar events to projects, organize Focus tasks, and copy task details. More reliable sync and safer attachments. Encrypted sync: update every device, then choose Upgrade sync encryption once in Settings > Sync.

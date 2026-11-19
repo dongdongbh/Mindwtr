@@ -15,11 +15,11 @@ COPY apps/mcp-server/src ./apps/mcp-server/src
 COPY packages/core/src ./packages/core/src
 RUN bun run --filter mindwtr-mcp build
 
-ARG MCP_VERSION=1.1.14
+ARG MCP_VERSION=1.1.15
 RUN test "$(bun -p "require('./apps/mcp-server/package.json').version")" = "$MCP_VERSION"
 
 FROM node:24.22.3-alpine@sha256:116b800c3754b440ee0aa3ed2f20f5bf3d99a554bfd9adeea09ea8017f6e85f5 AS runtime
-ARG MCP_VERSION=1.1.14
+ARG MCP_VERSION=1.1.15
 ARG SOURCE_REVISION
 LABEL org.opencontainers.image.title="Mindwtr MCP" \
       org.opencontainers.image.description="Mindwtr MCP for the desktop Local API and self-hosted Cloud" \

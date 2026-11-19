@@ -1,30 +1,3 @@
 # Mindwtr Unreleased
 
 Changes collected since the latest stable release.
-
-- Encrypted sync: this version uses a stronger encryption format. If you sync with encryption on, update Mindwtr on every device first. Then, on one device, open Settings › Sync and choose Upgrade sync encryption, and enter your passphrase once. Until you do, sync stops with a message that the sync location uses older encryption. After the upgrade, versions older than this one cannot read the sync files. Your existing encrypted copies are kept.
-- Sync: when another device is writing to the sync location and Mindwtr says it will upload your changes on its own shortly, it now does. Before, the upload waited until your next edit, until you reopened the app, or until you synced by hand.
-- Sync: on desktop and mobile, an edit you make just as a WebDAV or Dropbox sync finishes no longer flips back to the old value on screen. Since v1.2.5, a second edit to the same task could then overwrite the first edit on every device.
-- Sync: on mobile, when you edited once or more while a sync failed and the next sync carried your edits, the sync badge no longer stays on syncing until your next edit. On desktop, React Native mobile and native Android, a sync you start while another is running now reports the result of the sync that carries your change. On mobile, when you pull to refresh during a sync, your sync starts about 1 s after the running one ends.
-- Sync: on desktop, an edit you make while a sync finishes no longer counts as synced. This applies after you choose to use the external sync file, and after a sync that finds nothing to change. Mindwtr now syncs that edit when you leave the window. When the sync file then changes on another device, Mindwtr shows "External sync change detected" and asks how to continue, instead of taking in the file.
-- Sync: changing a setting in Appearance, Language or another settings group whose sync is not switched on no longer makes Self-hosted sync run over and over. A group's change time now travels only with its values, and the Self-hosted server ignores groups that are not synced when it decides whether a device should sync again. (feedback d4644bd4)
-- Sync: switching on Appearance, Language or GTD settings sync no longer makes Self-hosted sync run over and over when two devices held different values under the same change time; all devices now settle on one value. A change time that an older version left on the server no longer decides which value wins. (feedback d4644bd4)
-- Self-hosted sync: update the Mindwtr server along with the apps. Until the server is updated, each change costs one extra sync cycle. (feedback d4644bd4)
-- Mobile Dropbox: Disconnect during a sync now stays disconnected. Before, a token refresh still running at that moment saved the sign-in back, so Settings showed Dropbox as Connected again.
-- Mobile Dropbox: Disconnect now also revokes the app's access at Dropbox when the saved access token has expired. Before, the revoke failed quietly and the sign-in stayed valid at Dropbox.
-- Mobile voice capture: on-device Whisper now detects the spoken language when Settings › AI is set to Auto, and uses the language you picked otherwise. Before, it always transcribed as English. English-only (`.en`) models always use English.
-- Mobile: Review and Data settings take less space. Review's "Due for review" / "All open tasks" choice is now one small button next to Start Review; its menu explains each queue and links to Done. Settings › Data › Archive retention starts folded, shows the current setting, and opens to a short description with a Learn more link.
-- Mobile task Preview: Mark Done saves the current draft and completes the task directly, retaining Retry if saving fails. (#1514)
-- Desktop: a project's Review date uses the same date field as Start and Due. It is empty until you set it, follows your date format, and closes when you click elsewhere. (#1556)
-- Desktop: project task titles use the shared task-row typography. The Area selector summarizes the active scope and provides a direct reset to all areas. (#1532, #1525)
-- Quick add: on a library with no projects, a `+name` made of letters a-f and digits, such as `+cafe1234`, now creates a project with that name. Before, the task got a project link that pointed nowhere. A `!name` or `/area:name` that matches no area now stays in the task title instead of linking to a missing area.
-- Task notes: when you type `[[` and pick a task or project from the suggestions, the link now ends with one `]]`. Before, the closing brackets that typing `[[` adds stayed behind, so the link ended with `]]]]`.
-
-- Desktop Local API and MCP: reopen ordinary done/archived tasks with optional stale-write protection, and create or restore areas by name without duplicates. Reopening reactivates the parent while leaving finished siblings finished; recurring history requires the app. (#1506)
-- Bun Local API helper: add task-list versions, stale-write protection for PATCH and completion/archive, durable retry-safe creates, and unchanged-PATCH detection. (#1506)
-- Desktop Local API and MCP: sections and people can be listed read-only. Task-list polls support query-specific ETags and bodyless unchanged responses, including retained tombstones when requested. (#1506)
-
-- Daily and Weekly Review: Waiting For prompts follow the task's review date, or its start date when no valid review date is set. Future dates defer follow-up; an explicit review date can bring a task back before it starts. (#1531)
-
-- Android widget: when you check off several tasks in a row, no row moves while any Undo is still open. All checked rows leave together three seconds after the last tap, and each one can still be undone until then. (#1211)
-- Android: returning within App Lock's Require unlock delay shows the open task without briefly displaying the unlock panel. An opaque privacy cover still hides the app while it is away. (#1423)
