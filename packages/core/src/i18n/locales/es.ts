@@ -2893,6 +2893,8 @@ export const esOverrides: Record<string, string> = {
 'settings.syncPreferenceSavedFilters': "Filtros guardados",
 'savedFilters.saveTitle': "Guardar filtro",
 'savedFilters.namePlaceholder': "Nombre del filtro",
+'savedFilters.moveEarlier': "Mover a la izquierda",
+'savedFilters.moveLater': "Mover a la derecha",
 'settings.backgroundSync': "Sincronización en segundo plano",
 'settings.backgroundSyncDesc': "La sincronización de escritorio se ejecuta al iniciar, cuando la aplicación recupera el foco, cada 15 minutos mientras Mindwtr está en funcionamiento y poco después de cambios en tareas o proyectos. Al cerrar a la bandeja se mantiene activa; la opción de iniciar al arrancar puede ponerla en marcha tras iniciar sesión. Cerrar la aplicación detiene la sincronización en segundo plano de escritorio.",
 'settings.attachmentsCleanupPendingDeletes': "Eliminaciones remotas pendientes",

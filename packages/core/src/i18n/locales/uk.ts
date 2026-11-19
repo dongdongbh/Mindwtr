@@ -491,6 +491,8 @@ export const ukOverrides: Record<string, string> = {
     "taskEdit.checklist": "Контрольний список",
     'savedFilters.saveTitle': "Зберегти фільтр",
     'savedFilters.namePlaceholder': "Назва фільтра",
+    'savedFilters.moveEarlier': "Перемістити ліворуч",
+    'savedFilters.moveLater': "Перемістити праворуч",
     'taskEdit.dragChecklistItem': "Перетягніть, щоб змінити порядок",
     'taskEdit.checklistItemActions': "Дії з пунктом списку",
     'taskEdit.moveChecklistTop': "Перемістити на початок",

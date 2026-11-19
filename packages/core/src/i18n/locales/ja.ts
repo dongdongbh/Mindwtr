@@ -2968,6 +2968,8 @@ export const jaOverrides: Record<string, string> = {
         'settings.syncPreferenceSavedFilters': '保存した絞り込み条件',
         'savedFilters.saveTitle': "フィルターを保存",
         'savedFilters.namePlaceholder': "フィルター名",
+        'savedFilters.moveEarlier': "左へ移動",
+        'savedFilters.moveLater': "右へ移動",
         'settings.backgroundSync': 'バックグラウンド同期',
         'settings.backgroundSyncDesc': 'デスクトップ版では、起動時、アプリが前面に戻ったとき、起動中は15分ごと、そしてタスクやプロジェクトを変更した少しあとに同期します。トレイに常駐させておけば同期は続き、ログイン時に起動する設定にすればサインイン後から動きます。アプリを終了すると、バックグラウンド同期は止まります。',
         'settings.attachmentsCleanupPendingDeletes': '保留中のリモート削除',

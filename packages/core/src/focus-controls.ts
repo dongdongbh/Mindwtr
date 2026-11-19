@@ -221,6 +221,26 @@ export function planFocusFilterDelete(savedFilters: readonly SavedFilter[] | und
     return { savedFilters: markSavedFilterDeleted(savedFilters, id, deletedAt) };
 }
 
+export type FocusFilterMoveDirection = 'earlier' | 'later';
+
+export function planFocusFilterMove(
+    savedFilters: readonly SavedFilter[] | undefined,
+    id: string,
+    direction: FocusFilterMoveDirection,
+): { savedFilters: SavedFilter[] } | null {
+    const visibleIds = selectFocusSavedFilters(savedFilters).map((filter) => filter.id);
+    const visibleIndex = visibleIds.indexOf(id);
+    if (visibleIndex < 0) return null;
+    const neighborId = visibleIds[visibleIndex + (direction === 'earlier' ? -1 : 1)];
+    if (!neighborId) return null;
+    const next = [...(savedFilters ?? [])];
+    const from = next.findIndex((filter) => filter?.id === id);
+    const to = next.findIndex((filter) => filter?.id === neighborId);
+    if (from < 0 || to < 0) return null;
+    [next[from], next[to]] = [next[to], next[from]];
+    return { savedFilters: next };
+}
+
 export type FocusAdvancedFilterChip = {
 
     id: string;

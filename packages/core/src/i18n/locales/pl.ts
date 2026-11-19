@@ -351,6 +351,8 @@ export const plOverrides: Record<string, string> = {
         'taskEdit.checklist': 'Lista kontrolna',
         'savedFilters.saveTitle': "Zapisz filtr",
         'savedFilters.namePlaceholder': "Nazwa filtra",
+        'savedFilters.moveEarlier': "Przenieś w lewo",
+        'savedFilters.moveLater': "Przenieś w prawo",
         'taskEdit.dragChecklistItem': "Przeciągnij, aby zmienić kolejność",
         'taskEdit.checklistItemActions': "Działania elementu listy",
         'taskEdit.moveChecklistTop': "Przenieś na początek",

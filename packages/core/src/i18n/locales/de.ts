@@ -2790,6 +2790,8 @@ export const deOverrides: Record<string, string> = {
         'settings.syncPreferenceSavedFilters': 'Gespeicherte Filter',
         'savedFilters.saveTitle': "Filter speichern",
         'savedFilters.namePlaceholder': "Filtername",
+        'savedFilters.moveEarlier': "Nach links verschieben",
+        'savedFilters.moveLater': "Nach rechts verschieben",
         'settings.syncQueuedBody': 'Während der Synchronisierung kamen lokale Änderungen an. Ein erneuter Versuch wurde automatisch eingereiht.',
         'settings.syncReadMergeFolder': 'Sync-Ordner lesen und zusammenführen',
         'settings.syncReadMergeSelfHosted': 'Selbst gehostete Daten lesen und zusammenführen',

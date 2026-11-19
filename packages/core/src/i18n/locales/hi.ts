@@ -352,6 +352,8 @@ export const hiOverrides: Record<string, string> = {
         'taskEdit.checklist': 'जांच सूची',
         'savedFilters.saveTitle': "फ़िल्टर सहेजें",
         'savedFilters.namePlaceholder': "फ़िल्टर का नाम",
+        'savedFilters.moveEarlier': "बाएँ ले जाएँ",
+        'savedFilters.moveLater': "दाएँ ले जाएँ",
         'taskEdit.dragChecklistItem': "क्रम बदलने के लिए खींचें",
         'taskEdit.checklistItemActions': "चेकलिस्ट आइटम की कार्रवाइयाँ",
         'taskEdit.moveChecklistTop': "सबसे ऊपर ले जाएँ",

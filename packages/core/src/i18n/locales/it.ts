@@ -1742,6 +1742,8 @@ export const itOverrides: Record<string, string> = {
         'taskEdit.checklist': 'Lista di controllo',
         'savedFilters.saveTitle': "Salva filtro",
         'savedFilters.namePlaceholder': "Nome del filtro",
+        'savedFilters.moveEarlier': "Sposta a sinistra",
+        'savedFilters.moveLater': "Sposta a destra",
         'taskEdit.dragChecklistItem': "Trascina per riordinare",
         'taskEdit.checklistItemActions': "Azioni elemento della lista",
         'taskEdit.moveChecklistTop': "Sposta in cima",

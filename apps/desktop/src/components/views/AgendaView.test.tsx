@@ -2190,6 +2190,28 @@ describe('AgendaView', () => {
         expect(queryByRole('button', { name: 'Desk' })).not.toBeInTheDocument();
     });
 
+    it('moves saved Focus filters left and right from their menus', async () => {
+        const make = (id: string, name: string): SavedFilter => ({ id, name, view: 'focus', criteria: { contexts: [`@${id}`] }, createdAt: nowIso, updatedAt: nowIso });
+        useTaskStore.setState({ settings: { savedFilters: [make('desk', 'Desk'), make('phone', 'Phone'), make('home', 'Home')] } });
+        const { getByRole, queryByRole } = renderAgenda();
+        const storedIds = () => useTaskStore.getState().settings.savedFilters?.map((filter) => filter.id);
+
+        fireEvent.click(getByRole('button', { name: 'More options: Desk' }));
+        expect(queryByRole('menuitem', { name: 'Move left' })).not.toBeInTheDocument();
+        expect(getByRole('menuitem', { name: 'Move right' })).toHaveFocus();
+        fireEvent.click(getByRole('menuitem', { name: 'Move right' }));
+        await waitFor(() => expect(storedIds()).toEqual(['phone', 'desk', 'home']));
+        expect(getByRole('button', { name: 'More options: Desk' })).toHaveFocus();
+
+        fireEvent.click(getByRole('button', { name: 'More options: Home' }));
+        expect(queryByRole('menuitem', { name: 'Move right' })).not.toBeInTheDocument();
+        fireEvent.click(getByRole('menuitem', { name: 'Move left' }));
+        await waitFor(() => expect(storedIds()).toEqual(['phone', 'home', 'desk']));
+
+        const chips = Array.from(getByRole('button', { name: 'All' }).parentElement?.querySelectorAll('button[aria-pressed]') ?? []).map((node) => node.textContent);
+        expect(chips).toEqual(['All', 'Phone', 'Home', 'Desk']);
+    });
+
     it('deletes a saved Focus filter on the stored list, keeping a filter another device deleted meanwhile', async () => {
         const desk: SavedFilter = { id: 'filter-desk', name: 'Desk', view: 'focus', criteria: { contexts: ['@desk'] }, createdAt: nowIso, updatedAt: nowIso };
         const phone: SavedFilter = { id: 'filter-phone', name: 'Phone', view: 'focus', criteria: { contexts: ['@phone'] }, createdAt: nowIso, updatedAt: nowIso };

@@ -357,6 +357,8 @@ export const trOverrides: Record<string, string> = {
         'taskEdit.checklist': 'Kontrol listesi',
         'savedFilters.saveTitle': "Filtreyi kaydet",
         'savedFilters.namePlaceholder': "Filtre adı",
+        'savedFilters.moveEarlier': "Sola taşı",
+        'savedFilters.moveLater': "Sağa taşı",
         'taskEdit.dragChecklistItem': "Sıralamak için sürükleyin",
         'taskEdit.checklistItemActions': "Kontrol listesi öğesi işlemleri",
         'taskEdit.moveChecklistTop': "En üste taşı",

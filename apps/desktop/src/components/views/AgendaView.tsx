@@ -16,15 +16,15 @@ import {
 import { SortableContext, arrayMove, sortableKeyboardCoordinates, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { ErrorBoundary } from '../ErrorBoundary';
 import { shallow, useTaskStore, TaskPriority, TimeEstimate, TIME_ESTIMATE_OPTIONS, buildFocusPools, compareProjectsByOrder, planFocusFilterCriterionRemoval, formatFocusTaskLimitText,
-    getFocusHiddenByAreaLabel, logInfo, getFocusStarBlockedText, formatTimeEstimateLabel, generateUUID, getUsedTaskTokens, deriveFocusTaskLists, getProjectDeadlineBoostLabel, getTaskMetadataFilterVisibility, isTaskFutureFocusCandidate, markSavedFilterDeleted, normalizeFocusTaskLimit, collectBulkTaskTokens, resolveFeatureFlags, resolveTaskPerspectiveForFeatures, safeFormatDate, safeParseDate, selectFocusSavedFilters, isDueForReview, shouldShowTaskForStart, splitTodayTasksByStartTime, translateWithFallback, tFallback, updateSettingsFromLatest } from '@mindwtr/core';
+    getFocusHiddenByAreaLabel, logInfo, getFocusStarBlockedText, formatTimeEstimateLabel, generateUUID, getUsedTaskTokens, deriveFocusTaskLists, getProjectDeadlineBoostLabel, getTaskMetadataFilterVisibility, isTaskFutureFocusCandidate, markSavedFilterDeleted, planFocusFilterMove, normalizeFocusTaskLimit, collectBulkTaskTokens, resolveFeatureFlags, resolveTaskPerspectiveForFeatures, safeFormatDate, safeParseDate, selectFocusSavedFilters, isDueForReview, shouldShowTaskForStart, splitTodayTasksByStartTime, translateWithFallback, tFallback, updateSettingsFromLatest } from '@mindwtr/core';
 import { DEFAULT_FOCUS_SORT_BY } from '@mindwtr/core';
-import type { BulkOrganizeTaskUpdateInput, MultiValueFilterMatchMode, RangeSelectionOptions, SavedFilter, SortField, Task, TaskEnergyLevel, TaskStatus } from '@mindwtr/core';
+import type { BulkOrganizeTaskUpdateInput, FocusFilterMoveDirection, MultiValueFilterMatchMode, RangeSelectionOptions, SavedFilter, SortField, Task, TaskEnergyLevel, TaskStatus } from '@mindwtr/core';
 import { useTaskFilterSelections } from '@mindwtr/core/task-filter-selections';
 import { buildAdvancedChips, buildSelectionChips, type ActiveFilterChipDeps } from './list/active-filter-chips';
 import { useLanguage } from '../../contexts/language-context';
 import { cn } from '../../lib/utils';
 import { useUiStore } from '../../store/ui-store';
-import { AlertCircle, CalendarDays, ChevronDown, ChevronRight, Clock, ArrowRight, Folder, CheckCircle2, MoreHorizontal, Trash2 } from 'lucide-react';
+import { AlertCircle, CalendarDays, ChevronDown, ChevronRight, Clock, ArrowLeft, ArrowRight, Folder, CheckCircle2, MoreHorizontal, Trash2 } from 'lucide-react';
 import { useConfirmDialog } from '../../hooks/useConfirmDialog';
 import { usePerformanceMonitor } from '../../hooks/usePerformanceMonitor';
 import { checkBudget } from '../../config/performanceBudgets';
@@ -133,14 +133,20 @@ function getSavedFilterDefaultName(chips: AgendaActiveFilterChip[], fallback: st
 function SavedFocusFilterChip({
     filter,
     isActive,
+    canMoveEarlier,
+    canMoveLater,
     onApply,
     onDelete,
+    onMove,
     resolveText,
 }: {
     filter: SavedFilter;
     isActive: boolean;
+    canMoveEarlier: boolean;
+    canMoveLater: boolean;
     onApply: (filter: SavedFilter) => void;
     onDelete: (filter: SavedFilter) => Promise<void>;
+    onMove: (filter: SavedFilter, direction: FocusFilterMoveDirection) => void;
     resolveText: (key: string, fallback: string) => string;
 }) {
     const menuAnchorRef = useRef<HTMLDivElement | null>(null);
@@ -240,6 +246,36 @@ function SavedFocusFilterChip({
                         menuButtonRef.current?.focus();
                     }}
                 >
+                    {canMoveEarlier && (
+                        <button
+                            type="button"
+                            role="menuitem"
+                            onClick={() => {
+                                setMenuOpen(false);
+                                onMove(filter, 'earlier');
+                                menuButtonRef.current?.focus();
+                            }}
+                            className="flex w-full items-center gap-2 rounded px-3 py-2 text-left text-sm transition-colors hover:bg-muted focus:bg-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                        >
+                            <ArrowLeft className="h-4 w-4 rtl:rotate-180" aria-hidden="true" />
+                            <span>{resolveText('savedFilters.moveEarlier', 'Move left')}</span>
+                        </button>
+                    )}
+                    {canMoveLater && (
+                        <button
+                            type="button"
+                            role="menuitem"
+                            onClick={() => {
+                                setMenuOpen(false);
+                                onMove(filter, 'later');
+                                menuButtonRef.current?.focus();
+                            }}
+                            className="flex w-full items-center gap-2 rounded px-3 py-2 text-left text-sm transition-colors hover:bg-muted focus:bg-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                        >
+                            <ArrowRight className="h-4 w-4 rtl:rotate-180" aria-hidden="true" />
+                            <span>{resolveText('savedFilters.moveLater', 'Move right')}</span>
+                        </button>
+                    )}
                     <button
                         type="button"
                         role="menuitem"
@@ -812,6 +848,10 @@ export function AgendaView() {
         }).catch(() => undefined);
     }, [activeSavedFilterId, requestConfirmation, resolveText, t, unbindSavedFilter]);
 
+    const handleMoveSavedFilter = useCallback((filter: SavedFilter, direction: FocusFilterMoveDirection) => {
+        void updateSettingsFromLatest((latest) => planFocusFilterMove(latest.savedFilters, filter.id, direction)).catch(() => undefined);
+    }, []);
+
     useEffect(() => {
         if (!highlightTaskId) return;
         const el = document.querySelector(`[data-task-id="${highlightTaskId}"]`) as HTMLElement | null;
@@ -1227,15 +1267,18 @@ export function AgendaView() {
                     >
                         {resolveText('common.all', 'All')}
                     </button>
-                    {savedFocusFilters.map((filter) => {
+                    {savedFocusFilters.map((filter, index) => {
                         const isActive = activeSavedFilterId === filter.id;
                         return (
                             <SavedFocusFilterChip
                                 key={filter.id}
                                 filter={filter}
                                 isActive={isActive}
+                                canMoveEarlier={index > 0}
+                                canMoveLater={index < savedFocusFilters.length - 1}
                                 onApply={applySavedFocusFilter}
                                 onDelete={handleDeleteSavedFilter}
+                                onMove={handleMoveSavedFilter}
                                 resolveText={resolveText}
                             />
                         );

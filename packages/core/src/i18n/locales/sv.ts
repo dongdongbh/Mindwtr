@@ -478,6 +478,8 @@ export const svOverrides: Record<string, string> = {
         'taskEdit.checklist': 'Checklista',
         'savedFilters.saveTitle': "Spara filter",
         'savedFilters.namePlaceholder': "Filternamn",
+        'savedFilters.moveEarlier': "Flytta åt vänster",
+        'savedFilters.moveLater': "Flytta åt höger",
         'taskEdit.dragChecklistItem': "Dra för att ändra ordning",
         'taskEdit.checklistItemActions': "Åtgärder för checklistpunkt",
         'taskEdit.moveChecklistTop': "Flytta överst",

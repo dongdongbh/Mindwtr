@@ -431,6 +431,8 @@ export const viOverrides: Record<string, string> = {
         'taskEdit.checklist': 'Danh sách kiểm tra',
         'savedFilters.saveTitle': "Lưu bộ lọc",
         'savedFilters.namePlaceholder': "Tên bộ lọc",
+        'savedFilters.moveEarlier': "Di chuyển sang trái",
+        'savedFilters.moveLater': "Di chuyển sang phải",
         'taskEdit.dragChecklistItem': "Kéo để sắp xếp lại",
         'taskEdit.checklistItemActions': "Thao tác với mục danh sách",
         'taskEdit.moveChecklistTop': "Chuyển lên đầu",

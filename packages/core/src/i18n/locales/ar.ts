@@ -345,6 +345,8 @@ export const arOverrides: Record<string, string> = {
         'taskEdit.checklist': 'قائمة التحقق',
         'savedFilters.saveTitle': "حفظ الفلتر",
         'savedFilters.namePlaceholder': "اسم الفلتر",
+        'savedFilters.moveEarlier': "نقل للأمام",
+        'savedFilters.moveLater': "نقل للخلف",
         'taskEdit.dragChecklistItem': "اسحب لإعادة الترتيب",
         'taskEdit.checklistItemActions': "إجراءات عنصر القائمة",
         'taskEdit.moveChecklistTop': "نقل إلى الأعلى",

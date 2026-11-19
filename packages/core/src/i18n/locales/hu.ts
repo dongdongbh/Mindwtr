@@ -468,6 +468,8 @@ export const huOverrides: Record<string, string> = {
     'taskEdit.checklist': 'Ellenőrzőlista',
     'savedFilters.saveTitle': "Szűrő mentése",
     'savedFilters.namePlaceholder': "Szűrő neve",
+    'savedFilters.moveEarlier': "Mozgatás balra",
+    'savedFilters.moveLater': "Mozgatás jobbra",
     'taskEdit.dragChecklistItem': "Húzás az átrendezéshez",
     'taskEdit.checklistItemActions': "Listaelem műveletei",
     'taskEdit.moveChecklistTop': "Áthelyezés a lista elejére",
