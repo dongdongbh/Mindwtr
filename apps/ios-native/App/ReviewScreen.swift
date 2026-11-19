@@ -28,8 +28,8 @@ struct ReviewScreen: View {
                             .accessibilityIdentifier("review-row-notice")
                     }
                     if !view.text("empty").isEmpty {
-                        Text(view.text("empty")).rnFont(14).foregroundStyle(palette.secondary)
-                            .frame(maxWidth: .infinity).padding(.vertical, 40).accessibilityIdentifier("review-empty")
+                        Text(view.text("empty")).rnFont(16).foregroundStyle(palette.secondary).multilineTextAlignment(.center)
+                            .frame(maxWidth: .infinity).padding(32).accessibilityIdentifier("review-empty")
                     }
                     let items = view.objects("items")
                     ForEach(items.indices, id: \.self) { index in
