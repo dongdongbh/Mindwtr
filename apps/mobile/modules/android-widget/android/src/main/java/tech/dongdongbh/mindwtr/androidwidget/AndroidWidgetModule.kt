@@ -28,17 +28,17 @@ class AndroidWidgetModule : Module() {
     AsyncFunction("completeWidgetLaunch") { token: Int -> WidgetLaunchCover.complete(token) }.runOnQueue(Queues.MAIN)
 
     Function("setPayload") { json: String ->
-      val context = appContext.reactContext ?: return@Function
+      val context = checkNotNull(appContext.reactContext) { "Widget publication requires an Android context" }
 
       check(WidgetPayloadStore.write(context, json)) { "Widget payload not stored" }
     }
 
     Function("updateWidgets") {
-      val context = appContext.reactContext
-      val result = context?.let { WidgetRenderer.refreshAll(it) } ?: WidgetRenderer.RefreshResult()
-      val hiddenCheckoffCount = context?.let { CheckoffStore.consumeHiddenCount(it) } ?: 0
-      val serializedCheckoffCount = context?.let { CheckoffStore.consumeSerializedCount(it) } ?: 0
-      val heldCheckoffCount = context?.let { CheckoffStore.consumeHeldCount(it) } ?: 0
+      val context = checkNotNull(appContext.reactContext) { "Widget refresh requires an Android context" }
+      val result = WidgetRenderer.refreshAll(context)
+      val hiddenCheckoffCount = CheckoffStore.consumeHiddenCount(context)
+      val serializedCheckoffCount = CheckoffStore.consumeSerializedCount(context)
+      val heldCheckoffCount = CheckoffStore.consumeHeldCount(context)
       mapOf(
         "legacyWidgetCount" to result.legacyWidgetCount,
         "compactWidgetCount" to result.compactWidgetCount,

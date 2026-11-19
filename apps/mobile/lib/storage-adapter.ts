@@ -4,7 +4,7 @@ import Constants from 'expo-constants';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { WIDGET_DATA_KEY } from './widget-data';
-import { updateMobileWidgetFromData } from './widget-service';
+import { canPublishAndroidWidget, updateMobileWidgetFromData } from './widget-service';
 import { logError, logInfo, logWarn } from './app-log';
 import { markStartupPhase, measureStartupPhase } from './startup-profiler';
 
@@ -726,6 +726,8 @@ const isAppForegroundActive = (): boolean => (
     && (AppState as unknown as { currentState?: string } | undefined)?.currentState === 'active'
 );
 
+let androidWidgetPublicationFailed = false;
+let androidWidgetRecoveryRead: Promise<void> | null = null;
 
 const widgetRefreshCoalescer = createCoalescingWriter<AppData, { throttled: boolean }>({
     coalesceMs: JSON_BACKUP_COALESCE_MS,
@@ -737,13 +739,24 @@ const widgetRefreshCoalescer = createCoalescingWriter<AppData, { throttled: bool
     ),
     write: async (pending) => {
         const throttled = isAppForegroundActive();
-        try {
-            await measureStartupPhase(`${pending.phasePrefix}.widget_update`, async () =>
-                updateMobileWidgetFromData(pending.data)
-            );
-        } catch (error) {
+        const publish = () => updateMobileWidgetFromData(pending.data).catch((error) => {
             logStorageWarn('[Widgets] Failed to update mobile widget after backup', error);
-        }
+            return false;
+        });
+        await measureStartupPhase(`${pending.phasePrefix}.widget_update`, async () => {
+            const androidWidget = canPublishAndroidWidget();
+            const published = await publish();
+            const retry = published === false && !throttled && androidWidget;
+            const finalResult = retry ? await publish() : published;
+            if (androidWidget) androidWidgetPublicationFailed = finalResult === false;
+            if (retry) {
+                const log = finalResult ? logInfo : logWarn;
+                await log('Android background widget publication retried', {
+                    scope: 'widget', force: true,
+                    extra: { releaseCheck: 'v1.3.10/android-widget-publication-retry', outcome: finalResult ? 'published' : 'failed' },
+                });
+            }
+        });
         return { throttled };
     },
     onSlow: (elapsedMs, pending, result) => {
@@ -1663,6 +1676,14 @@ const createStorage = (): StorageAdapter => {
 
 export const mobileStorage = createStorage();
 
+export const recoverAndroidWidgetAfterSync = (): void => {
+    if (!androidWidgetPublicationFailed || androidWidgetRecoveryRead || widgetRefreshCoalescer.hasPending() || !canPublishAndroidWidget()) return;
+    androidWidgetRecoveryRead = mobileStorage.getData()
+        .then(() => undefined)
+        .catch((error) => logStorageWarn('[Widgets] Failed to read local data for widget recovery', error))
+        .finally(() => { androidWidgetRecoveryRead = null; });
+};
+
 export const readTrustedLocalDataForEncryptionUpgrade = async (): Promise<AppData> => {
     await waitForQueuedSqliteWrites();
     const state = await getSqliteState();
@@ -1674,6 +1695,7 @@ export const readTrustedLocalDataForEncryptionUpgrade = async (): Promise<AppDat
 
 
 const drainMobileStorageWork = async (): Promise<void> => {
+    await androidWidgetRecoveryRead;
     await waitForQueuedSqliteWrites();
     await flushPendingStartupJsonBackup();
     await flushPendingWidgetRefresh();
@@ -1718,6 +1740,8 @@ export const __mobileStorageTestUtils = {
         jsonCopyReconciled = false;
         didLogUnreconciledJsonCopy = false;
         widgetRefreshCoalescer.reset();
+        androidWidgetPublicationFailed = false;
+        androidWidgetRecoveryRead = null;
         initializeSqliteState = initSqliteState;
         jsonAheadOfSqlite = false;
         clearPreferJsonBackup();
@@ -1728,7 +1752,7 @@ export const __mobileStorageTestUtils = {
         initializeSqliteState = initializer;
         clearPreferJsonBackup();
     },
-    setSqliteStateForTests: (state: { adapter: Pick<SqliteAdapter, 'saveTask'> & Partial<Pick<SqliteAdapter, 'getData'>>; client: Partial<SqliteClient> }) => {
+    setSqliteStateForTests: (state: { adapter: Partial<Pick<SqliteAdapter, 'saveTask' | 'saveData' | 'getData'>>; client: Partial<SqliteClient> }) => {
         sqliteStatePromise = Promise.resolve(state as SqliteState);
         sqliteStateRetryAfter = 0;
         clearPreferJsonBackup();

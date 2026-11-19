@@ -408,6 +408,10 @@ export function resetMobileWidgetRenderCache(): void {
     widgetFingerprintLoadPromise = null;
 }
 
+export function canPublishAndroidWidget(): boolean {
+    return Platform.OS === 'android' && !isSandboxMode() && AndroidWidget.isSupported();
+}
+
 export async function updateMobileWidgetFromData(data: AppData): Promise<boolean> {
     if (isSandboxMode()) return false;
     if (Platform.OS !== 'android' && Platform.OS !== 'ios') return false;

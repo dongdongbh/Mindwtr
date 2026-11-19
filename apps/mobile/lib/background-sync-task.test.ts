@@ -54,6 +54,7 @@ const syncServiceMock = vi.hoisted(() => ({
 const storageAdapterMock = vi.hoisted(() => ({
   mobileStorage: { name: 'mobile' },
   quiesceMobileStorage: vi.fn(),
+  recoverAndroidWidgetAfterSync: vi.fn(),
 }));
 
 const asyncStorageMock = vi.hoisted(() => {
@@ -277,6 +278,7 @@ describe('mobile background sync task', () => {
 
     expect(coreMock.flushPendingSave).not.toHaveBeenCalled();
     expect(syncServiceMock.performMobileSync).not.toHaveBeenCalled();
+    expect(storageAdapterMock.recoverAndroidWidgetAfterSync).not.toHaveBeenCalled();
     expect(result).toBe(backgroundTaskMock.BackgroundTaskResult.Success);
   });
 
@@ -288,6 +290,20 @@ describe('mobile background sync task', () => {
     const result = await taskManagerMock.state.executor?.();
 
     expect(result).toBe(backgroundTaskMock.BackgroundTaskResult.Failed);
+    expect(storageAdapterMock.recoverAndroidWidgetAfterSync).not.toHaveBeenCalled();
+  });
+
+  it('requests widget recovery before quiescing after a successful unchanged Android sync', async () => {
+    syncServiceMock.getMobileSyncConfigurationStatus.mockResolvedValue({ backend: 'cloud', configured: true });
+    syncServiceMock.performMobileSync.mockResolvedValue({ success: true, skipped: 'unchanged' });
+
+    await loadModule();
+    const result = await taskManagerMock.state.executor?.();
+
+    expect(result).toBe(backgroundTaskMock.BackgroundTaskResult.Success);
+    expect(storageAdapterMock.recoverAndroidWidgetAfterSync).toHaveBeenCalledTimes(1);
+    expect(storageAdapterMock.recoverAndroidWidgetAfterSync.mock.invocationCallOrder[0])
+      .toBeLessThan(storageAdapterMock.quiesceMobileStorage.mock.invocationCallOrder[0]);
   });
 
 

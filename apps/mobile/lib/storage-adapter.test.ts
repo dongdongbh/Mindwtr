@@ -70,6 +70,7 @@ vi.mock('@react-native-async-storage/async-storage', () => ({
 }));
 
 vi.mock('./widget-service', () => ({
+  canPublishAndroidWidget: () => mockPlatformOS.value === 'android',
   updateMobileWidgetFromData: updateMobileWidgetFromDataMock,
 }));
 
@@ -2299,6 +2300,55 @@ describe('mobile storage adapter', () => {
     }
   }, 10_000);
 
+
+  it.each([true, false])('retries a failed background Android widget publication once, outcome %s', async (recovered) => {
+    const { mobileStorage, quiesceMobileStorage, __mobileStorageTestUtils } = await import('./storage-adapter');
+    const snapshot = makeWidgetSnapshot(makeWidgetTask('remotely-added'));
+    const saveData = vi.fn().mockResolvedValue(undefined);
+    __mobileStorageTestUtils.setSqliteStateForTests({ adapter: { saveData }, client: {} });
+    appStateCurrentState.value = 'background';
+    if (recovered) updateMobileWidgetFromDataMock.mockResolvedValueOnce(false).mockResolvedValue(true);
+    else updateMobileWidgetFromDataMock.mockRejectedValue(new Error('Widget unavailable'));
+
+    await mobileStorage.saveData(snapshot);
+    await quiesceMobileStorage();
+
+    expect(saveData).toHaveBeenCalledTimes(1);
+    expect(updateMobileWidgetFromDataMock.mock.calls.map(([data]) => data)).toEqual([snapshot, snapshot]);
+    expect(recovered ? logInfoMock : logWarnMock).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({
+      scope: 'widget', extra: { releaseCheck: 'v1.3.10/android-widget-publication-retry', outcome: recovered ? 'published' : 'failed' },
+    }));
+  });
+
+  it('recovers a failed widget publication on a successful sync without a local read or write', async () => {
+    const { mobileStorage, quiesceMobileStorage, recoverAndroidWidgetAfterSync, __mobileStorageTestUtils } = await import('./storage-adapter');
+    const first = makeWidgetSnapshot(makeWidgetTask('first-sync'));
+    const current = makeWidgetSnapshot(makeWidgetTask('latest-durable-task'));
+    const saveData = vi.fn().mockResolvedValue(undefined);
+    const getData = vi.fn().mockResolvedValue(current);
+    __mobileStorageTestUtils.setSqliteStateForTests({ adapter: { saveData, getData }, client: {} });
+    appStateCurrentState.value = 'background';
+
+    updateMobileWidgetFromDataMock.mockResolvedValue(false);
+    await mobileStorage.saveData(first);
+    await quiesceMobileStorage();
+    expect(updateMobileWidgetFromDataMock.mock.calls.map(([data]) => data)).toEqual([first, first]);
+    expect(getData).not.toHaveBeenCalled();
+
+    updateMobileWidgetFromDataMock.mockResolvedValue(true);
+    recoverAndroidWidgetAfterSync();
+    recoverAndroidWidgetAfterSync();
+    await quiesceMobileStorage();
+    expect(updateMobileWidgetFromDataMock).toHaveBeenLastCalledWith(current);
+    expect(updateMobileWidgetFromDataMock).toHaveBeenCalledTimes(3);
+    expect(getData).toHaveBeenCalledTimes(1);
+    expect(saveData).toHaveBeenCalledTimes(1);
+
+    recoverAndroidWidgetAfterSync();
+    await quiesceMobileStorage();
+    expect(getData).toHaveBeenCalledTimes(1);
+    expect(updateMobileWidgetFromDataMock).toHaveBeenCalledTimes(3);
+  });
 
   it('quiesces throttled backup and widget work without waiting out the window', async () => {
     try {

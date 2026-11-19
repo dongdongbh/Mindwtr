@@ -19,7 +19,7 @@ import { logInfo, logWarn } from './app-log';
 import { areJsTimersPaused } from './js-timers';
 import { drainPendingCapturesInBackground } from './pending-capture-drain';
 import { reconcileLocalMobileNotificationsInBackground } from './notification-service-local';
-import { mobileStorage, quiesceMobileStorage } from './storage-adapter';
+import { mobileStorage, quiesceMobileStorage, recoverAndroidWidgetAfterSync } from './storage-adapter';
 import { abortMobileSync, getMobileSyncConfigurationStatus, performMobileSync, setMobileSyncRequestDeadline } from './sync-service';
 import {
   BACKGROUND_SYNC_LAST_REGISTERED_INTERVAL_KEY,
@@ -142,6 +142,7 @@ const backgroundSyncRunner = (): MobileBackgroundSyncRunner => {
             await useTaskStore.getState().fetchData({ silent: true });
           }
           await reconcileLocalMobileNotificationsInBackground('sync');
+          recoverAndroidWidgetAfterSync();
         }
         return result;
       },
