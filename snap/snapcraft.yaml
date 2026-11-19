@@ -18,6 +18,7 @@ confinement: strict
 apps:
   mindwtr:
     command: usr/bin/mindwtr
+    desktop: usr/share/applications/Mindwtr.desktop
     extensions: [gnome]
     plugs:
       - home
