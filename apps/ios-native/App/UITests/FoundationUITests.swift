@@ -14939,7 +14939,7 @@ final class FoundationUITests: XCTestCase {
         let alert = app.alerts["Row Beta"]
         XCTAssertTrue(alert.waitForExistence(timeout: 10))
         XCTAssertFalse(alert.buttons["Move up"].exists, "RN offers no move past the top of the area")
-        alert.buttons["Move down"].tap()
+        alert.buttons["Move down"].firstMatch.tap()
         waitForProjectRow(app, alpha, above: beta)
         boardTap(app, "project-row-menu-" + alpha)
         boardEnabled(projectRowMenuItem(app, "Area"))
@@ -14974,7 +14974,7 @@ final class FoundationUITests: XCTestCase {
         let alert = app.alerts["Projects"]
         XCTAssertTrue(alert.waitForExistence(timeout: 10))
         XCTAssertTrue(alert.staticTexts["Delete this project? Tasks in this project will be kept and moved to unassigned."].exists)
-        alert.buttons["Delete"].tap()
+        alert.buttons["Delete"].firstMatch.tap()
         XCTAssertTrue(row.waitForNonExistence(timeout: 20))
         boardTap(app, "project-delete-undo")
         boardEnabled(row, timeout: 20)
