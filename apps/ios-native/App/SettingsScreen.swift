@@ -4264,6 +4264,7 @@ struct DiagnosticsCard: View {
     @FocusState private var retentionDaysFocused: Bool
     @State private var backupOpen = false
     @State private var retentionOpen = false
+    @State private var importOpen = false
     @State private var backupPreviewPresented = false
     @State private var backupPreviewAnswered = false
     @State private var backupRestorePresented = false
@@ -4416,6 +4417,31 @@ struct DiagnosticsCard: View {
                         }
                     }
                     .background(palette.card, in: RoundedRectangle(cornerRadius: 12))
+                    let importData = model.dataSettings.object("importData")
+                    if !importData.isEmpty {
+                        VStack(alignment: .leading, spacing: 0) {
+                            disclosureHeader(title: importData.text("title"), subtitle: importData.text("description"), label: importData.text("title"),
+                                open: importOpen, id: "import-disclosure") { importOpen.toggle() }
+                            if importOpen {
+                                VStack(alignment: .leading, spacing: 16) {
+                                    if let guide = model.importDataGuide {
+                                        Link(destination: guide.url) {
+                                            HStack(spacing: 6) {
+                                                Text(guide.title).rnFont(14, .semibold)
+                                                AppIcon(name: "external-link", size: 16)
+                                            }
+                                            .foregroundStyle(palette.tint).frame(minHeight: 44)
+                                        }
+                                        .accessibilityIdentifier("import-guide-link")
+                                    }
+                                    importDataButtons(backup)
+                                }
+                                .padding(16).overlay(alignment: .top) { palette.border.frame(height: 1) }
+                            }
+                        }
+                        .background(palette.card, in: RoundedRectangle(cornerRadius: 12))
+                    }
+                    backupTransferStatus
                 }
                 if owner == model.settingsDiagnosticsOwner, !model.archiveRetentionCard.isEmpty {
                     archiveRetentionContent
@@ -4673,37 +4699,7 @@ struct DiagnosticsCard: View {
     }
 
     @ViewBuilder
-    private func backupTransferContent(_ backup: CoreObject) -> some View {
-        Button { model.openBackupImportPicker(action: .replace) } label: {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(backup.text("restoreFileLabel")).rnFont(15, .semibold)
-                Text(backup.text("restoreFileDescription")).rnFont(13).foregroundStyle(palette.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }.multilineTextAlignment(.leading)
-                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-        }
-        .disabled(!model.backupImportEnabled)
-        .accessibilityIdentifier("data-transfer-restore")
-        Button { model.openBackupImportPicker() } label: {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(backup.text("mergeLabel")).rnFont(15, .semibold)
-                Text(backup.text("mergeDescription")).rnFont(13).foregroundStyle(palette.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }.multilineTextAlignment(.leading)
-                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-        }
-        .disabled(!model.backupImportEnabled)
-        .accessibilityIdentifier("data-transfer-merge")
-        Button { model.openBackupImportPicker(action: .csv) } label: {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(backup.text("csvImportLabel")).rnFont(15, .semibold)
-                Text(backup.text("csvImportDescription")).rnFont(13).foregroundStyle(palette.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }.multilineTextAlignment(.leading)
-                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-        }
-        .disabled(!model.backupImportEnabled)
-        .accessibilityIdentifier("data-transfer-import-csv")
+    private func importDataButtons(_ backup: CoreObject) -> some View {
         Button { model.openBackupImportPicker(action: .todoist) } label: {
             VStack(alignment: .leading, spacing: 4) {
                 Text(backup.text("todoistImportLabel")).rnFont(15, .semibold)
@@ -4744,6 +4740,20 @@ struct DiagnosticsCard: View {
         }
         .disabled(!model.backupImportEnabled)
         .accessibilityIdentifier("data-transfer-import-omnifocus")
+        Button { model.openBackupImportPicker(action: .csv) } label: {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(backup.text("csvImportLabel")).rnFont(15, .semibold)
+                Text(backup.text("csvImportDescription")).rnFont(13).foregroundStyle(palette.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }.multilineTextAlignment(.leading)
+                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+        }
+        .disabled(!model.backupImportEnabled)
+        .accessibilityIdentifier("data-transfer-import-csv")
+    }
+
+    @ViewBuilder
+    private var backupTransferStatus: some View {
         if model.backupImportBusy {
             ProgressView().accessibilityIdentifier("backup-import-progress")
         }
@@ -4771,6 +4781,30 @@ struct DiagnosticsCard: View {
                     .accessibilityIdentifier("backup-result-done")
             }
         }
+    }
+
+    @ViewBuilder
+    private func backupTransferContent(_ backup: CoreObject) -> some View {
+        Button { model.openBackupImportPicker(action: .replace) } label: {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(backup.text("restoreFileLabel")).rnFont(15, .semibold)
+                Text(backup.text("restoreFileDescription")).rnFont(13).foregroundStyle(palette.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }.multilineTextAlignment(.leading)
+                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+        }
+        .disabled(!model.backupImportEnabled)
+        .accessibilityIdentifier("data-transfer-restore")
+        Button { model.openBackupImportPicker() } label: {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(backup.text("mergeLabel")).rnFont(15, .semibold)
+                Text(backup.text("mergeDescription")).rnFont(13).foregroundStyle(palette.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }.multilineTextAlignment(.leading)
+                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+        }
+        .disabled(!model.backupImportEnabled)
+        .accessibilityIdentifier("data-transfer-merge")
         Text(backup.text("snapshotsLabel")).rnFont(16, .semibold)
             .accessibilityAddTraits(.isHeader).accessibilityIdentifier("backup-snapshots-title")
         if let failure = model.backupSnapshotReadError {

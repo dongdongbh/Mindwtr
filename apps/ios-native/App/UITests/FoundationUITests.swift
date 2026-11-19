@@ -29988,6 +29988,10 @@ extension FoundationUITests {
         }
         task197Data(app); boardTap(app, "backup-disclosure")
         let importAction = omnifocusPicker ? "data-transfer-import-omnifocus" : dgtPicker ? "data-transfer-import-dgt" : ticktickPicker ? "data-transfer-import-ticktick" : todoistPicker ? "data-transfer-import-todoist" : replacePicker ? "data-transfer-restore" : (csvPicker ? "data-transfer-import-csv" : "data-transfer-merge")
+        if importAction.hasPrefix("data-transfer-import-") {
+            task192Reveal(app, "import-disclosure", buttons: true, scrollID: "diagnostics-scroll")
+            boardTap(app, "import-disclosure")
+        }
         task192Reveal(app, importAction, buttons: true, scrollID: "diagnostics-scroll")
         boardEnabled(app.buttons[importAction]); boardTap(app, importAction)
         let cancel = app.buttons.matching(NSPredicate(format: "label == %@ OR label == %@", "Cancel", "إلغاء")).firstMatch

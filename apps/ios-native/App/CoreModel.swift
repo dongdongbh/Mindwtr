@@ -1206,6 +1206,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     private(set) var dataSettings: CoreObject = [:]
     private(set) var archiveRetentionCard: CoreObject = [:]
     private(set) var archiveRetentionGuide: (title: String, url: URL)?
+    var importDataGuide: (title: String, url: URL)? { Self.docsGuide(dataSettings.object("importData").object("guide")) }
     var archiveRetentionDaysDraft = ""
     private(set) var archiveRetentionReview: CoreObject = [:]
     private(set) var archiveRetentionError: String?
