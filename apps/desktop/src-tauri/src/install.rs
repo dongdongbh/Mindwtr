@@ -376,7 +376,7 @@ fn detect_install_source() -> String {
             }
             return "flatpak".to_string();
         }
-        if env::var_os("SNAP").is_some() || env::var_os("SNAP_NAME").is_some() {
+        if is_snap() {
             return "snap".to_string();
         }
         if env::var_os("APPIMAGE").is_some() {
@@ -557,6 +557,11 @@ pub(crate) fn is_flatpak() -> bool {
     env::var("FLATPAK_ID").is_ok()
         || env::var("FLATPAK_SANDBOX_DIR").is_ok()
         || Path::new("/.flatpak-info").exists()
+}
+
+#[cfg(target_os = "linux")]
+pub(crate) fn is_snap() -> bool {
+    env::var("SNAP_NAME").as_deref() == Ok("mindwtr")
 }
 
 pub(crate) fn diagnostics_enabled() -> bool {

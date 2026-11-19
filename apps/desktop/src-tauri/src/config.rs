@@ -14,6 +14,11 @@ fn keyring_enabled() -> bool {
     !crate::storage::is_portable_mode()
 }
 
+#[cfg(target_os = "linux")]
+fn uses_secret_portal() -> bool {
+    crate::install::is_flatpak() || crate::install::is_snap()
+}
+
 pub(crate) fn emit_keyring_fallback_warning(app: &tauri::AppHandle, secret_name: &str) {
     let message =
         format!("{secret_name} stored in plaintext because the system keyring is unavailable.");
@@ -2073,7 +2078,7 @@ pub(crate) fn delete_workspace_keyring_entries(app: &tauri::AppHandle, workspace
         return;
     }
     #[cfg(target_os = "linux")]
-    if crate::install::is_flatpak() {
+    if uses_secret_portal() {
         return;
     }
     let identifier = &app.config().identifier;
@@ -2107,7 +2112,7 @@ pub(crate) fn get_keyring_secret(
         return Ok(None);
     }
     #[cfg(target_os = "linux")]
-    if crate::install::is_flatpak() {
+    if uses_secret_portal() {
         return crate::portal_secrets::get(
             &get_secrets_path(app).with_file_name("portal-secrets.keyring"),
             &keyring_service(app),
@@ -2131,13 +2136,24 @@ pub(crate) fn set_keyring_secret(
         return Err("Portable mode stores secrets in secrets.toml".to_string());
     }
     #[cfg(target_os = "linux")]
-    if crate::install::is_flatpak() {
-        return crate::portal_secrets::set(
+    if uses_secret_portal() {
+        let stores_credential = value
+            .as_deref()
+            .is_some_and(|value| !value.trim().is_empty());
+        crate::portal_secrets::set(
             &get_secrets_path(app).with_file_name("portal-secrets.keyring"),
             &keyring_service(app),
             key,
             value,
-        );
+        )?;
+        if stores_credential && crate::install::is_snap() {
+            let diagnostic = format!(
+                "Snap encrypted credential write verified extra.releaseCheck=v1.3.10/snap-secret-portal"
+            );
+            log::info!("{diagnostic}");
+            crate::logging::append_native_log_line(app, &diagnostic);
+        }
+        return Ok(());
     }
     let entry = keyring_entry(app, key)?;
     match value {
@@ -3193,6 +3209,41 @@ pub(crate) fn read_external_calendar_file(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn secret_portal_routes_by_snap_package_name() {
+        const CHILD: &str = "MINDWTR_TEST_SNAP_SECRET_PORTAL_CHILD";
+        if let Ok(expected) = env::var(CHILD) {
+            let expected_snap = expected == "snap";
+            assert_eq!(crate::install::is_snap(), expected_snap);
+            assert_eq!(
+                uses_secret_portal(),
+                expected_snap || crate::install::is_flatpak()
+            );
+            return;
+        }
+        for (name, expected) in [("mindwtr", "snap"), ("code", "other")] {
+            let output = std::process::Command::new(env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "config::tests::secret_portal_routes_by_snap_package_name",
+                ])
+                .env_remove("FLATPAK_ID")
+                .env_remove("FLATPAK_SANDBOX_DIR")
+                .env("SNAP", format!("/snap/{name}/1"))
+                .env("SNAP_NAME", name)
+                .env(CHILD, expected)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "Snap launch with {name} failed: {}",
+                String::from_utf8_lossy(&output.stdout)
+            );
+            assert!(String::from_utf8_lossy(&output.stdout).contains("1 passed"));
+        }
+    }
 
     #[test]
     fn keyring_service_differs_per_workspace_and_the_default_is_unchanged() {
