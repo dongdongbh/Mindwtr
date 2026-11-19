@@ -2387,7 +2387,7 @@ describe('FocusScreen', () => {
     ).toEqual(['desk-phone-task', 'desk-task', 'phone-task']);
   });
 
-  it('confirms deletion without changing the selected saved Focus filter', async () => {
+  it('confirms long-press deletion without changing the selected saved Focus filter', async () => {
     const alertSpy = vi.spyOn(Alert, 'alert').mockImplementation(() => undefined);
     storeState.updateSettings.mockResolvedValue(undefined);
     storeState.settings = {
@@ -2424,7 +2424,7 @@ describe('FocusScreen', () => {
     });
 
     act(() => {
-      findButtonByText(tree, 'Desk').props.onAccessibilityAction({ nativeEvent: { actionName: 'delete' } });
+      findButtonByText(tree, 'Desk').props.onLongPress();
     });
 
     expect(alertSpy).toHaveBeenCalledTimes(1);
@@ -2444,7 +2444,7 @@ describe('FocusScreen', () => {
     });
     alertSpy.mockClear();
     act(() => {
-      findButtonByText(tree, 'Desk').props.onAccessibilityAction({ nativeEvent: { actionName: 'delete' } });
+      findButtonByText(tree, 'Desk').props.onLongPress();
     });
 
     expect(alertSpy).toHaveBeenCalledTimes(1);
@@ -2471,50 +2471,6 @@ describe('FocusScreen', () => {
   });
 
 
-  it('moves a saved Focus filter from the long-press menu and the accessibility actions', async () => {
-    const alertSpy = vi.spyOn(Alert, 'alert').mockImplementation(() => undefined);
-    storeState.updateSettings.mockResolvedValue(undefined);
-    const make = (id: string, name: string) => ({
-      id,
-      name,
-      view: 'focus',
-      criteria: { contexts: [`@${id}`] },
-      createdAt: '2026-04-01T00:00:00.000Z',
-      updatedAt: '2026-04-01T00:00:00.000Z',
-    });
-    storeState.settings = { appearance: {}, features: {}, savedFilters: [make('desk', 'Desk'), make('phone', 'Phone'), make('home', 'Home')] } as any;
-    storeState.tasks = [makeTask('desk-task', { title: 'Desk task', contexts: ['@desk'] })];
-    const savedIds = () => storeState.updateSettings.mock.calls.at(-1)?.[0]?.savedFilters.map((filter: { id: string }) => filter.id);
-
-    let tree!: ReturnType<typeof create>;
-    act(() => {
-      tree = create(<FocusScreen />);
-    });
-
-    act(() => {
-      findButtonByText(tree, 'Desk').props.onLongPress();
-    });
-    const firstMenu = alertSpy.mock.calls[0]?.[2] ?? [];
-    expect(firstMenu.map((button) => button.text)).toEqual(['Move right', expect.any(String)]);
-    await act(async () => {
-      firstMenu[0]?.onPress?.();
-    });
-    expect(savedIds()).toEqual(['phone', 'desk', 'home']);
-
-    alertSpy.mockClear();
-    act(() => {
-      findButtonByText(tree, 'Phone').props.onLongPress();
-    });
-    expect(alertSpy.mock.calls[0]?.[2]?.map((button) => button.text)).toEqual(['Move left', 'Move right', expect.any(String)]);
-
-    const homeActions = findButtonByText(tree, 'Home').props.accessibilityActions.map((action: { name: string }) => action.name);
-    expect(homeActions).toEqual(['moveEarlier', 'delete']);
-    await act(async () => {
-      findButtonByText(tree, 'Home').props.onAccessibilityAction({ nativeEvent: { actionName: 'moveEarlier' } });
-    });
-    expect(savedIds()).toEqual(['desk', 'home', 'phone']);
-  });
-
   it('keeps a saved filter another device deleted when deleting another one', async () => {
     const alertSpy = vi.spyOn(Alert, 'alert').mockImplementation(() => undefined);
     storeState.updateSettings.mockResolvedValue(undefined);
@@ -2538,7 +2494,7 @@ describe('FocusScreen', () => {
     storeState.settings = { appearance: {}, features: {}, savedFilters: [desk, phoneDeleted] } as any;
 
     act(() => {
-      findButtonByText(tree, 'Desk').props.onAccessibilityAction({ nativeEvent: { actionName: 'delete' } });
+      findButtonByText(tree, 'Desk').props.onLongPress();
     });
     const deleteButton = alertSpy.mock.calls[0]?.[2]?.find((button) => button.style === 'destructive');
     await act(async () => {
