@@ -1132,7 +1132,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             f"{', '.join(result['tracks'])}."
         )
     elif args.command == "promote-rn-testing":
-        print(f"RN testing promotion versionCode {result['versionCode']}: {json.dumps(result)}")
+        print(f"RN testing promotion versionCode {result['versionCode']}: planned={','.join(result['plannedTracks']) or 'none'}; updated={','.join(result['updatedTracks']) or 'none'}; committed={result['committed']}")
+        for track in [result["production"], *result["previousTesting"].values()]:
+            for release in track.get("releases", []):
+                print(f"Observed {track['track']}: versionCodes={','.join(str(code) for code in release.get('versionCodes', []))}; status={release.get('status')}; fraction={release.get('userFraction', 'none')}")
     else:
         percentage_text = (
             ""
