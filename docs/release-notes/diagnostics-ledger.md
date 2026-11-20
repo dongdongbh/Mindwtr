@@ -62,6 +62,8 @@ The v1.3.6 task-editor correction is confirmed by the visible disappearance of t
 
 - **`v1.3.10/repeat-project`** — `packages/core/src/store-projects/project-actions.ts`. Completing a repeating project saves its next run. Look for `Next project run saved` after completion.
 
+- **`v1.3.10/ios-siri-reminder-action`** — React Native iOS `apps/mobile/lib/siri-reminders.ts` reports `Siri Reminder request acknowledged` after the App Group transport stores the response. With App Lock off and Mindwtr in the foreground, ask Siri to create an Inbox reminder and then change its due date. Export Diagnostics and check for `operation=create` and `operation=update`, each with `outcome=persisted`. Rejected requests report a bounded reason. No task content or identifiers are logged. (#915)
+
 - **`v1.3.10/android-widget-publication-retry`** — Android mobile storage retries a failed background widget publication once. After a background sync saves changes, check for `Android background widget publication retried` with outcome `published` or `failed`. This records the native publication result. Check the launcher separately. (#1589)
 
 - **`v1.3.10/contexts-bulk-organize`** — Native Contexts selection. Apply Bulk organize to selected tasks, then export Diagnostics. The marker records the operation outcome after the write, with no task titles or estimates. (#1591)

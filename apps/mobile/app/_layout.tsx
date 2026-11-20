@@ -66,6 +66,7 @@ import { useRootLayoutContextAutomation } from '@/hooks/root-layout/use-root-lay
 import { useRootLayoutExternalCapture } from '@/hooks/root-layout/use-root-layout-external-capture';
 import { useRootLayoutAppleRemindersAutoImport } from '@/hooks/root-layout/use-root-layout-apple-reminders';
 import { useRootLayoutPendingCaptures } from '@/hooks/root-layout/use-root-layout-pending-captures';
+import { useRootLayoutSiriReminders } from '@/hooks/root-layout/use-root-layout-siri-reminders';
 import { useRootLayoutGmailCapture } from '@/hooks/root-layout/use-root-layout-gmail-capture';
 import { useRootLayoutPomodoro } from '@/hooks/root-layout/use-root-layout-pomodoro';
 import { useRootLayoutWatch } from '@/hooks/root-layout/use-root-layout-watch';
@@ -483,6 +484,7 @@ function RootLayoutContentInner() {
   });
   useRootLayoutPomodoro({ canonicalDataReady, disabled: sandboxMode, resolveText });
   const drainPendingCaptures = useRootLayoutPendingCaptures({ canonicalDataReady, disabled: sandboxMode });
+  useRootLayoutSiriReminders({ canonicalDataReady, disabled: sandboxMode });
   useRootLayoutGmailCapture({ canonicalDataReady, disabled: sandboxMode });
   useRootLayoutAppleRemindersAutoImport({ canonicalDataReady, disabled: sandboxMode, showToast, t });
   useRootLayoutWatch({ canonicalDataReady, disabled: sandboxMode, language, onPendingCapture: drainPendingCaptures });

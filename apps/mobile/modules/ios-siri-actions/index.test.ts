@@ -4,9 +4,11 @@ const mocks = vi.hoisted(() => ({
   platform: { OS: 'ios' },
   remove: vi.fn(),
   nativeModule: {
+    isAvailable: vi.fn(),
     claimPending: vi.fn(),
     acknowledge: vi.fn(),
     publishSnapshot: vi.fn(),
+    clearSnapshot: vi.fn(),
     setAccessAllowed: vi.fn(),
     addListener: vi.fn(),
   },
@@ -21,6 +23,7 @@ vi.mock('expo-modules-core', () => ({
 const request = {
   version: 1 as const,
   id: '00000000-0000-4000-8000-000000000001',
+  replayOnly: true,
   operation: 'update' as const,
   targetId: '00000000-0000-4000-8000-000000000002',
   expectedToken: 'revision-1',
@@ -35,9 +38,11 @@ describe('ios-siri-actions wrapper', () => {
     vi.resetModules();
     vi.clearAllMocks();
     mocks.platform.OS = 'ios';
+    mocks.nativeModule.isAvailable.mockReturnValue(true);
     mocks.nativeModule.claimPending.mockResolvedValue([]);
     mocks.nativeModule.acknowledge.mockResolvedValue(undefined);
     mocks.nativeModule.publishSnapshot.mockResolvedValue(undefined);
+    mocks.nativeModule.clearSnapshot.mockResolvedValue(undefined);
     mocks.nativeModule.setAccessAllowed.mockResolvedValue(undefined);
     mocks.nativeModule.addListener.mockReturnValue({ remove: mocks.remove });
     mocks.requireOptionalNativeModule.mockReturnValue(mocks.nativeModule);
@@ -47,10 +52,12 @@ describe('ios-siri-actions wrapper', () => {
     mocks.nativeModule.claimPending.mockResolvedValue([request]);
     const bridge = await import('./index');
 
+    expect(bridge.isAvailable()).toBe(true);
     await expect(bridge.claimPending()).resolves.toEqual([request]);
     await bridge.acknowledge(request.id, '{"outcome":"persisted","task":"{}"}');
     await bridge.publishSnapshot('{"requiresAppUnlock":true}');
     await bridge.setAccessAllowed(true);
+    await bridge.clearSnapshot();
 
     expect(mocks.nativeModule.acknowledge).toHaveBeenCalledWith(
       request.id,
@@ -60,6 +67,7 @@ describe('ios-siri-actions wrapper', () => {
       '{"requiresAppUnlock":true}',
     );
     expect(mocks.nativeModule.setAccessAllowed).toHaveBeenCalledWith(true);
+    expect(mocks.nativeModule.clearSnapshot).toHaveBeenCalledOnce();
   });
 
   it('subscribes to the native pending-action wake-up edge', async () => {
@@ -79,6 +87,7 @@ describe('ios-siri-actions wrapper', () => {
     mocks.platform.OS = 'android';
     const bridge = await import('./index');
 
+    expect(bridge.isAvailable()).toBe(false);
     await expect(bridge.claimPending()).resolves.toEqual([]);
     await expect(bridge.acknowledge(request.id, '{}')).resolves.toBeUndefined();
     await expect(bridge.publishSnapshot('{}')).resolves.toBeUndefined();
@@ -95,6 +104,7 @@ describe('ios-siri-actions wrapper', () => {
     });
     const bridge = await import('./index');
 
+    expect(bridge.isAvailable()).toBe(false);
     await expect(bridge.claimPending()).resolves.toEqual([]);
     await expect(bridge.publishSnapshot('{}')).resolves.toBeUndefined();
     await expect(bridge.setAccessAllowed(true)).resolves.toBeUndefined();

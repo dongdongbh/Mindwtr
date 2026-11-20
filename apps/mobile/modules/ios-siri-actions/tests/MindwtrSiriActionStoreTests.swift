@@ -47,7 +47,7 @@ final class MindwtrSiriActionStoreTests: XCTestCase {
         super.tearDown()
     }
 
-    func testQueuedAccessEnableCannotOverrideResignOrDestroyGeneration() {
+    func testQueuedAccessEnableCannotOverrideResignOrDestroyGeneration() throws {
         let accessQueue = DispatchQueue(label: "mindwtr-siri-access-resign-race")
         let resignDrained = expectation(description: "resign queue drained")
         let resignObservations = LockedBooleans()
@@ -73,6 +73,11 @@ final class MindwtrSiriActionStoreTests: XCTestCase {
         let nextGeneration = MindwtrSiriActionStore.beginAccessSession()
         MindwtrSiriActionStore.setAccessAllowed(true, forSession: activeGeneration)
         XCTAssertFalse(MindwtrSiriActionStore.isAccessAllowed)
+        MindwtrSiriActionStore.setAccessAllowed(true, forSession: nextGeneration)
+        XCTAssertFalse(MindwtrSiriActionStore.isAccessAllowed)
+        try withStore { store, _ in
+            try store.publishSnapshotForAccessSession("{\"version\":1}", generation: nextGeneration)
+        }
         MindwtrSiriActionStore.setAccessAllowed(true, forSession: nextGeneration)
         XCTAssertTrue(MindwtrSiriActionStore.isAccessAllowed)
 
@@ -117,6 +122,58 @@ final class MindwtrSiriActionStoreTests: XCTestCase {
                     .conflictingRequestIdentifier
                 )
             }
+        }
+    }
+
+    func testRevocationRequiresNewPublicationBeforeAnyAccessCanBeGranted() throws {
+        try withStore { store, _ in
+            let initial = MindwtrSiriActionStore.beginAccessSession()
+            try store.publishSnapshotForAccessSession("{\"version\":1}", generation: initial)
+            MindwtrSiriActionStore.setAccessAllowed(true, forSession: initial)
+            let previousAccess = try XCTUnwrap(MindwtrSiriActionStore.allowedAccessSession)
+
+            let current = try XCTUnwrap(MindwtrSiriActionStore.setAccessAllowed(false, forSession: initial))
+            XCTAssertThrowsError(try store.publishSnapshotForAccessSession("{\"version\":1}", generation: initial))
+            MindwtrSiriActionStore.setAccessAllowed(true, forSession: current)
+            XCTAssertNil(MindwtrSiriActionStore.allowedAccessSession)
+
+            try store.clearSnapshot()
+            XCTAssertEqual(try store.readSnapshotFile(), "{}")
+            try store.publishSnapshotForAccessSession("{\"version\":1}", generation: current)
+            MindwtrSiriActionStore.setAccessAllowed(true, forSession: current)
+            XCTAssertNotEqual(try XCTUnwrap(MindwtrSiriActionStore.allowedAccessSession), previousAccess)
+        }
+    }
+
+    func testClaimsFromARevokedAccessSessionCanOnlyReplay() throws {
+        defer { MindwtrSiriActionStore.endAccessSession() }
+        try withStore { store, directory in
+            let initialGeneration = MindwtrSiriActionStore.beginAccessSession()
+            try store.publishSnapshotForAccessSession("{}", generation: initialGeneration)
+            MindwtrSiriActionStore.setAccessAllowed(true, forSession: initialGeneration)
+            let initial = try XCTUnwrap(MindwtrSiriActionStore.allowedAccessSession)
+            let now = Date(timeIntervalSince1970: 1_000)
+            let claimed = makeRequest(index: 1, now: now)
+            let unclaimed = makeRequest(index: 2, now: now)
+            try store.enqueue(claimed, now: now, accessSession: initial)
+            XCTAssertEqual(try store.claimPending(now: now, accessSession: initial).map { $0.replayOnly }, [false])
+            XCTAssertEqual(try store.claimPending(now: now, accessSession: initial).map { $0.replayOnly }, [false])
+            try store.enqueue(unclaimed, now: now, accessSession: initial)
+
+            MindwtrSiriActionStore.endAccessSession()
+            let nextGeneration = MindwtrSiriActionStore.beginAccessSession()
+            let reopened = MindwtrSiriActionStore(directory: directory)
+            try reopened.publishSnapshotForAccessSession("{}", generation: nextGeneration)
+            MindwtrSiriActionStore.setAccessAllowed(true, forSession: nextGeneration)
+            let next = try XCTUnwrap(MindwtrSiriActionStore.allowedAccessSession)
+            XCTAssertNotEqual(next, initial)
+            XCTAssertThrowsError(try reopened.enqueue(makeRequest(index: 3, now: now), now: now, accessSession: initial))
+            try reopened.enqueue(claimed, now: now, accessSession: next)
+            let fresh = makeRequest(index: 4, now: now)
+            try reopened.enqueue(fresh, now: now, accessSession: next)
+            let claims = try reopened.claimPending(now: now, accessSession: next)
+            XCTAssertEqual(claims.map { $0.request.id }, [claimed.id, unclaimed.id, fresh.id])
+            XCTAssertEqual(claims.map { $0.replayOnly }, [true, true, false])
         }
     }
 

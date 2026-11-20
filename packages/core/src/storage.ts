@@ -1,4 +1,5 @@
 import type { AppData, Task, Project, TaskStatus } from './types';
+import type { SiriReminderReceipt } from './siri-reminder-receipts';
 
 export type TaskQueryOptions = {
     status?: TaskStatus | 'all';
@@ -38,12 +39,15 @@ export type SearchResults = {
 
 export interface StorageAdapter {
 
-    getData(options?: { rawTasks?: true }): Promise<AppData>;
+    getData(options?: { rawTasks?: true; requireCanonical?: true }): Promise<AppData>;
 
     acknowledgeDataLoad?: (data: AppData) => void;
 
     saveData(data: AppData): Promise<AppData | void>;
     saveDataIfUnchanged?: (data: AppData, expectedData: AppData) => Promise<AppData | void>;
+    getSiriReminderReceipt?: (id: string) => Promise<SiriReminderReceipt | null>;
+    saveSiriReminder?: (data: AppData, expectedData: AppData, receipt: SiriReminderReceipt, canWrite: () => boolean,
+        claimedIds?: readonly string[]) => Promise<void>;
     saveTask?: (task: Task, snapshot?: AppData) => Promise<void>;
     queryTasks?: (options: TaskQueryOptions) => Promise<Task[]>;
     searchAll?: (query: string) => Promise<SearchResults>;

@@ -17,6 +17,13 @@ public final class MindwtrIosSiriActionsModule: Module {
 
         Events("onPendingActionsChanged")
 
+        Function("isAvailable") {
+#if compiler(>=6.4)
+            if #available(iOS 27.0, *) { return true }
+#endif
+            return false
+        }
+
         OnCreate {
             Self.performOnMain {
                 self.resignObserver = NotificationCenter.default.addObserver(
@@ -75,11 +82,21 @@ public final class MindwtrIosSiriActionsModule: Module {
         }
 
         AsyncFunction("claimPending") { () throws -> [[String: Any]] in
-            let requests = try MindwtrSiriActionStore.appGroupStore().claimPending(now: Date())
-            return try requests.map { try Self.dictionary(from: $0) }
+            guard let session = MindwtrSiriActionStore.allowedAccessSession else { return [] }
+            let requests = try MindwtrSiriActionStore.appGroupStore().claimPending(now: Date(), accessSession: session)
+            let claims = try requests.map { claim in
+                var request = try Self.dictionary(from: claim.request)
+                request["replayOnly"] = claim.replayOnly
+                return request
+            }
+            guard MindwtrSiriActionStore.allowedAccessSession == session else { return [] }
+            return claims
         }.runOnQueue(Self.ioQueue)
 
         AsyncFunction("acknowledge") { (id: String, resultJSON: String) throws -> Void in
+            guard MindwtrSiriActionStore.isAccessAllowed else {
+                throw MindwtrSiriActionStoreError.accessUnavailable
+            }
             let result = try MindwtrSiriActionStore.decodeResultJSON(resultJSON)
             try MindwtrSiriActionStore.appGroupStore().acknowledge(
                 id: id,
@@ -88,18 +105,41 @@ public final class MindwtrIosSiriActionsModule: Module {
             )
         }.runOnQueue(Self.ioQueue)
 
-        AsyncFunction("publishSnapshot") { (snapshotJSON: String) throws -> Void in
-            try MindwtrSiriActionStore.appGroupStore().publishSnapshot(snapshotJSON)
+        AsyncFunction("publishSnapshot") { (snapshotJSON: String, promise: Promise) -> Void in
+            guard UIApplication.shared.applicationState == .active,
+                  let generation = self.accessSessionGeneration else {
+                promise.reject("ERR_SIRI_ACCESS", "Siri reminder access is unavailable.")
+                return
+            }
+            Self.ioQueue.async {
+                do {
+                    try MindwtrSiriActionStore.appGroupStore().publishSnapshotForAccessSession(
+                        snapshotJSON,
+                        generation: generation
+                    )
+                    promise.resolve(nil)
+                } catch {
+                    promise.reject("ERR_SIRI_SNAPSHOT", "Siri reminders could not publish a snapshot.")
+                }
+            }
+        }.runOnQueue(.main)
+
+        AsyncFunction("clearSnapshot") { () throws -> Void in
+            try MindwtrSiriActionStore.appGroupStore().clearSnapshot()
         }.runOnQueue(Self.ioQueue)
 
-        AsyncFunction("setAccessAllowed") { (allowed: Bool) -> Void in
+        AsyncFunction("setAccessAllowed") { (allowed: Bool) throws -> Void in
             guard UIApplication.shared.applicationState == .active,
                   let generation = self.accessSessionGeneration else {
                 MindwtrSiriActionStore.endAccessSession()
                 self.accessSessionGeneration = nil
+                if allowed { throw MindwtrSiriActionStoreError.accessUnavailable }
                 return
             }
-            MindwtrSiriActionStore.setAccessAllowed(allowed, forSession: generation)
+            self.accessSessionGeneration = MindwtrSiriActionStore.setAccessAllowed(allowed, forSession: generation)
+            if allowed && !MindwtrSiriActionStore.isAccessAllowed {
+                throw MindwtrSiriActionStoreError.accessUnavailable
+            }
         }.runOnQueue(.main)
     }
 

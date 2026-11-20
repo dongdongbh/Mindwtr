@@ -1,8 +1,6 @@
 # Apple Siri and task-entity contract
 
-This document records the implemented read-only contract and the remaining
-requirements for issue #915. It does not declare Mindwtr conformant with the
-Reminders App Schema.
+Mindwtr exposes read-only task queries and two foreground Reminders actions in the production Expo iOS app.
 
 ## Current read-only entity
 
@@ -36,96 +34,37 @@ React Native can refresh the snapshot later without triggering a new index, so
 Spotlight can remain stale until the next launch. The consuming app revalidates
 every returned ID against current hydrated state before opening a task.
 
-## Why App Schema mutation is deferred
+## iOS 27 Reminders actions
 
-Apple's Reminders domain defines schema-backed intents and entities. Its
-`createReminder` contract includes a title plus optional list, note, flag,
-images, tags, URLs, due date, recurrence, location trigger, and section, and it
-returns the created reminder entity. A conforming Mindwtr intent must therefore
-know that the mutation reached the normal store and must return the resulting
-stable entity.
+`MindwtrCreateReminderIntent` creates an Inbox task with a title and an optional due date. `MindwtrUpdateReminderIntent` sets or clears the due date on an eligible Inbox task. Both return the persisted task entity. An explicitly supplied unsupported field fails the request before a write.
 
-The existing background capture intent only appends a pending-capture command.
-The app drains that command later. Queue acceptance is not durable task
-creation, and the extension cannot observe the task ID or a save failure.
-Advertising this path as `createReminder` would report success too early.
+The foreground app publishes a bounded projection of ordinary, unassigned Inbox tasks. Siri resolves the required update target before it foregrounds the app. A date edit therefore requires an existing foreground access session. The query uses stable task IDs. Date edits also require the revision shown to the caller. App Lock, a workspace transition, sandbox mode, and unavailable canonical storage disable this path. The custom Capture action continues to use its own background queue.
 
-Upstream commit `09276a308` adds a separate, reusable Siri evaluation
-transport under `apps/mobile/modules/ios-siri-actions`. Its bounded App Group
-store supports versioned create/update/delete request envelopes, expiry,
-claim-and-replay behavior, cancellation before claim, persisted/rejected
-receipts, bounded receipt retention, derived snapshot publication, and a
-process-scoped access gate. The Expo bridge exposes claim, acknowledge,
-snapshot publication, and access control to React Native. Swift package tests
-exercise the store contract.
+The Swift intent submits a command with a unique ID and waits for its receipt. React Native validates the command in the current workspace and writes the task and device-local receipt in one conditional SQLite transaction. If the process stops before acknowledgment, the consumer can replay that command without applying the edit twice. Separate invocations of the same words are separate commands.
 
-That transport is infrastructure, not a completed App Schema implementation.
-No schema intent uses it, no React Native consumer in that commit applies its
-requests through Mindwtr's core and durable-save path, and no schema intent
-waits for a receipt and returns the resulting entity. It also does not change
-the older pending-capture intent's queue-only success boundary. The transport
-should be integrated and extended rather than duplicated.
+## Native validation
 
-No schema-backed create, update, complete, reopen, or delete intent is included
-in this change. Existing custom capture and read-only query behavior stays in
-place behind its current compiler and runtime availability guards.
-
-## Required mutation completion protocol
-
-A future schema-backed write can use the existing Siri action transport, while
-preserving React Native as the single writer. Completion still requires:
-
-1. Native code atomically enqueues the transport's bounded command with a
-   random ID, operation, target stable ID when applicable, expected revision
-   token, normalized payload, creation time, and expiry. It never writes the
-   database.
-2. React Native claims and replays commands idempotently and passes them through the same
-   core factories, normalization, recurrence, sync, and validation paths used
-   by the app.
-3. React Native completes the ordinary durable-save boundary before calling
-   the transport acknowledgement API. A persisted receipt includes the
-   resulting bounded task projection; a rejected receipt carries a structured
-   reason.
-4. A schema intent waits for the matching stored receipt only for a bounded interval. It
-   returns a schema entity only for a successful durable receipt. Timeout,
-   cancellation, lock state, ambiguity, and failed saves surface as failure;
-   none may be presented as a completed mutation.
-5. Retried intents reuse their command ID and consume the transport's retained
-   receipt rather than creating duplicate tasks.
-6. The app wires the transport's process-scoped access gate to current hydrated
-   and unlocked state. Destructive and bulk changes retain normal confirmation
-   rules.
-
-This protocol needs crash, duplicate-delivery, cancellation, save-failure,
-locked-app, and sync-convergence tests before any schema conformance is added.
-
-## Semantic mapping boundary
-
-The safe initial mapping is narrow: a Mindwtr task can represent a reminder,
-and stable task identity can back the schema entity. A project may map to a
-reminder list only after list membership and lifecycle semantics are verified.
-Mindwtr areas, GTD statuses, focus state, start dates, waiting context, and
-project hierarchy must not be relabeled as reminder priority, recurrence,
-sections, collaboration, or location triggers. Unsupported schema fields stay
-unset until the product has matching behavior.
-
-## Native validation still required
-
-Linux checks source contracts and JavaScript behavior, but cannot compile App
-Intents metadata. On the selected Apple toolchain, run:
+From the repository root, check the SDK availability guards and the Expo plugin.
 
 ```sh
 node scripts/ci/validate-ios-app-intents-availability.js
 bun test apps/mobile/plugins/ios-widgets-and-shortcuts.test.js
-APP_VARIANT=development bunx expo prebuild --clean --platform ios --no-install
-xcodebuild -workspace apps/mobile/ios/Mindwtr.xcworkspace -scheme Mindwtr \
-  -configuration Release -sdk iphoneos CODE_SIGNING_ALLOWED=NO archive
 ```
 
-Then use Apple's App Intents testing tools, Shortcuts, Spotlight, and Siri on a
-supported device. Verify exact IDs, missing/deleted tasks, duplicate project
-names, stale snapshots, capped snapshots, locked state, and removal after a
-task becomes ineligible.
+On a Mac with Xcode 27 and a matching iOS simulator runtime, generate the development app and register the UI test target. Use a dedicated simulator with synthetic tasks.
+
+```sh
+cd apps/mobile
+APP_VARIANT=development bunx expo prebuild --platform ios --no-install
+(cd ios && pod install)
+ruby ios-app-intents/tests/register-test-target.rb ios/MindwtrDev.xcodeproj
+CI=1 APP_VARIANT=development NODE_ENV=production xcodebuild test \
+  -workspace ios/MindwtrDev.xcworkspace -scheme MindwtrReminderIntentsTests \
+  -configuration Release -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" \
+  -parallel-testing-enabled NO
+```
+
+The test creates an Inbox task, edits the returned entity, and resolves its new date after restarting Mindwtr. Use an Apple Intelligence iPhone to check spoken requests, foreground handoff, and App Lock. Test the existing capture and query actions on the oldest supported iOS release.
 
 ## Apple sources
 

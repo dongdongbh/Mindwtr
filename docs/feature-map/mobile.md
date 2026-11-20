@@ -429,6 +429,8 @@ Source: `apps/mobile`. Routes live in `apps/mobile/app` (expo-router). Labels be
 
 ## iOS widgets, Home Screen quick actions, Siri
 
+- On iOS 27, Create Mindwtr Reminder creates an Inbox task with an optional due date. Change Mindwtr Reminder Due Date updates an eligible Inbox task by ID. Create opens Mindwtr. For a date change, keep Mindwtr in the foreground so Siri can resolve the task. Both actions require App Lock to be off. See `apps/mobile/ios-app-intents/MindwtrReminderIntents.swift`.
+
 - Reach: Home Screen and Lock Screen widgets: Mindwtr (list), Compact, Focus, Add Task, plus a Control Center Add Task control. Long press the app icon: Add task, Focus, Calendar. Shortcuts app actions: Capture to Mindwtr, Add to Mindwtr, Open Mindwtr List, Open Mindwtr Saved List, Get Mindwtr Tasks.
 - Code: `apps/mobile/widgets-ios/MindwtrWidgetsBundle.swift`, `apps/mobile/widgets-ios/MindwtrTasksWidget.swift`, `apps/mobile/plugins/ios-widgets-and-shortcuts.js`, `apps/mobile/ios-app-intents/MindwtrSiriCaptureIntents.swift`
 - Checks: `apps/mobile/lib/ios-widget-completions.test.ts`

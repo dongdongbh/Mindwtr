@@ -24,6 +24,7 @@ export interface MindwtrSiriActionFields {
 export interface MindwtrSiriActionRequest {
   version: 1;
   id: string;
+    replayOnly: boolean;
   operation: MindwtrSiriActionOperation;
   targetId?: string;
   expectedToken?: string;
@@ -45,14 +46,25 @@ export interface MindwtrSiriActionsSubscription {
 }
 
 interface MindwtrIosSiriActionsNativeModule extends NativeModule {
+  isAvailable?: () => boolean;
   claimPending?: () => Promise<MindwtrSiriActionRequest[]>;
   acknowledge?: (id: string, resultJSON: string) => Promise<void>;
   publishSnapshot?: (snapshotJSON: string) => Promise<void>;
+  clearSnapshot?: () => Promise<void>;
   setAccessAllowed?: (allowed: boolean) => Promise<void>;
   addListener?: (
     eventName: 'onPendingActionsChanged',
     listener: () => void,
   ) => MindwtrSiriActionsSubscription;
+}
+
+export function isAvailable(): boolean {
+  try {
+    const nativeModule = getNativeModule();
+    return nativeModule?.isAvailable?.() === true;
+  } catch {
+    return false;
+  }
 }
 
 let cachedNativeModule: MindwtrIosSiriActionsNativeModule | null | undefined;
@@ -101,6 +113,11 @@ export async function publishSnapshot(snapshotJSON: string): Promise<void> {
   const publish = nativeModule?.publishSnapshot;
   if (typeof publish !== 'function') return;
   await publish.call(nativeModule, snapshotJSON);
+}
+
+export async function clearSnapshot(): Promise<void> {
+  const nativeModule = getNativeModule();
+  await nativeModule?.clearSnapshot?.();
 }
 
 

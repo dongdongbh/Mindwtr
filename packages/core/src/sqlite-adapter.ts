@@ -10,6 +10,7 @@ export type CalendarSyncEntry = {
 };
 import { SEARCH_RESULT_LIMIT, StorageConflictError, type SearchProjectResult, type SearchResults, type SearchTaskResult, type TaskQueryOptions } from './storage';
 import { taskEditValuesEqual } from './json-value-equality';
+import { readSiriReminderReceipt, type SiriReminderReceipt } from './siri-reminder-receipts';
 import { buildTaskWhere } from './task-query';
 import { FTS_MAINTENANCE_TRIGGERS, SQLITE_BASE_SCHEMA, SQLITE_FTS_SCHEMA, SQLITE_INDEX_SCHEMA } from './sqlite-schema';
 import { normalizeTaskStatus } from './task-status';
@@ -1519,16 +1520,56 @@ export class SqliteAdapter {
     }
 
     async saveDataIfUnchanged(data: AppData, expectedData: AppData): Promise<void> {
-        return this.exclusive('saveDataIfUnchanged', async () => {
-            const current = await this.getDataNow(undefined, true);
-            if (!taskEditValuesEqual(current, expectedData)) throw new StorageConflictError();
-            const token = this.readTokenOf(current);
-            if (!token) throw new Error('SQLite conditional write has no read token');
-            await this.saveDataNow(data, { token, onStale: () => new StorageConflictError() });
+        return this.exclusive('saveDataIfUnchanged', () => this.saveDataIfUnchangedNow(data, expectedData));
+    }
+
+    async getSiriReminderReceipt(id: string): Promise<SiriReminderReceipt | null> {
+        return this.exclusive('getSiriReminderReceipt', async () => {
+            const table = await this.client.get("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'siri_reminder_receipts'");
+            if (!table) return null;
+            const row = await this.client.get<{ fingerprint: string; reply: string }>(
+                'SELECT fingerprint, reply FROM siri_reminder_receipts WHERE request_id = ?', [id]);
+            return row ? readSiriReminderReceipt(id, row.fingerprint, row.reply) : null;
         });
     }
 
-    protected async saveDataNow(data: AppData, options?: { token?: SqliteReadToken } & SqliteStaleOption): Promise<void> {
+    async saveSiriReminder(data: AppData, expectedData: AppData, receipt: SiriReminderReceipt, canWrite: () => boolean,
+        claimedIds?: readonly string[]): Promise<void> {
+        return this.exclusive('saveSiriReminder', async () => {
+            if (!canWrite()) throw new StorageConflictError();
+            const reply = JSON.stringify(receipt.task);
+            readSiriReminderReceipt(receipt.id, receipt.fingerprint, reply);
+            await this.saveDataIfUnchangedNow(data, expectedData, async () => {
+                if (!canWrite()) throw new StorageConflictError();
+                await this.client.run(`CREATE TABLE IF NOT EXISTS siri_reminder_receipts (
+                    request_id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, reply TEXT NOT NULL, saved_at INTEGER NOT NULL
+                )`);
+                if (await this.client.get('SELECT 1 FROM siri_reminder_receipts WHERE request_id = ?', [receipt.id])) {
+                    throw new StorageConflictError();
+                }
+                const now = Date.now();
+                if (claimedIds) {
+                    const retained = [receipt.id, ...claimedIds];
+                    await this.client.run(
+                        `DELETE FROM siri_reminder_receipts WHERE saved_at < ? AND request_id NOT IN (${retained.map(() => '?').join(', ')})`,
+                        [now - 24 * 60 * 60 * 1000, ...retained]);
+                }
+                await this.client.run('INSERT INTO siri_reminder_receipts (request_id, fingerprint, reply, saved_at) VALUES (?, ?, ?, ?)',
+                    [receipt.id, receipt.fingerprint, reply, now]);
+                if (!canWrite()) throw new StorageConflictError();
+            });
+        });
+    }
+
+    private async saveDataIfUnchangedNow(data: AppData, expectedData: AppData, beforeCommit?: () => Promise<void>): Promise<void> {
+        const current = await this.getDataNow(undefined, true);
+        if (!taskEditValuesEqual(current, expectedData)) throw new StorageConflictError();
+        const token = this.readTokenOf(current);
+        if (!token) throw new Error('SQLite conditional write has no read token');
+        await this.saveDataNow(data, { token, onStale: () => new StorageConflictError(), beforeCommit });
+    }
+
+    protected async saveDataNow(data: AppData, options?: { token?: SqliteReadToken; beforeCommit?: () => Promise<void> } & SqliteStaleOption): Promise<void> {
         await this.ensureSchemaNow();
         const token = options?.token;
         if (options?.onStale && !token) {
@@ -1955,6 +1996,7 @@ export class SqliteAdapter {
 
             saveStep = 'before-commit';
             await this.beforeCommit({ data });
+            if (options?.beforeCommit) await options.beforeCommit();
 
             saveStep = 'commit';
             const commitStartedAt = Date.now();

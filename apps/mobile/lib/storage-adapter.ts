@@ -1251,6 +1251,14 @@ const createStorage = (): StorageAdapter => {
     const shouldUseSqlite = sqliteUnavailableReason == null;
     registerBackgroundFlushListener();
 
+    const getCanonicalSqliteAdapter = async (): Promise<SqliteAdapter> => {
+        if (!shouldUseSqlite) throw new Error(sqliteUnavailableReason ?? 'SQLite unavailable');
+        const state = await withOperationTimeout(getSqliteState(), SQLITE_NO_FALLBACK_READ_TIMEOUT_MS, 'SQLite initialization timed out');
+        assertSqliteWritesAllowed(state, canonicalReloadRequired);
+        if (jsonIsReadAuthority()) throw new Error('Canonical SQLite data is unavailable');
+        return state.adapter;
+    };
+
     const saveJsonIfUnchanged = async (data: AppData, expectedData: AppData, queuedWriteStartedAtMs: number): Promise<void> => {
         await flushPendingStartupJsonBackup();
         if (!isJsonCopyServable() || !isJsonBackupUsable()) throw new Error('Pomodoro JSON storage is unavailable');
@@ -1266,7 +1274,12 @@ const createStorage = (): StorageAdapter => {
     };
 
     return {
-        getData: async (): Promise<AppData> => {
+        getData: async (options): Promise<AppData> => {
+            if (options?.requireCanonical) {
+                await awaitQueuedSqliteWrites('get_data', SQLITE_NO_FALLBACK_READ_TIMEOUT_MS);
+                const adapter = await getCanonicalSqliteAdapter();
+                return withOperationTimeout(adapter.getData(options), SQLITE_NO_FALLBACK_READ_TIMEOUT_MS, 'SQLite read timed out');
+            }
             markStartupPhase('mobile.storage.get_data.start');
 
 
@@ -1421,6 +1434,28 @@ const createStorage = (): StorageAdapter => {
             if (!canonicalReloadRequired || !canonicalReloadCandidates.has(data)) return;
             canonicalReloadRequired = false;
             canonicalReloadCandidates = new WeakSet<AppData>();
+        },
+        getSiriReminderReceipt: async (id) => {
+            await awaitQueuedSqliteWrites('get_data', SQLITE_NO_FALLBACK_READ_TIMEOUT_MS);
+            const adapter = await getCanonicalSqliteAdapter();
+            return withOperationTimeout(adapter.getSiriReminderReceipt(id), SQLITE_NO_FALLBACK_READ_TIMEOUT_MS, 'Siri Reminder receipt read timed out');
+        },
+        saveSiriReminder: async (data, expectedData, receipt, canWrite, claimedIds) => {
+            const reloadRequiredWhenEnqueued = canonicalReloadRequired;
+            return enqueueSave(async () => {
+                if (reloadRequiredWhenEnqueued) throw new SqliteWriteBlockedError('canonical-reload');
+                const adapter = await getCanonicalSqliteAdapter();
+                if (!canWrite()) throw new StorageConflictError();
+                const previousWriteStartedAtMs = latestQueuedWriteStartedAtMs;
+                const queuedWriteStartedAtMs = markQueuedWriteStarted();
+                try {
+                    await adapter.saveSiriReminder(data, expectedData, receipt, canWrite, claimedIds);
+                } catch (error) {
+                    if (error instanceof StorageConflictError) latestQueuedWriteStartedAtMs = previousWriteStartedAtMs;
+                    throw error;
+                }
+                scheduleStartupJsonBackup(data, 'mobile.storage.siri_reminder', queuedWriteStartedAtMs);
+            });
         },
         saveData: async (data: AppData): Promise<void> => {
             const enqueuedAtMs = Date.now();

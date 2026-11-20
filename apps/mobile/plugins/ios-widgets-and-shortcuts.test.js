@@ -16,6 +16,7 @@ const {
   copySharedWidgetActionStore,
   ensureSourceFileInTarget,
   ensureWidgetSwiftSourcesInTarget,
+  weakLinkReminderLocationOverlay,
 } = plugin.__testables;
 
 describe('ios-widgets-and-shortcuts', () => {
@@ -52,6 +53,33 @@ describe('ios-widgets-and-shortcuts', () => {
     expect(source).toContain('var list: MindwtrSavedListEntity');
     expect(source).toContain('var list: MindwtrShortcutList');
     expect(source).toContain('MindwtrSavedListCatalog.destination(id: list.id)');
+  });
+
+  it('ships the Reminders schemas without registering UI test sources', () => {
+    const dir = path.resolve(__dirname, '..', APP_INTENTS_FOLDER);
+    const files = collectSwiftFiles(dir);
+    expect(files).toContain('MindwtrReminderIntents.swift');
+    expect(files).not.toContain('MindwtrReminderIntentsTests.swift');
+  });
+
+  it('weak-links the Reminders location overlay in the app on SDKs that provide it', () => {
+    const project = require('xcode').project('fixture.pbxproj');
+    const app = { OTHER_LDFLAGS: ['"$(inherited)"', '"-ObjC"'] };
+    const widget = {};
+    project.hash = { project: { objects: {
+      PBXNativeTarget: { APP: { buildConfigurationList: 'APP_CONFIG' } },
+      XCConfigurationList: { APP_CONFIG: { buildConfigurations: [{ value: 'RELEASE' }] } },
+      XCBuildConfiguration: { RELEASE: { buildSettings: app }, WIDGET: { buildSettings: widget } },
+    } } };
+
+    weakLinkReminderLocationOverlay(project, 'APP');
+    weakLinkReminderLocationOverlay(project, 'APP');
+
+    expect(app.OTHER_LDFLAGS).toEqual(['"$(inherited)"', '"-ObjC"', '"$(MINDWTR_REMINDER_LOCATION_LINK_FLAGS)"']);
+    expect(app.MINDWTR_REMINDER_LOCATION_LINK_FLAGS).toEqual(['"-weak_framework"', '"_GeoToolbox_AppIntents"']);
+    expect(app['"MINDWTR_REMINDER_LOCATION_LINK_FLAGS[sdk=iphoneos1*]"']).toBe('""');
+    expect(app['"MINDWTR_REMINDER_LOCATION_LINK_FLAGS[sdk=iphonesimulator1*]"']).toBe('""');
+    expect(widget).toEqual({});
   });
 
   it('ships the rich configurable Tasks widget with legacy payload and iOS 15 fallbacks', () => {

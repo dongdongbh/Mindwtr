@@ -10,6 +10,17 @@ const sourcePath = path.join(
 );
 const source = fs.readFileSync(sourcePath, 'utf8');
 
+const reminderSource = fs.readFileSync(path.join(path.dirname(sourcePath), 'MindwtrReminderIntents.swift'), 'utf8');
+const schemaDeclarations = reminderSource.match(/@App(?:Intent|Entity|Enum)\(schema:/g) || [];
+const availableSchemas = reminderSource.match(/@available\(iOS 27\.0, \*\)\s*\n@App(?:Intent|Entity|Enum)\(schema:/g) || [];
+if (!reminderSource.startsWith('#if compiler(>=6.4) && canImport(MindwtrIosSiriActions)\n')
+    || !reminderSource.trimEnd().endsWith('#endif')
+    || schemaDeclarations.length === 0
+    || schemaDeclarations.length !== availableSchemas.length) {
+  console.error('The Reminders schemas require Swift 6.4, the Siri actions module, and iOS 27 availability.');
+  process.exit(1);
+}
+
 
 const widgetsDir = path.join(repoRoot, 'apps/mobile/widgets-ios');
 const widgetSources = fs

@@ -7,6 +7,7 @@ export { isSettingsSyncGroupEnabled } from './settings-options';
 export * from './async-utils';
 export * from './storage';
 export * from './pomodoro-credit';
+export * from './siri-reminder-actions';
 export { taskEditValuesEqual } from './json-value-equality';
 export * from './range-selection';
 export * from './task-metadata-filter-visibility';

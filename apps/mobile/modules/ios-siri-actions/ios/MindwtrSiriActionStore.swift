@@ -233,6 +233,7 @@ public struct MindwtrSiriActionResult: Codable, Equatable, Sendable {
 
 public enum MindwtrSiriActionStoreError: Error, LocalizedError, Equatable {
     case appGroupUnavailable
+    case accessUnavailable
     case invalidRequest(String)
     case expiredRequest
     case futureRequest
@@ -251,6 +252,8 @@ public enum MindwtrSiriActionStoreError: Error, LocalizedError, Equatable {
         switch self {
         case .appGroupUnavailable:
             return "The Mindwtr App Group container is unavailable."
+        case .accessUnavailable:
+            return "Siri reminder access is unavailable."
         case .invalidRequest(let reason):
             return "The Siri action request is invalid: \(reason)."
         case .expiredRequest:
@@ -283,6 +286,7 @@ public enum MindwtrSiriActionStoreError: Error, LocalizedError, Equatable {
 
 private struct MindwtrSiriPendingRecord: Codable, Equatable {
     let request: MindwtrSiriActionRequest
+    let accessSession: UUID?
     var claimed: Bool
     var claimedAt: Double?
 }
@@ -321,9 +325,10 @@ public final class MindwtrSiriActionStore: @unchecked Sendable {
 
     private static let processLock = NSLock()
     private static let accessLock = NSLock()
-    private static var accessAllowed = false
     private static var accessSessionActive = false
     private static var accessSessionGeneration: UInt64 = 0
+    private static var publishedSession: UInt64?
+    private static var grantedAccessSession: UUID?
     private static let stateFileName = "mindwtr-siri-actions-v1.json"
     private static let snapshotFileName = "mindwtr-siri-snapshot-v1.json"
     private static let lockFileName = ".mindwtr-siri-actions.lock"
@@ -339,9 +344,13 @@ public final class MindwtrSiriActionStore: @unchecked Sendable {
     private let publicationHook: ((String) throws -> Void)?
 
     public static var isAccessAllowed: Bool {
+        allowedAccessSession != nil
+    }
+
+    public static var allowedAccessSession: UUID? {
         accessLock.lock()
         defer { accessLock.unlock() }
-        return accessSessionActive && accessAllowed
+        return grantedAccessSession
     }
 
     @discardableResult
@@ -349,7 +358,8 @@ public final class MindwtrSiriActionStore: @unchecked Sendable {
         accessLock.lock()
         accessSessionGeneration &+= 1
         accessSessionActive = true
-        accessAllowed = false
+        publishedSession = nil
+        grantedAccessSession = nil
         let generation = accessSessionGeneration
         accessLock.unlock()
         return generation
@@ -359,35 +369,77 @@ public final class MindwtrSiriActionStore: @unchecked Sendable {
         accessLock.lock()
         accessSessionGeneration &+= 1
         accessSessionActive = false
-        accessAllowed = false
+        publishedSession = nil
+        grantedAccessSession = nil
         accessLock.unlock()
     }
 
-    static func setAccessAllowed(_ allowed: Bool, forSession generation: UInt64) {
+    @discardableResult
+    static func setAccessAllowed(_ allowed: Bool, forSession generation: UInt64) -> UInt64? {
         accessLock.lock()
-        if accessSessionActive && accessSessionGeneration == generation {
-            accessAllowed = allowed
-        } else if !allowed {
-            accessAllowed = false
+        defer { accessLock.unlock() }
+        if !allowed {
+            accessSessionGeneration &+= 1
+            publishedSession = nil
+            grantedAccessSession = nil
+        } else if accessSessionActive,
+                  accessSessionGeneration == generation,
+                  publishedSession == generation,
+                  grantedAccessSession == nil {
+            grantedAccessSession = UUID()
         }
-        accessLock.unlock()
+        return accessSessionActive ? accessSessionGeneration : nil
+    }
+
+    func publishSnapshotForAccessSession(_ snapshotJSON: String, generation: UInt64) throws {
+        guard Self.isActiveSession(generation) else {
+            throw MindwtrSiriActionStoreError.accessUnavailable
+        }
+        try publishSnapshot(snapshotJSON)
+        Self.accessLock.lock()
+        defer { Self.accessLock.unlock() }
+        guard Self.accessSessionActive, Self.accessSessionGeneration == generation else {
+            throw MindwtrSiriActionStoreError.accessUnavailable
+        }
+        Self.publishedSession = generation
+    }
+
+    private static func isActiveSession(_ generation: UInt64) -> Bool {
+        accessLock.lock()
+        defer { accessLock.unlock() }
+        return accessSessionActive && accessSessionGeneration == generation
+    }
+
+    func clearSnapshot() throws {
+        Self.accessLock.lock()
+        Self.publishedSession = nil
+        Self.grantedAccessSession = nil
+        Self.accessLock.unlock()
+        try publishSnapshot("{}")
     }
 
     public static func appGroupStore() throws -> MindwtrSiriActionStore {
 #if os(iOS) || os(macOS)
-        guard let directory = FileManager.default.containerURL(
+        guard let bundleIdentifier = Bundle.main.bundleIdentifier,
+              !bundleIdentifier.isEmpty,
+              let directory = FileManager.default.containerURL(
             forSecurityApplicationGroupIdentifier: appGroupIdentifier
         ) else {
             throw MindwtrSiriActionStoreError.appGroupUnavailable
         }
-        return MindwtrSiriActionStore(directory: directory)
+        return MindwtrSiriActionStore(directory: directory
+            .appendingPathComponent("siri-actions", isDirectory: true)
+            .appendingPathComponent(bundleIdentifier, isDirectory: true))
 #else
         throw MindwtrSiriActionStoreError.appGroupUnavailable
 #endif
     }
 
     public static func readSnapshot() throws -> String? {
-        try appGroupStore().readSnapshotFile()
+        guard let session = allowedAccessSession else { return nil }
+        let snapshot = try appGroupStore().readSnapshotFile()
+        guard allowedAccessSession == session else { return nil }
+        return snapshot
     }
 
     init(
@@ -398,11 +450,14 @@ public final class MindwtrSiriActionStore: @unchecked Sendable {
         self.publicationHook = publicationHook
     }
 
-    public func enqueue(_ request: MindwtrSiriActionRequest, now: Date) throws {
+    public func enqueue(_ request: MindwtrSiriActionRequest, now: Date, accessSession: UUID? = nil) throws {
         let nowMilliseconds = try milliseconds(for: now)
         try validateRequest(request, enforceCurrentTimeAt: nil)
         let requestPayload = try encodeRequest(request)
         let inserted = try withLockedState { state in
+            if let accessSession, Self.allowedAccessSession != accessSession {
+                throw MindwtrSiriActionStoreError.accessUnavailable
+            }
             let pruned = pruneReceipts(&state, nowMilliseconds: nowMilliseconds)
             if let pending = state.pending.first(where: {
                 canonicalIdentifier($0.request.id) == canonicalIdentifier(request.id)
@@ -431,6 +486,7 @@ public final class MindwtrSiriActionStore: @unchecked Sendable {
             }
             state.pending.append(MindwtrSiriPendingRecord(
                 request: request,
+                accessSession: accessSession,
                 claimed: false,
                 claimedAt: nil
             ))
@@ -446,6 +502,17 @@ public final class MindwtrSiriActionStore: @unchecked Sendable {
     }
 
     public func claimPending(now: Date) throws -> [MindwtrSiriActionRequest] {
+        try claimPendingRecords(now: now).map(\.request)
+    }
+
+    func claimPending(now: Date, accessSession: UUID) throws -> [(request: MindwtrSiriActionRequest, replayOnly: Bool)] {
+        guard Self.allowedAccessSession == accessSession else { return [] }
+        let records = try claimPendingRecords(now: now)
+        guard Self.allowedAccessSession == accessSession else { return [] }
+        return records.map { ($0.request, $0.accessSession != accessSession) }
+    }
+
+    private func claimPendingRecords(now: Date) throws -> [MindwtrSiriPendingRecord] {
         let nowMilliseconds = try milliseconds(for: now)
         return try withLockedState { state in
             var changed = pruneReceipts(&state, nowMilliseconds: nowMilliseconds)
@@ -473,7 +540,7 @@ public final class MindwtrSiriActionStore: @unchecked Sendable {
                 changed = true
             }
 
-            return (state.pending.filter(\.claimed).map(\.request), changed)
+            return (state.pending.filter(\.claimed), changed)
         }
     }
 
@@ -749,7 +816,7 @@ public final class MindwtrSiriActionStore: @unchecked Sendable {
             guard let record = value as? [String: Any],
                   Self.hasExpectedKeys(
                     record,
-                    allowed: ["request", "claimed", "claimedAt"],
+                    allowed: ["request", "accessSession", "claimed", "claimedAt"],
                     required: ["request", "claimed"]
                   ),
                   let request = record["request"] as? [String: Any] else {

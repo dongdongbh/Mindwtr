@@ -192,6 +192,22 @@ const addAppDelegateShortcutsRegistration = (config) =>
     },
   ]);
 
+function weakLinkReminderLocationOverlay(xcodeProject, targetUuid) {
+  const target = xcodeProject.pbxNativeTargetSection()[targetUuid];
+  const configurations = xcodeProject.pbxXCConfigurationList()[target.buildConfigurationList];
+  const settings = xcodeProject.pbxXCBuildConfigurationSection();
+  const linkerFlag = '"$(MINDWTR_REMINDER_LOCATION_LINK_FLAGS)"';
+  for (const { value } of configurations.buildConfigurations) {
+    const buildSettings = settings[value].buildSettings;
+    const existing = buildSettings.OTHER_LDFLAGS ?? '"$(inherited)"';
+    const flags = Array.isArray(existing) ? existing : [existing];
+    if (!flags.includes(linkerFlag)) buildSettings.OTHER_LDFLAGS = [...flags, linkerFlag];
+    buildSettings.MINDWTR_REMINDER_LOCATION_LINK_FLAGS = ['"-weak_framework"', '"_GeoToolbox_AppIntents"'];
+    buildSettings['"MINDWTR_REMINDER_LOCATION_LINK_FLAGS[sdk=iphoneos1*]"'] = '""';
+    buildSettings['"MINDWTR_REMINDER_LOCATION_LINK_FLAGS[sdk=iphonesimulator1*]"'] = '""';
+  }
+}
+
 const addAppIntentSourcesToMainTarget = (config) =>
   withXcodeProject(config, (cfg) => {
     const xcodeProject = cfg.modResults;
@@ -205,10 +221,9 @@ const addAppIntentSourcesToMainTarget = (config) =>
       throw new Error(`[ios-widgets-and-shortcuts] Missing app intents template folder: ${sourceDir}`);
     }
 
-    copyRecursive(sourceDir, targetDir);
-
     const swiftFiles = collectSwiftFiles(sourceDir);
     if (swiftFiles.length === 0) return cfg;
+    fs.mkdirSync(targetDir, { recursive: true });
 
     const mainTargetUuid = xcodeProject.getFirstTarget().uuid;
     const mainGroupKey =
@@ -220,12 +235,14 @@ const addAppIntentSourcesToMainTarget = (config) =>
     }
 
     for (const fileName of swiftFiles) {
+      fs.copyFileSync(path.join(sourceDir, fileName), path.join(targetDir, fileName));
       ensureSourceFileInTarget(xcodeProject, {
         filePath: `${appName}/${fileName}`,
         groupKey: mainGroupKey,
         targetUuid: mainTargetUuid,
       });
     }
+    weakLinkReminderLocationOverlay(xcodeProject, mainTargetUuid);
 
     return cfg;
   });
@@ -486,4 +503,5 @@ module.exports.__testables = {
   copySharedWidgetActionStore,
   ensureSourceFileInTarget,
   ensureWidgetSwiftSourcesInTarget,
+  weakLinkReminderLocationOverlay,
 };
