@@ -396,7 +396,7 @@ describe('TaskList', () => {
     storeState._allTasks = storeState.tasks;
     storeState.settings.features = { timeEstimates: true };
     let tree!: ReturnType<typeof create>;
-    await act(async () => { tree = create(<TaskList projectId={project.id} statusFilter="all" title="Launch" />); });
+    await act(async () => { tree = create(<TaskList project={project} statusFilter="all" title="Launch" />); });
     await act(async () => { latestHeaderProps().onOpenFilters(); });
 
     const sheet = taskFilterSheetPropsSpy.mock.calls.at(-1)?.[0];
