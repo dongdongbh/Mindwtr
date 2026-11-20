@@ -6,7 +6,7 @@ import {
 import { logInfo } from '../../lib/app-log';
 
 type CalendarLoad = { status: 'idle' | 'loading' | 'error' } | {
-    status: 'ready'; events: ExternalCalendarEvent[]; calendars: ExternalCalendarSubscription[]; available: boolean;
+    status: 'ready'; events: ExternalCalendarEvent[]; calendars: ExternalCalendarSubscription[]; available: boolean; deviceCalendarsFailed: boolean;
 };
 
 export function useProjectCalendarReference(project: Project, readOnly: boolean) {
@@ -42,14 +42,16 @@ export function useProjectCalendarReference(project: Project, readOnly: boolean)
             ranges.push([start, end]);
         }
         const failedSources = new Set<string>();
+        let deviceCalendarsFailed = false;
         import('../../lib/external-calendar').then(({ fetchExternalCalendarEvents }) => Promise.all(ranges.map(([start, end]) => fetchExternalCalendarEvents(start, end, {
             onFeedError: sourceId => { failedSources.add(sourceId); },
+            deviceCalendars: { onError: () => { deviceCalendarsFailed = true; } },
         })))).then(results => {
             if (cancelled) return;
             setCurrentTime(new Date());
             const upcomingIds = new Set(results[0].events.map(event => event.id));
             setLoad({ status: 'ready', events: results.flatMap((result, index) => index === 0 ? result.events : result.events.filter(event => !upcomingIds.has(event.id))).filter(event => !event.calendarSourceId || !failedSources.has(event.calendarSourceId)),
-                calendars: results[0].calendars, available: failedSources.size === 0 });
+                calendars: results[0].calendars, available: failedSources.size === 0, deviceCalendarsFailed });
         }).catch(() => { if (!cancelled) setLoad({ status: 'error' }); });
         return () => { cancelled = true; };
     }, [pickerOpen, hasReference, reference?.sourceId, reference?.uid, reference?.recurrenceId, reference?.start, reference?.end, subscriptions]);

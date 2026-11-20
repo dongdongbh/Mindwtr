@@ -220,6 +220,22 @@ describe('DailyReviewScreen', () => {
         expect(tree.root.findAllByProps({ testID: 'daily-review-completed-scroll' }).length).toBeGreaterThan(0);
     });
 
+    it('keeps subscription events beside a device calendar error', async () => {
+        const event = { id: 'ics-event', sourceId: 'subscription', title: 'Subscribed event', allDay: false,
+            start: '2026-07-15T15:00:00.000Z', end: '2026-07-15T16:00:00.000Z' };
+        vi.mocked(fetchExternalCalendarEvents).mockImplementationOnce(async (_start, _end, options) => {
+            const error = new Error('Calendars could not be found');
+            if (!options?.deviceCalendars || options.deviceCalendars === 'exclude') throw error;
+            options.deviceCalendars.onError(error);
+            return { calendars: [], events: [event] };
+        });
+        let tree!: ReturnType<typeof create>;
+        await act(async () => { tree = create(<DailyReviewScreen onClose={vi.fn()} />); });
+        const texts = tree.root.findAllByType(Text).map((node) => React.Children.toArray(node.props.children).join(''));
+        expect(texts).toContain('Calendars could not be found');
+        expect(texts).toContain('Subscribed event');
+    });
+
     it('shows the singular noun for one Today task', async () => {
         let tree!: ReturnType<typeof create>;
         await act(async () => { tree = create(<DailyReviewScreen onClose={vi.fn()} />); });

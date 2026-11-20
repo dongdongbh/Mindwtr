@@ -331,20 +331,31 @@ describe('actual exported iOS device-calendar prepared setting', () => {
 
 
 describe('iOS Calendar Settings Test-fetch', () => {
-    it.each([true, false])('Test-fetch returns fresh shared counts without writes and respects diagnostics %s', async (loggingEnabled) => {
-        const f = fixture(); await f.boot();
-        f.state.fixture.install({ ...structuredClone(data), settings: { externalCalendars: [], diagnostics: { loggingEnabled } } });
+    const uri = 'file:///PRIVATE/library/attachment-files/documents/calendar-files/22222222-2222-4222-8222-222222222222-' + 'b'.repeat(64) + '.ics';
+    const setSubscriptionEvents = (f: ReturnType<typeof fixture>, count: number) => {
         const now = new Date();
-        const first = { ...event('test-event'), startDate: new Date(now.getFullYear(), now.getMonth(), 15, 8).toISOString(),
-            endDate: new Date(now.getFullYear(), now.getMonth(), 15, 9).toISOString() };
-        f.setEvents([first]);
+        const day = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}15`;
+        const body = ['BEGIN:VCALENDAR', 'VERSION:2.0', ...Array.from({ length: count }, (_, index) => ['BEGIN:VEVENT', `UID:subscription-${index}`,
+            `DTSTART:${day}T120000Z`, `DTEND:${day}T130000Z`, 'SUMMARY:PRIVATE SUBSCRIPTION EVENT', 'END:VEVENT']).flat(), 'END:VCALENDAR'];
+        f.setLocalFile(uri, new TextEncoder().encode(body.join('\r\n')));
+    };
+    const subscribe = (f: ReturnType<typeof fixture>, loggingEnabled = false) => {
+        f.state.fixture.install({ ...structuredClone(data), settings: { diagnostics: { loggingEnabled }, externalCalendars: [
+            { id: 'local', name: 'PRIVATE LOCAL NAME', url: uri, enabled: true },
+        ] } });
+        setSubscriptionEvents(f, 1);
+    };
+
+    it.each([true, false])('Test-fetch returns fresh subscription counts without device reads or writes and respects diagnostics %s', async (loggingEnabled) => {
+        const f = fixture(); await f.boot(); subscribe(f, loggingEnabled);
         expect(await f.read({ op: 'openSettings' })).toMatchObject({ ok: true });
         const before = f.state.fixture.canonical(), kv = new Map(f.kv);
         const view = await f.read({ op: 'testSettings' });
         expect(view).toEqual({ ok: true, value: { toasts: [{ title: 'Success', message: 'Loaded 1 events', tone: 'success', durationMs: null }] } });
-        f.setEvents([first, { ...first, id: 'second-test-event' }]);
+        setSubscriptionEvents(f, 2);
         expect(await f.read({ op: 'testSettings' })).toMatchObject({ ok: true, value: { toasts: [{ message: 'Loaded 2 events' }] } });
-        expect(f.calls.filter((call) => call.op === 'events')).toHaveLength(2);
+        expect(f.calls.filter((call) => call.op === 'events')).toHaveLength(0);
+        expect(f.calls.filter((call) => call.op === 'readFile')).toHaveLength(2);
         await assertReadonly(f, before, kv);
         const lines = f.logText().trim().split('\n').filter(Boolean).map((line) => JSON.parse(line));
         expect(lines.filter((line) => line.message === 'Native iOS calendar read delivered' && line.context?.outcome === 'testSettings'))
@@ -371,9 +382,9 @@ describe('iOS Calendar Settings Test-fetch', () => {
         expect(await absent.read({ op: 'testSettings' })).toMatchObject({ ok: false, error: expect.stringContaining('NOT_READY:') });
     });
 
-    it.each(['permissions', 'events'])('keeps public cancellation precedence during held %s and permits fresh Test', async (phase) => {
-        const f = fixture(); await f.boot(); await f.read({ op: 'openSettings' });
-        const before = f.state.fixture.canonical(), kv = new Map(f.kv), gate = f.hold(phase);
+    it('keeps public cancellation precedence during a held subscription read and permits fresh Test', async () => {
+        const f = fixture(); await f.boot(); subscribe(f); await f.read({ op: 'openSettings' });
+        const before = f.state.fixture.canonical(), kv = new Map(f.kv), gate = f.hold('readFile');
         const ticket = f.state.MindwtrHost.iosCalendarRead('{"op":"testSettings"}');
         await gate.accepted;
         f.state.MindwtrHost.cancel(ticket);
@@ -387,8 +398,8 @@ describe('iOS Calendar Settings Test-fetch', () => {
     });
 
     it('uses the fixed native logical deadline and drops later provider phases', async () => {
-        const f = fixture({ deadlineMs: 20 }); await f.boot(); await f.read({ op: 'openSettings' });
-        const before = f.state.fixture.canonical(), kv = new Map(f.kv), gate = f.hold('permissions');
+        const f = fixture({ deadlineMs: 20 }); await f.boot(); subscribe(f); await f.read({ op: 'openSettings' });
+        const before = f.state.fixture.canonical(), kv = new Map(f.kv), gate = f.hold('readFile');
         const ticket = f.state.MindwtrHost.iosCalendarRead('{"op":"testSettings"}');
         await gate.accepted;
         const calls = f.calls.length;
@@ -403,10 +414,9 @@ describe('iOS Calendar Settings Test-fetch', () => {
     });
 
     it.each(['mindwtr-system-calendar-settings', 'mindwtr-external-calendars'])('returns only a failure warning after deadline and external %s change', async (cell) => {
-        const f = fixture({ deadlineMs: 20 }); await f.boot();
-        f.state.fixture.install({ ...structuredClone(data), settings: { externalCalendars: [], diagnostics: { loggingEnabled: true } } });
+        const f = fixture({ deadlineMs: 20 }); await f.boot(); subscribe(f, true);
         await f.read({ op: 'openSettings' });
-        const before = f.state.fixture.canonical(), gate = f.hold('events');
+        const before = f.state.fixture.canonical(), gate = f.hold('readFile');
         const ticket = f.state.MindwtrHost.iosCalendarRead('{"op":"testSettings"}');
         await gate.accepted;
         f.kv.set(cell, cell === 'mindwtr-system-calendar-settings' ? '{"enabled":false}' : '[]');
@@ -424,8 +434,8 @@ describe('iOS Calendar Settings Test-fetch', () => {
     });
 
     it('suppresses a closed visit result and does not seed the Calendar cache', async () => {
-        const f = fixture(); await f.boot(); await f.read({ op: 'openSettings' });
-        const before = f.state.fixture.canonical(), kv = new Map(f.kv), gate = f.hold('events');
+        const f = fixture(); await f.boot(); subscribe(f); await f.read({ op: 'openSettings' });
+        const before = f.state.fixture.canonical(), kv = new Map(f.kv), gate = f.hold('readFile');
         const ticket = f.state.MindwtrHost.iosCalendarRead('{"op":"testSettings"}');
         await gate.accepted;
         expect(await f.read({ op: 'closeSettings' })).toEqual({ ok: true, value: null });

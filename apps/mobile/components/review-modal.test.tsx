@@ -619,6 +619,27 @@ describe('ReviewModal', () => {
         await act(async () => tree.unmount());
     });
 
+    it('keeps subscription events beside a device calendar error', async () => {
+        storeState.tasks = [];
+        storeState.projects = [];
+        const start = new Date(Date.now() + 3_600_000);
+        const event = { id: 'ics-event', sourceId: 'subscription', title: 'Subscribed event', allDay: false,
+            start: start.toISOString(), end: new Date(start.getTime() + 3_600_000).toISOString() };
+        vi.mocked(fetchExternalCalendarEvents).mockImplementationOnce(async (_start, _end, options) => {
+            const error = new Error('Calendars could not be found');
+            if (!options?.deviceCalendars || options.deviceCalendars === 'exclude') throw error;
+            options.deviceCalendars.onError(error);
+            return { calendars: [], events: [event] };
+        });
+        let tree!: ReturnType<typeof create>;
+        await act(async () => { tree = create(<ReviewModal visible onClose={vi.fn()} />); });
+        expect(currentStepOf(tree)).toBe('calendar');
+        const shows = (value: string) => tree.root.findAll((node) => flattenText(node.props?.children) === value).length > 0;
+        expect(shows('Calendars could not be found')).toBe(true);
+        expect(shows('Subscribed event')).toBe(true);
+        await act(async () => tree.unmount());
+    });
+
     it('waits on the calendar before saving an empty review as complete', async () => {
         storeState.tasks = [];
         storeState.projects = [];

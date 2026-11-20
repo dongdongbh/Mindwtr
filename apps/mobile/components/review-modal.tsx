@@ -428,11 +428,15 @@ export function ReviewModal({ visible, onClose }: ReviewModalProps) {
                 </View>
             );
         }
-        if (notice !== null) {
+        const keptEventsError = externalCalendarError && days.length > 0 ? externalCalendarError : null;
+        if (notice !== null && keptEventsError === null) {
             return <Text style={[styles.calendarEventMeta, { color: tc.secondaryText }]}>{notice}</Text>;
         }
         return (
             <View style={styles.calendarEventList}>
+                {keptEventsError !== null && (
+                    <Text style={[styles.calendarEventMeta, { color: tc.secondaryText }]}>{keptEventsError}</Text>
+                )}
                 {days.map((day) => {
                     const isExpanded = expandedExternalDays.has(day.key);
                     const visibleEvents = isExpanded ? day.events : day.events.slice(0, WEEKLY_REVIEW_PREVIEW.dayEvents);

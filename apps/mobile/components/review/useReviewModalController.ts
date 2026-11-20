@@ -365,7 +365,14 @@ export function useReviewModalController({
             setExternalCalendarError(null);
             try {
                 const range = getReviewCalendarRange(new Date(), 7);
-                const { events } = await fetchExternalCalendarEvents(range.start, range.end);
+                const { events } = await fetchExternalCalendarEvents(range.start, range.end, {
+                    deviceCalendars: {
+                        onError: (error) => {
+                            if (cancelled) return;
+                            setExternalCalendarError(error instanceof Error ? error.message : String(error));
+                        },
+                    },
+                });
                 if (cancelled) return;
                 setExternalCalendarEvents(events);
             } catch (error) {

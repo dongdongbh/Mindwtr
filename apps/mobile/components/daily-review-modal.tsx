@@ -149,6 +149,12 @@ function DailyReviewFlow({ onClose }: { onClose: () => void }) {
                 const { events } = await fetchExternalCalendarEvents(start, end, {
                     signal: controller?.signal,
                     timeoutMs: 15_000,
+                    deviceCalendars: {
+                        onError: (error) => {
+                            if (controller?.signal.aborted) return;
+                            setExternalError(error instanceof Error ? error.message : String(error));
+                        },
+                    },
                 });
                 if (controller?.signal.aborted) return;
                 setExternalEvents(events);
@@ -321,14 +327,15 @@ function DailyReviewFlow({ onClose }: { onClose: () => void }) {
         if (externalLoading) {
             return <Text style={[styles.eventMeta, { color: tc.secondaryText }]}>{text.loading}</Text>;
         }
-        if (externalError) {
-            return <Text style={[styles.eventMeta, { color: tc.secondaryText }]}>{externalError}</Text>;
-        }
+        const errorNotice = externalError
+            ? <Text style={[styles.eventMeta, { color: tc.secondaryText }]}>{externalError}</Text>
+            : null;
         if (day.count === 0) {
-            return <Text style={[styles.eventMeta, { color: tc.secondaryText }]}>{text.noEvents}</Text>;
+            return errorNotice ?? <Text style={[styles.eventMeta, { color: tc.secondaryText }]}>{text.noEvents}</Text>;
         }
         return (
             <View style={styles.eventList}>
+                {errorNotice}
                 {day.events.map((event) => (
                     <View key={event.key} style={styles.eventRow}>
                         <Text style={[styles.eventTitle, { color: tc.text }]} numberOfLines={1}>

@@ -53,7 +53,7 @@ export function ProjectCalendarReference({ project, readOnly, t }: {
                 placeholderTextColor={tc.secondaryText} style={{ minHeight: 44, paddingHorizontal: 10, color: tc.text, backgroundColor: tc.inputBg, borderColor: tc.border, borderWidth: 1, borderRadius: 8 }} />
             {matches.length > PROJECT_CALENDAR_REFERENCE_PICKER_LIMIT && <Text style={{ color: tc.secondaryText, fontSize: 12 }}>{t('projects.calendarLimit')}</Text>}
             {load.status === 'loading' && <Text style={{ color: tc.secondaryText }}>{t('common.loading')}</Text>}
-            {(load.status === 'error' || (load.status === 'ready' && !load.available)) && <Text accessibilityLiveRegion="polite" style={{ color: tc.secondaryText }}>{t('projects.calendarLoadFailed')}</Text>}
+            {(load.status === 'error' || (load.status === 'ready' && (!load.available || load.deviceCalendarsFailed))) && <Text accessibilityLiveRegion="polite" style={{ color: tc.secondaryText }}>{t('projects.calendarLoadFailed')}</Text>}
             {load.status === 'ready' && load.available && matches.length === 0 && <Text style={{ color: tc.secondaryText }}>{t(query ? 'common.noMatches' : 'projects.calendarEmpty')}</Text>}
             {visibleChoices.length > 0 && <ScrollView nestedScrollEnabled style={{ maxHeight: 260 }}>
                 {visibleChoices.map((event, index) => <TouchableOpacity accessibilityRole="button" disabled={disabled} accessibilityState={{ disabled }}

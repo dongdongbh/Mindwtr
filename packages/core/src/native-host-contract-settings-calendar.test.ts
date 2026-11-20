@@ -42,6 +42,10 @@ type Fixture = {
 type Host = ReturnType<typeof createNativeHostContract>;
 
 const fixture: Fixture = JSON.parse(readFileSync(new URL('./calendar-settings-parity.fixtures.json', import.meta.url), 'utf8'));
+const subscriptionTestToasts: Partial<Record<string, { step: number; toasts: unknown[][] }>> = {
+    'feeds: a local file, a cancelled pick, a failed test': { step: 3, toasts: [['Success', 'Loaded 1 events', 'success', null]] },
+    'in Chinese: push on and a test': { step: 2, toasts: [['成功', '已加载 2 个日程', 'success', null]] },
+};
 
 const value = <T,>(result: NativeHostResult<T>): T => {
     if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`);
@@ -467,7 +471,9 @@ describe('native host contract: Settings › Calendar', () => {
                 observed.push(driver.observe());
             }
             value(contract.closeCalendarSettings());
-            expect(observed).toEqual(fixture.observations[name]);
+            const change = subscriptionTestToasts[name];
+            expect(observed).toEqual(fixture.observations[name].map((frame, step) =>
+                change && step === change.step ? { ...frame, toasts: change.toasts } : frame));
         },
     );
     it.each(['create', 'update', 'delete'] as const)('forwards exact event identity through the native settings wrapper: %s', async (operation) => {
@@ -1539,18 +1545,15 @@ describe('native host contract: Settings › Calendar', () => {
         });
 
         it.each([
-            ['first source', 'abort'], ['final source', 'abort'], ['permission', 'abort'], ['events', 'abort'], ['HTTP', 'abort'],
-            ['first source', 'deadline'], ['final source', 'deadline'], ['permission', 'deadline'], ['events', 'deadline'], ['HTTP', 'deadline'],
+            ['first source', 'abort'], ['final source', 'abort'], ['HTTP', 'abort'],
+            ['first source', 'deadline'], ['final source', 'deadline'], ['HTTP', 'deadline'],
         ] as const)('terminalizes %s on %s while observing late rejection and allowing a fresh Test', async (phase, stop) => {
-            const provider = phase === 'permission' || phase === 'events';
             const { handset, contract, fetches } = await setup({
-                settings: { externalCalendars: provider ? [] : fixture.settings.synced.externalCalendars },
-                device: { permission: 'granted', calendars: ['primary'],
-                    storage: { [KEYS.system]: JSON.stringify({ enabled: provider }) } },
+                settings: { externalCalendars: fixture.settings.synced.externalCalendars },
+                device: { permission: 'granted', calendars: ['primary'], storage: { [KEYS.system]: JSON.stringify({ enabled: false }) } },
             });
             const gate = deferred<never>(), entered = deferred<void>(), owner = new AbortController();
             const info = vi.spyOn(handset.host.log, 'info'), error = vi.spyOn(handset.host.log, 'error');
-            const oldPermission = handset.host.calendars.getPermissions, oldEvents = handset.host.calendars.getEvents;
             const originalFetch = fetches.getMockImplementation()!;
             let sourceReads = 0;
             handset.host.storage.multiGet = (names) => {
@@ -1559,8 +1562,6 @@ describe('native host contract: Settings › Calendar', () => {
                 }
                 return Promise.resolve(names.map((name) => [name, handset.state.storage.get(name) ?? null]));
             };
-            if (phase === 'permission') handset.host.calendars.getPermissions = () => { entered.resolve(); return gate.promise; };
-            if (phase === 'events') handset.host.calendars.getEvents = () => { entered.resolve(); return gate.promise; };
             if (phase === 'HTTP') fetches.mockImplementation(() => { entered.resolve(); return gate.promise; });
             const add = vi.spyOn(owner.signal, 'addEventListener'), remove = vi.spyOn(owner.signal, 'removeEventListener');
             vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
@@ -1578,7 +1579,6 @@ describe('native host contract: Settings › Calendar', () => {
             expect(info).not.toHaveBeenCalled(); expect(error).toHaveBeenCalledTimes(stop === 'abort' ? 0 : 1);
             expect(vi.getTimerCount()).toBe(0);
             delete handset.host.storage.multiGet;
-            handset.host.calendars.getPermissions = oldPermission; handset.host.calendars.getEvents = oldEvents;
             fetches.mockImplementation(originalFetch);
             expect(value(await contract.testCalendarFeeds({ timeoutMs: 15_000 })).toasts).toEqual([success(2)]);
             expect(useTaskStore.getState().settings).toEqual(beforeSettings); expect(handset.snapshot()).toEqual(beforeDevice);
@@ -1623,12 +1623,9 @@ describe('native host contract: Settings › Calendar', () => {
             expect(writes).toEqual([]); expect(handset.life.step).toBe(0); expect(handset.state.prompts).toBe(0);
         });
 
-        it.each([
-            ['legacy', 'provider failure'], ['system', 'provider failure'],
-            ['legacy', 'deadline'], ['system', 'deadline'],
-        ] as const)('keeps a generic attempted-Test warning after %s cells change during held %s, without counts or repair', async (kind, stop) => {
-            const { handset, contract } = await setup({
-                settings: kind === 'legacy' ? {} : { externalCalendars: [] },
+        it.each(['legacy', 'system'] as const)('keeps a generic attempted-Test warning after %s cells change during a held deadline, without counts or repair', async (kind) => {
+            const { handset, contract, fetches } = await setup({
+                settings: kind === 'legacy' ? {} : { externalCalendars: fixture.settings.synced.externalCalendars },
                 device: { permission: 'granted', calendars: ['primary'], storage: {
                     [KEYS.feeds]: JSON.stringify(fixture.settings.synced.externalCalendars),
                     [KEYS.system]: JSON.stringify({ enabled: true }),
@@ -1637,7 +1634,7 @@ describe('native host contract: Settings › Calendar', () => {
             const gate = deferred<never>(), entered = deferred<void>();
             const cells = vi.fn((names: string[]) => Promise.resolve(names.map((name) => [name, handset.state.storage.get(name) ?? null] as [string, string | null])));
             handset.host.storage.multiGet = cells;
-            handset.host.calendars.getEvents = () => { entered.resolve(); return gate.promise; };
+            fetches.mockImplementation(() => { entered.resolve(); return gate.promise; });
             const info = vi.spyOn(handset.host.log, 'info'), error = vi.spyOn(handset.host.log, 'error');
             vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
             vi.setSystemTime(new Date(fixture.now));
@@ -1646,17 +1643,14 @@ describe('native host contract: Settings › Calendar', () => {
             await entered.promise;
             handset.state.storage.set(kind === 'legacy' ? KEYS.feeds : KEYS.system, kind === 'legacy' ? '[]' : JSON.stringify({ enabled: false }));
             const changedDevice = handset.snapshot();
-            if (stop === 'provider failure') gate.reject(new Error('Calendar provider unavailable'));
-            else await vi.advanceTimersByTimeAsync(15_000);
+            await vi.advanceTimersByTimeAsync(15_000);
             expect(value(await pending)).toEqual({ toasts: [warning()] });
             expect(cells).toHaveBeenCalledTimes(1);
             expect(info).not.toHaveBeenCalled(); expect(error).toHaveBeenCalledTimes(1);
-            if (stop === 'deadline') {
-                expect(error.mock.calls[0][0]).toEqual(new Error('External calendar request timed out'));
-                gate.reject(new Error('PRIVATE late provider failure'));
-                await flushMicrotasks();
-                expect(error).toHaveBeenCalledTimes(1);
-            }
+            expect(error.mock.calls[0][0]).toEqual(new Error('External calendar request timed out'));
+            gate.reject(new Error('PRIVATE late subscription failure'));
+            await flushMicrotasks();
+            expect(error).toHaveBeenCalledTimes(1);
             expect(vi.getTimerCount()).toBe(0);
             expect(useTaskStore.getState().settings).toEqual(beforeSettings); expect(handset.snapshot()).toEqual(changedDevice);
             expect(writes).toEqual([]); expect(handset.life.step).toBe(0); expect(handset.state.prompts).toBe(0);
@@ -1713,20 +1707,25 @@ describe('native host contract: Settings › Calendar', () => {
             expect(writes).toEqual([]); expect(handset.state.prompts).toBe(0);
         });
 
-        it('uses the exact local-month range, saved selection, shared count and a single generic partial warning', async () => {
+        it('counts only subscription events with a single generic partial warning, without reading the device calendars', async () => {
             const { handset, contract, fetches } = await setup({ device: { permission: 'granted', calendars: ['primary'],
                 storage: { [KEYS.system]: JSON.stringify({ enabled: true, selectAll: false, selectedCalendarIds: ['g-primary'] }) } } });
             freezeClock();
             const events = vi.spyOn(handset.host.calendars, 'getEvents');
-            expect(value(await contract.testCalendarFeeds({ timeoutMs: 15_000 })).toasts).toEqual([success(4)]);
-            expect(events.mock.calls[0][0]).toEqual(['g-primary']);
-            expect(events.mock.calls[0][1].toISOString()).toBe('2026-09-01T00:00:00.000Z');
-            expect(events.mock.calls[0][2].toISOString()).toBe('2026-09-30T23:59:59.999Z');
+            expect(value(await contract.testCalendarFeeds({ timeoutMs: 15_000 })).toasts).toEqual([success(2)]);
+            expect(events).not.toHaveBeenCalled();
             useTaskStore.setState({ settings: { externalCalendars: [...fixture.settings.synced.externalCalendars!, {
                 id: 'failed', name: 'Private name', url: 'https://synthetic-person:synthetic-secret@example.invalid/private.ics', enabled: true,
             }] } });
             expect(value(await contract.testCalendarFeeds({ timeoutMs: 15_000 })).toasts).toEqual([warning()]);
             expect(fetches).toHaveBeenCalledTimes(3); expect(writes).toEqual([]); expect(handset.state.prompts).toBe(0);
+        });
+
+        it('reports the subscription count while the device calendars fail', async () => {
+            const { handset, contract } = await setup({ device: { permission: 'granted', calendars: ['primary'],
+                storage: { [KEYS.system]: JSON.stringify({ enabled: true }) } } });
+            handset.host.calendars.getEvents = async () => { throw new Error('Calendar provider unavailable'); };
+            expect(value(await contract.testCalendarFeeds({ timeoutMs: 15_000 })).toasts).toEqual([success(2)]);
         });
 
         it.each(['en', 'zh'] as const)('keeps HTTP200 empty parsing and localized zero-count semantics (%s)', async (language) => {
@@ -2264,11 +2263,17 @@ describe('native host contract: Settings › Calendar', () => {
             for (const read of reads) expect(read).not.toHaveBeenCalled();
         });
 
-        it('answers an error feed when the device calendars fail, and refuses bad input', async () => {
-            await seed({});
+        it('keeps subscription events with a warning when the device calendars fail, and refuses bad input', async () => {
+            await seed({ externalCalendars: fixture.settings.synced.externalCalendars });
             const handset = phone({ calendars: ['primary'], failEvents: true, storage: { [KEYS.system]: JSON.stringify({ enabled: true }) } });
+            const info = vi.spyOn(handset.host.log, 'info');
             const contract = await openHost(handset.host);
-            expect(value(await contract.loadExternalCalendarFeed({ slot: 'weeklyReview', ...range }))).toEqual({ status: 'error', message: 'Calendar provider unavailable' });
+            const feed = value(await contract.loadExternalCalendarFeed({ slot: 'weeklyReview', ...range }));
+            expect(feed).toMatchObject({ status: 'ready', warning: 'Calendar provider unavailable' });
+            if (feed.status !== 'ready') throw new Error('not ready');
+            expect(feed.events.map((event) => event.title)).toEqual(['Planning', 'Review']);
+            expect(feed.events.every((event) => event.sourceId === 'feed-a')).toBe(true);
+            expect(info.mock.calls.some(([, context]) => JSON.stringify(context).includes('v1.3.10/calendar-subscriptions-after-device-error'))).toBe(true);
             expect(await contract.loadExternalCalendarFeed({ slot: 'calendar', start: range.end, end: range.start })).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
             expect(await contract.loadExternalCalendarFeed({ slot: 'other' as never, ...range })).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
         });
@@ -2279,7 +2284,7 @@ describe('native host contract: Settings › Calendar', () => {
             handset.host.calendars.getEvents = async () => { throw new Error('PRIVATE CONTENT '.repeat(2000)); };
             const contract = await openHost(handset.host);
             expect(value(await contract.loadExternalCalendarFeed({ slot: 'calendar', ...range })))
-                .toEqual({ status: 'error', message: 'Calendar events could not be read' });
+                .toMatchObject({ status: 'ready', events: [], warning: 'Calendar events could not be read' });
             expect(writes).toEqual([]); expect(handset.life.step).toBe(0);
         });
     });

@@ -918,12 +918,18 @@ export function createCalendarSettingsMethods(deps: CalendarSettingsDeps) {
 
     const loadFeed = (host: NativeCalendarHost, start: Date, end: Date, timeoutMs: number | undefined, signal: AbortSignal, sources?: Sources) => {
         let failedFeeds = 0;
-        return device(host).feeds.fetchExternalCalendarEvents(start, end, { signal, timeoutMs, sources, onFeedError: () => { failedFeeds += 1; } })
+        let deviceError: string | null = null;
+        return device(host).feeds.fetchExternalCalendarEvents(start, end, {
+            signal, timeoutMs, sources,
+            onFeedError: () => { failedFeeds += 1; },
+            deviceCalendars: { onError: (error) => { deviceError = boundedFeedError(error); } },
+        })
             .then((data): NativeHostResult<NativeCalendarFeed> => (signal.aborted
                 ? fail('STALE_REVISION', 'A newer load for this screen replaced it')
                 : { ok: true, value: {
                     status: 'ready', calendars: data.calendars, events: data.events,
-                    ...(failedFeeds > 0 ? { warning: translators().tr('settings.calendarMobile.failedToLoadEvents') } : {}),
+                    ...(deviceError !== null ? { warning: deviceError }
+                        : failedFeeds > 0 ? { warning: translators().tr('settings.calendarMobile.failedToLoadEvents') } : {}),
                 } }))
             .catch((error: unknown): NativeHostResult<NativeCalendarFeed> => (signal.aborted
                 ? fail('STALE_REVISION', 'A newer load for this screen replaced it')
@@ -1121,7 +1127,7 @@ export function createCalendarSettingsMethods(deps: CalendarSettingsDeps) {
                 const range = getCalendarTestRange(new Date());
                 let failedFeeds = 0;
                 const { events } = await read(() => device(opened.value.host).feeds.fetchExternalCalendarEvents(range.start, range.end, {
-                    sources, signal: controller.signal,
+                    sources, signal: controller.signal, deviceCalendars: 'exclude',
                     onFeedError: () => { failedFeeds += 1; },
                 }));
                 if (!current()) return staleLoad();

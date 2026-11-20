@@ -85,6 +85,19 @@ describe('project calendar reference mobile', () => {
         expect(text()).not.toContain('Unverified appointment');
         expect(updateProject).not.toHaveBeenCalled();
     });
+    it('offers subscription events and warns when the device calendars fail', async () => {
+        vi.mocked(fetchExternalCalendarEvents).mockImplementation(async (_start, _end, options) => {
+            const error = new Error('Calendars could not be found');
+            if (!options?.deviceCalendars || options.deviceCalendars === 'exclude') throw error;
+            options.deviceCalendars.onError(error);
+            return { events: [event], calendars: [calendar] };
+        });
+        await mount();
+        await act(async () => { button('project-calendar-link')?.props.onPress(); });
+        expect(text()).toContain('projects.calendarLoadFailed');
+        await act(async () => { button('project-calendar-event-0')?.props.onPress(); });
+        expect(updateProject).toHaveBeenCalledWith(project.id, { calendarReference: reference });
+    });
     it('shows fresh rescheduling without persisting the live event', async () => {
         vi.mocked(fetchExternalCalendarEvents).mockResolvedValue({ events: [{ ...event, title: 'Rescheduled appointment' }], calendars: [calendar] });
         await mount({ ...project, calendarReference: reference });
