@@ -148,6 +148,20 @@ describe('list view models', () => {
         expect(resolved.activeCount).toBe(1);
     });
 
+    it('offers No estimate for enabled status filters with no estimated tasks', () => {
+        const task: Task = { id: 'plain', title: 'Unestimated task', status: 'done', contexts: [], tags: [], createdAt: '', updatedAt: '' };
+        const input = { tasks: [task], allProjects: [], settings: { features: { timeEstimates: true } }, timeEstimateFilters: true, t };
+        const enabled = buildStatusListFilterOptions({ ...input, kind: 'done' });
+        expect(enabled.visibility.timeEstimate).toBe(true);
+        expect(enabled.timeEstimates).toContain('none');
+
+        for (const kind of ['inbox', 'reference'] as const) {
+            const hidden = buildStatusListFilterOptions({ ...input, kind });
+            expect(hidden.visibility.timeEstimate).toBe(false);
+            expect(hidden.timeEstimates).not.toContain('none');
+        }
+    });
+
     it('uses the Search title rather than its input placeholder in the active chip', () => {
         const resolved = resolveListFilterState(
             { ...EMPTY_LIST_FILTER_STATE, searchQuery: ' MILK ' },

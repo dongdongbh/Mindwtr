@@ -26,6 +26,7 @@ import {
   TASK_LIST_SORT_OPTIONS,
   getTaskSortByLabel,
   TIME_ESTIMATE_FILTER_OPTIONS,
+  TIME_ESTIMATE_OPTIONS,
   buildStatusListFilterOptions,
   buildStatusListFilterSummary,
   buildStatusListModel,
@@ -1640,7 +1641,8 @@ function TaskListComponent({
         options={{
           tokens: tokenFilterOptions,
           projects: referenceProjectFilterOptions,
-          timeEstimates: TIME_ESTIMATE_FILTER_OPTIONS,
+          timeEstimates: statusListFilterOptions?.timeEstimates
+            ?? (metadataFilterVisibility.timeEstimate ? TIME_ESTIMATE_FILTER_OPTIONS : TIME_ESTIMATE_OPTIONS),
           visibility: metadataFilterVisibility,
         }}
         hasAdditionalActiveFilters={archivedReferenceFilterActive}

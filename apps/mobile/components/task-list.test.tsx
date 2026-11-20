@@ -163,12 +163,6 @@ vi.mock('react-native-draggable-flatlist', () => ({
 vi.mock('@mindwtr/core', async (importOriginal) => {
   const { mockCore } = await import('../test-support/mock-core');
   return mockCore(importOriginal as () => Promise<Record<string, unknown>>, () => storeState, {
-    getTaskMetadataFilterVisibility: vi.fn(() => ({
-      showEnergy: true,
-      showLocation: true,
-      showPriority: true,
-      showTimeEstimate: true,
-    })),
     hasActiveFilterCriteria: vi.fn(() => false),
     matchesTask: vi.fn(() => true),
     parseSearchQuery: vi.fn(() => ({ filters: [], text: '' })),
@@ -394,6 +388,26 @@ describe('TaskList', () => {
     act(() => { taskFilterSheetPropsSpy.mock.calls.at(-1)?.[0].selections.setSearchQuery(' MILK '); });
     expect(latestHeaderProps().activeFilterChips.find((chip: { id: string }) => chip.id === 'search').label)
       .toBe('Search: MILK');
+    act(() => tree.unmount());
+  });
+
+  it('offers No estimate in an enabled list when no tasks have estimates', async () => {
+    storeState.tasks = [makeTask('plain', 'Unestimated task')];
+    storeState._allTasks = storeState.tasks;
+    storeState.settings.features = { timeEstimates: true };
+    let tree!: ReturnType<typeof create>;
+    await act(async () => { tree = create(<TaskList projectId={project.id} statusFilter="all" title="Launch" />); });
+    await act(async () => { latestHeaderProps().onOpenFilters(); });
+
+    const sheet = taskFilterSheetPropsSpy.mock.calls.at(-1)?.[0];
+    expect(sheet.visible).toBe(true);
+    expect(sheet.options.visibility.timeEstimate).toBe(true);
+    expect(sheet.options.timeEstimates).toContain('none');
+    expect(sheet.selections.timeEstimates).toEqual([]);
+
+    await act(async () => { sheet.selections.toggleTimeEstimate('none'); });
+    expect(taskFilterSheetPropsSpy.mock.calls.at(-1)?.[0].selections.criteria.timeEstimates).toEqual(['none']);
+    expect(latestHeaderProps().activeFilterChips).toContainEqual(expect.objectContaining({ id: 'time:none', label: 'No estimate' }));
     act(() => tree.unmount());
   });
 
