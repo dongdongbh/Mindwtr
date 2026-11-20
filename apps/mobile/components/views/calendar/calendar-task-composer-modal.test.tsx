@@ -1,5 +1,5 @@
 import React from 'react';
-import { Modal, TextInput } from 'react-native';
+import { Modal, Platform, ScrollView, TextInput } from 'react-native';
 import { act, create } from 'react-test-renderer';
 import { describe, expect, it, vi } from 'vitest';
 import { createDateFormatter, type DateFormatter, type Task } from '@mindwtr/core';
@@ -96,6 +96,23 @@ const baseProps = {
 };
 
 describe('CalendarTaskComposerModal', () => {
+  it('keeps the iOS time fields in the keyboard-adjusted scroll area and outside dismiss targets', () => {
+    const original = Platform.OS;
+    try {
+      Object.defineProperty(Platform, 'OS', { configurable: true, value: 'ios' });
+      let tree!: ReturnType<typeof create>;
+      act(() => { tree = create(<CalendarTaskComposerModal {...baseProps} />); });
+      const form = tree.root.findByType(ScrollView);
+      expect(form.props.automaticallyAdjustKeyboardInsets).toBe(true);
+      const start = form.findAllByType(TextInput)[1];
+      for (let parent = start.parent; parent; parent = parent.parent) {
+        expect(parent.props.onPress).not.toBe(baseProps.closeComposer);
+      }
+    } finally {
+      Object.defineProperty(Platform, 'OS', { configurable: true, value: original });
+    }
+  });
+
   it('shows the user clock while keeping composer times unchanged', () => {
     const rendered = composer({ startAt: new Date(2026, 7, 26, 9) });
     let tree!: ReturnType<typeof create>;

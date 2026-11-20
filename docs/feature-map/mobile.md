@@ -228,6 +228,7 @@ Source: `apps/mobile`. Routes live in `apps/mobile/app` (expo-router). Labels be
 
 - Reach: Menu › Calendar. Modes: Day, Week, Month, Schedule.
 - Shortcuts: Swipe left or right on Month or Day to change the period. In the Day timeline, long press a scheduled block and drag it to a new time. Deep link `mindwtr:///calendar`.
+- Task planning: Start and End are in the scrollable form. On iOS the form adjusts to the keyboard. Use Save, Cancel, or Close to leave the sheet.
 - Selectors: `calendar-all-day-more`, `calendar-deadline-` (+ task id)
 - Code: `apps/mobile/components/views/calendar-view.tsx`, `apps/mobile/components/views/calendar/useCalendarViewController.ts`, `apps/mobile/components/views/calendar/calendar-task-composer-modal.tsx`
 - Checks: `apps/mobile/components/views/calendar/calendar-period-navigation.test.tsx`, `apps/mobile/components/views/calendar-view.all-day.test.tsx`, `apps/mobile/components/views/calendar-view.schedule-order.test.tsx`, `apps/mobile/components/views/calendar/calendar-task-composer-modal.test.tsx`

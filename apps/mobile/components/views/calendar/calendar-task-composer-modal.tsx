@@ -13,12 +13,14 @@ import {
 import React from 'react';
 import {
   Modal,
+  Platform,
+  ScrollView,
   Pressable,
   Text,
   TextInput,
   View,
 } from 'react-native';
-import { ScrollView } from 'react-native-gesture-handler';
+import { ScrollView as ResultsScrollView } from 'react-native-gesture-handler';
 
 import type { ThemeColors } from '@/hooks/use-theme-colors';
 
@@ -97,23 +99,22 @@ export function CalendarTaskComposerModal({
       transparent
       visible={Boolean(composer)}
     >
-      <Pressable
-        accessible={false}
-        onPress={closeComposer}
+      <View
         style={keyboardInset > 0
           ? [styles.composerBackdrop, { paddingBottom: keyboardInset }]
           : styles.composerBackdrop}
       >
         {composer && (
-          <View
+          <ScrollView
             accessibilityViewIsModal
-            onTouchEnd={(event) => event.stopPropagation()}
+            automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
+            keyboardShouldPersistTaps="handled"
+            contentContainerStyle={[styles.composerContent, { paddingBottom: Math.max(18, bottomInset + 14) }]}
             style={[
               styles.calendarComposer,
               {
                 backgroundColor: tc.cardBg,
                 borderColor: tc.border,
-                paddingBottom: Math.max(18, bottomInset + 14),
               },
             ]}
           >
@@ -184,7 +185,7 @@ export function CalendarTaskComposerModal({
                   style={[styles.input, styles.composerInput, { backgroundColor: tc.inputBg, borderColor: tc.border, color: tc.text }]}
                   value={composer.query}
                 />
-                <ScrollView style={styles.composerResults} keyboardShouldPersistTaps="handled">
+                <ResultsScrollView nestedScrollEnabled style={styles.composerResults} keyboardShouldPersistTaps="handled">
                   {candidates.map((task) => {
                     const selected = task.id === composer.selectedTaskId;
                     return (
@@ -213,7 +214,7 @@ export function CalendarTaskComposerModal({
                       {text.noMatchingTasks}
                     </Text>
                   )}
-                </ScrollView>
+                </ResultsScrollView>
                 {selectedTask && (
                   <Text
                     accessibilityLiveRegion="polite"
@@ -321,9 +322,9 @@ export function CalendarTaskComposerModal({
                 <Text style={[styles.composerActionText, { color: tc.onTint }]}>{text.save}</Text>
               </Pressable>
             </View>
-          </View>
+          </ScrollView>
         )}
-      </Pressable>
+      </View>
     </Modal>
   );
 }

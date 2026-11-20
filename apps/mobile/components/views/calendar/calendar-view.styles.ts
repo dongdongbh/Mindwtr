@@ -832,10 +832,13 @@ export const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.55)',
   },
   calendarComposer: {
+    flexGrow: 0,
     maxHeight: '82%',
     borderTopWidth: 1,
     borderTopLeftRadius: 18,
     borderTopRightRadius: 18,
+  },
+  composerContent: {
     padding: 16,
     gap: 14,
   },
