@@ -157,7 +157,8 @@ describeSqlite('SqliteAdapter', () => {
         db.exec(`
             ALTER TABLE projects DROP COLUMN perSectionFlow;
             ALTER TABLE projects DROP COLUMN calendarReference;
-            ALTER TABLE projects DROP COLUMN repeatAfterMonths;
+            ALTER TABLE projects DROP COLUMN repeatAfterCount;
+            ALTER TABLE projects DROP COLUMN repeatAfterUnit;
             ALTER TABLE sections DROP COLUMN isSequential;
         `);
         runSql(db, "INSERT INTO projects (id,title,status,color,createdAt,updatedAt) VALUES ('trip','Camping Trip','active','#6B7280','2026-10-01','2026-10-01')");
@@ -189,7 +190,8 @@ describeSqlite('SqliteAdapter', () => {
         db.exec(SQLITE_BASE_SCHEMA);
         db.exec(`
             ALTER TABLE projects DROP COLUMN calendarReference;
-            ALTER TABLE projects DROP COLUMN repeatAfterMonths;
+            ALTER TABLE projects DROP COLUMN repeatAfterCount;
+            ALTER TABLE projects DROP COLUMN repeatAfterUnit;
         `);
         const at = '2026-11-01T10:00:00.000Z';
         const reference = { sourceId: 'feed', uid: 'event', sourceName: 'Calendar', title: 'Meeting',

@@ -583,7 +583,7 @@ export function createReferenceProjectNextActionMethods(deps: { readiness: () =>
                     op.task = addTask(op, getTaskReminderDefault(data.settings)); operation = op; result = { action: 'add', id, openAfterSave: request.openAfterSave };
                     rawBefore = { tasks: [{ id, before: null }], projects: [], sections: [] };
                 } else {
-                    if (context.project.repeatAfterMonths)
+                    if (context.project.repeatAfterCount)
                         return fail('INVALID_INPUT', 'Complete repeating projects in Mindwtr for desktop');
                     if (context.scope !== 'project') return fail('INVALID_INPUT', 'This section prompt cannot complete its project');
                     const sections = lists.sections.filter((r) => r.projectId === context.project.id); const ids = new Set(sections.map((r) => r.id));

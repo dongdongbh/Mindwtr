@@ -16,6 +16,7 @@ import {
     nextRevision,
 } from './store-helpers';
 import { isProjectCancelled } from './project-status';
+import { normalizeProjectRepeatFields } from './project-sync-schema';
 import { getAutoArchiveDays, shouldAutoArchiveCompletedTask } from './task-utils';
 import { isTaskActionable, isTaskFinished } from './task-status';
 import { generateUUID as uuidv4 } from './uuid';
@@ -441,6 +442,14 @@ const normalizeProjectStatusAndTagsMigration: LoadMigration = {
     },
 };
 
+const normalizeProjectRepeatIntervalMigration: LoadMigration = {
+    name: 'normalize-project-repeat-interval',
+    run: (data) => {
+        const projects = data.projects.map(normalizeProjectRepeatFields);
+        return projects.some((project, index) => project !== data.projects[index]) ? { ...data, projects } : null;
+    },
+};
+
 const migrateProjectOrderMigration: LoadMigration = {
     name: 'migrate-project-order',
     shouldRun: (ctx) => ctx.shouldRunSchemaMigration,
@@ -772,6 +781,7 @@ const LOAD_MIGRATIONS: LoadMigration[] = [
     promoteScheduledTasksMigration,
     autoArchiveStaleTasksMigration,
     normalizePeopleForLoadMigration,
+    normalizeProjectRepeatIntervalMigration,
     normalizeProjectStatusAndTagsMigration,
     migrateProjectOrderMigration,
     migrateLegacyAreasMigration,

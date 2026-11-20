@@ -1,4 +1,4 @@
-import { normalizeProjectRepeatAfterMonths, safeFormatDate, safeParseDate, type Project, type ProjectFlowMode, type StoreActionResult } from '@mindwtr/core';
+import { normalizeProjectRepeatAfterCount, normalizeProjectRepeatAfterUnit, PROJECT_REPEAT_UNITS, safeFormatDate, safeParseDate, type Project, type ProjectFlowMode, type ProjectRepeatUnit, type StoreActionResult } from '@mindwtr/core';
 import { joinDateTime, splitDateTime } from '@mindwtr/core/date-draft';
 import { Calendar, CalendarClock, CalendarRange, FolderOpenDot, ListOrdered, Plus, Repeat, Settings2, Signal, Tags } from 'lucide-react';
 import { useNativeDateInputLocale } from '../../../hooks/use-native-date-input-locale';
@@ -35,7 +35,7 @@ type ProjectDetailsFieldsProps = {
     onStartDateChange: (value: string) => void;
     dueDateValue: string;
     onDueDateChange: (value: string) => void;
-    onRepeatAfterMonthsChange: (value: number | undefined) => Promise<StoreActionResult> | undefined;
+    onRepeatAfterChange: (updates: Pick<Project, 'repeatAfterCount' | 'repeatAfterUnit'>) => Promise<StoreActionResult> | undefined;
     reviewAtValue: string;
     onReviewAtChange: (value: string) => void;
     readOnly?: boolean;
@@ -66,7 +66,7 @@ export function ProjectDetailsFields({
     onStartDateChange,
     dueDateValue,
     onDueDateChange,
-    onRepeatAfterMonthsChange,
+    onRepeatAfterChange,
     reviewAtValue,
     onReviewAtChange,
     readOnly = false,
@@ -77,12 +77,14 @@ export function ProjectDetailsFields({
     const [colorIntent, setColorIntent] = useState<string | null>(null);
     const [repeatSaving, setRepeatSaving] = useState(false);
     const [repeatError, setRepeatError] = useState<string | null>(null);
+    const [repeatDraft, setRepeatDraft] = useState<{ count: string; unit: ProjectRepeatUnit } | null>(null);
     const projectGeneration = useRef(0);
     useEffect(() => {
         projectGeneration.current += 1;
         setColorSaving(false); setColorError(false); setColorIntent(null);
         setRepeatSaving(false);
         setRepeatError(null);
+        setRepeatDraft(null);
     }, [project.id]);
     const resolveText = (key: string, fallback: string) => {
         const value = t(key);
@@ -103,22 +105,30 @@ export function ProjectDetailsFields({
         } catch { if (projectGeneration.current === generation) setColorError(true); }
         finally { if (projectGeneration.current === generation) setColorSaving(false); }
     };
-    const saveRepeat = async (raw: string) => {
-        if (readOnly || repeatSaving) return;
-        const text = raw.trim();
-        const months = /^\d+$/.test(text) ? normalizeProjectRepeatAfterMonths(Number(text)) : undefined;
-        if (text && months === undefined) {
+    const savedRepeatCount = project.repeatAfterCount?.toString() ?? '';
+    const savedRepeatUnit = project.repeatAfterUnit ?? 'month';
+    const repeatCount = repeatDraft?.count ?? savedRepeatCount;
+    const repeatUnit = repeatDraft?.unit ?? savedRepeatUnit;
+    const repeatDirty = repeatSaving || repeatError !== null || repeatCount.trim() !== savedRepeatCount
+        || (repeatCount.trim() !== '' && repeatUnit !== savedRepeatUnit);
+    const saveRepeat = async () => {
+        if (readOnly || repeatSaving || !repeatDirty) return;
+        const text = repeatCount.trim();
+        const repeatAfterCount = /^\d+$/.test(text) ? normalizeProjectRepeatAfterCount(Number(text)) : undefined;
+        if (text && repeatAfterCount === undefined) {
             setRepeatError('projects.repeatInvalidInterval');
             return;
         }
         setRepeatError(null);
-        if (months === project.repeatAfterMonths) return;
         const generation = projectGeneration.current;
         setRepeatSaving(true);
         try {
-            const result = await onRepeatAfterMonthsChange(months);
-            if (projectGeneration.current === generation && result?.success === false) {
-                setRepeatError(result.error === 'PROJECT_REPEAT_TASK_RECURRENCE' ? 'projects.repeatTaskConflict' : 'projects.repeatSaveFailed');
+            const result = await onRepeatAfterChange({ repeatAfterCount, repeatAfterUnit: repeatAfterCount === undefined ? undefined : repeatUnit });
+            if (projectGeneration.current !== generation) return;
+            if (result?.success) {
+                setRepeatDraft(null);
+            } else {
+                setRepeatError(result?.error === 'PROJECT_REPEAT_TASK_RECURRENCE' ? 'projects.repeatTaskConflict' : 'projects.repeatSaveFailed');
             }
         } catch {
             if (projectGeneration.current === generation) setRepeatError('projects.repeatSaveFailed');
@@ -324,29 +334,59 @@ export function ProjectDetailsFields({
                 </div>
 
                 <div className="min-w-0 space-y-1">
-                    <label htmlFor="project-repeat-after-months" className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider flex items-center gap-1.5">
+                    <label htmlFor="project-repeat-after-count" className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider flex items-center gap-1.5">
                         <Repeat className="h-3.5 w-3.5 shrink-0" />
                         {t('recurrence.afterCompletion')}
                     </label>
                     <div className="flex items-center gap-2">
                         <input
-                            key={`${project.id}-repeat-${project.repeatAfterMonths ?? 'off'}`}
-                            id="project-repeat-after-months"
-                            data-testid="project-repeat-after-months"
+                            id="project-repeat-after-count"
+                            data-testid="project-repeat-after-count"
                             inputMode="numeric"
                             className="h-8 w-16 rounded-md border border-border bg-background px-2 text-sm text-foreground"
                             placeholder={t('settings.off')}
-                            defaultValue={project.repeatAfterMonths ?? ''}
+                            value={repeatCount}
                             disabled={repeatSaving}
                             aria-invalid={repeatError !== null}
-                            aria-describedby={repeatError ? 'project-repeat-error' : 'project-repeat-unit'}
-                            onBlur={(event) => { void saveRepeat(event.currentTarget.value); }}
+                            aria-describedby={repeatError ? 'project-repeat-error' : undefined}
+                            onChange={(event) => {
+                                setRepeatError(null);
+                                setRepeatDraft({ count: event.currentTarget.value, unit: repeatUnit });
+                            }}
                             onKeyDown={(event) => {
-                                if (event.key === 'Enter' && !isImeComposing(event)) event.currentTarget.blur();
+                                if (event.key === 'Enter' && !isImeComposing(event)) {
+                                    event.preventDefault();
+                                    void saveRepeat();
+                                }
                             }}
                         />
-                        <span id="project-repeat-unit" className="text-xs text-muted-foreground">{t('recurrence.monthUnit')}</span>
+                        <select
+                            data-testid="project-repeat-after-unit"
+                            aria-label={t('recurrence.repeatEvery')}
+                            className="h-8 min-w-0 rounded-md border border-border bg-background px-2 text-sm text-foreground"
+                            value={repeatUnit}
+                            disabled={repeatSaving}
+                            onChange={(event) => {
+                                const unit = normalizeProjectRepeatAfterUnit(event.currentTarget.value);
+                                if (!unit) return;
+                                setRepeatError(null);
+                                setRepeatDraft({ count: repeatCount, unit });
+                            }}
+                        >
+                            {PROJECT_REPEAT_UNITS.map((unit) => <option key={unit} value={unit}>{t(`recurrence.${unit}Unit`)}</option>)}
+                        </select>
                     </div>
+                    {!readOnly && repeatDirty && (
+                        <button
+                            type="button"
+                            data-testid="project-repeat-after-save"
+                            className="rounded-md bg-primary px-2 py-1 text-xs font-medium text-primary-foreground disabled:opacity-50"
+                            disabled={repeatSaving}
+                            onClick={() => { void saveRepeat(); }}
+                        >
+                            {t('common.save')}
+                        </button>
+                    )}
                     {repeatError && <p id="project-repeat-error" role="alert" className="text-xs text-destructive">{t(repeatError)}</p>}
                 </div>
 

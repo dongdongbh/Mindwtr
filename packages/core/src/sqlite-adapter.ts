@@ -910,12 +910,29 @@ export class SqliteAdapter {
     }
 
     private async ensureProjectColumns() {
-        const columns = await this.client.all<{ name?: string }>('PRAGMA table_info(projects)');
-        const names = new Set(columns.map((col) => col.name));
-        const definitions = PROJECT_SQLITE_MIGRATION_COLUMNS;
-        for (const definition of definitions) {
-            if (!names.has(definition.name)) {
-                await this.client.run(definition.sql);
+        const projectColumnNames = async () => new Set(
+            (await this.client.all<{ name?: string }>('PRAGMA table_info(projects)')).map((col) => col.name),
+        );
+        const names = await projectColumnNames();
+        if (names.has('repeatAfterMonths') || PROJECT_SQLITE_MIGRATION_COLUMNS.some(({ name }) => !names.has(name))) {
+            await this.client.run('BEGIN IMMEDIATE');
+            try {
+                const currentNames = await projectColumnNames();
+                for (const definition of PROJECT_SQLITE_MIGRATION_COLUMNS) {
+                    if (!currentNames.has(definition.name)) await this.client.run(definition.sql);
+                }
+                if (currentNames.has('repeatAfterMonths')) {
+                    await this.client.run(`
+                        UPDATE projects SET repeatAfterCount = repeatAfterMonths, repeatAfterUnit = 'month'
+                        WHERE repeatAfterCount IS NULL AND repeatAfterUnit IS NULL
+                            AND typeof(repeatAfterMonths) = 'integer' AND repeatAfterMonths BETWEEN 1 AND 1200
+                    `);
+                    await this.client.run('ALTER TABLE projects DROP COLUMN repeatAfterMonths');
+                }
+                await this.client.run('COMMIT');
+            } catch (error) {
+                await this.client.run('ROLLBACK').catch(() => undefined);
+                throw error;
             }
         }
         await this.client.run(

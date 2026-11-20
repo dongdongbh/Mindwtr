@@ -1,6 +1,6 @@
 import { normalizeProjectCalendarReference } from './project-calendar-reference-schema';
 import schemaFixture from './project-sync-schema.fixture.json';
-import type { Project } from './types';
+import type { Project, ProjectRepeatUnit } from './types';
 import { normalizeProjectSequentialScope, normalizeProjectTaskSortBy } from './project-utils';
 import {
     deriveSqliteColumnEntries,
@@ -63,10 +63,50 @@ export const normalizeProjectStatus = (value: unknown): Project['status'] => {
     return 'active';
 };
 
-export const normalizeProjectRepeatAfterMonths = (value: unknown): number | undefined =>
+export const normalizeProjectRepeatAfterCount = (value: unknown): number | undefined =>
     typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 1200 ? value : undefined;
 
-const projectColumnValues = (project: Project): Record<string, unknown> => ({
+export const PROJECT_REPEAT_UNITS = ['day', 'week', 'month', 'year'] as const;
+
+export const normalizeProjectRepeatAfterUnit = (value: unknown): ProjectRepeatUnit | undefined =>
+    PROJECT_REPEAT_UNITS.find((unit) => unit === value);
+
+type ProjectRepeatIntervalFields = {
+    repeatAfterCount?: unknown;
+    repeatAfterUnit?: unknown;
+    repeatAfterMonths?: unknown;
+};
+
+const normalizedProjectRepeatInterval = (project: ProjectRepeatIntervalFields) => {
+    if ('repeatAfterCount' in project || 'repeatAfterUnit' in project) {
+        const count = normalizeProjectRepeatAfterCount(project.repeatAfterCount);
+        const unit = normalizeProjectRepeatAfterUnit(project.repeatAfterUnit);
+        if (count !== undefined && unit !== undefined) return { repeatAfterCount: count, repeatAfterUnit: unit };
+    } else if ('repeatAfterMonths' in project) {
+        const count = normalizeProjectRepeatAfterCount(project.repeatAfterMonths);
+        if (count !== undefined) return { repeatAfterCount: count, repeatAfterUnit: 'month' as const };
+    }
+    return { repeatAfterCount: undefined, repeatAfterUnit: undefined };
+};
+
+export const normalizeProjectRepeatFields = (project: Project): Project => {
+    const interval = normalizedProjectRepeatInterval(project);
+    if (!('repeatAfterMonths' in project)
+        && project.repeatAfterCount === interval.repeatAfterCount && project.repeatAfterUnit === interval.repeatAfterUnit) return project;
+    const normalized: Project & ProjectRepeatIntervalFields = { ...project, ...interval };
+    delete normalized.repeatAfterMonths;
+    return normalized;
+};
+
+export const isValidProjectRepeatInterval = (project: Record<string, unknown>): boolean => {
+    if ('repeatAfterCount' in project || 'repeatAfterUnit' in project) {
+        return (project.repeatAfterCount === undefined && project.repeatAfterUnit === undefined)
+            || normalizedProjectRepeatInterval(project).repeatAfterCount !== undefined;
+    }
+    return project.repeatAfterMonths === undefined || normalizedProjectRepeatInterval(project).repeatAfterCount !== undefined;
+};
+
+const projectColumnValues = (project: Project, { repeatAfterCount, repeatAfterUnit }: ReturnType<typeof normalizedProjectRepeatInterval>): Record<string, unknown> => ({
     id: project.id,
     title: project.title,
     status: project.status,
@@ -97,27 +137,33 @@ const projectColumnValues = (project: Project): Record<string, unknown> => ({
     purgedAt: project.purgedAt ?? null,
     viewSectionIds: toJson(project.viewSectionIds),
     calendarReference: toJson(project.calendarReference),
-    repeatAfterMonths: normalizeProjectRepeatAfterMonths(project.repeatAfterMonths) ?? null,
+    repeatAfterCount: repeatAfterCount ?? null,
+    repeatAfterUnit: repeatAfterUnit ?? null,
 });
 
 export const projectToSqliteRow = (project: Project): unknown[] =>
-    sqliteRowFromColumnValues(PROJECT_SQLITE_COLUMNS, projectColumnValues(project));
+    sqliteRowFromColumnValues(PROJECT_SQLITE_COLUMNS, projectColumnValues(project, normalizedProjectRepeatInterval(project)));
 
 
 export const PROJECT_SQLITE_LEGACY_ROW_LENGTH = 26;
 
 
-export const padProjectSqliteCells = (cells: readonly unknown[]): unknown[] | null => (
-    cells.length >= PROJECT_SQLITE_LEGACY_ROW_LENGTH && cells.length <= PROJECT_SQLITE_COLUMNS.length
-        ? [...cells, ...new Array<null>(PROJECT_SQLITE_COLUMNS.length - cells.length).fill(null)]
-        : null
-);
+const MONTHLY_PROJECT_SQLITE_ROW_LENGTH = 30;
+
+export const padProjectSqliteCells = (cells: readonly unknown[]): unknown[] | null => {
+    if (cells.length < PROJECT_SQLITE_LEGACY_ROW_LENGTH || cells.length > PROJECT_SQLITE_COLUMNS.length) return null;
+    if (cells.length === MONTHLY_PROJECT_SQLITE_ROW_LENGTH && normalizeProjectRepeatAfterCount(cells[cells.length - 1]) !== undefined) {
+        return [...cells, 'month'];
+    }
+    return [...cells, ...new Array<null>(PROJECT_SQLITE_COLUMNS.length - cells.length).fill(null)];
+};
 
 
-export const projectSqliteCellsFit = (cells: readonly unknown[], project: Project): boolean => (
-    padProjectSqliteCells(cells) !== null
-    && projectToSqliteRow(project).slice(cells.length).every((cell) => cell === null)
-);
+export const projectSqliteCellsFit = (cells: readonly unknown[], project: Project): boolean => {
+    const padded = padProjectSqliteCells(cells);
+    return padded !== null && projectToSqliteRow(project).slice(cells.length)
+        .every((cell, index) => cell === padded[cells.length + index]);
+};
 
 
 export const projectFromSqliteRow = (row: Record<string, unknown>): Project => {
@@ -154,6 +200,6 @@ export const projectFromSqliteRow = (row: Record<string, unknown>): Project => {
         viewSectionIds: fromJson<unknown>(row.viewSectionIds, undefined) as Project['viewSectionIds'],
         calendarReference: row.calendarReference === 'null' ? null
             : normalizeProjectCalendarReference(fromJson<unknown>(row.calendarReference, undefined)),
-        repeatAfterMonths: normalizeProjectRepeatAfterMonths(row.repeatAfterMonths),
+        ...normalizedProjectRepeatInterval(row),
     };
 };

@@ -50,6 +50,19 @@ describe('runLoadMigrations', () => {
         expect(result).toBe(data);
     });
 
+    it('normalizes legacy monthly repeat rules in a settled document once', () => {
+        const legacy: Project & { repeatAfterMonths: number } = {
+            id: 'project', title: 'Project', status: 'active', color: '#6b7280', order: 0, tagIds: [],
+            createdAt: NOW_ISO, updatedAt: NOW_ISO, rev: 7, repeatAfterMonths: 5,
+        };
+        const data = settledData({ projects: [legacy] });
+        const { data: result, applied } = runLoadMigrations(data, ctxFor(data));
+        expect(applied).toEqual(['normalize-project-repeat-interval']);
+        expect(result.projects[0]).toMatchObject({ repeatAfterCount: 5, repeatAfterUnit: 'month', rev: 7 });
+        expect(result.projects[0]).not.toHaveProperty('repeatAfterMonths');
+        expect(runLoadMigrations(result, ctxFor(result)).data).toBe(result);
+    });
+
     it('normalize-area-timestamps: fills in missing createdAt/updatedAt/order and self-reports', () => {
         const data = settledData({ areas: [{ id: 'area-1', name: 'Work' } as Area] });
         const { data: result, applied } = runLoadMigrations(data, ctxFor(data));

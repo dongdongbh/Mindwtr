@@ -24,12 +24,15 @@ import {
     getAttachmentDisplayTitle,
     getProjectDetailsPresentation,
     getProjectFlowMode,
-    normalizeProjectRepeatAfterMonths,
+    normalizeProjectRepeatAfterCount,
     planProjectFlowModeChange,
+    PROJECT_REPEAT_UNITS,
     type Project,
     type ProjectFlowMode,
+    type ProjectRepeatUnit,
     type ProjectSequenceTaskCue,
     type Section,
+    type StoreActionResult,
     type Task,
     type TaskSortBy,
     getSequentialProjectTaskCues,
@@ -610,12 +613,16 @@ export function ProjectDetailModal({
     const [colorIntent, setColorIntent] = React.useState<string | null>(null);
     const [repeatSaving, setRepeatSaving] = React.useState(false);
     const [repeatError, setRepeatError] = React.useState<string | null>(null);
+    const [repeatDraft, setRepeatDraft] = React.useState<{ count: string; unit: ProjectRepeatUnit } | null>(null);
+    const [repeatUnitMenuOpen, setRepeatUnitMenuOpen] = React.useState(false);
     const projectGeneration = React.useRef(0);
     React.useEffect(() => {
         projectGeneration.current += 1;
         setColorSaving(false); setColorError(false); setColorIntent(null);
         setRepeatSaving(false);
         setRepeatError(null);
+        setRepeatDraft(null);
+        setRepeatUnitMenuOpen(false);
     }, [selectedProject?.id]);
     const liveSelectedProjectStatus = liveSelectedProject?.status;
     const isArchivedProject = selectedProject?.status === 'archived' || liveSelectedProjectStatus === 'archived';
@@ -652,26 +659,51 @@ export function ProjectDetailModal({
         } catch { if (projectGeneration.current === generation) setColorError(true); }
         finally { if (projectGeneration.current === generation) setColorSaving(false); }
     };
-    const saveProjectRepeat = async (raw: string) => {
+    const repeatProject = liveSelectedProject ?? selectedProject;
+    const savedRepeatCount = repeatProject?.repeatAfterCount?.toString() ?? '';
+    const savedRepeatUnit = repeatProject?.repeatAfterUnit ?? 'month';
+    const repeatCount = repeatDraft?.count ?? savedRepeatCount;
+    const repeatUnit = repeatDraft?.unit ?? savedRepeatUnit;
+    const repeatUnitLabel = t(`recurrence.${repeatUnit}Unit`);
+    const repeatDirty = repeatSaving || repeatError !== null || repeatCount.trim() !== savedRepeatCount
+        || (repeatCount.trim() !== '' && repeatUnit !== savedRepeatUnit);
+    const repeatDisabled = isArchivedProject || repeatSaving;
+    const saveProjectRepeat = async () => {
         const current = getMutableSelectedProject();
-        if (!current || repeatSaving) return;
-        const text = raw.trim();
-        const repeatAfterMonths = /^\d+$/.test(text) ? normalizeProjectRepeatAfterMonths(Number(text)) : undefined;
-        if (text && repeatAfterMonths === undefined) {
+        if (!current || repeatSaving || !repeatDirty) return;
+        const text = repeatCount.trim();
+        const repeatAfterCount = /^\d+$/.test(text) ? normalizeProjectRepeatAfterCount(Number(text)) : undefined;
+        if (text && repeatAfterCount === undefined) {
             setRepeatError('projects.repeatInvalidInterval');
             return;
         }
+        const repeatAfterUnit = repeatAfterCount === undefined ? undefined : repeatUnit;
+        const updates = { repeatAfterCount, repeatAfterUnit };
         setRepeatError(null);
-        if (repeatAfterMonths === current.repeatAfterMonths) return;
+        setRepeatUnitMenuOpen(false);
         const generation = projectGeneration.current;
         setRepeatSaving(true);
         try {
-            const result = await updateProject(current.id, { repeatAfterMonths });
+            const { persistenceFailure, retryPersistence } = useTaskStore.getState();
+            if (persistenceFailure) {
+                await retryPersistence();
+                if (getMutableSelectedProject()?.id !== current.id) return;
+            }
+            const latest = useTaskStore.getState();
+            const saved = latest._projectsById.get(current.id);
+            const alreadySaved = persistenceFailure && !latest.persistenceFailure && saved
+                && saved.repeatAfterCount === repeatAfterCount && saved.repeatAfterUnit === repeatAfterUnit;
+            const result: StoreActionResult = alreadySaved ? { success: true } : await updateProject(current.id, updates);
             if (projectGeneration.current !== generation) return;
             if (!result.success) {
                 setRepeatError(result.error === 'PROJECT_REPEAT_TASK_RECURRENCE' ? 'projects.repeatTaskConflict' : 'projects.repeatSaveFailed');
             } else if (selectedProjectRef.current?.id === current.id) {
-                onProjectChange({ ...selectedProjectRef.current, repeatAfterMonths });
+                const persisted = useTaskStore.getState()._projectsById.get(current.id);
+                onProjectChange({
+                    ...selectedProjectRef.current,
+                    ...(persisted ? { repeatAfterCount: persisted.repeatAfterCount, repeatAfterUnit: persisted.repeatAfterUnit } : updates),
+                });
+                setRepeatDraft(null);
             }
         } catch {
             if (projectGeneration.current === generation) setRepeatError('projects.repeatSaveFailed');
@@ -1743,25 +1775,73 @@ export function ProjectDetailModal({
                                                 </Text>
                                                 <View style={styles.projectMetadataControls}>
                                                     <TextInput
-                                                        key={`${selectedProject.id}-repeat-${selectedProject.repeatAfterMonths ?? 'off'}`}
-                                                        testID="project-repeat-after-months"
+                                                        testID="project-repeat-after-count"
                                                         style={[styles.projectMetadataValueButton, styles.projectMetadataValueText,
                                                             { minWidth: 64, backgroundColor: tc.inputBg, borderColor: tc.border, color: tc.text }]}
                                                         placeholderTextColor={tc.secondaryText}
                                                         placeholder={t('settings.off')}
-                                                        defaultValue={selectedProject.repeatAfterMonths?.toString() ?? ''}
+                                                        value={repeatCount}
                                                         keyboardType="number-pad"
                                                         returnKeyType="done"
-                                                        editable={!isArchivedProject && !repeatSaving}
+                                                        editable={!repeatDisabled}
                                                         accessibilityLabel={t('recurrence.afterCompletion')}
-                                                        accessibilityHint={t('recurrence.monthUnit')}
-                                                        accessibilityState={{ disabled: isArchivedProject || repeatSaving }}
-                                                        onEndEditing={({ nativeEvent }) => { void saveProjectRepeat(nativeEvent.text); }}
+                                                        accessibilityState={{ disabled: repeatDisabled }}
+                                                        onChangeText={(count) => {
+                                                            setRepeatError(null);
+                                                            setRepeatDraft({ count, unit: repeatUnit });
+                                                        }}
                                                     />
-                                                    <Text style={{ color: tc.secondaryText }}>{t('recurrence.monthUnit')}</Text>
+                                                    <TouchableOpacity
+                                                        testID="project-repeat-after-unit"
+                                                        accessibilityRole="button"
+                                                        accessibilityLabel={t('recurrence.repeatEvery')}
+                                                        accessibilityValue={{ text: repeatUnitLabel }}
+                                                        accessibilityState={{ disabled: repeatDisabled, expanded: repeatUnitMenuOpen }}
+                                                        disabled={repeatDisabled}
+                                                        style={[styles.statusPicker, { flexShrink: 1, minHeight: 44, backgroundColor: tc.inputBg, borderColor: tc.border }]}
+                                                        onPress={() => setRepeatUnitMenuOpen((open) => !open)}
+                                                    >
+                                                        <Text style={[styles.statusPickerText, { color: tc.text, flexShrink: 1 }]} numberOfLines={1}>{repeatUnitLabel}</Text>
+                                                        <Ionicons name="chevron-down" size={14} color={tc.secondaryText} />
+                                                    </TouchableOpacity>
                                                 </View>
                                             </View>
-                                            {repeatError && <Text accessibilityRole="alert" style={{ color: tc.danger }}>{t(repeatError)}</Text>}
+                                            {repeatUnitMenuOpen && !repeatDisabled && (
+                                                <View style={[styles.statusMenu, { backgroundColor: tc.inputBg, borderColor: tc.border, marginHorizontal: 0, marginTop: 8, marginBottom: 0 }]}>
+                                                    {PROJECT_REPEAT_UNITS.map((unit) => (
+                                                        <TouchableOpacity
+                                                            key={unit}
+                                                            testID={`project-repeat-after-unit-${unit}`}
+                                                            accessibilityRole="radio"
+                                                            accessibilityState={{ checked: repeatUnit === unit }}
+                                                            style={[styles.statusMenuItem, { minHeight: 44 }, repeatUnit === unit && { backgroundColor: tc.filterBg }]}
+                                                            onPress={() => {
+                                                                setRepeatError(null);
+                                                                setRepeatDraft({ count: repeatCount, unit });
+                                                                setRepeatUnitMenuOpen(false);
+                                                            }}
+                                                        >
+                                                            <Text style={[styles.statusMenuText, { color: tc.text }]}>{t(`recurrence.${unit}Unit`)}</Text>
+                                                        </TouchableOpacity>
+                                                    ))}
+                                                </View>
+                                            )}
+                                            {!isArchivedProject && repeatDirty && (
+                                                <TouchableOpacity
+                                                    testID="project-repeat-after-save"
+                                                    accessibilityRole="button"
+                                                    accessibilityState={{ disabled: repeatSaving }}
+                                                    disabled={repeatSaving}
+                                                    style={[styles.projectMetadataValueButton, {
+                                                        alignSelf: 'flex-end', minHeight: 44, marginTop: 4,
+                                                        backgroundColor: tc.tint, borderColor: tc.tint, opacity: repeatSaving ? 0.5 : 1,
+                                                    }]}
+                                                    onPress={() => { void saveProjectRepeat(); }}
+                                                >
+                                                    <Text style={[styles.projectMetadataValueText, { color: tc.onTint }]}>{t('common.save')}</Text>
+                                                </TouchableOpacity>
+                                            )}
+                                            {repeatError && <Text accessibilityRole="alert" accessibilityLiveRegion="polite" style={{ color: tc.danger }}>{t(repeatError)}</Text>}
                                             <View style={[styles.projectMetadataRow, styles.projectMetadataRowDivider, { borderTopColor: tc.border }]}>
                                                 <Text style={[styles.reviewLabel, { color: tc.text }]}>{tFallback(t, 'projects.reviewAt', 'Review Date')}</Text>
                                                 <View style={styles.projectMetadataControls}>

@@ -1,4 +1,5 @@
 import type { AppData, Attachment, SettingsSyncGroup } from './types';
+import { normalizeProjectRepeatFields } from './project-sync-schema';
 import { mapPass, runToEnd, SLICE_ITEMS, type CooperativePass } from './cooperative';
 import { keepSavedFilters } from './saved-filters';
 import { getGtdSyncSnapshot, isSettingsSyncGroupEnabled } from './settings-options';
@@ -329,7 +330,7 @@ export function* sanitizeAppDataForRemotePass(data: AppData): CooperativePass<Ap
         projects: yield* mapPass(data.projects, (project) => project.purgedAt
             ? compactPurgedProjectTombstone(project)
             : {
-                ...project,
+                ...normalizeProjectRepeatFields(project),
                 attachments: sanitizeAttachments(project.attachments, Boolean(project.deletedAt)),
             }),
         sections: compactSectionsForPurgedProjects(data.sections, data.projects),

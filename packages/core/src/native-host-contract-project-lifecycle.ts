@@ -167,7 +167,7 @@ export function createProjectLifecycleMethods(deps: {
                 || request.action !== 'reactivate' && target.status === 'archived'
                 || request.action === 'reactivate' && target.status !== 'archived')
                 return fail('STALE_REVISION', 'Project changed since the detail was read');
-            if (request.action === 'complete' && target.repeatAfterMonths)
+            if (request.action === 'complete' && target.repeatAfterCount)
                 return fail('INVALID_INPUT', 'Complete repeating projects in Mindwtr for desktop');
             const scope = projectScope(target);
             const device = ensureDeviceId(state.settings);

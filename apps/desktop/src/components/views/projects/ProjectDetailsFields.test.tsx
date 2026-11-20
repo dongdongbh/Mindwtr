@@ -19,7 +19,12 @@ const translations: Record<string, string> = {
     'projects.repeatInvalidInterval': 'Enter a whole number from 1 to 1200.',
     'projects.repeatTaskConflict': 'Turn off repeats on active tasks before setting this project to repeat.',
     'recurrence.afterCompletion': 'Repeat after completion',
+    'recurrence.repeatEvery': 'Repeat every',
+    'recurrence.dayUnit': 'day(s)',
+    'recurrence.weekUnit': 'week(s)',
     'recurrence.monthUnit': 'month(s)',
+    'recurrence.yearUnit': 'year(s)',
+    'common.save': 'Save',
     'settings.off': 'Off',
     'projects.sequenceMode': 'Flow Mode',
     'projects.sequential': 'Sequential',
@@ -74,35 +79,54 @@ const defaultProps = {
     onStartDateChange: vi.fn(),
     dueDateValue: '',
     onDueDateChange: vi.fn(),
-    onRepeatAfterMonthsChange: vi.fn(),
+    onRepeatAfterChange: vi.fn(),
     reviewAtValue: '',
     onReviewAtChange: vi.fn(),
 };
 
 describe('ProjectDetailsFields', () => {
-    it('saves a whole number of months and surfaces a conflict with task repeats', async () => {
+    it('validates and saves the count and unit together, keeping the draft on conflict', async () => {
         const save = vi.fn(async () => ({ success: false, error: 'PROJECT_REPEAT_TASK_RECURRENCE' }));
-        render(<LanguageProvider><ProjectDetailsFields {...defaultProps} onRepeatAfterMonthsChange={save} /></LanguageProvider>);
+        render(<LanguageProvider><ProjectDetailsFields {...defaultProps} onRepeatAfterChange={save} /></LanguageProvider>);
         const repeat = screen.getByRole('textbox', { name: 'Repeat after completion' });
+        const unit = screen.getByRole('combobox', { name: 'Repeat every' });
         expect(repeat).toHaveAttribute('placeholder', 'Off');
+        expect(unit).toHaveValue('month');
+        expect(screen.queryByRole('button', { name: 'Save' })).toBeNull();
+        expect(Array.from(unit.querySelectorAll('option'), (option) => option.textContent))
+            .toEqual(['day(s)', 'week(s)', 'month(s)', 'year(s)']);
         fireEvent.change(repeat, { target: { value: '1201' } });
-        fireEvent.blur(repeat);
+        fireEvent.click(screen.getByRole('button', { name: 'Save' }));
         expect(screen.getByRole('alert')).toHaveTextContent('Enter a whole number from 1 to 1200.');
         expect(save).not.toHaveBeenCalled();
         fireEvent.change(repeat, { target: { value: '10' } });
         fireEvent.blur(repeat);
+        fireEvent.change(unit, { target: { value: 'week' } });
+        expect(save).not.toHaveBeenCalled();
+        fireEvent.click(screen.getByRole('button', { name: 'Save' }));
         await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Turn off repeats on active tasks'));
-        expect(save).toHaveBeenCalledExactlyOnceWith(10);
+        expect(save).toHaveBeenCalledExactlyOnceWith({ repeatAfterCount: 10, repeatAfterUnit: 'week' });
+        expect(repeat).toHaveValue('10');
+        expect(unit).toHaveValue('week');
+        expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled();
     });
 
-    it('clears the saved interval when the field is emptied', async () => {
+    it('displays a saved interval and clears both fields in one update', async () => {
         const save = vi.fn(async () => ({ success: true }));
-        render(<LanguageProvider><ProjectDetailsFields {...defaultProps} project={buildProject({ repeatAfterMonths: 3 })} onRepeatAfterMonthsChange={save} /></LanguageProvider>);
+        const { rerender } = render(<LanguageProvider>
+            <ProjectDetailsFields {...defaultProps} project={buildProject({ repeatAfterCount: 3, repeatAfterUnit: 'year' })} onRepeatAfterChange={save} />
+        </LanguageProvider>);
         const repeat = screen.getByRole('textbox', { name: 'Repeat after completion' });
+        const unit = screen.getByRole('combobox', { name: 'Repeat every' });
         expect(repeat).toHaveValue('3');
+        expect(unit).toHaveValue('year');
         fireEvent.change(repeat, { target: { value: '' } });
-        fireEvent.blur(repeat);
-        await waitFor(() => expect(save).toHaveBeenCalledExactlyOnceWith(undefined));
+        fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+        rerender(<LanguageProvider><ProjectDetailsFields {...defaultProps} onRepeatAfterChange={save} /></LanguageProvider>);
+        await waitFor(() => expect(screen.queryByRole('button', { name: 'Save' })).toBeNull());
+        expect(save).toHaveBeenCalledExactlyOnceWith({ repeatAfterCount: undefined, repeatAfterUnit: undefined });
+        expect(repeat).toHaveValue('');
+        expect(unit).toHaveValue('month');
     });
 
     it('picks Parallel, Sequential or Per section, and shows the scope only for Sequential (#1429)', () => {

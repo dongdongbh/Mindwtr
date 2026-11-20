@@ -1,4 +1,4 @@
-import { addMonths, format } from 'date-fns';
+import { addDays, addWeeks, addMonths, addYears, format } from 'date-fns';
 import { hasRecurrenceRule } from '../recurrence';
 import { isProjectCalendarReference } from '../project-calendar-reference-schema';
 import { retainProjectTaxonomy, retainTaxonomyEffects } from '../taxonomy-catalog';
@@ -28,7 +28,7 @@ import { clearDerivedCache } from '../store-settings';
 import { generateDeterministicUUID, generateUUID as uuidv4 } from '../uuid';
 import { DEFAULT_PROJECT_COLOR, isValidProjectColorOverride } from '../color-constants';
 import { findSelectableProjectByTitleAndArea, normalizeProjectTaskSortBy, planProjectFlowModeChange } from '../project-utils';
-import { PROJECT_SQLITE_COLUMNS, normalizeProjectRepeatAfterMonths, padProjectSqliteCells, projectFromSqliteRow, projectSqliteCellsFit, projectToSqliteRow } from '../project-sync-schema';
+import { PROJECT_SQLITE_COLUMNS, isValidProjectRepeatInterval, normalizeProjectRepeatAfterCount, normalizeProjectRepeatAfterUnit, padProjectSqliteCells, projectFromSqliteRow, projectSqliteCellsFit, projectToSqliteRow } from '../project-sync-schema';
 import { taskEditValuesEqual } from '../json-value-equality';
 import { planAttachmentLinkBatch, softDeleteAttachment } from '../attachment-editor-model';
 import type { Area, Attachment, ProjectFlowMode, TaskSortBy } from '../types';
@@ -372,9 +372,18 @@ const projectLifecycleScopeRows = (state: TaskStore, projectId: string) => {
     return { sections, tasks };
 };
 
+const projectRepeatDate = { day: addDays, week: addWeeks, month: addMonths, year: addYears };
+
+const isValidProjectRepeatPatch = (patch: Partial<Project>) => {
+    const hasCount = Object.prototype.hasOwnProperty.call(patch, 'repeatAfterCount');
+    const hasUnit = Object.prototype.hasOwnProperty.call(patch, 'repeatAfterUnit');
+    return hasCount === hasUnit && isValidProjectRepeatInterval(patch);
+};
+
 const nextProjectRun = (state: TaskStore, source: Project, now: string, deviceId: string) => {
-    const months = normalizeProjectRepeatAfterMonths(source.repeatAfterMonths);
-    if (!months) return null;
+    const count = normalizeProjectRepeatAfterCount(source.repeatAfterCount);
+    const unit = normalizeProjectRepeatAfterUnit(source.repeatAfterUnit);
+    if (!count || !unit) return null;
     const nextId = (kind: string, sourceId: string, ownerId?: string) =>
         generateDeterministicUUID(JSON.stringify(['repeat-project', source.id, kind, sourceId, ownerId]));
     if (state._allProjects.some(project => project.id === nextId('project', source.id))) return null;
@@ -385,7 +394,7 @@ const nextProjectRun = (state: TaskStore, source: Project, now: string, deviceId
     const copy = projectDuplicateEffect({ project: source, area: null, tasks: steps, sections,
         sameAreaProjects: state._allProjects.filter(row => !row.deletedAt && row.areaId === source.areaId),
     }, deviceId, now, nextId, true);
-    const startDate = format(addMonths(new Date(now), months), 'yyyy-MM-dd');
+    const startDate = format(projectRepeatDate[unit](new Date(now), count), 'yyyy-MM-dd');
     const project: Project = { ...copy.project, title: source.title, status: 'active', startDate,
         dueDate: undefined, reviewAt: undefined, calendarReference: undefined };
     return { project, sections: copy.sections, tasks: copy.tasks.map((task, order) => ({
@@ -807,8 +816,8 @@ export const createProjectCoreActions = ({
     getSaveGeneration,
 }: ProjectActionContext): ProjectCoreActions => ({
     addProject: async (title: string, color: string, initialProps?: Partial<Project>) => {
-        if (initialProps?.repeatAfterMonths != null && normalizeProjectRepeatAfterMonths(initialProps.repeatAfterMonths) === undefined) {
-            set({ error: 'Enter a repeat interval from 1 to 1200 months' });
+        if (initialProps && !isValidProjectRepeatPatch(initialProps)) {
+            set({ error: 'Choose a repeat unit and a whole number from 1 to 1200' });
             return null;
         }
         if (initialProps?.calendarReference != null && !isProjectCalendarReference(initialProps.calendarReference)) {
@@ -1557,9 +1566,8 @@ export const createProjectCoreActions = ({
     },
 
     updateProject: async (id: string, updates: Partial<Project>, intent?: 'complete') => {
-        const months = updates.repeatAfterMonths;
-        if (months != null && normalizeProjectRepeatAfterMonths(months) === undefined) {
-            return actionFail('Enter a repeat interval from 1 to 1200 months');
+        if (!isValidProjectRepeatPatch(updates)) {
+            return actionFail('Choose a repeat unit and a whole number from 1 to 1200');
         }
         let repeated = false;
         let conflictingRecurrence = false;
@@ -1574,7 +1582,7 @@ export const createProjectCoreActions = ({
             return actionFail(message);
         }
         const existing = get()._projectsById.get(id);
-        if (intent === 'complete' && existing?.repeatAfterMonths && existing.status === 'archived'
+        if (intent === 'complete' && existing?.repeatAfterCount && existing.status === 'archived'
             && !existing.cancelledAt && !existing.deletedAt) {
             try {
                 if (get().persistenceFailure) await get().retryPersistence();
@@ -1607,7 +1615,7 @@ export const createProjectCoreActions = ({
             }
             const deviceState = ensureDeviceId(state.settings);
 
-            if (months != null && projectLifecycleScopeRows(state, id).tasks.some(task => !task.deletedAt
+            if (updates.repeatAfterCount != null && projectLifecycleScopeRows(state, id).tasks.some(task => !task.deletedAt
                 && !['done', 'archived'].includes(task.status) && hasRecurrenceRule(task.recurrence))) {
                 conflictingRecurrence = true;
                 return state;
@@ -1689,7 +1697,7 @@ export const createProjectCoreActions = ({
         });
 
         if (conflictingRecurrence) return actionFail('PROJECT_REPEAT_TASK_RECURRENCE');
-        if (repeated || Object.prototype.hasOwnProperty.call(updates, 'repeatAfterMonths')) {
+        if (repeated || Object.prototype.hasOwnProperty.call(updates, 'repeatAfterCount')) {
             try {
                 await flushPendingSave();
             } catch (error) {

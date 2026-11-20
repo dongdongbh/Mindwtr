@@ -190,20 +190,28 @@ describeSqlite('schema replay through single-statement execute (op-sqlite emulat
         expect(Number(triggerCount.count)).toBeGreaterThanOrEqual(10);
     });
 
-    it('adds the optional repeat interval to a legacy project and keeps changes across a reload', async () => {
+    it('migrates monthly repeats and persists interval changes and clearing across a reload', async () => {
         db.exec(SQLITE_BASE_SCHEMA);
-        db.exec('ALTER TABLE projects DROP COLUMN repeatAfterMonths');
-        db.exec("INSERT INTO projects (id, title, status, color, createdAt, updatedAt, rev) VALUES ('old', 'Old project', 'active', '#6b7280', '2026-01-01', '2026-01-01', 1)");
+        db.exec(`
+            ALTER TABLE projects DROP COLUMN repeatAfterCount;
+            ALTER TABLE projects DROP COLUMN repeatAfterUnit;
+            ALTER TABLE projects ADD COLUMN repeatAfterMonths INTEGER;
+            INSERT INTO projects (id, title, status, color, createdAt, updatedAt, rev, repeatAfterMonths)
+            VALUES ('old', 'Old project', 'active', '#6b7280', '2026-01-01', '2026-01-01', 1, 6);
+        `);
         const client = createSingleStatementClient(db);
         const adapter = new SqliteAdapter(client);
         const prior = await adapter.getData();
         const [project] = prior.projects;
-        expect(project.repeatAfterMonths).toBeUndefined();
-        await adapter.saveData({ ...prior, projects: [{ ...project, repeatAfterMonths: 6, rev: 2 }] });
+        expect(project).toMatchObject({ repeatAfterCount: 6, repeatAfterUnit: 'month', rev: 1 });
+        expect(prepareSingle(db, 'SELECT repeatAfterCount, repeatAfterUnit FROM projects').get())
+            .toEqual({ repeatAfterCount: 6, repeatAfterUnit: 'month' });
+        await adapter.saveData({ ...prior, projects: [{ ...project, repeatAfterCount: 2, repeatAfterUnit: 'week', rev: 2 }] });
         const reopened = new SqliteAdapter(client);
         const saved = await reopened.getData();
-        expect(saved.projects[0]).toMatchObject({ id: 'old', repeatAfterMonths: 6 });
-        await reopened.saveData({ ...saved, projects: [{ ...saved.projects[0], repeatAfterMonths: undefined, rev: 3 }] });
-        expect((await adapter.getData()).projects[0].repeatAfterMonths).toBeUndefined();
+        expect(saved.projects[0]).toMatchObject({ id: 'old', repeatAfterCount: 2, repeatAfterUnit: 'week' });
+        await reopened.saveData({ ...saved, projects: [{ ...saved.projects[0], repeatAfterCount: undefined, repeatAfterUnit: undefined, rev: 3 }] });
+        const cleared = await new SqliteAdapter(client).getData();
+        expect(cleared.projects[0]).toMatchObject({ repeatAfterCount: undefined, repeatAfterUnit: undefined, rev: 3 });
     });
 });

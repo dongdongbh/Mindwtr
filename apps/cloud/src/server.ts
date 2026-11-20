@@ -27,6 +27,7 @@ import {
     sanitizeAppDataForRemote,
     normalizeTaskLifecycleFields,
     normalizeProjectLifecycleFields,
+    normalizeProjectRepeatFields,
     normalizeFocusTaskLimit,
     buildQuickAddParseOptions,
     parseQuickAdd,
@@ -217,7 +218,7 @@ const emptyCorsResponse = (status: number): Response => {
 
 const normalizeStoredAppData = (data: AppData): AppData => ({
     tasks: Array.isArray(data.tasks) ? data.tasks : [],
-    projects: Array.isArray(data.projects) ? data.projects : [],
+    projects: Array.isArray(data.projects) ? data.projects.map(normalizeProjectRepeatFields) : [],
     sections: Array.isArray(data.sections) ? data.sections : [],
     areas: Array.isArray(data.areas) ? data.areas : [],
     people: Array.isArray(data.people) ? data.people : [],

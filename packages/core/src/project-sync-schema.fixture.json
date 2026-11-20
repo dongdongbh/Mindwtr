@@ -1,5 +1,5 @@
 {
-    "schemaVersion": 7,
+    "schemaVersion": 8,
     "fields": [
         { "name": "id", "nullability": "required", "cloudSynced": false, "cloudWrite": "managed", "sqliteColumn": "id", "sqliteOrder": 0, "sqliteType": null },
         { "name": "title", "nullability": "required", "cloudSynced": true, "cloudWrite": "patch", "sqliteColumn": "title", "sqliteOrder": 1, "sqliteType": null },
@@ -30,7 +30,8 @@
         { "name": "colorOverride", "nullability": "optional", "cloudSynced": true, "cloudWrite": "create-patch", "sqliteColumn": "colorOverride", "sqliteOrder": 26, "sqliteType": "TEXT" },
         { "name": "perSectionFlow", "nullability": "optional", "cloudSynced": true, "cloudWrite": "managed", "sqliteColumn": "perSectionFlow", "sqliteOrder": 27, "sqliteType": "INTEGER" },
         { "name": "calendarReference", "nullability": "optional-nullable", "cloudSynced": true, "cloudWrite": "create-patch", "sqliteColumn": "calendarReference", "sqliteOrder": 28, "sqliteType": "TEXT" },
-        { "name": "repeatAfterMonths", "nullability": "optional", "cloudSynced": true, "cloudWrite": "managed", "sqliteColumn": "repeatAfterMonths", "sqliteOrder": 29, "sqliteType": "INTEGER" }
+        { "name": "repeatAfterCount", "nullability": "optional", "cloudSynced": true, "cloudWrite": "managed", "sqliteColumn": "repeatAfterCount", "sqliteOrder": 29, "sqliteType": "INTEGER" },
+        { "name": "repeatAfterUnit", "nullability": "optional", "cloudSynced": true, "cloudWrite": "managed", "sqliteColumn": "repeatAfterUnit", "sqliteOrder": 30, "sqliteType": "TEXT" }
     ],
     "fixture": {
         "id": "project-schema-fixture",
@@ -69,6 +70,7 @@
         "archivedAt": "2026-07-14T11:15:00.000Z",
         "viewSectionIds": { "someday": "view-section-schema" },
         "calendarReference": { "sourceId": "feed-schema", "uid": "event-schema", "recurrenceId": "2026-07-20T09:00:00.000Z", "sourceName": "Calendar", "title": "Commitment", "start": "2026-07-20T09:00:00.000Z", "end": "2026-07-20T10:00:00.000Z", "allDay": false },
-        "repeatAfterMonths": 12
+        "repeatAfterCount": 2,
+        "repeatAfterUnit": "week"
     }
 }

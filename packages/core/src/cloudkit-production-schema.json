@@ -85,7 +85,7 @@
     "perSectionFlow",
     "calendarReference"
    ],
-   "pendingProduction": ["repeatAfterMonths"]
+   "pendingProduction": ["repeatAfterCount", "repeatAfterUnit"]
   },
   "MindwtrSection": {
    "deployed": [

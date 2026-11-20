@@ -1,4 +1,5 @@
 import type { ExternalCalendarSubscription } from './ics';
+import type { PROJECT_REPEAT_UNITS } from './project-sync-schema';
 
 export type TaskStatus = 'inbox' | 'next' | 'waiting' | 'someday' | 'reference' | 'done' | 'archived';
 
@@ -86,6 +87,8 @@ export type ProjectSequentialScope = 'project' | 'section';
 
 export type ProjectFlowMode = 'parallel' | 'sequential' | 'perSection';
 
+export type ProjectRepeatUnit = typeof PROJECT_REPEAT_UNITS[number];
+
 export type ProjectCalendarReference = {
     sourceId: string;
     uid: string;
@@ -116,7 +119,8 @@ export interface Project {
     startDate?: string;
     dueDate?: string;
     reviewAt?: string;
-    repeatAfterMonths?: number;
+    repeatAfterCount?: number;
+    repeatAfterUnit?: ProjectRepeatUnit;
     cancelledAt?: string;
     archivedAt?: string;
     areaId?: string;

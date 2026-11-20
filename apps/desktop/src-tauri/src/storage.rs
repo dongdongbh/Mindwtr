@@ -38,7 +38,7 @@ const SQLITE_BUSY_TIMEOUT_MS: u64 = 5_000;
 const STORAGE_RETRY_ATTEMPTS: usize = 4;
 const STORAGE_RETRY_BASE_DELAY_MS: u64 = 120;
 
-const STORAGE_SCHEMA_VERSION: i64 = 19;
+const STORAGE_SCHEMA_VERSION: i64 = 20;
 const STORAGE_SCHEMA_STATE_TABLE: &str = "storage_schema_state";
 
 const FTS_TRIGGER_MIGRATION_VERSION: i64 = 4;
@@ -155,7 +155,8 @@ CREATE TABLE IF NOT EXISTS projects (
   cancelledAt TEXT,
   archivedAt TEXT,
   viewSectionIds TEXT,
-  repeatAfterMonths INTEGER
+  repeatAfterCount INTEGER,
+  repeatAfterUnit TEXT
 );
 
 CREATE TABLE IF NOT EXISTS areas (
@@ -515,7 +516,7 @@ fn initialize_sqlite_schema(conn: &mut Connection) -> Result<i64, String> {
     let result = (|| {
         let current_generation = sqlite_schema_generation(&transaction)?;
         if sqlite_schema_state_is_current(&transaction, current_generation)? {
-            return Ok(current_generation);
+            return Ok((current_generation, false));
         }
 
         transaction
@@ -584,7 +585,7 @@ fn initialize_sqlite_schema(conn: &mut Connection) -> Result<i64, String> {
         ensure_column(&transaction, "projects", "archivedAt", "TEXT")?;
         ensure_column(&transaction, "projects", "viewSectionIds", "TEXT")?;
         ensure_column(&transaction, "projects", "calendarReference", "TEXT")?;
-        ensure_column(&transaction, "projects", "repeatAfterMonths", "INTEGER")?;
+        let migrated_repeat_interval = migrate_project_repeat_interval(&transaction)?;
         ensure_projects_purged_at_column(&transaction)?;
         ensure_projects_area_order_index(&transaction)?;
         ensure_sync_revision_columns(&transaction)?;
@@ -593,12 +594,15 @@ fn initialize_sqlite_schema(conn: &mut Connection) -> Result<i64, String> {
 
         let schema_generation = sqlite_schema_generation(&transaction)?;
         record_sqlite_schema_state(&transaction, schema_generation)?;
-        Ok(schema_generation)
+        Ok((schema_generation, migrated_repeat_interval))
     })();
 
     match result {
-        Ok(schema_generation) => {
+        Ok((schema_generation, migrated_repeat_interval)) => {
             transaction.commit().map_err(|e| e.to_string())?;
+            if migrated_repeat_interval {
+                log::info!("Desktop project repeat interval migration completed extra.releaseCheck=v1.3.10/project-repeat-interval-migration outcome=migrated");
+            }
             Ok(schema_generation)
         }
         Err(error) => {
@@ -1392,6 +1396,22 @@ fn ensure_projects_due_date_column(conn: &Connection) -> Result<(), String> {
 
 fn ensure_projects_purged_at_column(conn: &Connection) -> Result<(), String> {
     ensure_column(conn, "projects", "purgedAt", "TEXT")
+}
+
+fn migrate_project_repeat_interval(conn: &Connection) -> Result<bool, String> {
+    ensure_column(conn, "projects", "repeatAfterCount", "INTEGER")?;
+    ensure_column(conn, "projects", "repeatAfterUnit", "TEXT")?;
+    if !has_column(conn, "projects", "repeatAfterMonths")? {
+        return Ok(false);
+    }
+    conn.execute_batch(
+        "UPDATE projects SET repeatAfterCount = repeatAfterMonths, repeatAfterUnit = 'month'
+         WHERE repeatAfterCount IS NULL AND repeatAfterUnit IS NULL
+           AND typeof(repeatAfterMonths) = 'integer' AND repeatAfterMonths BETWEEN 1 AND 1200;
+         ALTER TABLE projects DROP COLUMN repeatAfterMonths;",
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(true)
 }
 
 fn ensure_projects_area_order_index(conn: &Connection) -> Result<(), String> {
@@ -2226,10 +2246,16 @@ fn row_to_project_value(row: &rusqlite::Row<'_>) -> Result<Value, rusqlite::Erro
             map.insert("calendarReference".to_string(), value);
         }
     }
-    if let Ok(Some(months)) = row.get::<_, Option<i64>>("repeatAfterMonths") {
-        if (1..=1200).contains(&months) {
-            map.insert("repeatAfterMonths".to_string(), Value::from(months));
-        }
+    let repeat_after_count = row.get::<_, Option<i64>>("repeatAfterCount").ok().flatten();
+    let repeat_after_unit = row
+        .get::<_, Option<String>>("repeatAfterUnit")
+        .ok()
+        .flatten();
+    if let Some((count, unit)) =
+        normalized_project_repeat_interval(repeat_after_count, repeat_after_unit.as_deref())
+    {
+        map.insert("repeatAfterCount".to_string(), Value::from(count));
+        map.insert("repeatAfterUnit".to_string(), Value::from(unit));
     }
     if let Ok(val) = row.get::<_, Option<String>>("areaId") {
         if let Some(v) = val {
@@ -3378,8 +3404,9 @@ fn replace_prepared_data_in_transaction(
         let tag_ids_json = json_str_or_default(project.get("tagIds"), "[]");
         let attachments_json = json_str(project.get("attachments"));
         let view_section_ids_json = json_str(project.get("viewSectionIds"));
+        let (repeat_after_count, repeat_after_unit) = project_repeat_interval(&project).unzip();
         execute_insert(
-            "INSERT OR REPLACE INTO projects (id, title, status, color, orderNum, tagIds, isSequential, sequentialScope, taskSortBy, isFocused, supportNotes, attachments, dueDate, reviewAt, areaId, areaTitle, rev, revBy, createdAt, updatedAt, deletedAt, purgedAt, startDate, cancelledAt, viewSectionIds, archivedAt, colorOverride, perSectionFlow, calendarReference, repeatAfterMonths) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30)",
+            "INSERT OR REPLACE INTO projects (id, title, status, color, orderNum, tagIds, isSequential, sequentialScope, taskSortBy, isFocused, supportNotes, attachments, dueDate, reviewAt, areaId, areaTitle, rev, revBy, createdAt, updatedAt, deletedAt, purgedAt, startDate, cancelledAt, viewSectionIds, archivedAt, colorOverride, perSectionFlow, calendarReference, repeatAfterCount, repeatAfterUnit) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31)",
             params![
                 project.get("id").and_then(|v| v.as_str()).unwrap_or_default(),
                 project.get("title").and_then(|v| v.as_str()).unwrap_or_default(),
@@ -3410,7 +3437,8 @@ fn replace_prepared_data_in_transaction(
                 project.get("colorOverride").and_then(|v| v.as_str()),
                 project.get("perSectionFlow").and_then(|v| v.as_bool()).map(|v| v as i32),
                 project.get("calendarReference").map(Value::to_string),
-                project_repeat_after_months(&project),
+                repeat_after_count,
+                repeat_after_unit,
             ],
         )
         .map_err(|e| e.to_string())?;
@@ -4977,12 +5005,28 @@ fn read_project_mutation_data(
     Ok((data, stats))
 }
 
-fn project_repeat_after_months(project: &Value) -> Option<i64> {
-    project
-        .get("repeatAfterMonths")
+fn normalized_project_repeat_interval(
+    count: Option<i64>,
+    unit: Option<&str>,
+) -> Option<(i64, &str)> {
+    let count = count.filter(|count| (1..=1200).contains(count))?;
+    let unit = unit.filter(|unit| matches!(*unit, "day" | "week" | "month" | "year"))?;
+    Some((count, unit))
+}
+
+fn project_repeat_interval(project: &Value) -> Option<(i64, &str)> {
+    let (count, unit) = match (
+        project.get("repeatAfterCount"),
+        project.get("repeatAfterUnit"),
+    ) {
+        (None, None) => (project.get("repeatAfterMonths"), Some("month")),
+        (count, unit) => (count, unit.and_then(Value::as_str)),
+    };
+    let count = count
         .and_then(Value::as_f64)
-        .filter(|months| months.fract() == 0.0 && (1.0..=1200.0).contains(months))
-        .map(|months| months as i64)
+        .filter(|count| count.fract() == 0.0)
+        .map(|count| count as i64);
+    normalized_project_repeat_interval(count, unit)
 }
 
 fn replace_project_row(conn: &Connection, project: &Value) -> Result<(), String> {
@@ -4996,9 +5040,10 @@ fn replace_project_row(conn: &Connection, project: &Value) -> Result<(), String>
     let view_section_ids_json = json_str(project.get("viewSectionIds"));
     let normalized_rev = normalized_revision_for_storage(project.get("rev"));
     let normalized_rev_by = normalized_rev_by(project.get("revBy"));
+    let (repeat_after_count, repeat_after_unit) = project_repeat_interval(project).unzip();
     conn.execute(
-        "INSERT INTO projects (id, title, status, color, orderNum, tagIds, isSequential, sequentialScope, taskSortBy, isFocused, supportNotes, attachments, dueDate, reviewAt, areaId, areaTitle, rev, revBy, createdAt, updatedAt, deletedAt, purgedAt, startDate, cancelledAt, viewSectionIds, archivedAt, colorOverride, perSectionFlow, calendarReference, repeatAfterMonths)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30)
+        "INSERT INTO projects (id, title, status, color, orderNum, tagIds, isSequential, sequentialScope, taskSortBy, isFocused, supportNotes, attachments, dueDate, reviewAt, areaId, areaTitle, rev, revBy, createdAt, updatedAt, deletedAt, purgedAt, startDate, cancelledAt, viewSectionIds, archivedAt, colorOverride, perSectionFlow, calendarReference, repeatAfterCount, repeatAfterUnit)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31)
          ON CONFLICT(id) DO UPDATE SET
            title=excluded.title, status=excluded.status, color=excluded.color, orderNum=excluded.orderNum,
            tagIds=excluded.tagIds, isSequential=excluded.isSequential, sequentialScope=excluded.sequentialScope,
@@ -5009,7 +5054,7 @@ fn replace_project_row(conn: &Connection, project: &Value) -> Result<(), String>
            purgedAt=excluded.purgedAt, startDate=excluded.startDate, cancelledAt=excluded.cancelledAt,
            viewSectionIds=excluded.viewSectionIds, archivedAt=excluded.archivedAt, colorOverride=excluded.colorOverride,
            perSectionFlow=excluded.perSectionFlow, calendarReference=excluded.calendarReference,
-           repeatAfterMonths=excluded.repeatAfterMonths",
+           repeatAfterCount=excluded.repeatAfterCount, repeatAfterUnit=excluded.repeatAfterUnit",
         params![
             project.get("id").and_then(Value::as_str).unwrap_or_default(),
             project.get("title").and_then(Value::as_str).unwrap_or_default(),
@@ -5058,7 +5103,8 @@ fn replace_project_row(conn: &Connection, project: &Value) -> Result<(), String>
                 .and_then(Value::as_bool)
                 .map(|v| v as i32),
             project.get("calendarReference").map(Value::to_string),
-            project_repeat_after_months(project),
+            repeat_after_count,
+            repeat_after_unit,
         ],
     )
     .map_err(|e| e.to_string())?;
@@ -7285,7 +7331,8 @@ mod tests {
             "ALTER TABLE projects DROP COLUMN startDate;
              ALTER TABLE projects DROP COLUMN archivedAt;
              ALTER TABLE projects DROP COLUMN viewSectionIds;
-             ALTER TABLE projects DROP COLUMN repeatAfterMonths;",
+             ALTER TABLE projects DROP COLUMN repeatAfterCount;
+             ALTER TABLE projects DROP COLUMN repeatAfterUnit;",
         )
         .expect("remove columns from the version six fixture");
         let schema_generation = sqlite_schema_generation(&conn).expect("read legacy generation");
@@ -7299,8 +7346,12 @@ mod tests {
         let reopened = open_sqlite_path(&db_path).expect("migrate version six database");
 
         assert!(has_column(&reopened, "projects", "startDate").expect("inspect project columns"));
-        assert!(has_column(&reopened, "projects", "repeatAfterMonths")
-            .expect("inspect project columns"));
+        assert!(
+            has_column(&reopened, "projects", "repeatAfterCount").expect("inspect project columns")
+        );
+        assert!(
+            has_column(&reopened, "projects", "repeatAfterUnit").expect("inspect project columns")
+        );
         let state = stored_sqlite_schema_state(&reopened)
             .expect("read migrated state")
             .expect("migrated state row");
@@ -7317,7 +7368,8 @@ mod tests {
         conn.execute_batch(
             "ALTER TABLE projects DROP COLUMN archivedAt;
              ALTER TABLE projects DROP COLUMN viewSectionIds;
-             ALTER TABLE projects DROP COLUMN repeatAfterMonths;",
+             ALTER TABLE projects DROP COLUMN repeatAfterCount;
+             ALTER TABLE projects DROP COLUMN repeatAfterUnit;",
         )
         .expect("remove columns from the version nine fixture");
         conn.execute(
@@ -7362,7 +7414,8 @@ mod tests {
         conn.execute_batch(
             "ALTER TABLE tasks DROP COLUMN archivedAt;
              ALTER TABLE projects DROP COLUMN archivedAt;
-             ALTER TABLE projects DROP COLUMN repeatAfterMonths;",
+             ALTER TABLE projects DROP COLUMN repeatAfterCount;
+             ALTER TABLE projects DROP COLUMN repeatAfterUnit;",
         )
         .expect("remove columns from the version ten fixture");
         assert!(!has_column(&conn, "tasks", "archivedAt").expect("legacy task columns"));
@@ -7437,7 +7490,8 @@ mod tests {
              ALTER TABLE projects DROP COLUMN cancelledAt;
              ALTER TABLE projects DROP COLUMN archivedAt;
              ALTER TABLE projects DROP COLUMN viewSectionIds;
-             ALTER TABLE projects DROP COLUMN repeatAfterMonths;",
+             ALTER TABLE projects DROP COLUMN repeatAfterCount;
+             ALTER TABLE projects DROP COLUMN repeatAfterUnit;",
         )
         .expect("remove columns from the version seven fixture");
         conn.execute(
@@ -8084,9 +8138,8 @@ mod tests {
         let mut project = serde_json::json!({
             "id": "repeating-project", "title": "Project", "status": "active", "color": "#6B7280",
             "createdAt": "2026-11-01T10:00:00.000Z", "updatedAt": "2026-11-01T10:00:00.000Z",
-            "repeatAfterMonths": 1200
+            "repeatAfterMonths": 1200,
         });
-        replace_project_row(&conn, &project).expect("write repeat interval");
         let read = || {
             conn.query_row(
                 "SELECT * FROM projects WHERE id='repeating-project'",
@@ -8095,13 +8148,78 @@ mod tests {
             )
             .expect("read project")
         };
-        assert_eq!(read()["repeatAfterMonths"], project["repeatAfterMonths"]);
-        project
-            .as_object_mut()
-            .expect("project object")
-            .remove("repeatAfterMonths");
-        replace_project_row(&conn, &project).expect("clear repeat interval");
-        assert!(read().get("repeatAfterMonths").is_none());
+        replace_project_row(&conn, &project).expect("write legacy repeat interval");
+        assert_eq!(read()["repeatAfterCount"], 1200);
+        assert_eq!(read()["repeatAfterUnit"], "month");
+
+        project["repeatAfterCount"] = Value::from(2);
+        project["repeatAfterUnit"] = Value::from("week");
+        replace_project_row(&conn, &project).expect("write repeat interval");
+        assert_eq!(read()["repeatAfterCount"], 2);
+        assert_eq!(read()["repeatAfterUnit"], "week");
+
+        project["repeatAfterCount"] = Value::Null;
+        replace_project_row(&conn, &project).expect("clear repeat interval with incomplete pair");
+        assert!(read().get("repeatAfterCount").is_none());
+        assert!(read().get("repeatAfterUnit").is_none());
+    }
+
+    #[test]
+    fn sqlite_open_migrates_legacy_month_intervals_and_preserves_clear() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let db_path = temp.path().join("version-nineteen-repeats.sqlite");
+        let conn = Connection::open(&db_path).expect("open legacy database");
+        conn.execute_batch(SQLITE_SCHEMA).expect("create schema");
+        conn.execute_batch(
+            "ALTER TABLE projects DROP COLUMN repeatAfterCount;
+             ALTER TABLE projects DROP COLUMN repeatAfterUnit;
+             ALTER TABLE projects ADD COLUMN repeatAfterMonths INTEGER;
+             INSERT INTO projects (id, title, status, color, createdAt, updatedAt, repeatAfterMonths)
+               VALUES ('repeat', 'Repeat', 'active', '#6B7280', '2026-09-01', '2026-09-01', 6),
+                      ('invalid', 'Invalid', 'active', '#6B7280', '2026-09-01', '2026-09-01', 1.5);
+             INSERT INTO tasks (id, title, status, projectId, createdAt, updatedAt)
+               VALUES ('task', 'Task', 'next', 'repeat', '2026-09-01', '2026-09-01');",
+        )
+        .expect("create and seed legacy schema");
+        let schema_generation = sqlite_schema_generation(&conn).expect("read legacy generation");
+        conn.execute(
+            "INSERT INTO storage_schema_state (id, storage_version, schema_generation) VALUES (1, 19, ?1)",
+            params![schema_generation],
+        )
+        .expect("record version nineteen schema state");
+        drop(conn);
+
+        let read_project = |conn: &Connection, id: &str| {
+            conn.query_row(
+                "SELECT * FROM projects WHERE id = ?1",
+                [id],
+                row_to_project_value,
+            )
+            .expect("read project")
+        };
+        let mut reopened = open_sqlite_path(&db_path).expect("migrate repeat intervals");
+        let mut repeated = read_project(&reopened, "repeat");
+        assert_eq!(repeated["repeatAfterCount"], 6);
+        assert_eq!(repeated["repeatAfterUnit"], "month");
+        let invalid = read_project(&reopened, "invalid");
+        assert!(invalid.get("repeatAfterCount").is_none());
+        assert!(invalid.get("repeatAfterUnit").is_none());
+        assert_eq!(
+            read_sqlite_data(&reopened).expect("read task")["tasks"][0]["projectId"],
+            "repeat"
+        );
+
+        let fields = repeated.as_object_mut().expect("project object");
+        fields.remove("repeatAfterCount");
+        fields.remove("repeatAfterUnit");
+        replace_project_row(&reopened, &repeated).expect("clear migrated repeat interval");
+        reopened
+            .execute("DELETE FROM storage_schema_state", [])
+            .expect("require schema check");
+        initialize_sqlite_schema(&mut reopened).expect("recheck schema");
+        let cleared = read_project(&reopened, "repeat");
+        assert!(cleared.get("repeatAfterCount").is_none());
+        assert!(cleared.get("repeatAfterUnit").is_none());
     }
 
     #[test]
@@ -8186,7 +8304,8 @@ mod tests {
         });
         let project = serde_json::json!({
             "id": "project-full",
-            "repeatAfterMonths": 6,
+            "repeatAfterCount": 6,
+            "repeatAfterUnit": "year",
             "title": "Full project",
             "status": "waiting",
             "color": "#2563eb",
@@ -8334,7 +8453,8 @@ mod tests {
             "dueDate",
             "startDate",
             "reviewAt",
-            "repeatAfterMonths",
+            "repeatAfterCount",
+            "repeatAfterUnit",
             "cancelledAt",
             "archivedAt",
             "areaId",

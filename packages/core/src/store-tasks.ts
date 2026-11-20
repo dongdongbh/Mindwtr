@@ -450,7 +450,7 @@ export const prepareTaskUpdatesForStore = ({
     const destination = { ...task, ...updates, ...containerPatch.updates };
     if ((hasOwnField(updates, 'recurrence') || destination.projectId !== task.projectId)
         && hasRecurrenceRule(destination.recurrence)
-        && allProjects.some(project => project.id === destination.projectId && project.repeatAfterMonths)) {
+        && allProjects.some(project => project.id === destination.projectId && project.repeatAfterCount)) {
         return { ok: false, error: 'This project repeats as a whole. Turn off individual task recurrence first.' };
     }
 
@@ -597,7 +597,7 @@ export const planTaskBatchUpdateEffects = ({
             recurrenceProjections?.get(task.id),
         );
         const stampedNextRecurringTask = stampNewRecurringFollowUp(
-            nextRecurringTask && allProjects.some(project => project.id === updatedTask.projectId && project.repeatAfterMonths) ? null : nextRecurringTask,
+            nextRecurringTask && allProjects.some(project => project.id === updatedTask.projectId && project.repeatAfterCount) ? null : nextRecurringTask,
             deviceId,
             getTaskOrder(task),
             projectOrderReserver,
@@ -671,7 +671,7 @@ export const planTaskUpdateEffects = ({
         completionSource,
     );
     const stampedNextRecurringTask = stampNewRecurringFollowUp(
-        nextRecurringTask && allProjects.some(project => project.id === updatedTask.projectId && project.repeatAfterMonths) ? null : nextRecurringTask,
+        nextRecurringTask && allProjects.some(project => project.id === updatedTask.projectId && project.repeatAfterCount) ? null : nextRecurringTask,
         deviceId,
         getTaskOrder(task),
 

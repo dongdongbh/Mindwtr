@@ -4931,7 +4931,7 @@ describe('TaskStore', () => {
         await addTask('Visit', { projectId: project.id, sectionId: section.id, status: 'done',
             timeSpentMinutes: 10, dueDate: '2026-09-01', checklist: [{ id: 'before', title: 'Measure', isCompleted: true }] });
         await addTask('File', { projectId: project.id, sectionId: section.id, status: 'next' });
-        await updateProject(project.id, { isSequential: true, repeatAfterMonths: 4 });
+        await updateProject(project.id, { isSequential: true, repeatAfterCount: 4, repeatAfterUnit: 'month' });
         const before = useTaskStore.getState();
         await updateProject(project.id, { status: 'archived' });
         expect(useTaskStore.getState()._allProjects).toHaveLength(1);
@@ -4940,7 +4940,7 @@ describe('TaskStore', () => {
         const after = useTaskStore.getState();
         expect(after._allProjects).toHaveLength(2);
         const next = after._allProjects.find(row => row.id !== project.id)!;
-        expect(next).toMatchObject({ title: 'Inspection', startDate: '2027-02-28', status: 'active', isSequential: true, repeatAfterMonths: 4 });
+        expect(next).toMatchObject({ title: 'Inspection', startDate: '2027-02-28', status: 'active', isSequential: true, repeatAfterCount: 4, repeatAfterUnit: 'month' });
         const copyTasks = after._allTasks.filter(task => task.projectId === next.id);
         expect(copyTasks.map(task => task.title)).toEqual(['Visit', 'File']);
         expect(copyTasks[0]).toMatchObject({ status: 'next', startTime: next.startDate,
@@ -4962,9 +4962,28 @@ describe('TaskStore', () => {
         const merged = mergeAppData(mockAppData(after._allTasks, after._allProjects, after._allSections),
             mockAppData(secondDevice._allTasks, secondDevice._allProjects, secondDevice._allSections), { nowIso: next.updatedAt });
         expect(merged.projects.filter(row => row.id !== project.id)).toHaveLength(1);
-        expect(merged.projects.find(row => row.id === next.id)?.repeatAfterMonths).toBe(4);
+        expect(merged.projects.find(row => row.id === next.id)?.repeatAfterCount).toBe(4);
         expect(merged.tasks.filter(row => row.projectId === next.id)).toHaveLength(2);
         expect(merged.sections?.filter(row => row.projectId === next.id)).toHaveLength(1);
+    });
+
+    it.each([
+        [3, 'day', '2024-03-03'],
+        [2, 'week', '2024-03-14'],
+        [1, 'month', '2024-03-29'],
+        [1, 'year', '2025-02-28'],
+    ] as const)('prepares a run %s %s after explicit completion', async (count, unit, startDate) => {
+        vi.setSystemTime(new Date(2024, 1, 29, 12));
+        const { addProject, updateProject } = useTaskStore.getState();
+        const project = (await addProject('Routine', '#123456', { repeatAfterCount: count, repeatAfterUnit: unit }))!;
+        expect((await updateProject(project.id, { repeatAfterCount: 3 })).success).toBe(false);
+        expect((await updateProject(project.id, { repeatAfterUnit: undefined })).success).toBe(false);
+        expect((await updateProject(project.id, { status: 'archived' }, 'complete')).success).toBe(true);
+        const next = useTaskStore.getState().projects.find(row => row.id !== project.id)!;
+        expect(next).toMatchObject({ repeatAfterCount: count, repeatAfterUnit: unit, startDate });
+        expect((await updateProject(next.id, { repeatAfterCount: undefined, repeatAfterUnit: undefined })).success).toBe(true);
+        await updateProject(next.id, { status: 'archived' }, 'complete');
+        expect(useTaskStore.getState()._allProjects).toHaveLength(2);
     });
 
     it('keeps remote files reachable and acknowledges a repeated completion only after a durable save', async () => {
@@ -4972,7 +4991,7 @@ describe('TaskStore', () => {
         const file = { id: 'remote-file', title: 'Instructions', kind: 'file' as const, uri: '',
             cloudKey: 'attachments/instructions', fileHash: 'a'.repeat(64),
             createdAt: '2026-07-01T12:00:00Z', updatedAt: '2026-07-01T12:00:00Z' };
-        const project = (await addProject('Maintenance', '#123456', { repeatAfterMonths: 4, attachments: [file] }))!;
+        const project = (await addProject('Maintenance', '#123456', { repeatAfterCount: 4, repeatAfterUnit: 'month', attachments: [file] }))!;
         await addTask('Read', { projectId: project.id, attachments: [file] });
         await flushPendingSave();
         vi.mocked(mockStorage.saveData).mockRejectedValue(new Error('disk full'));
@@ -4997,14 +5016,14 @@ describe('TaskStore', () => {
     it('rejects invalid project intervals and active independently recurring steps', async () => {
         const { addProject, addTask, updateProject } = useTaskStore.getState();
         const project = (await addProject('Inspection', '#123456'))!;
-        expect((await updateProject(project.id, { repeatAfterMonths: -1 })).success).toBe(false);
+        expect((await updateProject(project.id, { repeatAfterCount: -1, repeatAfterUnit: 'week' })).success).toBe(false);
         await addTask('Visit', { status: 'next', projectId: project.id, recurrence: 'weekly' });
-        expect((await updateProject(project.id, { repeatAfterMonths: 4 })).success).toBe(false);
-        expect(useTaskStore.getState().projects[0].repeatAfterMonths).toBeUndefined();
+        expect((await updateProject(project.id, { repeatAfterCount: 4, repeatAfterUnit: 'month' })).success).toBe(false);
+        expect(useTaskStore.getState().projects[0].repeatAfterCount).toBeUndefined();
         const task = useTaskStore.getState()._allTasks[0];
         const { updateTask, cancelProject } = useTaskStore.getState();
         await updateTask(task.id, { recurrence: undefined });
-        expect((await updateProject(project.id, { repeatAfterMonths: 4 })).success).toBe(true);
+        expect((await updateProject(project.id, { repeatAfterCount: 4, repeatAfterUnit: 'month' })).success).toBe(true);
         expect((await addTask('Other', { projectId: project.id, recurrence: 'daily' })).success).toBe(false);
         expect((await updateTask(task.id, { recurrence: 'daily' })).success).toBe(false);
         await cancelProject(project.id);

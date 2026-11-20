@@ -6,9 +6,13 @@ import {
     PROJECT_SYNC_FIELD_SCHEMA,
     PROJECT_SYNC_SCHEMA_FIXTURE,
     PROJECT_SYNC_SCHEMA_VERSION,
+    padProjectSqliteCells,
+    projectToSqliteRow,
 } from './project-sync-schema';
 import cloudKitProductionSchema from './cloudkit-production-schema.json';
 import { mergeAppDataWithStats } from './sync';
+import { validateBackupJson } from './backup-transfer';
+import { parseSyncDocument } from './sync-document';
 import { sanitizeAppDataForRemote } from './sync-helpers';
 import { normalizeProjectForContentComparison } from './sync-signatures';
 import type { AppData, Project } from './types';
@@ -61,16 +65,38 @@ describe('Project sync schema contract', () => {
         const oldProject: Project = { id: 'project', title: 'Project', status: 'active', color: '#6b7280',
             order: 0, tagIds: [], createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z', rev: 1 };
         const wrap = (project: Project): AppData => ({ tasks: [], projects: [project], sections: [], areas: [], people: [], settings: {} });
-        const updated = { ...oldProject, rev: 2, repeatAfterMonths: 6 };
+        const updated: Project = { ...oldProject, rev: 2, repeatAfterCount: 6, repeatAfterUnit: 'month' };
+        const legacy = { ...oldProject, rev: 2, repeatAfterMonths: 6 };
         expect(normalizeProjectForContentComparison(updated)).not.toEqual(normalizeProjectForContentComparison(oldProject));
+        expect(normalizeProjectForContentComparison(legacy)).toEqual(normalizeProjectForContentComparison(updated));
         const local = wrap(oldProject);
-        const incoming = sanitizeAppDataForRemote(wrap(updated));
-        expect(JSON.parse(JSON.stringify(incoming)).projects[0].repeatAfterMonths).toBe(6);
-        const merged = mergeAppDataWithStats(local, incoming).data;
-        expect(merged.projects[0].repeatAfterMonths).toBe(6);
-        expect(mergeAppDataWithStats(merged, incoming).data).toEqual(merged);
+        const incoming = JSON.parse(JSON.stringify(sanitizeAppDataForRemote(wrap(legacy))));
+        expect(incoming.projects[0]).toMatchObject({ repeatAfterCount: 6, repeatAfterUnit: 'month' });
+        expect(incoming.projects[0]).not.toHaveProperty('repeatAfterMonths');
+        expect(validateBackupJson(JSON.stringify(wrap(legacy)))).toMatchObject({ valid: true, data: { projects: [updated] } });
+        expect(parseSyncDocument(wrap({ ...oldProject, repeatAfterCount: 6 }), 'remote')).toMatchObject({ ok: false });
+        const merged = mergeAppDataWithStats(local, wrap(legacy)).data;
+        expect(merged.projects[0]).toMatchObject({ repeatAfterCount: 6, repeatAfterUnit: 'month' });
+        const aligned = mergeAppDataWithStats(merged, incoming);
+        expect(aligned.data.projects).toEqual(merged.projects);
+        expect(aligned.stats.projects.conflicts).toBe(0);
 
-        const cleared = wrap({ ...oldProject, rev: 3 });
-        expect(mergeAppDataWithStats(merged, cleared).data.projects[0].repeatAfterMonths).toBeUndefined();
+        const unitChanged: Project = { ...updated, rev: 3, repeatAfterUnit: 'day' };
+        expect(mergeAppDataWithStats(merged, wrap(unitChanged)).data.projects[0]).toMatchObject({ repeatAfterCount: 6, repeatAfterUnit: 'day' });
+
+        const cleared: Project & { repeatAfterMonths: number } = {
+            ...oldProject, rev: 4, repeatAfterCount: undefined, repeatAfterUnit: undefined, repeatAfterMonths: 6,
+        };
+        const clearedMerge = mergeAppDataWithStats(merged, wrap(cleared)).data;
+        expect(clearedMerge.projects[0]).toMatchObject({ repeatAfterCount: undefined, repeatAfterUnit: undefined });
+        expect(clearedMerge.projects[0]).not.toHaveProperty('repeatAfterMonths');
+        expect(mergeAppDataWithStats(clearedMerge, wrap(legacy)).data.projects).toEqual(clearedMerge.projects);
+    });
+
+    it('maps an older monthly SQLite row to a count and unit', () => {
+        const month = { ...PROJECT_SYNC_SCHEMA_FIXTURE, repeatAfterUnit: 'month' as const };
+        const cells = projectToSqliteRow(month);
+        expect(padProjectSqliteCells(cells.slice(0, -1))).toEqual(cells);
+        expect(padProjectSqliteCells(cells.slice(0, -2))?.slice(-2)).toEqual([null, null]);
     });
 });

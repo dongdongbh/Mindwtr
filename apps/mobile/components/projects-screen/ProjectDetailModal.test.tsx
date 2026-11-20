@@ -2,7 +2,7 @@ import React from 'react';
 import { Alert, Dimensions, Keyboard, KeyboardAvoidingView, Modal, Platform, Text, TextInput } from 'react-native';
 import { act, create } from 'react-test-renderer';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Project, Section, Task } from '@mindwtr/core';
+import type { PersistenceFailure, Project, Section, Task } from '@mindwtr/core';
 
 const mockScrollTo = vi.hoisted(() => vi.fn());
 const mockScrollToOffset = vi.hoisted(() => vi.fn());
@@ -69,6 +69,11 @@ const translate = vi.hoisted(() => (key: string) => ({
     'projects.sequentialScope': 'Sequential Scope',
     'projects.sequentialWithinSections': 'Within sections',
     'projects.statusLabel': 'Status',
+    'recurrence.repeatEvery': 'Repeat every',
+    'recurrence.dayUnit': 'day(s)',
+    'recurrence.weekUnit': 'week(s)',
+    'recurrence.monthUnit': 'month(s)',
+    'recurrence.yearUnit': 'year(s)',
     'sort.default': 'Default',
     'sort.due': 'Due date',
     'sort.label': 'Sort',
@@ -101,10 +106,12 @@ const storeActions = vi.hoisted(() => ({
     _projectsById: new Map<string, Project>(),
     _allSections: [] as Section[],
     _allTasks: [] as Task[],
+    persistenceFailure: null as PersistenceFailure | null,
     addSection: vi.fn(),
     cancelProject: vi.fn(),
     deleteSection: vi.fn(),
     reorderSections: vi.fn(),
+    retryPersistence: vi.fn(),
     updateProject: vi.fn(),
     updateSection: vi.fn(),
     setProjectFlowMode: vi.fn(),
@@ -337,6 +344,7 @@ beforeEach(() => {
     storeActions._projectsById = new Map();
     storeActions._allSections = [];
     storeActions._allTasks = [];
+    storeActions.persistenceFailure = null;
     for (const action of Object.values(storeActions)) {
         if (typeof action === 'function') action.mockReset();
     }
@@ -1404,30 +1412,91 @@ describe('ProjectDetailModal lifecycle actions', () => {
         expect(alertSpy).not.toHaveBeenCalled();
     });
 
-    it('rejects a conflicting project repeat and clears it independently of task repeats', async () => {
+    it('saves repeat count and unit together, keeps a rejected draft, and clears both fields', async () => {
         storeActions.updateProject
             .mockResolvedValueOnce({ success: false, error: 'PROJECT_REPEAT_TASK_RECURRENCE' })
             .mockResolvedValueOnce({ success: true });
         const onProjectChange = vi.fn();
         let tree!: ReturnType<typeof create>;
+        const initialProject = { ...project('active'), repeatAfterCount: 3, repeatAfterUnit: 'year' } satisfies Project;
+        const Editor = () => {
+            const [selectedProject, setSelectedProject] = React.useState<Project>(initialProject);
+            return <ProjectDetailModal {...createProjectDetailModalProps({
+                project: selectedProject,
+                onProjectChange: (next) => {
+                    onProjectChange(next);
+                    setSelectedProject(next);
+                },
+            })} />;
+        };
         await act(async () => {
-            tree = create(<ProjectDetailModal {...createProjectDetailModalProps({
-                project: { ...project('active'), repeatAfterMonths: 3 },
-                onProjectChange,
-            })} />);
+            tree = create(<Editor />);
         });
         expandProjectDetails(tree);
-        const repeat = () => tree.root.findByProps({ testID: 'project-repeat-after-months' });
-        expect(repeat().props.defaultValue).toBe('3');
-        await act(async () => { repeat().props.onEndEditing({ nativeEvent: { text: '6' } }); });
-        expect(storeActions.updateProject).toHaveBeenCalledWith('project-1', { repeatAfterMonths: 6 });
+        const repeat = () => tree.root.findByProps({ testID: 'project-repeat-after-count' });
+        const unit = () => tree.root.findByProps({ testID: 'project-repeat-after-unit' });
+        const save = () => tree.root.findByProps({ testID: 'project-repeat-after-save' });
+        expect(repeat().props.value).toBe('3');
+        expect(unit().props.accessibilityValue.text).toBe('year(s)');
+        expect(tree.root.findAllByProps({ testID: 'project-repeat-after-save' })).toHaveLength(0);
+        act(() => repeat().props.onChangeText('1201'));
+        await act(async () => { save().props.onPress(); });
+        expect(tree.root.findAllByProps({ accessibilityRole: 'alert' }).some(
+            (node) => node.props.children === 'projects.repeatInvalidInterval',
+        )).toBe(true);
+        act(() => repeat().props.onChangeText('6'));
+        act(() => unit().props.onPress());
+        expect(tree.root.findByProps({ testID: 'project-repeat-after-unit-year' }).props.accessibilityState.checked).toBe(true);
+        act(() => tree.root.findByProps({ testID: 'project-repeat-after-unit-week' }).props.onPress());
+        expect(storeActions.updateProject).not.toHaveBeenCalled();
+        await act(async () => { save().props.onPress(); });
+        expect(storeActions.updateProject).toHaveBeenCalledWith('project-1', { repeatAfterCount: 6, repeatAfterUnit: 'week' });
         expect(tree.root.findAllByProps({ accessibilityRole: 'alert' }).some(
             (node) => node.props.children === 'projects.repeatTaskConflict',
         )).toBe(true);
         expect(onProjectChange).not.toHaveBeenCalled();
-        await act(async () => { repeat().props.onEndEditing({ nativeEvent: { text: '' } }); });
-        expect(storeActions.updateProject).toHaveBeenLastCalledWith('project-1', { repeatAfterMonths: undefined });
-        expect(onProjectChange).toHaveBeenCalledWith(expect.objectContaining({ repeatAfterMonths: undefined }));
+        expect(repeat().props.value).toBe('6');
+        expect(unit().props.accessibilityValue.text).toBe('week(s)');
+        act(() => repeat().props.onChangeText(''));
+        await act(async () => { save().props.onPress(); });
+        expect(storeActions.updateProject).toHaveBeenLastCalledWith('project-1', { repeatAfterCount: undefined, repeatAfterUnit: undefined });
+        expect(onProjectChange).toHaveBeenCalledWith(expect.objectContaining({ repeatAfterCount: undefined, repeatAfterUnit: undefined }));
+        expect(tree.root.findAllByProps({ testID: 'project-repeat-after-save' })).toHaveLength(0);
+        expect(repeat().props.value).toBe('');
+        expect(unit().props.accessibilityValue.text).toBe('month(s)');
+    });
+
+    it('retries a refused durable save without writing the same interval again', async () => {
+        const selected = project('active');
+        const pending = { ...selected, repeatAfterCount: 14, repeatAfterUnit: 'month' } satisfies Project;
+        storeActions.updateProject.mockImplementation(async () => {
+            storeActions.persistenceFailure = { message: 'Disk unavailable', failedAt: selected.updatedAt, retrying: false };
+            storeActions._allProjects = [pending];
+            storeActions._projectsById.set(selected.id, pending);
+            return { success: false };
+        });
+        storeActions.retryPersistence.mockImplementation(async () => {
+            storeActions.persistenceFailure = null;
+        });
+        const onProjectChange = vi.fn();
+        let tree!: ReturnType<typeof create>;
+        await act(async () => {
+            tree = create(<ProjectDetailModal {...createProjectDetailModalProps({ project: selected, onProjectChange })} />);
+        });
+        expandProjectDetails(tree);
+        act(() => tree.root.findByProps({ testID: 'project-repeat-after-count' }).props.onChangeText('14'));
+        const save = () => tree.root.findByProps({ testID: 'project-repeat-after-save' });
+        await act(async () => { save().props.onPress(); });
+        expect(tree.root.findAllByProps({ accessibilityRole: 'alert' }).some(
+            (node) => node.props.children === 'projects.repeatSaveFailed',
+        )).toBe(true);
+        expect(onProjectChange).not.toHaveBeenCalled();
+
+        await act(async () => { save().props.onPress(); });
+        expect(storeActions.retryPersistence).toHaveBeenCalledOnce();
+        expect(storeActions.updateProject).toHaveBeenCalledExactlyOnceWith(selected.id, { repeatAfterCount: 14, repeatAfterUnit: 'month' });
+        expect(onProjectChange).toHaveBeenCalledWith(pending);
+        expect(tree.root.findAllByProps({ testID: 'project-repeat-after-save' })).toHaveLength(0);
     });
 
     it('shows a completion failure and keeps the selected project when the write is refused', async () => {
@@ -1602,7 +1671,8 @@ describe('ProjectDetailModal archived projects', () => {
         expect(tree.root.findByProps({ testID: 'project-flow-mode-sequential' }).props.disabled).toBe(true);
         expect(tree.root.findByProps({ testID: 'project-area-picker' }).props.disabled).toBe(true);
         expect(tree.root.findByProps({ testID: 'project-due-date-picker' }).props.disabled).toBe(true);
-        expect(tree.root.findByProps({ testID: 'project-repeat-after-months' }).props.editable).toBe(false);
+        expect(tree.root.findByProps({ testID: 'project-repeat-after-count' }).props.editable).toBe(false);
+        expect(tree.root.findByProps({ testID: 'project-repeat-after-unit' }).props.disabled).toBe(true);
         expect(tree.root.findByProps({ testID: 'project-review-date-picker' }).props.disabled).toBe(true);
         expect(tree.root.findAllByType(TextInput).some((input) => input.props.placeholder === 'Notes')).toBe(false);
 

@@ -1889,7 +1889,23 @@ export function ProjectWorkspace({
                                         onStartDateChange={(value) => updateMutableSelectedProject({ startDate: value || undefined })}
                                         dueDateValue={toDateInputValue(selectedProject.dueDate)}
                                         onDueDateChange={(value) => updateMutableSelectedProject({ dueDate: value || undefined })}
-                                        onRepeatAfterMonthsChange={(repeatAfterMonths) => updateMutableSelectedProject({ repeatAfterMonths })}
+                                        onRepeatAfterChange={async (updates) => {
+                                            const current = getMutableSelectedProject();
+                                            if (!current) return { success: false };
+                                            const state = useTaskStore.getState();
+                                            if (state.persistenceFailure) {
+                                                await state.retryPersistence();
+                                                if (getMutableSelectedProject()?.id !== current.id) return { success: false };
+                                                const latest = useTaskStore.getState();
+                                                const saved = latest._projectsById.get(current.id);
+                                                if (!latest.persistenceFailure && saved
+                                                    && saved.repeatAfterCount === updates.repeatAfterCount
+                                                    && saved.repeatAfterUnit === updates.repeatAfterUnit) {
+                                                    return { success: true };
+                                                }
+                                            }
+                                            return updateProject(current.id, updates);
+                                        }}
                                         reviewAtValue={toDateTimeLocalValue(selectedProject.reviewAt)}
                                         onReviewAtChange={(value) => updateMutableSelectedProject({ reviewAt: value || undefined })}
                                         readOnly={isArchivedProject}

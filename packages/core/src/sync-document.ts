@@ -1,5 +1,6 @@
 import type { AppData, Attachment } from './types';
 import { logInfo } from './logger';
+import { normalizeProjectRepeatFields } from './project-sync-schema';
 import {
     isNonEmptyString,
     isObjectRecord,
@@ -276,6 +277,7 @@ export const parseSyncDocument = (
     const recovery = recoverLegacyAttachmentUrls(input, source);
     if (recovery.errors.length > 0) return { ok: false, errors: recovery.errors };
     const normalized = normalizeAppData(recovery.data as AppData);
+    normalized.projects = normalized.projects.map(normalizeProjectRepeatFields);
     const data = source === 'remote' ? withoutUnsyncedSettingsStamps(stripRemoteAttachmentDeviceState(normalized)) : normalized;
     if (recovery.repairedOwners > 0) {
         logInfo('Legacy attachment URL normalized for sync', {

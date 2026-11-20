@@ -60,6 +60,8 @@ The v1.3.6 task-editor correction is confirmed by the visible disappearance of t
 
 ## v1.3.10 (add before tagging, trim in the release after)
 
+- **`v1.3.10/project-repeat-interval-migration`** — `apps/desktop/src-tauri/src/storage.rs`. Opening a desktop database with the former monthly repeat column records this marker once the migration commits.
+
 - **`v1.3.10/repeat-project`** — `packages/core/src/store-projects/project-actions.ts`. Completing a repeating project saves its next run. Look for `Next project run saved` after completion.
 
 - **`v1.3.10/ios-siri-reminder-action`** — React Native iOS `apps/mobile/lib/siri-reminders.ts` reports `Siri Reminder request acknowledged` after the App Group transport stores the response. With App Lock off and Mindwtr in the foreground, ask Siri to create an Inbox reminder and then change its due date. Export Diagnostics and check for `operation=create` and `operation=update`, each with `outcome=persisted`. Rejected requests report a bounded reason. No task content or identifiers are logged. (#915)

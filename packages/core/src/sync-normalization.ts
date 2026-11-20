@@ -8,7 +8,7 @@ import { isSha256Hex } from './attachment-hash';
 import { normalizePersonName, normalizePersonNote, normalizePersonReferenceLink } from './people';
 import { normalizeProjectSequentialScope, normalizeProjectTaskSortBy } from './project-utils';
 import { normalizeProjectLifecycleFields } from './project-status';
-import { normalizeProjectRepeatAfterMonths } from './project-sync-schema';
+import { isValidProjectRepeatInterval, normalizeProjectRepeatFields } from './project-sync-schema';
 import { logInfo } from './logger';
 import { normalizeTaskForLoad } from './task-status';
 import { isTaskSectionProjectArchiveReference } from './store-helpers';
@@ -302,7 +302,7 @@ export const normalizeProjectForSyncMerge = (
             : compacted;
     }
     const candidate: Project = {
-        ...project,
+        ...normalizeProjectRepeatFields(project),
         status: normalizeProjectStatusForMerge(project.status),
         color: normalizeOptionalString(project.color) ?? '#6B7280',
         colorOverride: isValidProjectColorOverride(project.colorOverride) ? project.colorOverride : undefined,
@@ -316,7 +316,6 @@ export const normalizeProjectForSyncMerge = (
         dueDate: normalizeOptionalString(project.dueDate),
         startDate: normalizeOptionalString(project.startDate),
         reviewAt: normalizeOptionalString(project.reviewAt),
-        repeatAfterMonths: normalizeProjectRepeatAfterMonths(project.repeatAfterMonths),
         cancelledAt: normalizeOptionalString(project.cancelledAt),
         archivedAt: normalizeOptionalString(project.archivedAt),
         areaId: normalizeOptionalString(project.areaId),
@@ -792,8 +791,8 @@ export function* validateMergedSyncDataPass(data: AppData): CooperativePass<stri
             if (project.calendarReference != null && !isProjectCalendarReference(project.calendarReference)) {
                 errors.push(`projects[${index}].calendarReference must be a valid calendar reference or null`);
             }
-            if (project.repeatAfterMonths !== undefined && normalizeProjectRepeatAfterMonths(project.repeatAfterMonths) === undefined) {
-                errors.push(`projects[${index}].repeatAfterMonths must be a whole number from 1 through 1200`);
+            if (!isValidProjectRepeatInterval(project)) {
+                errors.push(`projects[${index}] must specify both repeatAfterCount (a whole number from 1 through 1200) and repeatAfterUnit (day, week, month, or year), or omit both`);
             }
             if (!isValidProjectColorOverride(project.colorOverride)) {
                 errors.push(`projects[${index}].colorOverride must be a six-digit hex color or null`);
@@ -900,6 +899,8 @@ export const validateSyncPayloadShape = (data: unknown, source: 'local' | 'remot
                 errors.push(`${source} payload field "${surface}[${index}]" must be an object`);
             } else if (!isNonEmptyString(entity.id)) {
                 errors.push(`${source} payload field "${surface}[${index}].id" must be a non-empty string`);
+            } else if (surface === 'projects' && !isValidProjectRepeatInterval(entity)) {
+                errors.push(`${source} payload field "projects[${index}]" has an invalid repeat interval`);
             }
         });
     }

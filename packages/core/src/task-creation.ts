@@ -59,7 +59,7 @@ export function buildNewTask({
     const hasTaskOrder = hasOwnField(initialTaskProps, 'order') || hasOwnField(initialTaskProps, 'orderNum');
     const resolvedProjectId = containerResolution.projectId;
     if (resolvedProjectId && hasRecurrenceRule(initialTaskProps.recurrence)
-        && state._allProjects.some(project => project.id === resolvedProjectId && project.repeatAfterMonths)) {
+        && state._allProjects.some(project => project.id === resolvedProjectId && project.repeatAfterCount)) {
         return { ok: false, error: 'This project repeats as a whole. Turn off individual task recurrence first.' };
     }
     const resolvedSectionId = containerResolution.sectionId;
