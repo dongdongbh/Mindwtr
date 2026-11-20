@@ -82,6 +82,8 @@ export type TaskInputAcceptedSuggestion =
     | { kind: 'person'; label: string; value: string }
     | { kind: 'command'; label: string; value: string; command: SlashCommand };
 
+type SuggestionResult = boolean | 'insert';
+
 interface TaskInputProps {
     id?: string;
     value: string;
@@ -92,7 +94,7 @@ interface TaskInputProps {
     areas?: Area[];
     people?: readonly string[];
     onCreateProject?: (title: string) => Promise<string | null>;
-    onAcceptSuggestion?: (suggestion: TaskInputAcceptedSuggestion) => boolean | Promise<boolean>;
+    onAcceptSuggestion?: (suggestion: TaskInputAcceptedSuggestion) => SuggestionResult | Promise<SuggestionResult>;
     placeholder?: string;
     className?: string;
     containerClassName?: string;
@@ -524,8 +526,8 @@ export function TaskInput({
                         : option.kind === 'context'
                             ? { kind: 'context', label: option.label, value: option.value }
                             : { kind: 'tag', label: option.label, value: option.value };
-            const handled = await onAcceptSuggestion(acceptedSuggestion);
-            if (handled) {
+            const result = await onAcceptSuggestion(acceptedSuggestion);
+            if (result === true) {
                 const next = removeAcceptedTriggerText(active.text, activeTrigger);
                 pushUndoEntry(active.text, active.selection);
                 valueRef.current = next.value;
@@ -534,7 +536,7 @@ export function TaskInput({
                 scheduleSelectionRestore({ start: next.caret, end: next.caret });
                 return;
             }
-            if (option.kind === 'command') {
+            if (result === false && option.kind === 'command') {
                 closeTrigger();
                 return;
             }

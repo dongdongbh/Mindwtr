@@ -1379,6 +1379,7 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
                                     return created?.id ?? null;
                                 }}
                                 onAcceptSuggestion={(suggestion) => {
+                                    if (suggestion.kind === 'command') return 'insert';
                                     if (suggestion.kind === 'project' || suggestion.kind === 'createProject') {
                                         if (!suggestion.projectId) return false;
                                         setDestinationOverride({ kind: 'project', id: suggestion.projectId });

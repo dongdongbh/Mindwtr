@@ -151,6 +151,27 @@ beforeEach(() => {
 });
 
 describe('QuickAddModal', () => {
+    it.each([['Tab', '/next'], ['Enter', '/done']])('inserts the selected slash command with %s', async (key, command) => {
+        const addTask = vi.fn(async () => ({ success: true, id: 'captured' }));
+        act(() => useTaskStore.setState({ addTask }));
+        renderQuickAddModal();
+        await act(async () => { window.dispatchEvent(new CustomEvent('mindwtr:quick-add')); });
+        const input = screen.getByRole('combobox');
+        fireEvent.change(input, { target: { value: 'Test /due:monday /ne' } });
+        const option = await screen.findByRole('option', { name: command });
+        const index = screen.getAllByRole('option').indexOf(option);
+        for (let i = 0; i < index; i++) fireEvent.keyDown(input, { key: 'ArrowDown' });
+        fireEvent.keyDown(input, { key });
+        await waitFor(() => expect(input).toHaveValue(`Test /due:monday ${command} `));
+        expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+        expect(addTask).not.toHaveBeenCalled();
+        input.focus();
+        await userEvent.keyboard('{Enter}');
+        await waitFor(() => expect(addTask).toHaveBeenCalledWith('Test', expect.objectContaining({
+            status: command.slice(1), dueDate: expect.any(String),
+        })));
+    });
+
     it('keeps Quick Add open when Escape cancels an IME composition', async () => {
         renderQuickAddModal();
         await act(async () => {
