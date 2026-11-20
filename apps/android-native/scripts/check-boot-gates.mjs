@@ -913,6 +913,9 @@ assert.match(source('InboxViewModel.kt'), /showToast\(null, toast\.getString\("m
 assert.match(source('TaskEditor.kt'), /if \(deferred\.isNotEmpty\(\)\) PickerHeading\(t\("projects\.deferredSection"\)\)/, 'the editor lists Someday \/ Waiting projects after the active ones');
 assert.match(source('ProcessInbox.kt'), /if \(index == deferredFrom\?\.getInt\("index"\)\) Text\(deferredFrom\.getString\("label"\)/, 'Process Inbox heads its Someday \/ Waiting projects');
 assert.match(readFileSync(resolve(app, 'bundle/host-entry.ts'), 'utf8'), /^    projectPickerGroups: true,$/m, 'Android and iOS ask core for grouped pickers');
+assert.match(hostEntry, /^    \.\.\.\(globalThis\.__mindwtrHostPlatform === 'android' \? \{ repeatingProjectCompletion: true \} : \{\}\),$/m,
+    'only native Android completes repeating projects; native iOS keeps the refusal until its Swift lifecycle checks accept next-run rows');
+assert.equal(hostEntry.match(/repeatingProjectCompletion/g)?.length, 1, 'no second binding of repeatingProjectCompletion');
 
 
 
@@ -2080,6 +2083,7 @@ for (const name of labelKeys) assert(enKeys.has(name), `LABEL_KEYS: ${name} is n
     assert.equal(hostGmail.match(/\berrorKey\b/g).length, 1);
     const gmailErrorKeys = quoted(/gmailCaptureErrorTranslation = [\s\S]*?\}\)\[error\.kind\]/.exec(coreSource('gmail-capture.ts'))[0]);
     const kotlinLiterals = [];
+    const projectRepeatUnitKeys = quoted(/PROJECT_REPEAT_UNITS = \[([^\]]+)\]/.exec(coreSource('project-sync-schema.ts'))[1]).map((unit) => `recurrence.${unit}Unit`);
     const DYNAMIC_LABEL_SITES = {
         'AreaOrderSheet.kt: t(key)': [1, kotlinLiterals],
         'Attachments.kt: ::t': [1, kotlinLiterals],
@@ -2091,10 +2095,12 @@ for (const name of labelKeys) assert(enKeys.has(name), `LABEL_KEYS: ${name} is n
         'MainActivity.kt: t(if (screen == Screen.Projects) menu.quickLabel else screen.label)': [1, kotlinLiterals],
         'MainActivity.kt: t(label)': [1, kotlinLiterals],
         'MenuWidgets.kt: t(screen.title)': [1, kotlinLiterals],
+        'ProjectDetails.kt: t("recurrence.${unit}Unit")': [1, projectRepeatUnitKeys],
+        'ProjectDetails.kt: t("recurrence.${value}Unit")': [1, projectRepeatUnitKeys],
         'ProjectDetails.kt: t("status.${row.optString("status")}")': [1, statusKeys],
         'ProjectDetails.kt: t(field.second)': [1, kotlinLiterals],
         'ProjectDetails.kt: t(it)': [2, kotlinLiterals],
-        'ProjectDetails.kt: t(key)': [4, kotlinLiterals],
+        'ProjectDetails.kt: t(key)': [5, kotlinLiterals],
         'ProjectsScreen.kt: ::t': [1, kotlinLiterals],
         'ProjectsScreen.kt: t(heading)': [1, kotlinLiterals],
         'ReviewScreen.kt: t(helpKey)': [1, kotlinLiterals],
@@ -10474,7 +10480,7 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     const { readdirSync } = await import('node:fs');
     const dir = resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr/pilot');
     const all = readdirSync(dir).filter((file) => file.endsWith('.kt')).map((file) => readFileSync(resolve(dir, file), 'utf8')).join('\n');
-    assert.equal(all.match(/\.hairline\(/g)?.length, 18 + 1, 'the 17 hairline sites, the Gmail section\'s body (G4), and the helper itself');
+    assert.equal(all.match(/\.hairline\(/g)?.length, 19 + 1, 'the 17 hairline sites, the Gmail section\'s body (G4), the Project details repeat row, and the helper itself');
     assert.ok((all.match(/\.rnBorder(Bottom|Top)\(/g)?.length ?? 0) >= 68, 'RN\'s borderWidth 1 lines are rnBorderBottom / rnBorderTop');
 }
 

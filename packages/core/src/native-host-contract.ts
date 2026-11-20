@@ -1091,6 +1091,8 @@ export function createNativeHostContract(options: {
     focusModelCache?: boolean;
 
     projectPickerGroups?: boolean;
+
+    repeatingProjectCompletion?: boolean;
 } = {}) {
 
     startNativeRequestSession();
@@ -1808,7 +1810,8 @@ export function createNativeHostContract(options: {
         ...taskChecklistMethods,
         ...createNativeWidgetCompletionMethods({ readiness, save, receipts, language: () => language,
             validateField: (field, value) => DRAFT_VALUE_CHECKS[field](value), isReadOnly: isInArchivedProject }),
-        ...createReferenceProjectNextActionMethods({ readiness, save, t: () => translate, originMethods: taskChecklistMethods }),
+        ...createReferenceProjectNextActionMethods({ readiness, save, t: () => translate, originMethods: taskChecklistMethods,
+            repeatingProjectCompletion: options.repeatingProjectCompletion === true }),
         ...createTaskPromotionMethods({ readiness, save, isReadOnly: isInArchivedProject, t: () => translate }),
 
         ...createTaskToSectionMethods({ readiness, receipts, isReadOnly: isInArchivedProject }),
@@ -2072,7 +2075,7 @@ export function createNativeHostContract(options: {
         ...createProjectDeleteMethods({ readiness, save, t: () => translate }),
         ...createProjectDuplicateMethods({ readiness, save, t: () => translate }),
         ...createProjectToSectionMethods({ readiness, save, t: () => translate }),
-        ...createProjectLifecycleMethods({ readiness, save }),
+        ...createProjectLifecycleMethods({ readiness, save, repeatingProjectCompletion: options.repeatingProjectCompletion === true }),
         ...createArchivedTaskRestoreMethods({ readiness, save }),
         ...createArchivedTasksRestoreMethods({ readiness, save }),
         ...createReferenceTasksMoveMethods({ readiness, save }),

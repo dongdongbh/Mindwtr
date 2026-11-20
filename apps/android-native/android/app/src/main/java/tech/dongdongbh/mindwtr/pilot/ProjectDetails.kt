@@ -104,6 +104,7 @@ import androidx.compose.ui.text.TextLinkStyles
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
@@ -158,6 +159,9 @@ class ProjectDetailsModel(private val shell: InboxViewModel) : FilterSheetHost {
     var tagDraft by mutableStateOf("")
 
     var datePicker by mutableStateOf<Pair<String, JSONObject>?>(null); private set
+    var repeatDraft by mutableStateOf<Pair<String, String>?>(null)
+    var repeatMenu by mutableStateOf(false)
+    var repeatError by mutableStateOf<String?>(null)
     var calendarStored by mutableStateOf<JSONObject?>(null); private set
     var calendarOptions by mutableStateOf<JSONObject?>(null); private set
     var calendarLoading by mutableStateOf(false); private set
@@ -382,6 +386,7 @@ class ProjectDetailsModel(private val shell: InboxViewModel) : FilterSheetHost {
         projectId = id
         open = false; statusMenu = false; raw = null; notesExpanded = false; notesPreview = false; notesFullscreen = false
         notesDraft = null; notesView = null; areaPicker = null; tagPicker = null; tagDraft = ""; datePicker = null
+        repeatDraft = null; repeatMenu = false; repeatError = null
         calendarStored = null; calendarOptions = null; calendarLoading = false; calendarSaveFailed = false
         calendarPicker = false; calendarQuery = ""; calendarLoadedFor = null
         sections = null; sectionDraft = null; sectionDelete = null; help = null; actionsOpen = false; actionConfirm = null
@@ -407,10 +412,12 @@ class ProjectDetailsModel(private val shell: InboxViewModel) : FilterSheetHost {
             JSONObject().put("status", runtime.menuRead("projectStatusOptions", input(id).toString()))
                 .put("flow", runtime.menuRead("projectFlowOptions", input(id).toString()))
                 .put("notes", runtime.menuRead("projectNotesOptions", input(id).toString()))
+                .put("repeat", runtime.menuRead("projectRepeatOptions", input(id).toString()))
         }) { reply, mine ->
 
             if (!replies.current(ticket) || !shell.fresh(mine, InboxViewModel.Part.ProjectDetails)) return@background
             raw = reply
+            repeatDraft?.let { (count, unit) -> if (repeatError == null && !projectRepeatDirty(count, unit, savedRepeat(reply.getJSONObject("repeat")))) repeatDraft = null }
 
             if (notesDraft == storedNotes()) notesDraft = null
         }
@@ -420,6 +427,26 @@ class ProjectDetailsModel(private val shell: InboxViewModel) : FilterSheetHost {
     fun status(): String? = raw?.getJSONObject("status")?.getJSONObject("project")?.getString("status")
     fun flow(): JSONObject? = raw?.getJSONObject("flow")?.getJSONObject("project")
     fun flowMode(): String? = raw?.getJSONObject("flow")?.menuText("flowMode")
+    fun repeat(): JSONObject? = raw?.optJSONObject("repeat")
+    fun shownRepeat(stored: JSONObject): Pair<String, String> = repeatDraft ?: savedRepeat(stored)
+
+    fun typeRepeat(count: String? = null, unit: String? = null) {
+        val stored = repeat() ?: return
+        val (shownCount, shownUnit) = shownRepeat(stored)
+        repeatError = null
+        repeatDraft = (count ?: shownCount) to (unit ?: shownUnit)
+        if (unit != null) repeatMenu = false
+    }
+
+    fun saveRepeat() {
+        val stored = repeat() ?: return
+        val (count, unit) = shownRepeat(stored)
+        val fields = projectRepeatEdit(count, unit, stored.getInt("maxCount")) ?: run { repeatError = "projects.repeatInvalidInterval"; return }
+        repeatError = null; repeatMenu = false
+        edit(projectId, "repeat", answer = { read() }, refused = { message ->
+            repeatError = if (message == "PROJECT_REPEAT_TASK_RECURRENCE") "projects.repeatTaskConflict" else "projects.repeatSaveFailed"
+        }) { put("count", fields.get("count")).put("unit", fields.get("unit")) }
+    }
 
 
     fun readNotes() {
@@ -540,7 +567,7 @@ class ProjectDetailsModel(private val shell: InboxViewModel) : FilterSheetHost {
 
     fun closeOverlays() {
         replies.close()
-        statusMenu = false; areaPicker = null; tagPicker = null; datePicker = null; calendarPicker = false; help = null; notesFullscreen = false; closeSections()
+        statusMenu = false; areaPicker = null; tagPicker = null; datePicker = null; repeatMenu = false; calendarPicker = false; help = null; notesFullscreen = false; closeSections()
     }
 
 
@@ -1090,10 +1117,68 @@ private fun DetailsDates(model: InboxViewModel, detail: ProjectDetail, metadata:
     val enabled = !archived && !model.busy && model.failedAction == null
     DetailsBlock(tag = "project-details-dates") {
         for ((index, field) in PROJECT_DATE_FIELDS.withIndex()) {
+            if (field.first == "reviewAt") repeat()?.let { RepeatRow(model, it, enabled) }
             val set = metadata.getBoolean("has${field.third}Date")
             MetadataRow(t(field.second), metadata.getString("${field.third.replaceFirstChar { it.lowercase() }}DateLabel"), enabled,
                 "project-${field.third.lowercase()}-date-picker", divider = index > 0, clear = if (set) ({ setDate(field.first, null) }) else null) { openDate(field.first) }
         }
+    }
+}
+
+
+@Composable
+private fun RepeatRow(model: InboxViewModel, stored: JSONObject, enabled: Boolean) = with(model.projectDetails) {
+    val c = LocalTheme.current.colors
+    val shape = RoundedCornerShape(8.dp)
+    val focus = LocalFocusManager.current
+    val editable = enabled && stored.getBoolean("canEdit")
+    val (count, unit) = shownRepeat(stored)
+    val label = t("recurrence.afterCompletion")
+    val unitLabel = t("recurrence.${unit}Unit")
+    Row(Modifier.fillMaxWidth().padding(top = 8.dp).hairline(c.border, top = true).padding(top = 8.dp).heightIn(min = 40.dp),
+        verticalAlignment = Alignment.CenterVertically) {
+        DetailsLabel(label, Modifier.padding(end = 12.dp))
+        Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.End), verticalAlignment = Alignment.CenterVertically) {
+            BasicTextField(count, { typeRepeat(count = it) }, enabled = editable, singleLine = true,
+                textStyle = rnText(13, 600).copy(color = c.text), cursorBrush = SolidColor(c.tint),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword, imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(onDone = { focus.clearFocus() }),
+                modifier = Modifier.width(64.dp).fade(if (editable) 1f else 0.5f).heightIn(min = 34.dp).clip(shape).background(c.inputBg)
+                    .rnBorder(1.dp, c.border, shape).semantics { contentDescription = label }.testTag("project-repeat-after-count")
+                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                decorationBox = { field -> Box { if (count.isEmpty()) Text(t("settings.off"), style = rnText(13, 600), color = c.secondaryText); field() } })
+            Row(Modifier.weight(1f, fill = false).heightIn(min = 44.dp).fade(if (editable) 1f else 0.5f).clip(shape).background(c.inputBg).rnBorder(1.dp, c.border, shape)
+                .clickable(enabled = editable, role = Role.Button) { repeatMenu = !repeatMenu }
+                .semantics { contentDescription = t("recurrence.repeatEvery"); stateDescription = unitLabel }
+                .testTag("project-repeat-after-unit").padding(horizontal = 10.dp, vertical = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(unitLabel, style = rnText(12, 600), color = c.text, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                Icon(SettingsIonicons.ChevronDown, null, tint = c.secondaryText, modifier = Modifier.size(14.dp))
+            }
+        }
+    }
+    if (repeatMenu && editable) {
+        Column(Modifier.padding(top = 8.dp).fillMaxWidth().clip(shape).background(c.inputBg).rnBorder(1.dp, c.border, shape)) {
+            for (value in stored.getJSONArray("units").let { list -> List(list.length()) { list.getString(it) } }) {
+                Row(Modifier.fillMaxWidth().heightIn(min = 44.dp).background(if (value == unit) c.filterBg else Color.Transparent)
+                    .selectable(value == unit, role = Role.RadioButton) { typeRepeat(unit = value) }
+                    .testTag("project-repeat-after-unit-$value").padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(t("recurrence.${value}Unit"), style = rnText(12, 600), color = c.text)
+                }
+            }
+        }
+    }
+    if (stored.getBoolean("canEdit") && (repeatError != null || projectRepeatDirty(count, unit, savedRepeat(stored)))) {
+        Box(Modifier.fillMaxWidth().padding(top = 4.dp), contentAlignment = Alignment.CenterEnd) {
+            Box(Modifier.heightIn(min = 44.dp).fade(if (enabled) 1f else 0.5f).clip(shape).background(c.tint).rnBorder(1.dp, c.tint, shape)
+                .clickable(enabled = enabled, role = Role.Button) { focus.clearFocus(); saveRepeat() }.testTag("project-repeat-after-save")
+                .padding(horizontal = 10.dp, vertical = 6.dp), contentAlignment = Alignment.Center) {
+                Text(t("common.save"), style = rnText(13, 600), color = c.onTint)
+            }
+        }
+    }
+    repeatError?.let { key ->
+        Text(t(key), style = rnText(14, 400), color = c.danger, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }.testTag("project-repeat-error"))
     }
 }
 
@@ -2002,6 +2087,22 @@ internal val PROJECT_FLOW_MODES = listOf("parallel" to "projects.parallel", "seq
 
 
 internal fun flowModeEdit(shown: String?, picked: String): JSONObject? = if (shown == picked) null else JSONObject().put("mode", picked)
+
+
+internal fun savedRepeat(stored: JSONObject): Pair<String, String> =
+    (if (stored.isNull("count")) "" else stored.getInt("count").toString()) to (stored.menuText("unit") ?: "month")
+
+
+internal fun projectRepeatDirty(count: String, unit: String, saved: Pair<String, String>): Boolean =
+    count.trim() != saved.first || (count.trim().isNotEmpty() && unit != saved.second)
+
+
+internal fun projectRepeatEdit(count: String, unit: String, maxCount: Int): JSONObject? {
+    val typed = count.trim()
+    if (typed.isEmpty()) return JSONObject().put("count", JSONObject.NULL).put("unit", JSONObject.NULL)
+    val number = typed.takeIf { text -> text.all { it in '0'..'9' } }?.toIntOrNull()?.takeIf { it in 1..maxCount } ?: return null
+    return JSONObject().put("count", number).put("unit", unit)
+}
 
 
 internal fun projectEdit(requestId: String, projectId: String, kind: String, fields: JSONObject): JSONObject =

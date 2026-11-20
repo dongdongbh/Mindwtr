@@ -835,6 +835,7 @@ const contract = createNativeHostContract({
         } };
     },
     projectPickerGroups: true,
+    ...(globalThis.__mindwtrHostPlatform === 'android' ? { repeatingProjectCompletion: true } : {}),
     ...(nativeAbout ? { about: nativeAbout } : {}),
     ...(iosAnalyticsAbout ? { analyticsAbout: iosAnalyticsAbout } : {}),
     ...(iosStartupPromptHost ? { startupPromptHost: iosStartupPromptHost } : {}),
@@ -1606,6 +1607,7 @@ const MENU_READS: Record<string, (input: never) => Reply> = {
     projectAreaOptions: (input) => contract.getProjectAreaOptions(input),
     projectTagsOptions: (input) => contract.getProjectTagsEditOptions(input),
     projectDateOptions: (input) => contract.getProjectDateOptions(input),
+    projectRepeatOptions: (input) => contract.getProjectRepeatOptions(input),
     projectSectionOrderOptions: (input: { projectId: string }) => contract.getProjectSectionOrderOptions({ ...input, sectionFlow: true }),
     projectNotesPreview: (input) => contract.getProjectNotesPreview(input),
 

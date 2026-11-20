@@ -8,7 +8,7 @@ import { createNativeRequestReceipts, revisionOf, revisionsToken } from './nativ
 import { ensureDeviceId } from './store-helpers';
 import { logInfo } from './logger';
 import { useTaskStore } from './store';
-import { projectLifecycleEffect } from './store-projects/project-actions';
+import { logNativeProjectRunCreated, projectLifecycleEffect } from './store-projects/project-actions';
 import { weeklyReviewProjectHasUnfinishedTasks } from './review-views-model';
 import type { PreparedProjectLifecycle } from './store-types';
 import type { Project, Section, Task } from './types';
@@ -120,6 +120,7 @@ const scopeRevision = (scope: PreparedProjectLifecycle['scope']): string => revi
 export function createProjectLifecycleMethods(deps: {
     readiness: () => NativeHostResult<null>;
     save: () => Promise<NativeHostResult<null>>;
+    repeatingProjectCompletion: boolean;
 }) {
     const receipts = createNativeRequestReceipts({ save: async () => {
         if (useTaskStore.getState().persistenceFailure) {
@@ -167,7 +168,7 @@ export function createProjectLifecycleMethods(deps: {
                 || request.action !== 'reactivate' && target.status === 'archived'
                 || request.action === 'reactivate' && target.status !== 'archived')
                 return fail('STALE_REVISION', 'Project changed since the detail was read');
-            if (request.action === 'complete' && target.repeatAfterCount)
+            if (request.action === 'complete' && target.repeatAfterCount && !deps.repeatingProjectCompletion)
                 return fail('INVALID_INPUT', 'Complete repeating projects in Mindwtr for desktop');
             const scope = projectScope(target);
             const device = ensureDeviceId(state.settings);
@@ -199,11 +200,14 @@ export function createProjectLifecycleMethods(deps: {
             if (!envelope) return fail('INVALID_INPUT', 'Prepared Project lifecycle is malformed');
             const ready = deps.readiness();
             if (!ready.ok) return ready;
+            let nextRun = false;
             const confirmed = await receipts.run(envelope.request.requestId, payload(envelope), async () => {
                 const applied = await useTaskStore.getState().commitPreparedProjectLifecycle(envelope.prepared);
+                nextRun = applied.nextRun === 'created';
                 return applied.success ? { ok: true, value: envelope.prepared.result }
                     : fail('STALE_REVISION', applied.error ?? 'Prepared Project lifecycle conflicts with saved data');
             });
+            if (confirmed.ok && nextRun) logNativeProjectRunCreated();
             if (confirmed.ok && envelope.request.action === 'reactivate') {
                 try { logInfo('Native archived Project restore confirmed', { scope: 'native-host', category: 'storage',
                     context: { releaseCheck: 'v1.3.4/ios-archive-project-restore', outcome: 'confirmed' } }); }

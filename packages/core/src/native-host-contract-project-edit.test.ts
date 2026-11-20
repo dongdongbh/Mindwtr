@@ -118,6 +118,38 @@ describe('runProjectEdit', () => {
 });
 
 
+describe('runProjectEdit repeat', () => {
+    const run = (host: Awaited<ReturnType<typeof open>>['host'], n: number, count: number | null, unit: string | null, projectId = 'p') =>
+        host.runProjectEdit({ requestId: uuid(n), projectId, kind: 'repeat', count, unit } as never);
+
+    it('reads the saved interval, saves {count, unit} once, and turns it off', async () => {
+        const { host, stored, saves } = await open();
+        expect(host.getProjectRepeatOptions({ projectId: 'p' })).toEqual({ ok: true, value: { count: null, unit: null,
+            units: ['day', 'week', 'month', 'year'], maxCount: 1200, canEdit: true } });
+        expect(await run(host, 1, 2, 'week')).toEqual({ ok: true, value: { id: 'p', kind: 'repeat', outcome: 'saved', reply: {} } });
+        expect(stored()).toMatchObject({ repeatAfterCount: 2, repeatAfterUnit: 'week' });
+        expect(host.getProjectRepeatOptions({ projectId: 'p' })).toMatchObject({ ok: true, value: { count: 2, unit: 'week' } });
+        const count = saves();
+        expect(await run(host, 1, 2, 'week')).toMatchObject({ ok: true, value: { outcome: 'unchanged' } });
+        expect(saves()).toBe(count);
+        expect(await run(host, 2, null, null)).toMatchObject({ ok: true, value: { outcome: 'saved' } });
+        expect(stored().repeatAfterCount).toBeUndefined();
+        expect(stored().repeatAfterUnit).toBeUndefined();
+    });
+
+    it('refuses an interval while an active task has recurrence, and malformed or archived edits', async () => {
+        const { host, stored } = await open({ tasks: [{ id: 't', title: 'Weekly', status: 'next', projectId: 'p', tags: [], contexts: [],
+            recurrence: { rule: 'weekly', strategy: 'strict' }, createdAt: at, updatedAt: at }] });
+        expect(await run(host, 3, 2, 'week')).toEqual({ ok: false, error: { code: 'STALE_REVISION', message: 'PROJECT_REPEAT_TASK_RECURRENCE' } });
+        expect(stored().repeatAfterCount).toBeUndefined();
+        for (const [count, unit] of [[0, 'week'], [1201, 'week'], [1.5, 'day'], [2, 'hour'], [2, null], [null, 'week']] as const) {
+            expect(await run(host, 4, count, unit)).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+        }
+        expect(host.getProjectRepeatOptions({ projectId: 'archived' })).toMatchObject({ ok: true, value: { canEdit: false } });
+        expect(await run(host, 5, 2, 'week', 'archived')).toMatchObject({ ok: true, value: { outcome: 'blocked' } });
+    });
+});
+
 describe('runProjectEdit project actions', () => {
     const task = (id: string) => ({ id, title: id, status: 'next', projectId: 'p', tags: [], contexts: [], createdAt: at, updatedAt: at });
 

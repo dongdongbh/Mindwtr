@@ -16,7 +16,7 @@ import { PROJECT_SQLITE_COLUMNS, projectFromSqliteRow, projectToSqliteRow } from
 import { getProjectNextActionPromptData } from './project-utils';
 import { normalizeProjectLifecycleFields } from './project-status';
 import { prepareTaskUpdatesForStore, planTaskUpdateEffects } from './store-tasks';
-import { projectLifecycleEffect } from './store-projects/project-actions';
+import { logNativeProjectRunCreated, projectLifecycleEffect } from './store-projects/project-actions';
 import { buildNewTask } from './task-creation';
 import { getTaskReminderDefault } from './task-reminder-policy';
 import { buildQuickAddParseOptions, parseProjectNextActionInput } from './quick-add';
@@ -330,7 +330,8 @@ export const prepareNativeProjectTaskAddOperation = (data: AppData, intent: Nati
 };
 
 export function createReferenceProjectNextActionMethods(deps: { readiness: () => NativeHostResult<null>;
-    save: () => Promise<NativeHostResult<null>>; t: () => (key: string) => string; originMethods: OriginMethods }) {
+    save: () => Promise<NativeHostResult<null>>; t: () => (key: string) => string; originMethods: OriginMethods;
+    repeatingProjectCompletion: boolean }) {
     const readOrigin = (v: unknown): NativeReferenceProjectNextActionOrigin | null => {
         if (!record(v) || !exact(v, ['kind', 'envelope']) || !record(v.envelope)) return null;
         const o = v as unknown as NativeReferenceProjectNextActionOrigin;
@@ -478,12 +479,14 @@ export function createReferenceProjectNextActionMethods(deps: { readiness: () =>
             return { ok: true, value: null };
         } catch { return fail('STALE_REVISION', 'Project next action context changed; refresh while retaining the draft'); }
     };
+    let createdRun = false;
     const apply = async (e: NativeReferenceProjectNextActionEnvelope, authority: PreparedAreaAuthority): Promise<NativeHostResult<null>> => {
         const op = e.prepared.operation; const options = { requireBefore: true as const, authority, rawBefore: e.prepared.rawBefore };
         const result = op.kind === 'choose' ? await useTaskStore.getState().commitPreparedChecklistEffect(op.effect, options)
             : op.kind === 'add' ? await useTaskStore.getState().commitPreparedCapture({ task: op.task, project: null,
                 deviceIdBefore: op.deviceIdBefore, deviceIdToInitialize: op.deviceIdToInitialize }, options)
                 : await useTaskStore.getState().commitPreparedProjectLifecycle(op.lifecycle, options);
+        if (result.success && 'nextRun' in result && result.nextRun === 'created') createdRun = true;
         return result.success ? { ok: true, value: null } : fail('STALE_REVISION', result.error ?? 'Prepared project next action conflicts with saved data');
     };
     let pending: { envelope: NativeReferenceProjectNextActionEnvelope; adapter: ReturnType<typeof import('./store')['getStorageAdapter']>;
@@ -583,7 +586,7 @@ export function createReferenceProjectNextActionMethods(deps: { readiness: () =>
                     op.task = addTask(op, getTaskReminderDefault(data.settings)); operation = op; result = { action: 'add', id, openAfterSave: request.openAfterSave };
                     rawBefore = { tasks: [{ id, before: null }], projects: [], sections: [] };
                 } else {
-                    if (context.project.repeatAfterCount)
+                    if (context.project.repeatAfterCount && !deps.repeatingProjectCompletion)
                         return fail('INVALID_INPUT', 'Complete repeating projects in Mindwtr for desktop');
                     if (context.scope !== 'project') return fail('INVALID_INPUT', 'This section prompt cannot complete its project');
                     const sections = lists.sections.filter((r) => r.projectId === context.project.id); const ids = new Set(sections.map((r) => r.id));
@@ -627,6 +630,7 @@ export function createReferenceProjectNextActionMethods(deps: { readiness: () =>
                 return { ok: true, value: e.prepared.result };
             });
             if (prewrite) return prewrite;
+            if (confirmed.ok && createdRun) { createdRun = false; logNativeProjectRunCreated(); }
             if (confirmed.ok) { if (!same(confirmed.value, e.prepared.result)) return fail('INVALID_INPUT', 'Saved next action result differs'); if (e.prepared.version === 1) diagnose(confirmed.value); }
             return confirmed;
         },

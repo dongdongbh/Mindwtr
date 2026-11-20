@@ -33,7 +33,7 @@ import { taskEditValuesEqual } from '../json-value-equality';
 import { planAttachmentLinkBatch, softDeleteAttachment } from '../attachment-editor-model';
 import type { Area, Attachment, ProjectFlowMode, TaskSortBy } from '../types';
 import type { Project, ProjectCoreActions, ProjectActionContext, Section, Task, TaskStatus } from './shared';
-import type { PreparedProjectArea, PreparedProjectAttachmentWrite, PreparedProjectFileAddWrite, PreparedProjectFileRemoveWrite, PreparedProjectCreate, PreparedProjectDate, PreparedProjectDelete, PreparedProjectDeleteUndo, PreparedProjectDuplicate, PreparedProjectLifecycle, PreparedProjectFlow, PreparedProjectTaskSort, PreparedProjectFocus, PreparedProjectNotesWrite, PreparedProjectTagsWrite, PreparedProjectRename, PreparedProjectStatus, PreparedTaskEditResult, PreparedTrashProjectRestore, ProjectAttachmentIntent, ProjectFileRemoveIntent, ProjectFlowAction, TaskStore } from '../store-types';
+import type { PreparedProjectArea, PreparedProjectAttachmentWrite, PreparedProjectFileAddWrite, PreparedProjectFileRemoveWrite, PreparedProjectCreate, PreparedProjectDate, PreparedProjectDelete, PreparedProjectDeleteUndo, PreparedProjectDuplicate, PreparedProjectLifecycle, PreparedProjectFlow, PreparedProjectTaskSort, PreparedProjectFocus, PreparedProjectNotesWrite, PreparedProjectTagsWrite, PreparedProjectRename, PreparedProjectStatus, PreparedProjectLifecycleResult, PreparedTaskEditResult, PreparedTrashProjectRestore, ProjectAttachmentIntent, ProjectFileRemoveIntent, ProjectFlowAction, TaskStore } from '../store-types';
 import { projectTagsForIntent, type ProjectTagsIntent } from '../project-tags';
 import { settingsWithPurgedParentAttachmentDeletes } from '../attachment-cleanup';
 import {
@@ -403,6 +403,11 @@ const nextProjectRun = (state: TaskStore, source: Project, now: string, deviceId
         timeSpentMinutes: undefined, projectArchivedAt: undefined, statusBeforeProjectArchive: undefined,
         completedAtBeforeProjectArchive: undefined, isFocusedTodayBeforeProjectArchive: undefined,
     })) };
+};
+
+export const logNativeProjectRunCreated = () => {
+    logInfo('Next project run saved', { scope: 'store', category: 'storage', force: true,
+        context: { releaseCheck: 'v1.3.10/native-project-repeat', outcome: 'created' } });
 };
 
 const afterRows = <T extends { id: string }>(scope: T[], effect: { before: T; after: T }[]) =>
@@ -1487,10 +1492,11 @@ export const createProjectCoreActions = ({
         return actionOk({ id });
     },
 
-    commitPreparedProjectLifecycle: async (input, raw): Promise<PreparedTaskEditResult> => {
-        let result: PreparedTaskEditResult = { success: false, reason: 'conflict',
+    commitPreparedProjectLifecycle: async (input, raw): Promise<PreparedProjectLifecycleResult> => {
+        let result: PreparedProjectLifecycleResult = { success: false, reason: 'conflict',
             error: 'Prepared Project lifecycle conflicts with current data' };
         let retainedTaxonomy = false;
+        let repeated = false;
         set((memory) => {
             let state = memory;
             const durable = raw?.authority.snapshot;
@@ -1531,18 +1537,22 @@ export const createProjectCoreActions = ({
                 || !sameProjectSqliteRow(current, input.scope.project)
                 || !sameOwnedRows(tasks, input.scope.tasks, sameTaskSqliteRow)
                 || !sameOwnedRows(sections, input.scope.sections, sameSectionSqliteRow)) return memory;
-            const projects = replaceEntitiesInArray(state._allProjects, [planned.project.after]);
-            const nextTasks = replaceEntitiesInArray(state._allTasks, planned.tasks.map((row) => row.after));
-            const nextSections = replaceEntitiesInArray(state._allSections, planned.sections.map((row) => row.after));
+            const run = input.request.action === 'complete'
+                ? nextProjectRun(state, current, input.updateAt, input.deviceIdBefore ?? input.deviceIdToInitialize!) : null;
+            repeated = run !== null;
+            const withRun = <T,>(rows: T[], added: T[] | undefined) => added?.length ? [...rows, ...added] : rows;
+            const projects = withRun(replaceEntitiesInArray(state._allProjects, [planned.project.after]), run ? [run.project] : undefined);
+            const nextTasks = withRun(replaceEntitiesInArray(state._allTasks, planned.tasks.map((row) => row.after)), run?.tasks);
+            const nextSections = withRun(replaceEntitiesInArray(state._allSections, planned.sections.map((row) => row.after)), run?.sections);
             const deviceSettings = input.deviceIdToInitialize
                 ? { ...state.settings, deviceId: input.deviceIdToInitialize } : state.settings;
             const settings = retainTaxonomyEffects(deviceSettings, planned.tasks, [planned.project]);
             retainedTaxonomy = settings !== deviceSettings;
             clearDerivedCache();
             if (raw && durable) {
-                const tasks = replaceEntitiesInArray(durable.tasks, planned.tasks.map((row) => row.after));
-                const projects = replaceEntitiesInArray(durable.projects, [planned.project.after]);
-                const sections = replaceEntitiesInArray(durable.sections ?? [], planned.sections.map((row) => row.after));
+                const tasks = withRun(replaceEntitiesInArray(durable.tasks, planned.tasks.map((row) => row.after)), run?.tasks);
+                const projects = withRun(replaceEntitiesInArray(durable.projects, [planned.project.after]), run ? [run.project] : undefined);
+                const sections = withRun(replaceEntitiesInArray(durable.sections ?? [], planned.sections.map((row) => row.after)), run?.sections);
                 const freshTasks = tasks.map((row) => normalizeTaskForLoad(row));
                 const freshProjects = projects.map(normalizeProjectLifecycleFields);
                 persist(set, debouncedSave, { ...memory, _allTasks: durable.tasks, _allProjects: durable.projects,
@@ -1551,13 +1561,13 @@ export const createProjectCoreActions = ({
                 const lastDataChangeAt = getNextDataChangeAt(memory.lastDataChangeAt);
                 raw.authority.saveBoundary = { taskReference: freshTasks, lastDataChangeAt,
                     generation: getSaveGeneration(), failure: memory.persistenceFailure };
-                result = { success: true, id: current.id, outcome: 'applied' };
+                result = { success: true, id: current.id, outcome: 'applied', ...(repeated ? { nextRun: 'created' as const } : {}) };
                 return { _allTasks: freshTasks, _allProjects: freshProjects, _allSections: sections,
                     _allAreas: durable.areas ?? [], _allPeople: durable.people ?? [], settings, lastDataChangeAt };
             }
             persist(set, debouncedSave, state, { projects, tasks: nextTasks, sections: nextSections,
                 ...(settings !== state.settings ? { settings } : {}) });
-            result = { success: true, id: current.id, outcome: 'applied' };
+            result = { success: true, id: current.id, outcome: 'applied', ...(repeated ? { nextRun: 'created' as const } : {}) };
             return { _allProjects: projects, _allTasks: nextTasks, _allSections: nextSections, settings,
                 lastDataChangeAt: getNextDataChangeAt(state.lastDataChangeAt) };
         });

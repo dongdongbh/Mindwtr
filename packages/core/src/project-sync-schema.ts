@@ -63,8 +63,10 @@ export const normalizeProjectStatus = (value: unknown): Project['status'] => {
     return 'active';
 };
 
+export const PROJECT_REPEAT_MAX_COUNT = 1200;
+
 export const normalizeProjectRepeatAfterCount = (value: unknown): number | undefined =>
-    typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 1200 ? value : undefined;
+    typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= PROJECT_REPEAT_MAX_COUNT ? value : undefined;
 
 export const PROJECT_REPEAT_UNITS = ['day', 'week', 'month', 'year'] as const;
 

@@ -14,7 +14,8 @@ import { getProjectAccentColor } from './task-accent-color';
 import { isNativeJsonWithinBytes } from './native-host-contract-task-view';
 import { getProjectFlowMode } from './task-utils';
 import { planProjectMove } from './project-grouping';
-import type { Project, ProjectFlowMode } from './types';
+import { normalizeProjectRepeatAfterCount, PROJECT_REPEAT_MAX_COUNT, PROJECT_REPEAT_UNITS } from './project-sync-schema';
+import type { Project, ProjectFlowMode, ProjectRepeatUnit } from './types';
 
 
 export type NativeProjectEdit = { requestId: string; projectId: string } & (
@@ -29,6 +30,7 @@ export type NativeProjectEdit = { requestId: string; projectId: string } & (
     | { kind: 'tag'; tag: string; present: boolean }
     | { kind: 'notes'; text: string }
     | { kind: 'date'; field: 'startDate' | 'dueDate' | 'reviewAt'; value: string | null; opened: string | null }
+    | { kind: 'repeat'; count: number | null; unit: ProjectRepeatUnit | null }
     | { kind: 'sectionCreate'; title: string }
     | { kind: 'sectionRename'; sectionId: string; title: string }
     | { kind: 'sectionDelete'; sectionId: string }
@@ -84,6 +86,8 @@ const valid = (input: unknown): input is NativeProjectEdit => {
         case 'notes': return keys(edit, ['text']) && text(edit.text, 2_000_000);
         case 'date': return keys(edit, ['field', 'value', 'opened']) && ['startDate', 'dueDate', 'reviewAt'].includes(edit.field as string)
             && (edit.value === null || text(edit.value, 100)) && (edit.opened === null || (edit.field === 'reviewAt' && text(edit.opened, 100)));
+        case 'repeat': return keys(edit, ['count', 'unit']) && (edit.count === null ? edit.unit === null
+            : normalizeProjectRepeatAfterCount(edit.count) !== undefined && PROJECT_REPEAT_UNITS.some((unit) => unit === edit.unit));
         case 'sectionRename': return keys(edit, ['sectionId', 'title']) && id(edit.sectionId) && text(edit.title);
         case 'sectionDelete': return keys(edit, ['sectionId']) && id(edit.sectionId);
         case 'move': return keys(edit, ['direction', 'order']) && (edit.direction === 'up' || edit.direction === 'down')
@@ -274,6 +278,19 @@ export function createProjectEditMethods(deps: {
                 return { ok: true, value: read.value.canEdit === false ? { outcome: 'blocked' }
                     : { command: 'ProjectDate', request: { ...base, field: edit.field, value, expected: token(read.value) } } };
             }
+            case 'repeat': {
+                const current = useTaskStore.getState()._projectsById.get(edit.projectId);
+                if (!current || current.deletedAt || current.purgedAt) return { ok: true, value: { conflict: 'The Project is no longer there' } };
+                if (current.status === 'archived') return { ok: true, value: { outcome: 'blocked' } };
+                const updates = { repeatAfterCount: edit.count ?? undefined, repeatAfterUnit: edit.unit ?? undefined };
+                if (current.repeatAfterCount === updates.repeatAfterCount && current.repeatAfterUnit === updates.repeatAfterUnit)
+                    return { ok: true, value: { outcome: 'unchanged' } };
+                return { ok: true, value: { run: async () => {
+                    const result = await useTaskStore.getState().updateProject(edit.projectId, updates);
+                    if (result.success) return { ok: true, value: {} };
+                    return fail(useTaskStore.getState().persistenceFailure ? 'SAVE_FAILED' : 'STALE_REVISION', result.error ?? 'Project repeat could not be saved');
+                } } };
+            }
             case 'sectionCreate': {
 
                 if (useTaskStore.getState()._allSections.some((row) => row.id === edit.requestId)) return { ok: true, value: { outcome: 'unchanged' } };
@@ -413,6 +430,16 @@ export function createProjectEditMethods(deps: {
     };
 
     return {
+        getProjectRepeatOptions(input: { projectId: string }): NativeHostResult<Json> {
+            const ready = deps.readiness();
+            if (!ready.ok) return ready;
+            if (!input || typeof input !== 'object' || Object.keys(input).length !== 1 || !id(input.projectId))
+                return fail('INVALID_INPUT', 'A Project identifier is required');
+            const project = useTaskStore.getState()._projectsById.get(input.projectId);
+            if (!project || project.deletedAt || project.purgedAt) return fail('STALE_REVISION', 'The Project is no longer there');
+            return { ok: true, value: { count: project.repeatAfterCount ?? null, unit: project.repeatAfterUnit ?? null,
+                units: [...PROJECT_REPEAT_UNITS], maxCount: PROJECT_REPEAT_MAX_COUNT, canEdit: project.status !== 'archived' } };
+        },
 
 
         getProjectToSectionOptions(input: { projectId: string; destinationId: string | null; title: string }): NativeHostResult<Json> {

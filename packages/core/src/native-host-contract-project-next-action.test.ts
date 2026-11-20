@@ -107,6 +107,34 @@ describe('Reference project next action', () => {
     });
 });
 
+describe('Reference prompt Complete project of a repeating Project', () => {
+    it('keeps the refusal without repeatingProjectCompletion, and with it saves the same next run as RN in all nine tables, once', async () => {
+        vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date(NOW));
+        const repeating = (): Partial<AppData> => { const data = seed();
+            data.projects = data.projects!.map((row) => ({ ...row, repeatAfterCount: 2, repeatAfterUnit: 'week' as const })); return data; };
+        const rn = await openSqliteHost(repeating()); let expected: AppData; let expectedRaw: Awaited<ReturnType<typeof raw>>;
+        try { await origin(rn);
+            expect(await useTaskStore.getState().updateProject('project', { status: 'archived' }, 'complete')).toEqual({ success: true });
+            await flushPendingSave(); expected = rows(); expectedRaw = await raw(rn);
+        } finally { await rn.close(); }
+        expect(expected!.projects.filter((row) => row.id !== 'project')).toMatchObject([{ status: 'active', startDate: '2026-10-17' }]);
+        const ios = await openSqliteHost(repeating());
+        try { const proof = await origin(ios);
+            const options = value(await ios.host.getReferenceProjectNextActionOptions({ origin: proof, params: { offset: 0, revision: null } }))!;
+            const request = { requestId: WRITE, origin: options.origin, promptRevision: options.promptRevision, action: 'completeProject' as const };
+            expect(await ios.host.prepareReferenceProjectNextAction({ request, origin: proof } as never))
+                .toEqual({ ok: false, error: { code: 'INVALID_INPUT', message: 'Complete repeating projects in Mindwtr for desktop' } });
+        } finally { await ios.close(); }
+        const native = await openSqliteHost(repeating(), undefined, { repeatingProjectCompletion: true });
+        try { const proof = await origin(native);
+            const envelope = await followup(native, proof, 'completeProject');
+            expect(value(await native.host.commitPreparedReferenceProjectNextAction(envelope))).toEqual(envelope.prepared.result);
+            expect(value(await native.host.commitPreparedReferenceProjectNextAction(envelope))).toEqual(envelope.prepared.result);
+            expect(rows()).toEqual(expected!); expect(await raw(native)).toEqual(expectedRaw!);
+        } finally { await native.close(); }
+    });
+});
+
 const followup = async (sqlite: Sqlite, proof: NativeReferenceProjectNextActionOrigin, action: 'choose' | 'add' | 'completeProject') => {
     const options = value(await sqlite.host.getReferenceProjectNextActionOptions({ origin: proof, params: { offset: 0, revision: null } }))!;
     const request = { requestId: WRITE, origin: options.origin, promptRevision: options.promptRevision, action,

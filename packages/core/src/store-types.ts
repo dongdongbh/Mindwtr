@@ -49,6 +49,8 @@ export type PreparedTaskEditResult = StoreActionResult & {
     reason?: 'missing' | 'conflict' | 'invalid';
 };
 
+export type PreparedProjectLifecycleResult = PreparedTaskEditResult & { nextRun?: 'created' };
+
 
 export type TaskFocusWitnessRow = Pick<Task, 'id' | 'status' | 'createdAt'> & {
     projectId: string | null; sectionId: string | null; startTime: string | null;
@@ -878,7 +880,7 @@ export interface TaskStore {
     commitPreparedProjectDelete: (input: PreparedProjectDelete) => Promise<PreparedTaskEditResult>;
     commitPreparedProjectDeleteUndo: (input: PreparedProjectDeleteUndo) => Promise<PreparedTaskEditResult>;
     commitPreparedProjectDuplicate: (input: PreparedProjectDuplicate) => Promise<PreparedTaskEditResult>;
-    commitPreparedProjectLifecycle: (input: PreparedProjectLifecycle, options?: Extract<PreparedChecklistWriteOptions, { authority: PreparedAreaAuthority }>) => Promise<PreparedTaskEditResult>;
+    commitPreparedProjectLifecycle: (input: PreparedProjectLifecycle, options?: Extract<PreparedChecklistWriteOptions, { authority: PreparedAreaAuthority }>) => Promise<PreparedProjectLifecycleResult>;
     commitPreparedProjectDate: (input: PreparedProjectDate & { request: { projectId: string; field: 'startDate' | 'dueDate' | 'reviewAt'; value: string | null } }) => Promise<PreparedTaskEditResult>;
     commitPreparedProjectCalendarReference: (input: PreparedProjectCalendarReference & { request: { projectId: string; value: Project['calendarReference'] } }) => Promise<PreparedTaskEditResult>;
     commitPreparedProjectArea: (input: PreparedProjectArea & { request: { projectId: string; areaId: string | null; colorOverride?: string | null } }) => Promise<PreparedTaskEditResult>;

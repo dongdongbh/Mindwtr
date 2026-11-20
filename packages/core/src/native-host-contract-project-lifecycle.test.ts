@@ -9,6 +9,7 @@ import { loadNativeRequestReceipts, NativeReceiptSqliteAdapter, resetNativeReque
 import type { SqliteClient } from './sqlite-adapter';
 import { getSavedTaxonomyTokens } from './taxonomy-catalog';
 import * as logger from './logger';
+import { openSqliteHost } from './screen-parity.replay';
 import type { AppData, Project, Section, Task } from './types';
 
 const AT = '2026-10-01T12:00:00.000Z';
@@ -51,7 +52,7 @@ const initial = (): AppData => ({
 });
 
 async function open(start: AppData = initial(), shouldFail: () => boolean = () => false,
-    recoveryLoad = false) {
+    recoveryLoad = false, repeatingProjectCompletion = false) {
     await flushPendingSave(); resetForTests();
     let durable = copy(start);
     let saves = 0;
@@ -62,7 +63,7 @@ async function open(start: AppData = initial(), shouldFail: () => boolean = () =
     useTaskStore.setState({ _allTasks: [], _allProjects: [], _allSections: [], _allAreas: [], _allPeople: [],
         settings: {}, error: null, persistenceFailure: null, isLoading: false, editLockCount: 0,
         lastDataChangeAt: 0 } as never);
-    const host = createNativeHostContract();
+    const host = createNativeHostContract(repeatingProjectCompletion ? { repeatingProjectCompletion } : {});
     value(await host.activate({ writeSafetyReady: true, recoveryLoad }));
     await flushPendingSave(); saves = 0;
     const request = (action: 'complete' | 'reactivate' | 'cancel', requestId = action === 'complete'
@@ -76,7 +77,7 @@ async function open(start: AppData = initial(), shouldFail: () => boolean = () =
         return { request: input, prepared: plan.prepared };
     };
     return { host, request, prepare, state: () => useTaskStore.getState(), data: () => durable,
-        saves: () => saves, reopen: async () => open(durable, shouldFail, recoveryLoad) };
+        saves: () => saves, reopen: async () => open(durable, shouldFail, recoveryLoad, repeatingProjectCompletion) };
 }
 
 
@@ -380,6 +381,129 @@ describe('prepared Project Complete and Reactivate', () => {
         expect(rn.data().tasks.find((row) => row.id === 'deleted')?.deletedAt).toBe(AT);
         expect(rn.data().tasks.find((row) => row.id === 'archived')?.status).toBe('archived');
         expect(rn.data().tasks.find((row) => row.id === 'foreign')?.projectId).toBe('foreign-project');
+    });
+});
+
+const repeating = (): AppData => {
+    const source = initial();
+    source.projects[0] = project({ repeatAfterCount: 2, repeatAfterUnit: 'week' });
+    source.tasks = source.tasks.map((row) => row.id === 'reference' ? { ...row, recurrence: undefined } : row);
+    return source;
+};
+const runs = () => useTaskStore.getState()._allProjects.filter((row) => row.id !== ID && row.id !== 'foreign-project');
+const android = (start: AppData) => open(start, () => false, false, true);
+
+describe('prepared Project Complete of a repeating Project', () => {
+    it('keeps the desktop refusal for a host without repeatingProjectCompletion (native iOS)', async () => {
+        const env = await open(repeating());
+        const request = env.request('complete');
+        const refusal = { ok: false, error: { code: 'INVALID_INPUT', message: 'Complete repeating projects in Mindwtr for desktop' } };
+        expect(env.host.prepareProjectLifecycle(request)).toEqual(refusal);
+        const options = value(env.host.getReviewProjectCompletionOptions({ projectId: ID }));
+        expect(env.host.prepareReviewProjectCompletion({ request, scopeRevision: options.scopeRevision })).toEqual(refusal);
+        expect(env.state()._projectsById.get(ID)?.status).toBe('active');
+        expect(runs()).toHaveLength(0);
+        expect(env.saves()).toBe(0);
+    });
+
+    it('archives it, saves one next run 2 weeks later, and a replayed commit adds no second run', async () => {
+        const env = await android(repeating());
+        const diagnostic = vi.spyOn(logger, 'logInfo');
+        const envelope = env.prepare('complete');
+        expect(value(await env.host.commitPreparedProjectLifecycle(envelope))).toEqual({ id: ID, status: 'archived' });
+        expect(env.state()._projectsById.get(ID)?.status).toBe('archived');
+        expect(runs()).toHaveLength(1);
+        expect(runs()[0]).toMatchObject({ title: 'Saved Project', status: 'active', startDate: '2026-11-15',
+            repeatAfterCount: 2, repeatAfterUnit: 'week' });
+        const runTasks = env.state()._allTasks.filter((row) => row.projectId === runs()[0].id);
+        expect(runTasks.length).toBeGreaterThan(0);
+        expect(env.data().projects.map((row) => row.id)).toContain(runs()[0].id);
+        expect(diagnostic).toHaveBeenCalledWith('Next project run saved', { scope: 'store', category: 'storage', force: true,
+            context: { releaseCheck: 'v1.3.10/native-project-repeat', outcome: 'created' } });
+        diagnostic.mockClear();
+        expect(value(await env.host.commitPreparedProjectLifecycle(envelope))).toEqual({ id: ID, status: 'archived' });
+        expect(runs()).toHaveLength(1);
+        const cold = await env.reopen();
+        expect(await cold.host.commitPreparedProjectLifecycle(envelope)).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+        expect(runs()).toHaveLength(1);
+        value(await cold.host.commitPreparedProjectLifecycle(cold.prepare('reactivate')));
+        value(await cold.host.commitPreparedProjectLifecycle(cold.prepare('complete')));
+        expect(runs()).toHaveLength(1);
+        expect(diagnostic).not.toHaveBeenCalledWith('Next project run saved', expect.anything());
+        diagnostic.mockRestore();
+    });
+
+    it('completes a repeating Project from Weekly Review the same way', async () => {
+        const env = await android(repeating());
+        const options = value(env.host.getReviewProjectCompletionOptions({ projectId: ID }));
+        const request = env.request('complete');
+        const prepared = value(env.host.prepareReviewProjectCompletion({ request, scopeRevision: options.scopeRevision }));
+        const envelope = { request, prepared: prepared.prepared };
+        expect(value(await env.host.commitPreparedProjectLifecycle(envelope))).toEqual({ id: ID, status: 'archived' });
+        expect(value(await env.host.commitPreparedProjectLifecycle(envelope))).toEqual({ id: ID, status: 'archived' });
+        expect(runs()).toHaveLength(1);
+        expect(runs()[0]).toMatchObject({ status: 'active', startDate: '2026-11-15' });
+    });
+
+    it('saves the same next run as RN updateProject complete', async () => {
+        const snapshot = () => copy({ projects: useTaskStore.getState()._allProjects,
+            tasks: useTaskStore.getState()._allTasks, sections: useTaskStore.getState()._allSections });
+        const native = await android(repeating());
+        value(await native.host.commitPreparedProjectLifecycle(native.prepare('complete')));
+        const nativeCompleted = snapshot();
+        const rn = await android(repeating());
+        expect(await rn.state().updateProject(ID, { status: 'archived' }, 'complete')).toMatchObject({ success: true });
+        expect(snapshot()).toEqual(nativeCompleted);
+    });
+
+    it('logs the next run only after its save lands', async () => {
+        let failing = false;
+        const env = await open(repeating(), () => failing, false, true);
+        const diagnostic = vi.spyOn(logger, 'logInfo');
+        const envelope = env.prepare('complete');
+        failing = true;
+        expect(await env.host.commitPreparedProjectLifecycle(envelope)).toMatchObject({ ok: false, error: { code: 'SAVE_FAILED' } });
+        expect(diagnostic).not.toHaveBeenCalledWith('Next project run saved', expect.anything());
+        failing = false;
+        diagnostic.mockRestore();
+    });
+
+    it.each([false, true])('Weekly Review %s: matches RN complete in all nine SQLite tables, and a replay writes nothing more', async (review) => {
+        const sqlTables = ['tasks', 'projects', 'sections', 'areas', 'people', 'settings', 'saved_filters', 'schema_migrations', 'calendar_sync'];
+        type Sqlite = Awaited<ReturnType<typeof openSqliteHost>>;
+        const tables = async (host: Sqlite) => Object.fromEntries(await Promise.all(sqlTables.map(async (table) =>
+            [table, await host.sql(`SELECT * FROM ${table} ORDER BY rowid`)])));
+        const seed = () => { const data = repeating();
+            data.settings = { ...data.settings, analyticsProfileId: '00000000-0000-4000-8000-000000000399' }; return data; };
+        const rn = await openSqliteHost(seed());
+        let expected: Awaited<ReturnType<typeof tables>>;
+        try {
+            expect(await useTaskStore.getState().updateProject(ID, { status: 'archived' }, 'complete')).toEqual({ success: true });
+            await flushPendingSave();
+            expected = await tables(rn);
+        } finally { await rn.close(); }
+        const native = await openSqliteHost(seed(), undefined, { repeatingProjectCompletion: true });
+        try {
+            const request = { requestId: COMPLETE_ID, projectId: ID, action: 'complete' as const,
+                projectRevision: value(native.host.getProjectDetail({ projectId: ID, offset: 0, limit: 20 })).projectRevision };
+            const prepared = review
+                ? value(native.host.prepareReviewProjectCompletion({ request,
+                    scopeRevision: value(native.host.getReviewProjectCompletionOptions({ projectId: ID })).scopeRevision })).prepared
+                : value(native.host.prepareProjectLifecycle(request)).prepared;
+            const envelope = { request, prepared };
+            value(await native.host.commitPreparedProjectLifecycle(envelope));
+            await flushPendingSave();
+            expect(await tables(native)).toEqual(expected!);
+            value(await native.host.commitPreparedProjectLifecycle(envelope));
+            await flushPendingSave();
+            expect(await tables(native)).toEqual(expected!);
+        } finally { await native.close(); }
+    });
+
+    it('does not repeat a cancelled Project', async () => {
+        const env = await android(repeating());
+        value(await env.host.commitPreparedProjectLifecycle(env.prepare('cancel')));
+        expect(runs()).toHaveLength(0);
     });
 });
 

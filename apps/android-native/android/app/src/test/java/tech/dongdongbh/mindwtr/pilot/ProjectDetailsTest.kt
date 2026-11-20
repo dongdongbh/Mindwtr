@@ -96,6 +96,28 @@ class ProjectDetailsTest {
         assertEquals("perSection", flowModeEdit(shown = "sequential", picked = "perSection")?.getString("mode"))
     }
 
+    @Test fun theRepeatRowSavesCountAndUnitLikeRn() {
+        val stored = org.json.JSONObject().put("count", org.json.JSONObject.NULL).put("unit", org.json.JSONObject.NULL)
+        assertEquals("" to "month", savedRepeat(stored))
+        assertEquals("2" to "week", savedRepeat(org.json.JSONObject().put("count", 2).put("unit", "week")))
+
+        val save = projectEdit("r-2", "p", "repeat", projectRepeatEdit(" 2 ", "week", 1200)!!)
+        assertEquals(setOf("requestId", "projectId", "kind", "count", "unit"), save.keys().asSequence().toSet())
+        assertEquals("repeat", save.getString("kind"))
+        assertEquals(2, save.getInt("count"))
+        assertEquals("week", save.getString("unit"))
+
+        val off = projectRepeatEdit("  ", "week", 1200)!!
+        assertTrue(off.isNull("count") && off.isNull("unit"))
+        for (typed in listOf("0", "1201", "1.5", "-2", "two", "\u0662", "99999999999")) assertEquals(null, projectRepeatEdit(typed, "day", 1200))
+
+        assertFalse(projectRepeatDirty("", "week", "" to "month"))
+        assertTrue(projectRepeatDirty("3", "month", "" to "month"))
+        assertTrue(projectRepeatDirty("2", "day", "2" to "week"))
+        assertFalse(projectRepeatDirty(" 2 ", "week", "2" to "week"))
+        assertTrue(projectRepeatDirty("", "week", "2" to "week"))
+    }
+
     @Test fun aCalendarRefreshCutOffByAProjectEditRerunsOnce() {
         assertTrue(rerunsCalendarFeed("STALE_REVISION: Project or calendars changed while loading", null, retried = false))
         assertFalse(rerunsCalendarFeed("STALE_REVISION: Project or calendars changed while loading", null, retried = true))

@@ -126,6 +126,7 @@ val LABEL_KEYS = listOf(
     "sandbox.switching", "sandbox.switchFailed", "sandbox.confirmTitle", "sandbox.confirmDescription", "sandbox.enter", "settings.taskEditorLayout", "settings.appearance", "settings.regionalFormats",
     "quickAdd.audioCaptureLabel",
     "review.dueHelp", "review.overviewHelp",
+    "settings.off", "projects.repeatInvalidInterval", "projects.repeatTaskConflict", "projects.repeatSaveFailed",
 )
 
 
