@@ -257,7 +257,7 @@ describe('WeeklyReviewGuideModal', () => {
 
         completeFirstProject();
 
-        await waitFor(() => expect(updateProject).toHaveBeenCalledWith('project-0', { status: 'archived' }));
+        await waitFor(() => expect(updateProject).toHaveBeenCalledWith('project-0', { status: 'archived' }, 'complete'));
         expect(screen.queryByText('Mark this project completed and finish all its tasks?')).not.toBeInTheDocument();
         const completedProject = useTaskStore.getState()._allProjects.find((project) => project.id === 'project-0');
         expect(completedProject?.status).toBe('archived');

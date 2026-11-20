@@ -1390,6 +1390,7 @@
     "normalizeProcessInboxPickedDate",
     "normalizeProjectForSyncMerge",
     "normalizeProjectLifecycleFields",
+    "normalizeProjectRepeatAfterMonths",
     "normalizeProjectSequentialScope",
     "normalizeProjectStatus",
     "normalizeProjectTaskSortBy",

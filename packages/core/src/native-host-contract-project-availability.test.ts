@@ -274,8 +274,8 @@ describe('private prepared ordinary Project availability', () => {
             const api = privateMethods(env);
             const envelope = JSON.parse(JSON.stringify(value(await api.prepareProjectFileAvailability(downloadRequest(env)))));
 
-            expect(envelope.prepared.effect.rawBefore.splice(26)).toEqual([null, null, null]);
-            expect(envelope.prepared.effect.rawAfter.splice(26)).toEqual([null, null, null]);
+            expect(envelope.prepared.effect.rawBefore.splice(26)).toEqual([null, null, null, null]);
+            expect(envelope.prepared.effect.rawAfter.splice(26)).toEqual([null, null, null, null]);
             expect(api.validatePreparedProjectFileAvailability(envelope)).toMatchObject({ ok: true });
             await env.restart();
             expect(await privateMethods(env).commitPreparedProjectFileAvailability(envelope)).toMatchObject({ ok: true });

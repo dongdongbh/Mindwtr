@@ -398,7 +398,7 @@ describe('ReviewModal', () => {
         storeState.tasks = [];
         const tree = await openProjectCompletion();
         await act(async () => { await tree.root.findByProps({ testID: 'review-complete-project-project-1' }).props.onPress(); });
-        expect(storeState.updateProject).toHaveBeenCalledExactlyOnceWith('project-1', { status: 'archived' });
+        expect(storeState.updateProject).toHaveBeenCalledExactlyOnceWith('project-1', { status: 'archived' }, 'complete');
         expect(currentStepOf(tree)).toBe('projects');
         expect(tree.root.findAllByProps({ testID: 'review-confirm-complete-project' })).toHaveLength(0);
         expect(logInfo).toHaveBeenCalledWith('Weekly review project completed', {
@@ -428,7 +428,7 @@ describe('ReviewModal', () => {
         expect(storeState.updateProject).not.toHaveBeenCalled();
         await act(async () => tree.root.findByProps({ testID: 'review-complete-project-project-1' }).props.onPress());
         await act(async () => tree.root.findByProps({ testID: 'review-confirm-complete-project' }).props.onPress());
-        expect(storeState.updateProject).toHaveBeenCalledExactlyOnceWith('project-1', { status: 'archived' });
+        expect(storeState.updateProject).toHaveBeenCalledExactlyOnceWith('project-1', { status: 'archived' }, 'complete');
         expect(currentStepOf(tree)).toBe('projects');
         await act(async () => tree.unmount());
     });

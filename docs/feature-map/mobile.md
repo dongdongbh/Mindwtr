@@ -168,6 +168,7 @@ Source: `apps/mobile`. Routes live in `apps/mobile/app` (expo-router). Labels be
 
 ## Project detail
 
+- Repeat after completion: In project details, enter 1–1200 months in `project-repeat-after-months`. Clear the field to turn repeating off. Turn off repeats on active tasks in the project before enabling it. Select Complete in project actions to schedule its next run.
 - Reach: Projects › tap a project. Controls cover status, area, tags, dates, sections, flow mode, and the project task list.
 - Shortcuts: Reorder › long press and drag a task handle.
 - Selectors: `project-calendar-reference`, `project-calendar-link`, `project-calendar-unlink`, `project-calendar-event-` (+ index), `project-actions-menu-button`, `project-add-task-button`, `project-status-picker`, `project-status-menu-item-` (+ status), `project-area-picker`, `project-tag-picker`, `project-due-date-picker`, `project-start-date-picker`, `project-review-date-picker`, `project-sections-button`, `project-section-add-button`, `project-section-title-input`, `project-section-save-button`, `project-flow-mode-options`, `project-convert-to-section-button`, `project-duplicate-button`, `project-delete-button`, `project-task-reorder-toggle`, `project-task-drag-handle-` (+ task id), `project-task-view-options-button`

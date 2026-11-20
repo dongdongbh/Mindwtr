@@ -1382,7 +1382,8 @@ describe('ProjectDetailModal lifecycle actions', () => {
         expect(storeActions.cancelProject).toHaveBeenCalledWith('project-1');
     });
 
-    it('archives from the Archive action with a single tap and no native confirm', () => {
+    it('completes from the project action with a single tap and no native confirm', async () => {
+        storeActions.updateProject.mockResolvedValue({ success: true });
         const onProjectChange = vi.fn();
         const alertSpy = vi.spyOn(Alert, 'alert');
         let tree!: ReturnType<typeof create>;
@@ -1394,13 +1395,55 @@ describe('ProjectDetailModal lifecycle actions', () => {
         act(() => {
             tree.root.findByProps({ testID: 'project-actions-menu-button' }).props.onPress();
         });
-        act(() => {
+        await act(async () => {
             tree.root.findByProps({ testID: 'project-archive-button' }).props.onPress();
         });
 
-        expect(storeActions.updateProject).toHaveBeenCalledWith('project-1', { status: 'archived' });
+        expect(storeActions.updateProject).toHaveBeenCalledWith('project-1', { status: 'archived' }, 'complete');
         expect(onProjectChange).toHaveBeenCalledWith(expect.objectContaining({ status: 'archived' }));
         expect(alertSpy).not.toHaveBeenCalled();
+    });
+
+    it('rejects a conflicting project repeat and clears it independently of task repeats', async () => {
+        storeActions.updateProject
+            .mockResolvedValueOnce({ success: false, error: 'PROJECT_REPEAT_TASK_RECURRENCE' })
+            .mockResolvedValueOnce({ success: true });
+        const onProjectChange = vi.fn();
+        let tree!: ReturnType<typeof create>;
+        await act(async () => {
+            tree = create(<ProjectDetailModal {...createProjectDetailModalProps({
+                project: { ...project('active'), repeatAfterMonths: 3 },
+                onProjectChange,
+            })} />);
+        });
+        expandProjectDetails(tree);
+        const repeat = () => tree.root.findByProps({ testID: 'project-repeat-after-months' });
+        expect(repeat().props.defaultValue).toBe('3');
+        await act(async () => { repeat().props.onEndEditing({ nativeEvent: { text: '6' } }); });
+        expect(storeActions.updateProject).toHaveBeenCalledWith('project-1', { repeatAfterMonths: 6 });
+        expect(tree.root.findAllByProps({ accessibilityRole: 'alert' }).some(
+            (node) => node.props.children === 'projects.repeatTaskConflict',
+        )).toBe(true);
+        expect(onProjectChange).not.toHaveBeenCalled();
+        await act(async () => { repeat().props.onEndEditing({ nativeEvent: { text: '' } }); });
+        expect(storeActions.updateProject).toHaveBeenLastCalledWith('project-1', { repeatAfterMonths: undefined });
+        expect(onProjectChange).toHaveBeenCalledWith(expect.objectContaining({ repeatAfterMonths: undefined }));
+    });
+
+    it('shows a completion failure and keeps the selected project when the write is refused', async () => {
+        storeActions.updateProject.mockResolvedValue({ success: false, error: 'Failed to save' });
+        const onProjectChange = vi.fn();
+        const alertSpy = vi.spyOn(Alert, 'alert');
+        let tree!: ReturnType<typeof create>;
+        await act(async () => {
+            tree = create(<ProjectDetailModal {...createProjectDetailModalProps({ onProjectChange })} />);
+        });
+        act(() => tree.root.findByProps({ testID: 'project-actions-menu-button' }).props.onPress());
+        await act(async () => {
+            tree.root.findByProps({ testID: 'project-archive-button' }).props.onPress();
+        });
+        expect(alertSpy).toHaveBeenCalledWith('common.error', 'projects.archiveFailed');
+        expect(onProjectChange).not.toHaveBeenCalled();
     });
 
     it('reactivates an archived project and clears cancellation from the local projection', () => {
@@ -1559,6 +1602,7 @@ describe('ProjectDetailModal archived projects', () => {
         expect(tree.root.findByProps({ testID: 'project-flow-mode-sequential' }).props.disabled).toBe(true);
         expect(tree.root.findByProps({ testID: 'project-area-picker' }).props.disabled).toBe(true);
         expect(tree.root.findByProps({ testID: 'project-due-date-picker' }).props.disabled).toBe(true);
+        expect(tree.root.findByProps({ testID: 'project-repeat-after-months' }).props.editable).toBe(false);
         expect(tree.root.findByProps({ testID: 'project-review-date-picker' }).props.disabled).toBe(true);
         expect(tree.root.findAllByType(TextInput).some((input) => input.props.placeholder === 'Notes')).toBe(false);
 

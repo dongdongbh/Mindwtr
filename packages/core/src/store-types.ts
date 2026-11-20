@@ -938,7 +938,7 @@ export interface TaskStore {
         authority: PreparedAreaAuthority, legacyRaw: string | null) => Promise<PreparedTaskEditResult>;
     retryPreparedCalendarSubscriptionSettingSnapshot: (authority: PreparedAreaAuthority) => Promise<PreparedTaskEditResult>;
 
-    updateProject: (id: string, updates: Partial<Project>) => Promise<StoreActionResult>;
+    updateProject: (id: string, updates: Partial<Project>, intent?: 'complete') => Promise<StoreActionResult>;
 
     setProjectFlowMode: (id: string, mode: ProjectFlowMode) => Promise<StoreActionResult>;
 

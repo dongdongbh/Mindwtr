@@ -301,7 +301,7 @@ export function useReviewModalController({
 
         setKeepProjectsStep(true);
         try {
-            const result = await state.updateProject(projectId, { status: 'archived' });
+            const result = await state.updateProject(projectId, { status: 'archived' }, 'complete');
             if (result && !result.success) throw new Error(result.error || 'Failed to complete project');
             await flushPendingSave();
             setProjectCompletionPrompt(null);

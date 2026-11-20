@@ -166,6 +166,7 @@ enum CloudKitRecordMapper {
         FieldSpec(jsKey: "sequentialScope", ckKey: "sequentialScope", kind: .string),
         FieldSpec(jsKey: "perSectionFlow", ckKey: "perSectionFlow", kind: .bool),
         FieldSpec(jsKey: "calendarReference", ckKey: "calendarReference", kind: .jsonString),
+        FieldSpec(jsKey: "repeatAfterMonths", ckKey: "repeatAfterMonths", kind: .int),
         FieldSpec(jsKey: "taskSortBy", ckKey: "taskSortBy", kind: .string),
         FieldSpec(jsKey: "isFocused", ckKey: "isFocused", kind: .bool),
         FieldSpec(jsKey: "supportNotes", ckKey: "supportNotes", kind: .string),

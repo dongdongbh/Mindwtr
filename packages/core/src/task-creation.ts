@@ -5,7 +5,7 @@ import { getReferenceTaskFieldClears, getTaskOrder, resolveCaptureStatusForStart
 import { normalizeOptionalContainerId, resolveTaskContainerAssignment } from './task-container-rules';
 import { resolveDefaultNewTaskAreaId } from './area-utils';
 import { normalizeCancellationTimestamp, normalizeTaskLifecycleFields } from './task-status';
-import { normalizeRecurrenceForLoad } from './recurrence';
+import { hasRecurrenceRule, normalizeRecurrenceForLoad } from './recurrence';
 import { normalizeDueReminderLeadMinutes, normalizeStartReminderLeadMinutes, normalizeRepeatReminderMinutes } from './schedule-utils';
 import { resolveTaskFocusCreation } from './focus-star';
 import { isTaskFutureFocusCandidate, isTaskFutureFocusCandidateBeforeBoundary, type FocusDateLookup } from './task-utils';
@@ -58,6 +58,10 @@ export function buildNewTask({
         : resolveCaptureStatusForStart(initialTaskProps, resolvedStatus);
     const hasTaskOrder = hasOwnField(initialTaskProps, 'order') || hasOwnField(initialTaskProps, 'orderNum');
     const resolvedProjectId = containerResolution.projectId;
+    if (resolvedProjectId && hasRecurrenceRule(initialTaskProps.recurrence)
+        && state._allProjects.some(project => project.id === resolvedProjectId && project.repeatAfterMonths)) {
+        return { ok: false, error: 'This project repeats as a whole. Turn off individual task recurrence first.' };
+    }
     const resolvedSectionId = containerResolution.sectionId;
     const resolvedAreaId = containerResolution.areaId;
     const referenceClears = resolvedStatus === 'reference'

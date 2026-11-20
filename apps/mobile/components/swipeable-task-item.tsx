@@ -500,7 +500,7 @@ function SwipeableTaskItemInner({
         setIsProjectNextActionSubmitting(true);
 
 
-        void settleStoreAction(() => useTaskStore.getState().updateProject(projectId, { status: 'archived' }))
+        void settleStoreAction(() => useTaskStore.getState().updateProject(projectId, { status: 'archived' }, 'complete'))
             .then((outcome) => {
                 if (!outcome.ok) {
                     showActionFailure(outcome.message);

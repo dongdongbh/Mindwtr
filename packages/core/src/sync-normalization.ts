@@ -8,6 +8,7 @@ import { isSha256Hex } from './attachment-hash';
 import { normalizePersonName, normalizePersonNote, normalizePersonReferenceLink } from './people';
 import { normalizeProjectSequentialScope, normalizeProjectTaskSortBy } from './project-utils';
 import { normalizeProjectLifecycleFields } from './project-status';
+import { normalizeProjectRepeatAfterMonths } from './project-sync-schema';
 import { logInfo } from './logger';
 import { normalizeTaskForLoad } from './task-status';
 import { isTaskSectionProjectArchiveReference } from './store-helpers';
@@ -315,6 +316,7 @@ export const normalizeProjectForSyncMerge = (
         dueDate: normalizeOptionalString(project.dueDate),
         startDate: normalizeOptionalString(project.startDate),
         reviewAt: normalizeOptionalString(project.reviewAt),
+        repeatAfterMonths: normalizeProjectRepeatAfterMonths(project.repeatAfterMonths),
         cancelledAt: normalizeOptionalString(project.cancelledAt),
         archivedAt: normalizeOptionalString(project.archivedAt),
         areaId: normalizeOptionalString(project.areaId),
@@ -789,6 +791,9 @@ export function* validateMergedSyncDataPass(data: AppData): CooperativePass<stri
             if (!isObjectRecord(project)) return;
             if (project.calendarReference != null && !isProjectCalendarReference(project.calendarReference)) {
                 errors.push(`projects[${index}].calendarReference must be a valid calendar reference or null`);
+            }
+            if (project.repeatAfterMonths !== undefined && normalizeProjectRepeatAfterMonths(project.repeatAfterMonths) === undefined) {
+                errors.push(`projects[${index}].repeatAfterMonths must be a whole number from 1 through 1200`);
             }
             if (!isValidProjectColorOverride(project.colorOverride)) {
                 errors.push(`projects[${index}].colorOverride must be a six-digit hex color or null`);

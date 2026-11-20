@@ -116,6 +116,7 @@ export interface Project {
     startDate?: string;
     dueDate?: string;
     reviewAt?: string;
+    repeatAfterMonths?: number;
     cancelledAt?: string;
     archivedAt?: string;
     areaId?: string;

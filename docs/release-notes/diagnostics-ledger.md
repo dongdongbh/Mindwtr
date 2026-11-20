@@ -60,6 +60,8 @@ The v1.3.6 task-editor correction is confirmed by the visible disappearance of t
 
 ## v1.3.10 (add before tagging, trim in the release after)
 
+- **repeat-project** — `packages/core/src/store-projects/project-actions.ts`. Completing a repeating project saves its next run. Look for `Next project run saved` after completion.
+
 - **`v1.3.10/android-widget-publication-retry`** — Android mobile storage retries a failed background widget publication once. After a background sync saves changes, check for `Android background widget publication retried` with outcome `published` or `failed`. This records the native publication result. Check the launcher separately. (#1589)
 
 - **`v1.3.10/contexts-bulk-organize`** — Native Contexts selection. Apply Bulk organize to selected tasks, then export Diagnostics. The marker records the operation outcome after the write, with no task titles or estimates. (#1591)

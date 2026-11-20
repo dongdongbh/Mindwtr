@@ -1567,10 +1567,10 @@ export function ProjectWorkspace({
         const current = getMutableSelectedProject();
         if (!current) return;
         try {
-            await Promise.resolve(updateProject(current.id, { status: 'archived' }));
+            const result = await updateProject(current.id, { status: 'archived' }, 'complete');
+            if (!result.success) throw new Error(result.error);
         } catch (error) {
-            reportError('Failed to archive project', error);
-            showToast(tFallback(t, 'projects.archiveFailed', 'Failed to archive project'), 'error');
+            reportError('Failed to archive project', error, { userMessage: t('projects.archiveFailed') });
         }
     };
 
@@ -1889,6 +1889,7 @@ export function ProjectWorkspace({
                                         onStartDateChange={(value) => updateMutableSelectedProject({ startDate: value || undefined })}
                                         dueDateValue={toDateInputValue(selectedProject.dueDate)}
                                         onDueDateChange={(value) => updateMutableSelectedProject({ dueDate: value || undefined })}
+                                        onRepeatAfterMonthsChange={(repeatAfterMonths) => updateMutableSelectedProject({ repeatAfterMonths })}
                                         reviewAtValue={toDateTimeLocalValue(selectedProject.reviewAt)}
                                         onReviewAtChange={(value) => updateMutableSelectedProject({ reviewAt: value || undefined })}
                                         readOnly={isArchivedProject}

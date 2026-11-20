@@ -58,7 +58,7 @@ import {
 import { beginNotifyProfile, endNotifyProfile, type NotifyProfile } from './store-notify-profiler';
 import { generateUUID as uuidv4 } from './uuid';
 import { buildNextRecurringTask, canSkipRecurringTaskOccurrence, createNextRecurringTask,
-    normalizeRecurrenceForLoad, type RecurrenceProjection } from './recurrence';
+    hasRecurrenceRule, normalizeRecurrenceForLoad, type RecurrenceProjection } from './recurrence';
 import { normalizeFocusTaskLimit } from './focus-utils';
 import { resolveProcessInboxPlan } from './process-inbox-plan';
 import { boardOrderForDuplicate, countFocusedTasksBeforeBoundary, isTaskFutureFocusCandidate, sortTasksByFocusOrder,
@@ -447,6 +447,13 @@ export const prepareTaskUpdatesForStore = ({
         projectOrderReserver,
     });
     if (!containerPatch.ok) return containerPatch;
+    const destination = { ...task, ...updates, ...containerPatch.updates };
+    if ((hasOwnField(updates, 'recurrence') || destination.projectId !== task.projectId)
+        && hasRecurrenceRule(destination.recurrence)
+        && allProjects.some(project => project.id === destination.projectId && project.repeatAfterMonths)) {
+        return { ok: false, error: 'This project repeats as a whole. Turn off individual task recurrence first.' };
+    }
+
 
     const adjustedUpdates = normalizeTaskUpdate(task, {
         ...updates,
@@ -590,7 +597,7 @@ export const planTaskBatchUpdateEffects = ({
             recurrenceProjections?.get(task.id),
         );
         const stampedNextRecurringTask = stampNewRecurringFollowUp(
-            nextRecurringTask,
+            nextRecurringTask && allProjects.some(project => project.id === updatedTask.projectId && project.repeatAfterMonths) ? null : nextRecurringTask,
             deviceId,
             getTaskOrder(task),
             projectOrderReserver,
@@ -664,7 +671,7 @@ export const planTaskUpdateEffects = ({
         completionSource,
     );
     const stampedNextRecurringTask = stampNewRecurringFollowUp(
-        nextRecurringTask,
+        nextRecurringTask && allProjects.some(project => project.id === updatedTask.projectId && project.repeatAfterMonths) ? null : nextRecurringTask,
         deviceId,
         getTaskOrder(task),
 

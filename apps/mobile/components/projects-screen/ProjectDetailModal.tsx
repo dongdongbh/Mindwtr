@@ -24,6 +24,7 @@ import {
     getAttachmentDisplayTitle,
     getProjectDetailsPresentation,
     getProjectFlowMode,
+    normalizeProjectRepeatAfterMonths,
     planProjectFlowModeChange,
     type Project,
     type ProjectFlowMode,
@@ -607,10 +608,14 @@ export function ProjectDetailModal({
     const [colorSaving, setColorSaving] = React.useState(false);
     const [colorError, setColorError] = React.useState(false);
     const [colorIntent, setColorIntent] = React.useState<string | null>(null);
-    const colorGeneration = React.useRef(0);
+    const [repeatSaving, setRepeatSaving] = React.useState(false);
+    const [repeatError, setRepeatError] = React.useState<string | null>(null);
+    const projectGeneration = React.useRef(0);
     React.useEffect(() => {
-        colorGeneration.current += 1;
+        projectGeneration.current += 1;
         setColorSaving(false); setColorError(false); setColorIntent(null);
+        setRepeatSaving(false);
+        setRepeatError(null);
     }, [selectedProject?.id]);
     const liveSelectedProjectStatus = liveSelectedProject?.status;
     const isArchivedProject = selectedProject?.status === 'archived' || liveSelectedProjectStatus === 'archived';
@@ -633,7 +638,7 @@ export function ProjectDetailModal({
     const saveProjectColor = async (colorOverride: string | null) => {
         const current = getMutableSelectedProject();
         if (!current || colorSaving) return;
-        const generation = colorGeneration.current;
+        const generation = projectGeneration.current;
         setColorSaving(true);
         setColorIntent(colorOverride);
         setColorError(false);
@@ -643,9 +648,36 @@ export function ProjectDetailModal({
             const result = await updateProject(current.id, { colorOverride });
             if (!result.success) throw new Error('Save refused');
             const live = useTaskStore.getState()._projectsById.get(current.id);
-            if (colorGeneration.current === generation && selectedProjectRef.current?.id === current.id) onProjectChange({ ...selectedProjectRef.current, colorOverride, color: live?.color ?? current.color });
-        } catch { if (colorGeneration.current === generation) setColorError(true); }
-        finally { if (colorGeneration.current === generation) setColorSaving(false); }
+            if (projectGeneration.current === generation && selectedProjectRef.current?.id === current.id) onProjectChange({ ...selectedProjectRef.current, colorOverride, color: live?.color ?? current.color });
+        } catch { if (projectGeneration.current === generation) setColorError(true); }
+        finally { if (projectGeneration.current === generation) setColorSaving(false); }
+    };
+    const saveProjectRepeat = async (raw: string) => {
+        const current = getMutableSelectedProject();
+        if (!current || repeatSaving) return;
+        const text = raw.trim();
+        const repeatAfterMonths = /^\d+$/.test(text) ? normalizeProjectRepeatAfterMonths(Number(text)) : undefined;
+        if (text && repeatAfterMonths === undefined) {
+            setRepeatError('projects.repeatInvalidInterval');
+            return;
+        }
+        setRepeatError(null);
+        if (repeatAfterMonths === current.repeatAfterMonths) return;
+        const generation = projectGeneration.current;
+        setRepeatSaving(true);
+        try {
+            const result = await updateProject(current.id, { repeatAfterMonths });
+            if (projectGeneration.current !== generation) return;
+            if (!result.success) {
+                setRepeatError(result.error === 'PROJECT_REPEAT_TASK_RECURRENCE' ? 'projects.repeatTaskConflict' : 'projects.repeatSaveFailed');
+            } else if (selectedProjectRef.current?.id === current.id) {
+                onProjectChange({ ...selectedProjectRef.current, repeatAfterMonths });
+            }
+        } catch {
+            if (projectGeneration.current === generation) setRepeatError('projects.repeatSaveFailed');
+        } finally {
+            if (projectGeneration.current === generation) setRepeatSaving(false);
+        }
     };
 
 
@@ -981,8 +1013,19 @@ export function ProjectDetailModal({
     };
 
 
-    const handleArchiveSelectedProject = () => {
-        updateMutableSelectedProject({ status: 'archived' });
+    const handleArchiveSelectedProject = async () => {
+        const current = getMutableSelectedProject();
+        if (!current) return;
+        try {
+            const result = await updateProject(current.id, { status: 'archived' }, 'complete');
+            if (!result.success) throw new Error(result.error);
+            if (selectedProjectRef.current?.id === current.id) {
+                const saved = useTaskStore.getState()._allProjects?.find((project) => project.id === current.id);
+                onProjectChange(saved?.status === 'archived' ? saved : { ...selectedProjectRef.current, status: 'archived' });
+            }
+        } catch {
+            Alert.alert(t('common.error'), t('projects.archiveFailed'));
+        }
     };
     const handleCancelSelectedProject = () => {
         const current = getMutableSelectedProject();
@@ -1695,6 +1738,31 @@ export function ProjectDetailModal({
                                                 />
                                             ) : null}
                                             <View style={[styles.projectMetadataRow, styles.projectMetadataRowDivider, { borderTopColor: tc.border }]}>
+                                                <Text style={[styles.reviewLabel, { color: tc.text, flexShrink: 1 }]}>
+                                                    {t('recurrence.afterCompletion')}
+                                                </Text>
+                                                <View style={styles.projectMetadataControls}>
+                                                    <TextInput
+                                                        key={`${selectedProject.id}-repeat-${selectedProject.repeatAfterMonths ?? 'off'}`}
+                                                        testID="project-repeat-after-months"
+                                                        style={[styles.projectMetadataValueButton, styles.projectMetadataValueText,
+                                                            { minWidth: 64, backgroundColor: tc.inputBg, borderColor: tc.border, color: tc.text }]}
+                                                        placeholderTextColor={tc.secondaryText}
+                                                        placeholder={t('settings.off')}
+                                                        defaultValue={selectedProject.repeatAfterMonths?.toString() ?? ''}
+                                                        keyboardType="number-pad"
+                                                        returnKeyType="done"
+                                                        editable={!isArchivedProject && !repeatSaving}
+                                                        accessibilityLabel={t('recurrence.afterCompletion')}
+                                                        accessibilityHint={t('recurrence.monthUnit')}
+                                                        accessibilityState={{ disabled: isArchivedProject || repeatSaving }}
+                                                        onEndEditing={({ nativeEvent }) => { void saveProjectRepeat(nativeEvent.text); }}
+                                                    />
+                                                    <Text style={{ color: tc.secondaryText }}>{t('recurrence.monthUnit')}</Text>
+                                                </View>
+                                            </View>
+                                            {repeatError && <Text accessibilityRole="alert" style={{ color: tc.danger }}>{t(repeatError)}</Text>}
+                                            <View style={[styles.projectMetadataRow, styles.projectMetadataRowDivider, { borderTopColor: tc.border }]}>
                                                 <Text style={[styles.reviewLabel, { color: tc.text }]}>{tFallback(t, 'projects.reviewAt', 'Review Date')}</Text>
                                                 <View style={styles.projectMetadataControls}>
                                                     <TouchableOpacity
@@ -1967,7 +2035,7 @@ export function ProjectDetailModal({
                                             if (isArchivedProject) {
                                                 handleSetProjectStatus('active');
                                             } else {
-                                                handleArchiveSelectedProject();
+                                                void handleArchiveSelectedProject();
                                             }
                                         }}
                                         testID={isArchivedProject

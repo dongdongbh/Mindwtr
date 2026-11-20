@@ -460,7 +460,7 @@ describe('ProjectNextActionPromptProvider', () => {
             await Promise.resolve();
         });
 
-        expect(updateProject).toHaveBeenCalledWith('project-1', { status: 'archived' });
+        expect(updateProject).toHaveBeenCalledWith('project-1', { status: 'archived' }, 'complete');
         expect(hasText(tree, "What's the next action?")).toBe(false);
     });
 

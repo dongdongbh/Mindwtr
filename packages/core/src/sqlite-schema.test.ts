@@ -57,9 +57,9 @@ const prepareSingle = (db: Database, sql: string): Statement => {
             get: (...params: unknown[]) => unknown;
         };
         return {
-            run: (params: unknown[] = []) => statement.run(...params),
-            all: (params: unknown[] = []) => statement.all(...params),
-            get: (params: unknown[] = []) => statement.get(...params),
+            run: (...params: unknown[]) => statement.run(...params),
+            all: (...params: unknown[]) => statement.all(...params),
+            get: (...params: unknown[]) => statement.get(...params),
         };
     }
     if (typeof db.query === 'function') return db.query(sql);
@@ -188,5 +188,21 @@ describeSqlite('schema replay through single-statement execute (op-sqlite emulat
             "SELECT COUNT(*) as count FROM sqlite_master WHERE type = 'trigger'"
         ).get() as { count: number };
         expect(Number(triggerCount.count)).toBeGreaterThanOrEqual(10);
+    });
+
+    it('adds the optional repeat interval to a legacy project and keeps changes across a reload', async () => {
+        db.exec(SQLITE_BASE_SCHEMA.replace(',\n  repeatAfterMonths INTEGER', ''));
+        db.exec("INSERT INTO projects (id, title, status, color, createdAt, updatedAt, rev) VALUES ('old', 'Old project', 'active', '#6b7280', '2026-01-01', '2026-01-01', 1)");
+        const client = createSingleStatementClient(db);
+        const adapter = new SqliteAdapter(client);
+        const prior = await adapter.getData();
+        const [project] = prior.projects;
+        expect(project.repeatAfterMonths).toBeUndefined();
+        await adapter.saveData({ ...prior, projects: [{ ...project, repeatAfterMonths: 6, rev: 2 }] });
+        const reopened = new SqliteAdapter(client);
+        const saved = await reopened.getData();
+        expect(saved.projects[0]).toMatchObject({ id: 'old', repeatAfterMonths: 6 });
+        await reopened.saveData({ ...saved, projects: [{ ...saved.projects[0], repeatAfterMonths: undefined, rev: 3 }] });
+        expect((await adapter.getData()).projects[0].repeatAfterMonths).toBeUndefined();
     });
 });

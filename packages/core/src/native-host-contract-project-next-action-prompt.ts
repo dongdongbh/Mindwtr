@@ -126,7 +126,7 @@ export function createProjectNextActionPromptMethods(deps: {
                     if (!project || project.deletedAt) return fail('INVALID_INPUT', 'The project no longer exists');
                     if (revisionOf(project) !== request.projectRevision) return fail('STALE_REVISION', 'The project changed since the prompt showed it');
 
-                    const written = await runStoreWrite(() => useTaskStore.getState().updateProject(project.id, { status: 'archived' }));
+                    const written = await runStoreWrite(() => useTaskStore.getState().updateProject(project.id, { status: 'archived' }, 'complete'));
                     return settleWrite(written, { action: 'completeProject' as const, id: project.id });
                 }
 

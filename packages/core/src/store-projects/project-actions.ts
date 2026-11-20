@@ -1,3 +1,5 @@
+import { addMonths, format } from 'date-fns';
+import { hasRecurrenceRule } from '../recurrence';
 import { isProjectCalendarReference } from '../project-calendar-reference-schema';
 import { retainProjectTaxonomy, retainTaxonomyEffects } from '../taxonomy-catalog';
 import { getAttachmentUnrecoverablePatch } from '../mobile-attachment-availability';
@@ -23,10 +25,10 @@ import { rawReadProjectSnapshot, rawReadRow, rememberRawReadRow } from '../sqlit
 import { TASK_SQLITE_COLUMNS, taskToSqliteRow } from '../task-sync-schema';
 import { logInfo, logWarn } from '../logger';
 import { clearDerivedCache } from '../store-settings';
-import { generateUUID as uuidv4 } from '../uuid';
+import { generateDeterministicUUID, generateUUID as uuidv4 } from '../uuid';
 import { DEFAULT_PROJECT_COLOR, isValidProjectColorOverride } from '../color-constants';
 import { findSelectableProjectByTitleAndArea, normalizeProjectTaskSortBy, planProjectFlowModeChange } from '../project-utils';
-import { PROJECT_SQLITE_COLUMNS, padProjectSqliteCells, projectFromSqliteRow, projectSqliteCellsFit, projectToSqliteRow } from '../project-sync-schema';
+import { PROJECT_SQLITE_COLUMNS, normalizeProjectRepeatAfterMonths, padProjectSqliteCells, projectFromSqliteRow, projectSqliteCellsFit, projectToSqliteRow } from '../project-sync-schema';
 import { taskEditValuesEqual } from '../json-value-equality';
 import { planAttachmentLinkBatch, softDeleteAttachment } from '../attachment-editor-model';
 import type { Area, Attachment, ProjectFlowMode, TaskSortBy } from '../types';
@@ -41,39 +43,41 @@ import {
 import { actionFail, actionOk, mutateEntities, projectDeleteUndoReattachments,
     type DetachedProjectTask } from './shared';
 import { sameSectionSqliteRow, sameTaskSqliteRow, sectionFlowEffect } from './section-actions';
-import { getProjectFlowMode } from '../task-utils';
+import { compareTasksByProjectOrder, getProjectFlowMode } from '../task-utils';
 import { buildTaskContainerMovePatch, reserveTaskContainerProjectOrder } from '../task-container-rules';
 import type { PreparedAreaAuthority, SelectedProjectAvailabilityWrite } from '../store-types';
 import { getAttachmentAvailabilityPatch } from '../mobile-attachment-availability';
 
 const duplicateProjectAttachmentCopy = (attachment: NonNullable<Project['attachments']>[number], now: string,
-    nextId: () => string) => ({
+    id: string, keepFileSource: boolean) => ({
     ...attachment,
-    id: nextId(),
+    id,
     createdAt: now,
     updatedAt: now,
     deletedAt: undefined,
-    cloudKey: undefined,
-    fileHash: undefined,
-    localStatus: undefined,
-    contentRev: undefined,
-    contentMtimeMs: undefined,
-    contentSize: undefined,
-    staleContentHash: undefined,
+    ...(keepFileSource ? {} : {
+        cloudKey: undefined,
+        fileHash: undefined,
+        localStatus: undefined,
+        contentRev: undefined,
+        contentMtimeMs: undefined,
+        contentSize: undefined,
+        staleContentHash: undefined,
+    }),
 });
 
 
 export const projectDuplicateEffect = (scope: PreparedProjectDuplicate['scope'], deviceId: string,
-    now: string, nextId: () => string): PreparedProjectDuplicate['effect'] => {
+    now: string, nextId: (kind: string, sourceId: string, ownerId?: string) => string, keepFileSource = false): PreparedProjectDuplicate['effect'] => {
     const source = scope.project;
     const maxOrder = scope.sameAreaProjects
         .reduce((max, row) => Math.max(max, Number.isFinite(row.order) ? row.order : -1), -1);
     const projectAttachments = (source.attachments || [])
         .filter((attachment) => !attachment.deletedAt)
-        .map((attachment) => duplicateProjectAttachmentCopy(attachment, now, nextId));
+        .map((attachment) => duplicateProjectAttachmentCopy(attachment, now, nextId('attachment', attachment.id, source.id), keepFileSource));
     const project: Project = {
         ...source,
-        id: nextId(),
+        id: nextId('project', source.id),
         title: `${source.title} (Copy)`,
         order: maxOrder + 1,
         isFocused: false,
@@ -88,22 +92,22 @@ export const projectDuplicateEffect = (scope: PreparedProjectDuplicate['scope'],
     };
     const sectionIdMap = new Map<string, string>();
     const sections = scope.sections.filter((section) => !section.deletedAt).map((section) => {
-        const id = nextId();
+        const id = nextId('section', section.id);
         sectionIdMap.set(section.id, id);
         return { ...section, id, projectId: project.id, createdAt: now, updatedAt: now,
             deletedAt: undefined, rev: 1, revBy: deviceId };
     });
     const tasks = scope.tasks.filter((task) => !task.deletedAt).map((task) => {
         const checklist = task.checklist?.map((item) => ({
-            ...item, id: nextId(), isCompleted: false,
+            ...item, id: nextId('checklist', item.id, task.id), isCompleted: false,
         }));
         const attachments = (task.attachments || [])
             .filter((attachment) => !attachment.deletedAt)
-            .map((attachment) => duplicateProjectAttachmentCopy(attachment, now, nextId));
+            .map((attachment) => duplicateProjectAttachmentCopy(attachment, now, nextId('attachment', attachment.id, task.id), keepFileSource));
         const nextSectionId = task.sectionId ? sectionIdMap.get(task.sectionId) : undefined;
         const result: Task = {
             ...task,
-            id: nextId(),
+            id: nextId('task', task.id),
             projectId: project.id,
             sectionId: nextSectionId,
             status: (task.status === 'reference' ? 'reference' : 'next') as TaskStatus,
@@ -366,6 +370,30 @@ const projectLifecycleScopeRows = (state: TaskStore, projectId: string) => {
     const tasks = state._allTasks.filter((task) => task.projectId === projectId
         || (!task.projectId && task.sectionId !== undefined && sectionIds.has(task.sectionId)));
     return { sections, tasks };
+};
+
+const nextProjectRun = (state: TaskStore, source: Project, now: string, deviceId: string) => {
+    const months = normalizeProjectRepeatAfterMonths(source.repeatAfterMonths);
+    if (!months) return null;
+    const nextId = (kind: string, sourceId: string, ownerId?: string) =>
+        generateDeterministicUUID(JSON.stringify(['repeat-project', source.id, kind, sourceId, ownerId]));
+    if (state._allProjects.some(project => project.id === nextId('project', source.id))) return null;
+
+    const { tasks, sections } = projectLifecycleScopeRows(state, source.id);
+    const steps = tasks.filter(task => !task.deletedAt && !task.cancelledAt
+        && !(task.status === 'done' && hasRecurrenceRule(task.recurrence))).sort(compareTasksByProjectOrder);
+    const copy = projectDuplicateEffect({ project: source, area: null, tasks: steps, sections,
+        sameAreaProjects: state._allProjects.filter(row => !row.deletedAt && row.areaId === source.areaId),
+    }, deviceId, now, nextId, true);
+    const startDate = format(addMonths(new Date(now), months), 'yyyy-MM-dd');
+    const project: Project = { ...copy.project, title: source.title, status: 'active', startDate,
+        dueDate: undefined, reviewAt: undefined, calendarReference: undefined };
+    return { project, sections: copy.sections, tasks: copy.tasks.map((task, order) => ({
+        ...task, order, orderNum: order, startTime: task.status === 'reference' ? undefined : startDate,
+        recurrence: undefined, relativeStartOffset: undefined, showFutureRecurrence: undefined,
+        timeSpentMinutes: undefined, projectArchivedAt: undefined, statusBeforeProjectArchive: undefined,
+        completedAtBeforeProjectArchive: undefined, isFocusedTodayBeforeProjectArchive: undefined,
+    })) };
 };
 
 const afterRows = <T extends { id: string }>(scope: T[], effect: { before: T; after: T }[]) =>
@@ -779,6 +807,10 @@ export const createProjectCoreActions = ({
     getSaveGeneration,
 }: ProjectActionContext): ProjectCoreActions => ({
     addProject: async (title: string, color: string, initialProps?: Partial<Project>) => {
+        if (initialProps?.repeatAfterMonths != null && normalizeProjectRepeatAfterMonths(initialProps.repeatAfterMonths) === undefined) {
+            set({ error: 'Enter a repeat interval from 1 to 1200 months' });
+            return null;
+        }
         if (initialProps?.calendarReference != null && !isProjectCalendarReference(initialProps.calendarReference)) {
             set({ error: 'Invalid project calendar reference' });
             return null;
@@ -1524,7 +1556,13 @@ export const createProjectCoreActions = ({
         return result;
     },
 
-    updateProject: async (id: string, updates: Partial<Project>) => {
+    updateProject: async (id: string, updates: Partial<Project>, intent?: 'complete') => {
+        const months = updates.repeatAfterMonths;
+        if (months != null && normalizeProjectRepeatAfterMonths(months) === undefined) {
+            return actionFail('Enter a repeat interval from 1 to 1200 months');
+        }
+        let repeated = false;
+        let conflictingRecurrence = false;
         if (updates.calendarReference != null && !isProjectCalendarReference(updates.calendarReference)) {
             const message = 'Invalid project calendar reference';
             set({ error: message });
@@ -1534,6 +1572,17 @@ export const createProjectCoreActions = ({
             const message = 'Project color must be a six-digit hex color';
             set({ error: message });
             return actionFail(message);
+        }
+        const existing = get()._projectsById.get(id);
+        if (intent === 'complete' && existing?.repeatAfterMonths && existing.status === 'archived'
+            && !existing.cancelledAt && !existing.deletedAt) {
+            try {
+                if (get().persistenceFailure) await get().retryPersistence();
+                else await flushPendingSave();
+                return get().persistenceFailure ? actionFail('Could not save project repetition') : actionOk();
+            } catch (error) {
+                return actionFail(error instanceof Error ? error.message : 'Could not save project repetition');
+            }
         }
         const changeAt = Date.now();
         const now = new Date().toISOString();
@@ -1558,6 +1607,11 @@ export const createProjectCoreActions = ({
             }
             const deviceState = ensureDeviceId(state.settings);
 
+            if (months != null && projectLifecycleScopeRows(state, id).tasks.some(task => !task.deletedAt
+                && !['done', 'archived'].includes(task.status) && hasRecurrenceRule(task.recurrence))) {
+                conflictingRecurrence = true;
+                return state;
+            }
             const lifecycle = applyProjectLifecycleTransition(
                 oldProject,
                 updates,
@@ -1566,8 +1620,8 @@ export const createProjectCoreActions = ({
                 now,
                 deviceState.deviceId,
             );
-            const newAllTasks = lifecycle.tasks;
-            const newAllSections = lifecycle.sections;
+            let newAllTasks = lifecycle.tasks;
+            let newAllSections = lifecycle.sections;
             const incomingStatus = lifecycle.projectUpdates.status ?? oldProject.status;
             const statusChanged = incomingStatus !== oldProject.status;
 
@@ -1609,6 +1663,16 @@ export const createProjectCoreActions = ({
                     : project
             );
 
+            if (intent === 'complete' && updates.status === 'archived' && !updates.cancelledAt
+                && !oldProject.deletedAt && oldProject.status !== 'archived') {
+                const next = nextProjectRun(state, oldProject, now, deviceState.deviceId);
+                if (next) {
+                    newAllProjects.push(next.project);
+                    newAllTasks = [...newAllTasks, ...next.tasks];
+                    newAllSections = [...newAllSections, ...next.sections];
+                    repeated = true;
+                }
+            }
             persist(set, debouncedSave, state, {
                 tasks: newAllTasks,
                 projects: newAllProjects,
@@ -1624,6 +1688,19 @@ export const createProjectCoreActions = ({
             };
         });
 
+        if (conflictingRecurrence) return actionFail('PROJECT_REPEAT_TASK_RECURRENCE');
+        if (repeated || Object.prototype.hasOwnProperty.call(updates, 'repeatAfterMonths')) {
+            try {
+                await flushPendingSave();
+            } catch (error) {
+                return actionFail(error instanceof Error ? error.message : 'Could not save project repetition');
+            }
+            if (get().persistenceFailure) return actionFail('Could not save project repetition');
+        }
+        if (repeated) {
+            logInfo('Next project run saved', { scope: 'store', category: 'storage',
+                context: { releaseCheck: 'v1.3.10/repeat-project' } });
+        }
         if (missingProject) {
             const message = 'Project not found';
             logWarn('updateProject skipped: project not found', {

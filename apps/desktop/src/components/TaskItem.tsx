@@ -1154,7 +1154,7 @@ export const TaskItem = memo(function TaskItem({
         const { projectId } = prompt;
 
 
-        void Promise.resolve(useTaskStore.getState().updateProject(projectId, { status: 'archived' }))
+        void Promise.resolve(useTaskStore.getState().updateProject(projectId, { status: 'archived' }, 'complete'))
             .then((result) => {
                 if (result && result.success === false) {
                     throw new Error(result.error || 'Failed to complete project');
@@ -1163,8 +1163,8 @@ export const TaskItem = memo(function TaskItem({
                     closeProjectNextActionPrompt();
                 }
             })
-            .catch((error) => reportError('Failed to complete project from next-action prompt', error));
-    }, [closeProjectNextActionPrompt, getLiveMutableTask, projectNextActionPrompt, task.id]);
+            .catch((error) => reportError('Failed to complete project from next-action prompt', error, { userMessage: t('projects.archiveFailed') }));
+    }, [closeProjectNextActionPrompt, getLiveMutableTask, projectNextActionPrompt, t, task.id]);
     const closeWaitingAssignmentPrompt = useCallback(() => {
         setShowWaitingAssignmentPrompt(false);
     }, []);

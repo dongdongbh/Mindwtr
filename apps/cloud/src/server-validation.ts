@@ -5,6 +5,7 @@ import {
     isTaxonomyCatalog,
     isTaskSectionProjectArchiveReference,
     normalizeCancellationTimestamp,
+    normalizeProjectRepeatAfterMonths,
     normalizeRecurrenceForLoad,
     normalizeRelativeStartOffset,
     normalizeRepeatReminderMinutes,
@@ -213,6 +214,9 @@ function validateTaskPropValues(value: Record<string, unknown>): string | null {
 function validateProjectPropValues(value: Record<string, unknown>): string | null {
     if (value.calendarReference != null && !isProjectCalendarReference(value.calendarReference)) {
         return 'Invalid project calendarReference';
+    }
+    if (value.repeatAfterMonths !== undefined && normalizeProjectRepeatAfterMonths(value.repeatAfterMonths) === undefined) {
+        return 'Invalid project repeatAfterMonths';
     }
     if (value.perSectionFlow != null && typeof value.perSectionFlow !== 'boolean') {
         return 'Invalid project perSectionFlow';

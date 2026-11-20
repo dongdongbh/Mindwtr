@@ -1,7 +1,8 @@
-import { safeFormatDate, safeParseDate, type Project, type ProjectFlowMode } from '@mindwtr/core';
+import { normalizeProjectRepeatAfterMonths, safeFormatDate, safeParseDate, type Project, type ProjectFlowMode, type StoreActionResult } from '@mindwtr/core';
 import { joinDateTime, splitDateTime } from '@mindwtr/core/date-draft';
-import { Calendar, CalendarClock, CalendarRange, FolderOpenDot, ListOrdered, Plus, Settings2, Signal, Tags } from 'lucide-react';
+import { Calendar, CalendarClock, CalendarRange, FolderOpenDot, ListOrdered, Plus, Repeat, Settings2, Signal, Tags } from 'lucide-react';
 import { useNativeDateInputLocale } from '../../../hooks/use-native-date-input-locale';
+import { isImeComposing } from '../../../lib/ime';
 import { TokenAutocompleteInput } from '../../Task/TokenAutocompleteInput';
 import { DateField } from '../../ui/DateField';
 import { TimeInput } from '../../ui/TimeInput';
@@ -34,6 +35,7 @@ type ProjectDetailsFieldsProps = {
     onStartDateChange: (value: string) => void;
     dueDateValue: string;
     onDueDateChange: (value: string) => void;
+    onRepeatAfterMonthsChange: (value: number | undefined) => Promise<StoreActionResult> | undefined;
     reviewAtValue: string;
     onReviewAtChange: (value: string) => void;
     readOnly?: boolean;
@@ -64,6 +66,7 @@ export function ProjectDetailsFields({
     onStartDateChange,
     dueDateValue,
     onDueDateChange,
+    onRepeatAfterMonthsChange,
     reviewAtValue,
     onReviewAtChange,
     readOnly = false,
@@ -72,10 +75,14 @@ export function ProjectDetailsFields({
     const [colorSaving, setColorSaving] = useState(false);
     const [colorError, setColorError] = useState(false);
     const [colorIntent, setColorIntent] = useState<string | null>(null);
-    const colorGeneration = useRef(0);
+    const [repeatSaving, setRepeatSaving] = useState(false);
+    const [repeatError, setRepeatError] = useState<string | null>(null);
+    const projectGeneration = useRef(0);
     useEffect(() => {
-        colorGeneration.current += 1;
+        projectGeneration.current += 1;
         setColorSaving(false); setColorError(false); setColorIntent(null);
+        setRepeatSaving(false);
+        setRepeatError(null);
     }, [project.id]);
     const resolveText = (key: string, fallback: string) => {
         const value = t(key);
@@ -86,15 +93,38 @@ export function ProjectDetailsFields({
     const { nativeDateInputLocale, dateFormatSetting } = useNativeDateInputLocale();
     const { date: reviewDate, time: reviewTime } = splitDateTime(reviewAtValue);
     const saveColor = async (value: string | null) => {
-        const generation = colorGeneration.current;
+        const generation = projectGeneration.current;
         setColorIntent(value);
         setColorSaving(true);
         setColorError(false);
         try {
             const result = await onColorChange?.(value);
             if (result && typeof result === 'object' && 'success' in result && result.success === false) throw new Error('Save refused');
-        } catch { if (colorGeneration.current === generation) setColorError(true); }
-        finally { if (colorGeneration.current === generation) setColorSaving(false); }
+        } catch { if (projectGeneration.current === generation) setColorError(true); }
+        finally { if (projectGeneration.current === generation) setColorSaving(false); }
+    };
+    const saveRepeat = async (raw: string) => {
+        if (readOnly || repeatSaving) return;
+        const text = raw.trim();
+        const months = /^\d+$/.test(text) ? normalizeProjectRepeatAfterMonths(Number(text)) : undefined;
+        if (text && months === undefined) {
+            setRepeatError('projects.repeatInvalidInterval');
+            return;
+        }
+        setRepeatError(null);
+        if (months === project.repeatAfterMonths) return;
+        const generation = projectGeneration.current;
+        setRepeatSaving(true);
+        try {
+            const result = await onRepeatAfterMonthsChange(months);
+            if (projectGeneration.current === generation && result?.success === false) {
+                setRepeatError(result.error === 'PROJECT_REPEAT_TASK_RECURRENCE' ? 'projects.repeatTaskConflict' : 'projects.repeatSaveFailed');
+            }
+        } catch {
+            if (projectGeneration.current === generation) setRepeatError('projects.repeatSaveFailed');
+        } finally {
+            if (projectGeneration.current === generation) setRepeatSaving(false);
+        }
     };
 
     return (
@@ -291,6 +321,33 @@ export function ProjectDetailsFields({
                         onDateChange={onDueDateChange}
                         onClear={() => onDueDateChange('')}
                     />
+                </div>
+
+                <div className="min-w-0 space-y-1">
+                    <label htmlFor="project-repeat-after-months" className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider flex items-center gap-1.5">
+                        <Repeat className="h-3.5 w-3.5 shrink-0" />
+                        {t('recurrence.afterCompletion')}
+                    </label>
+                    <div className="flex items-center gap-2">
+                        <input
+                            key={`${project.id}-repeat-${project.repeatAfterMonths ?? 'off'}`}
+                            id="project-repeat-after-months"
+                            data-testid="project-repeat-after-months"
+                            inputMode="numeric"
+                            className="h-8 w-16 rounded-md border border-border bg-background px-2 text-sm text-foreground"
+                            placeholder={t('settings.off')}
+                            defaultValue={project.repeatAfterMonths ?? ''}
+                            disabled={repeatSaving}
+                            aria-invalid={repeatError !== null}
+                            aria-describedby={repeatError ? 'project-repeat-error' : 'project-repeat-unit'}
+                            onBlur={(event) => { void saveRepeat(event.currentTarget.value); }}
+                            onKeyDown={(event) => {
+                                if (event.key === 'Enter' && !isImeComposing(event)) event.currentTarget.blur();
+                            }}
+                        />
+                        <span id="project-repeat-unit" className="text-xs text-muted-foreground">{t('recurrence.monthUnit')}</span>
+                    </div>
+                    {repeatError && <p id="project-repeat-error" role="alert" className="text-xs text-destructive">{t(repeatError)}</p>}
                 </div>
 
                 <div className="min-w-0 space-y-1">

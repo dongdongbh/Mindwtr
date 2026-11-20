@@ -207,6 +207,7 @@ static const MWFieldSpec kProjectFields[] = {
     {"sequentialScope", "sequentialScope", MWFieldKindString},
     {"perSectionFlow", "perSectionFlow", MWFieldKindBool},
     {"calendarReference", "calendarReference", MWFieldKindJsonString},
+    {"repeatAfterMonths", "repeatAfterMonths", MWFieldKindInt},
     {"taskSortBy",   "taskSortBy",   MWFieldKindString},
     {"isFocused",    "isFocused",    MWFieldKindBool},
     {"supportNotes", "supportNotes", MWFieldKindString},

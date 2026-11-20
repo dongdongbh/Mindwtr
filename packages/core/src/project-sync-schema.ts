@@ -63,6 +63,8 @@ export const normalizeProjectStatus = (value: unknown): Project['status'] => {
     return 'active';
 };
 
+export const normalizeProjectRepeatAfterMonths = (value: unknown): number | undefined =>
+    typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 1200 ? value : undefined;
 
 const projectColumnValues = (project: Project): Record<string, unknown> => ({
     id: project.id,
@@ -95,6 +97,7 @@ const projectColumnValues = (project: Project): Record<string, unknown> => ({
     purgedAt: project.purgedAt ?? null,
     viewSectionIds: toJson(project.viewSectionIds),
     calendarReference: toJson(project.calendarReference),
+    repeatAfterMonths: normalizeProjectRepeatAfterMonths(project.repeatAfterMonths) ?? null,
 });
 
 export const projectToSqliteRow = (project: Project): unknown[] =>
@@ -151,5 +154,6 @@ export const projectFromSqliteRow = (row: Record<string, unknown>): Project => {
         viewSectionIds: fromJson<unknown>(row.viewSectionIds, undefined) as Project['viewSectionIds'],
         calendarReference: row.calendarReference === 'null' ? null
             : normalizeProjectCalendarReference(fromJson<unknown>(row.calendarReference, undefined)),
+        repeatAfterMonths: normalizeProjectRepeatAfterMonths(row.repeatAfterMonths),
     };
 };

@@ -186,7 +186,7 @@ export function WeeklyReviewGuideModal({ onClose }: WeeklyReviewGuideModalProps)
             const current = useTaskStore.getState();
             if (!current._allProjects.some((item) => item.id === projectId && !item.deletedAt && item.status === 'active')) return;
             setKeepProjectsStep(true);
-            const result = await current.updateProject(projectId, { status: 'archived' });
+            const result = await current.updateProject(projectId, { status: 'archived' }, 'complete');
             if (result && !result.success) throw new Error(result.error || 'Failed to complete project');
         } catch (error) {
             reportError('Failed to complete project during weekly review', error, { userMessage: t('projects.archiveFailed') });

@@ -4923,6 +4923,94 @@ describe('TaskStore', () => {
         expect(projectTasks.map(t => t.status)).toEqual(['next', 'waiting']);
     });
 
+    it('starts a fresh sequential run four calendar months after explicit completion and preserves it on retry', async () => {
+        vi.setSystemTime(new Date(2026, 9, 31, 12));
+        const { addProject, addSection, addTask, updateProject } = useTaskStore.getState();
+        const project = (await addProject('Inspection', '#123456'))!;
+        const section = (await addSection(project.id, 'Prepare'))!;
+        await addTask('Visit', { projectId: project.id, sectionId: section.id, status: 'done',
+            timeSpentMinutes: 10, dueDate: '2026-09-01', checklist: [{ id: 'before', title: 'Measure', isCompleted: true }] });
+        await addTask('File', { projectId: project.id, sectionId: section.id, status: 'next' });
+        await updateProject(project.id, { isSequential: true, repeatAfterMonths: 4 });
+        const before = useTaskStore.getState();
+        await updateProject(project.id, { status: 'archived' });
+        expect(useTaskStore.getState()._allProjects).toHaveLength(1);
+        useTaskStore.setState(before);
+        await updateProject(project.id, { status: 'archived' }, 'complete');
+        const after = useTaskStore.getState();
+        expect(after._allProjects).toHaveLength(2);
+        const next = after._allProjects.find(row => row.id !== project.id)!;
+        expect(next).toMatchObject({ title: 'Inspection', startDate: '2027-02-28', status: 'active', isSequential: true, repeatAfterMonths: 4 });
+        const copyTasks = after._allTasks.filter(task => task.projectId === next.id);
+        expect(copyTasks.map(task => task.title)).toEqual(['Visit', 'File']);
+        expect(copyTasks[0]).toMatchObject({ status: 'next', startTime: next.startDate,
+            sectionId: after._allSections.find(row => row.projectId === next.id)!.id });
+        expect(copyTasks[0].checklist?.[0].isCompleted).toBe(false);
+        expect(copyTasks[0].timeSpentMinutes).toBeUndefined();
+        expect(copyTasks[0].dueDate).toBeUndefined();
+        expect(after._allTasks.find(row => row.projectId === project.id && row.title === 'Visit')?.timeSpentMinutes).toBe(10);
+        await updateProject(next.id, { title: 'Edited next run' });
+        await updateProject(project.id, { status: 'active' });
+        await updateProject(project.id, { status: 'archived' }, 'complete');
+        expect(useTaskStore.getState()._allProjects.map(row => row.title)).toEqual(['Inspection', 'Edited next run']);
+        useTaskStore.setState({ ...before, settings: { ...before.settings, deviceId: 'other-device' },
+            _allTasks: [...before._allTasks].reverse() });
+        await updateProject(project.id, { status: 'archived' }, 'complete');
+        const secondDevice = useTaskStore.getState();
+        expect(secondDevice._allTasks.filter(task => task.projectId === next.id).map(task => task.id))
+            .toEqual(copyTasks.map(task => task.id));
+        const merged = mergeAppData(mockAppData(after._allTasks, after._allProjects, after._allSections),
+            mockAppData(secondDevice._allTasks, secondDevice._allProjects, secondDevice._allSections), { nowIso: next.updatedAt });
+        expect(merged.projects.filter(row => row.id !== project.id)).toHaveLength(1);
+        expect(merged.projects.find(row => row.id === next.id)?.repeatAfterMonths).toBe(4);
+        expect(merged.tasks.filter(row => row.projectId === next.id)).toHaveLength(2);
+        expect(merged.sections?.filter(row => row.projectId === next.id)).toHaveLength(1);
+    });
+
+    it('keeps remote files reachable and acknowledges a repeated completion only after a durable save', async () => {
+        const { addProject, addTask, updateProject } = useTaskStore.getState();
+        const file = { id: 'remote-file', title: 'Instructions', kind: 'file' as const, uri: '',
+            cloudKey: 'attachments/instructions', fileHash: 'a'.repeat(64),
+            createdAt: '2026-07-01T12:00:00Z', updatedAt: '2026-07-01T12:00:00Z' };
+        const project = (await addProject('Maintenance', '#123456', { repeatAfterMonths: 4, attachments: [file] }))!;
+        await addTask('Read', { projectId: project.id, attachments: [file] });
+        await flushPendingSave();
+        vi.mocked(mockStorage.saveData).mockRejectedValue(new Error('disk full'));
+        const complete = async () => {
+            const result = updateProject(project.id, { status: 'archived' }, 'complete');
+            await vi.advanceTimersByTimeAsync(4000);
+            return result;
+        };
+        expect((await complete()).success).toBe(false);
+        expect((await complete()).success).toBe(false);
+        vi.mocked(mockStorage.saveData).mockResolvedValue(undefined);
+        expect((await complete()).success).toBe(true);
+        const next = useTaskStore.getState()._allProjects.filter(row => row.id !== project.id);
+        expect(next).toHaveLength(1);
+        const step = useTaskStore.getState()._allTasks.find(row => row.projectId === next[0].id)!;
+        for (const owner of [next[0], step]) {
+            expect(owner.attachments?.[0]).toMatchObject({ cloudKey: file.cloudKey, fileHash: file.fileHash });
+            expect(owner.attachments?.[0].id).not.toBe(file.id);
+        }
+    });
+
+    it('rejects invalid project intervals and active independently recurring steps', async () => {
+        const { addProject, addTask, updateProject } = useTaskStore.getState();
+        const project = (await addProject('Inspection', '#123456'))!;
+        expect((await updateProject(project.id, { repeatAfterMonths: -1 })).success).toBe(false);
+        await addTask('Visit', { status: 'next', projectId: project.id, recurrence: 'weekly' });
+        expect((await updateProject(project.id, { repeatAfterMonths: 4 })).success).toBe(false);
+        expect(useTaskStore.getState().projects[0].repeatAfterMonths).toBeUndefined();
+        const task = useTaskStore.getState()._allTasks[0];
+        const { updateTask, cancelProject } = useTaskStore.getState();
+        await updateTask(task.id, { recurrence: undefined });
+        expect((await updateProject(project.id, { repeatAfterMonths: 4 })).success).toBe(true);
+        expect((await addTask('Other', { projectId: project.id, recurrence: 'daily' })).success).toBe(false);
+        expect((await updateTask(task.id, { recurrence: 'daily' })).success).toBe(false);
+        await cancelProject(project.id);
+        expect(useTaskStore.getState()._allProjects).toHaveLength(1);
+    });
+
     it('duplicates projects as fresh active work with reset checklists', async () => {
         const { addProject, addSection, addTask, duplicateProject } = useTaskStore.getState();
         const project = await addProject('Launch Template', '#00ff00');

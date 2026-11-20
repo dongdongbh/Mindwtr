@@ -8,6 +8,10 @@ import {
     PROJECT_SYNC_SCHEMA_VERSION,
 } from './project-sync-schema';
 import cloudKitProductionSchema from './cloudkit-production-schema.json';
+import { mergeAppDataWithStats } from './sync';
+import { sanitizeAppDataForRemote } from './sync-helpers';
+import { normalizeProjectForContentComparison } from './sync-signatures';
+import type { AppData, Project } from './types';
 
 
 const sorted = (values: Iterable<string>): string[] => Array.from(values).sort();
@@ -51,5 +55,22 @@ describe('Project sync schema contract', () => {
         });
         expect(cloudKitProductionSchema.records.MindwtrProject.deployed).toContain('cancelledAt');
         expect(cloudKitProductionSchema.records.MindwtrProject.pendingProduction).not.toContain('cancelledAt');
+    });
+
+    it('syncs an optional repeat interval and applies newer removal', () => {
+        const oldProject: Project = { id: 'project', title: 'Project', status: 'active', color: '#6b7280',
+            order: 0, tagIds: [], createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z', rev: 1 };
+        const wrap = (project: Project): AppData => ({ tasks: [], projects: [project], sections: [], areas: [], people: [], settings: {} });
+        const updated = { ...oldProject, rev: 2, repeatAfterMonths: 6 };
+        expect(normalizeProjectForContentComparison(updated)).not.toEqual(normalizeProjectForContentComparison(oldProject));
+        const local = wrap(oldProject);
+        const incoming = sanitizeAppDataForRemote(wrap(updated));
+        expect(JSON.parse(JSON.stringify(incoming)).projects[0].repeatAfterMonths).toBe(6);
+        const merged = mergeAppDataWithStats(local, incoming).data;
+        expect(merged.projects[0].repeatAfterMonths).toBe(6);
+        expect(mergeAppDataWithStats(merged, incoming).data).toEqual(merged);
+
+        const cleared = wrap({ ...oldProject, rev: 3 });
+        expect(mergeAppDataWithStats(merged, cleared).data.projects[0].repeatAfterMonths).toBeUndefined();
     });
 });
