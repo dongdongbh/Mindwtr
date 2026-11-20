@@ -17,7 +17,8 @@ import {
     type Language,
 } from '@mindwtr/core';
 import { LanguageProvider } from './contexts/language-context';
-import { isTauriRuntime } from './lib/runtime';
+import { isTauriRuntime, isWindowsRuntime } from './lib/runtime';
+import { getSystemShortDatePattern, loadWindowsRegionalDate } from './lib/system-locale';
 import { invokeNative, preloadNativeTransport } from './lib/tauri-invoke';
 import { reportError } from './lib/report-error';
 import { webStorage } from './lib/storage-adapter-web';
@@ -277,6 +278,13 @@ async function bootstrap() {
     }
 
 
+    if (isTauriRuntime() && isWindowsRuntime()) {
+        await loadWindowsRegionalDate();
+        if (!isQuickAddWindow) void logInfo('Windows regional date settings loaded', {
+            scope: 'settings', force: true,
+            extra: { releaseCheck: 'v1.3.10/windows-regional-date', outcome: getSystemShortDatePattern() ? 'native' : 'fallback' },
+        });
+    }
     if (!isQuickAddWindow) await loadAppLockState();
     const RootApp = isQuickAddWindow
         ? (await import('./QuickAddWindowApp.tsx')).QuickAddWindowApp

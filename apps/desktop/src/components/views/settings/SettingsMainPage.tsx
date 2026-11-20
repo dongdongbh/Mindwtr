@@ -15,6 +15,7 @@ import { useUiStore } from '../../../store/ui-store';
 import { HIDEABLE_SIDEBAR_VIEW_IDS, type HideableSidebarViewId } from '../../../lib/sidebar-views';
 import { canListInstalledFonts, loadInstalledFontFamilies } from '../../../lib/font-family';
 import { AutocompleteTextInput } from '../../ui/AutocompleteTextInput';
+import { systemShortDateExample } from '../../../lib/system-locale';
 
 const FLATPAK_QUICK_ADD_COMMAND = 'flatpak run tech.dongdongbh.mindwtr --quick-add';
 
@@ -435,7 +436,7 @@ export function SettingsMainPage({
                         {
 
                                                                  }
-                        <option value="system">{`${t.dateFormatSystem} (${new Date().toLocaleDateString()})`}</option>
+                        <option value="system">{`${t.dateFormatSystem} (${systemShortDateExample(new Date())})`}</option>
                         <option value="dmy">{t.dateFormatDmy}</option>
                         <option value="mdy">{t.dateFormatMdy}</option>
                         <option value="ymd">{t.dateFormatYmd}</option>

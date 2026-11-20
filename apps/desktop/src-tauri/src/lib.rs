@@ -2210,6 +2210,7 @@ pub fn run() {
             get_log_file_path,
             consume_quick_add_pending,
             get_system_theme_preference,
+            ui::get_windows_regional_date,
             set_global_quick_add_shortcut,
             hide_quick_add_window,
             get_install_source,

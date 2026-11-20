@@ -267,6 +267,29 @@ fn read_kde_color_scheme_preference() -> Option<&'static str> {
     None
 }
 
+#[tauri::command]
+pub(crate) fn get_windows_regional_date() -> Option<(String, String)> {
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::Globalization::{GetLocaleInfoEx, LOCALE_SNAME, LOCALE_SSHORTDATE};
+        let read = |field| {
+            let mut buffer = [0u16; 128];
+            let length = unsafe {
+                GetLocaleInfoEx(
+                    std::ptr::null(),
+                    field,
+                    buffer.as_mut_ptr(),
+                    buffer.len() as i32,
+                )
+            };
+            (length > 1).then(|| String::from_utf16_lossy(&buffer[..length as usize - 1]))
+        };
+        Some((read(LOCALE_SNAME)?, read(LOCALE_SSHORTDATE)?))
+    }
+    #[cfg(not(windows))]
+    None
+}
+
 #[tauri::command(async)]
 pub(crate) fn get_system_theme_preference() -> Option<String> {
     if let Some(preference) = read_portal_color_scheme() {

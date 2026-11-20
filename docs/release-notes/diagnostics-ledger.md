@@ -60,6 +60,8 @@ The v1.3.6 task-editor correction is confirmed by the visible disappearance of t
 
 ## v1.3.10 (add before tagging, trim in the release after)
 
+- **`v1.3.10/windows-regional-date`** — `apps/desktop/src/main.tsx`. After restarting Mindwtr on Windows, `outcome=native` confirms the current user's regional locale and short-date pattern were read. Check the System default date example against Windows. (#1594)
+
 - **`v1.3.10/project-repeat-interval-migration`** — `apps/desktop/src-tauri/src/storage.rs`. Opening a desktop database with the former monthly repeat column records this marker once the migration commits.
 
 - **`v1.3.10/repeat-project`** — `packages/core/src/store-projects/project-actions.ts`. Completing a repeating project saves its next run. Look for `Next project run saved` after completion.

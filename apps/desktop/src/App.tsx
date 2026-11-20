@@ -77,7 +77,7 @@ import { migratePortableAttachments } from './lib/portable-migration';
 import { logDesktopStartupContext } from './lib/startup-context';
 import * as LocalDataWatcher from './lib/local-data-watcher';
 import { invokeNative } from './lib/tauri-invoke';
-import { getSystemDefaultLocale } from './lib/system-locale';
+import { getSystemDefaultLocale, getSystemShortDatePattern } from './lib/system-locale';
 import { getInstallSourceOrFallback, isFlatpakRuntime, isLinuxRuntime, isTauriRuntime } from './lib/runtime';
 import { useDesktopShellSync } from './lib/desktop-shell-sync';
 import { useAppLockStore } from './lib/app-lock';
@@ -716,6 +716,7 @@ function App() {
             dateFormat: settingsDateFormat,
             calendarSystem: settingsCalendarSystem,
             timeFormat: settingsTimeFormat,
+            systemDateFormat: getSystemShortDatePattern(),
             systemLocale,
         });
     }, [language, settingsCalendarSystem, settingsDateFormat, settingsLanguage, settingsTimeFormat]);

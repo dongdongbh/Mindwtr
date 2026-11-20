@@ -12,6 +12,7 @@ const SANDBOX_NATIVE_COMMAND_ALLOWLIST = new Set([
     'append_log_line',
     'get_app_lock_state',
     'get_system_theme_preference',
+    'get_windows_regional_date',
     'notify_ui_ready',
     'quit_app',
 ]);

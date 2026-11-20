@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { getSystemDefaultLocale } from './system-locale';
+import { invokeNative } from './tauri-invoke';
+import { getSystemDefaultLocale, getSystemShortDatePattern, loadWindowsRegionalDate, systemShortDateExample } from './system-locale';
+
+vi.mock('./tauri-invoke', () => ({ invokeNative: vi.fn() }));
 
 const originalLanguage = navigator.language;
 const originalLanguages = navigator.languages;
@@ -14,6 +17,20 @@ describe('getSystemDefaultLocale', () => {
     afterEach(() => {
         vi.restoreAllMocks();
         setNavigatorLocale(originalLanguage, originalLanguages ?? [originalLanguage]);
+    });
+
+    it('uses the Windows short date even when the webview reports American English', async () => {
+        vi.mocked(invokeNative).mockResolvedValueOnce(['nl-NL', 'dd-MM-yyyy']);
+        await loadWindowsRegionalDate();
+        expect(invokeNative).toHaveBeenCalledWith('get_windows_regional_date');
+        expect(getSystemDefaultLocale()).toBe('nl-NL');
+        expect(getSystemShortDatePattern()).toBe('dd-MM-yyyy');
+        const date = new Date(2026, 10, 20);
+        expect(systemShortDateExample(date)).toBe('20-11-2026');
+        vi.mocked(invokeNative).mockRejectedValueOnce(new Error('unavailable'));
+        await loadWindowsRegionalDate();
+        expect(getSystemShortDatePattern()).toBeUndefined();
+        expect(systemShortDateExample(date)).toBe(date.toLocaleDateString());
     });
 
     it('uses the regional locale when the display language differs', () => {
