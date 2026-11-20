@@ -83,9 +83,11 @@
     "archivedAt",
     "colorOverride",
     "perSectionFlow",
-    "calendarReference"
+    "calendarReference",
+    "repeatAfterCount",
+    "repeatAfterUnit"
    ],
-   "pendingProduction": ["repeatAfterCount", "repeatAfterUnit"]
+   "pendingProduction": []
   },
   "MindwtrSection": {
    "deployed": [
