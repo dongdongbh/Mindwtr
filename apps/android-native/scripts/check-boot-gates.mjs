@@ -666,7 +666,7 @@ assert.match(hostEntry, /createNativeSync\(nativeSyncBindings\)/);
     assert(rawSql.length >= 6 && rawSql.every((line) => /withConnection\(|withHostConnection\(/.test(line)), `host SQL outside the adapter lock: ${rawSql.filter((line) => !/withConnection\(|withHostConnection\(/.test(line)).join(' | ')}`);
     assert.match(hostEntry, /const withHostConnection = <T,>\(work: \(\) => Promise<T>\): Promise<T> => \(bootAdapter \? bootAdapter\.withConnection\(work, \{ write: true \}\) : work\(\)\);/);
     const coreAdapter = readFileSync(resolve(app, '../../packages/core/src/sqlite-adapter.ts'), 'utf8');
-    assert.match(coreAdapter, /await this\.beforeCommit\(\{ data \}\);\s*saveStep = 'commit';\s*const commitStartedAt = Date\.now\(\);\s*await runTimed\('COMMIT'\);/);
+    assert.match(coreAdapter, /await this\.beforeCommit\(\{ data \}\);\s*if \(options\?\.beforeCommit\) await options\.beforeCommit\(\);\s*saveStep = 'commit';\s*const commitStartedAt = Date\.now\(\);\s*await runTimed\('COMMIT'\);/);
     assert.match(coreAdapter, /await this\.beforeCommit\(\{ task \}\);\s*await this\.client\.run\('COMMIT'\);/);
     const coreReceipts = readFileSync(resolve(app, '../../packages/core/src/native-request-receipts.ts'), 'utf8');
     assert.match(coreReceipts, /CREATE TABLE IF NOT EXISTS native_request_receipts \(/);

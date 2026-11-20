@@ -40,6 +40,7 @@ vi.mock('@/hooks/root-layout/use-root-layout-pending-captures', () => ({ useRoot
 vi.mock('@/hooks/root-layout/use-root-layout-pomodoro', () => ({ useRootLayoutPomodoro: vi.fn() }));
 vi.mock('@/hooks/root-layout/use-root-layout-startup', () => ({ useRootLayoutStartup: vi.fn() }));
 vi.mock('@/hooks/root-layout/use-root-layout-sync-effects', () => ({ useRootLayoutSyncEffects: vi.fn() }));
+vi.mock('@/hooks/root-layout/use-root-layout-siri-reminders', () => ({ useRootLayoutSiriReminders: vi.fn() }));
 vi.mock('@/hooks/root-layout/use-root-layout-watch', () => ({ useRootLayoutWatch: vi.fn() }));
 
 vi.mock('@/components/mobile-app-lock-gate', () => ({

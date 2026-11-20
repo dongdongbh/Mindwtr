@@ -21,11 +21,11 @@ const ALLOWED: Record<string, Record<string, number>> = {
 
         'SqliteAdapter.acquireFtsLock': 2, 'SqliteAdapter.releaseFtsLock': 1, 'SqliteAdapter.refreshFtsLock': 1,
         'SqliteAdapter.ensureSchemaInternal': 6, 'SqliteAdapter.ensureFtsSchema': 5, 'SqliteAdapter.ensureFtsTriggers': 7,
-        'SqliteAdapter.ensureTaskColumns': 2, 'SqliteAdapter.ensureProjectColumns': 5, 'SqliteAdapter.ensureSectionColumns': 3,
+        'SqliteAdapter.ensureTaskColumns': 2, 'SqliteAdapter.ensureProjectColumns': 10, 'SqliteAdapter.ensureSectionColumns': 3,
         'SqliteAdapter.ensureAreaColumns': 2, 'SqliteAdapter.ensurePeopleTable': 3, 'SqliteAdapter.ensureSavedFilterTable': 4,
         'SqliteAdapter.ensureFtsPopulated': 7,
 
-        'SqliteAdapter.saveTaskNow': 4, 'SqliteAdapter.saveDataNow': 4,
+        'SqliteAdapter.saveTaskNow': 4, 'SqliteAdapter.saveDataNow': 4, 'SqliteAdapter.saveSiriReminder': 3,
         'SqliteAdapter.upsertCalendarSyncEntryNow': 1, 'SqliteAdapter.deleteCalendarSyncEntryNow': 1,
     },
     'packages/core/src/native-request-receipts.ts': {
