@@ -1,6 +1,7 @@
 import React from 'react';
 import {
     areDraftAttachmentsDirty,
+    applyTaskDraftPatch,
     clearInvalidTaskDraftSection,
     flushPendingSave,
     collectFocusEligibilityTasks,
@@ -49,6 +50,22 @@ export type TaskEditActivityInputRecovery = {
 };
 const NOOP_ATTACHMENT_DRAFT_SETTLEMENT = () => {};
 
+type PendingPreviewCompletion = {
+    taskId: string;
+    attachments?: readonly Attachment[];
+    backdated?: boolean;
+};
+
+const logPreviewCompletionSaved = (backdated?: boolean) => {
+    void logInfo('Mobile Preview task completion saved', {
+        scope: 'task-edit', extra: { releaseCheck: 'v1.3.9/preview-mark-done', platform: 'rn', outcome: 'saved' },
+    });
+    if (backdated) void logInfo('Preview task saved with selected completion time', {
+        scope: 'task-edit', force: true,
+        extra: { releaseCheck: 'v1.3.10/preview-backdated-completion', platform: 'rn', outcome: 'saved' },
+    });
+};
+
 type TaskEditActivitySession = {
     activeInput: TaskEditActivityInputRecovery | null;
     contextInputDraft: string;
@@ -63,7 +80,7 @@ type TaskEditActivitySession = {
     titleDraft: string;
 
     baseTask?: Task;
-    pendingCompletion?: { taskId: string; attachments?: readonly Attachment[] };
+    pendingCompletion?: PendingPreviewCompletion;
 };
 
 const isTaskEditActivityInputRecovery = (value: unknown): value is TaskEditActivityInputRecovery => {
@@ -116,12 +133,14 @@ export type SetTaskEditDraftField = <K extends TaskDraftField>(
 
 export type TaskEditDraftLifecycle = {
     cancel: () => Promise<boolean>;
-    complete: () => Promise<boolean>;
+    complete: (selection?: PreviewCompletionTime) => Promise<boolean>;
     convertToReference: () => Promise<boolean>;
     discard: () => void;
     hasPendingChanges: () => boolean;
     save: () => Promise<boolean>;
 };
+
+type PreviewCompletionTime = Pick<TaskDraft, 'completedAt'> & Partial<Pick<TaskDraft, 'timeSpentMinutes'>>;
 
 export function resolveInitialTaskEditTab(target?: TaskEditTab, currentTask?: Task | null): TaskEditTab {
     if (target) return target;
@@ -174,7 +193,7 @@ export function useTaskEditState({
     const editorSessionRef = React.useRef(0);
     const submissionRef = React.useRef<'save' | 'cancel' | 'complete' | null>(null);
     const [submissionPending, setSubmissionPending] = React.useState(false);
-    const pendingCompletionRef = React.useRef<{ taskId: string; attachments?: readonly Attachment[] } | null>(null);
+    const pendingCompletionRef = React.useRef<PendingPreviewCompletion | null>(null);
     const [completionRetryPending, setCompletionRetryPending] = React.useState(false);
     const [completionError, setCompletionError] = React.useState<string | null>(null);
     const pendingCancellationPatchRef = React.useRef<Partial<Task> | null>(null);
@@ -430,7 +449,7 @@ export function useTaskEditState({
         return false;
     }, [onSave, onSaveError]);
 
-    const saveDraftImpl = React.useCallback(async (mode: 'save' | 'cancel' | 'complete' = 'save'): Promise<boolean> => {
+    const saveDraftImpl = React.useCallback(async (mode: 'save' | 'cancel' | 'complete', selection?: PreviewCompletionTime): Promise<boolean> => {
         const session = editorSessionRef.current;
         const ownsSession = () => editorSessionRef.current === session;
         const pendingCompletion = pendingCompletionRef.current;
@@ -454,7 +473,7 @@ export function useTaskEditState({
             checklistDraftRef.current = '';
             clearTaskEditActivitySession();
             settleCurrentAttachmentDraft(pendingCompletion.attachments);
-            void logInfo('Mobile Preview task completion saved', { scope: 'task-edit', extra: { releaseCheck: 'v1.3.9/preview-mark-done', platform: 'rn', outcome: 'saved' } });
+            logPreviewCompletionSaved(pendingCompletion.backdated);
             onClose();
             return true;
         }
@@ -501,7 +520,7 @@ export function useTaskEditState({
         }
 
         if (mode === 'complete') {
-            saveDraftState = { ...saveDraftState, draft: setTaskDraftField(saveDraftState.draft, 'status', 'done') };
+            saveDraftState = { ...saveDraftState, draft: applyTaskDraftPatch(saveDraftState.draft, { status: 'done', ...selection }) };
         }
 
         let updates: Partial<Task> | null = buildTaskEditUpdatePatch(saveDraftState, currentTask, {
@@ -603,7 +622,7 @@ export function useTaskEditState({
             if (mode === 'complete') {
                 taskEditDraftRef.current = saveDraftState;
                 setTaskEditDraftState(saveDraftState);
-                pendingCompletionRef.current = { taskId: currentTask.id, attachments: savedAttachments };
+                pendingCompletionRef.current = { taskId: currentTask.id, attachments: savedAttachments, backdated: Boolean(selection) };
                 setCompletionRetryPending(true);
             }
             if (mode === 'cancel') {
@@ -637,7 +656,7 @@ export function useTaskEditState({
             });
         }
         if (mode === 'complete') {
-            void logInfo('Mobile Preview task completion saved', { scope: 'task-edit', extra: { releaseCheck: 'v1.3.9/preview-mark-done', platform: 'rn', outcome: 'saved' } });
+            logPreviewCompletionSaved(Boolean(selection));
         }
         if (mode === 'cancel') {
             void logInfo('Mobile task cancellation draft saved', {
@@ -667,14 +686,14 @@ export function useTaskEditState({
         writePatch,
     ]);
 
-    const saveDraft = React.useCallback(async (mode: 'save' | 'cancel' | 'complete' = 'save') => {
+    const saveDraft = React.useCallback(async (mode: 'save' | 'cancel' | 'complete' = 'save', selection?: PreviewCompletionTime) => {
         if (submissionRef.current) return false;
         const session = editorSessionRef.current;
         submissionRef.current = mode;
         pendingSavesRef.current += 1;
         setSubmissionPending(true);
         try {
-            const result = await saveDraftImpl(mode);
+            const result = await saveDraftImpl(mode, selection);
             if (!result && mode === 'complete' && editorSessionRef.current === session) setCompletionError((current) => current || translate('task.updateFailed'));
             return result;
         } finally {
@@ -684,7 +703,7 @@ export function useTaskEditState({
         }
     }, [saveDraftImpl, translate]);
     const cancelDraft = React.useCallback(() => saveDraft('cancel'), [saveDraft]);
-    const completeDraft = React.useCallback(() => saveDraft('complete'), [saveDraft]);
+    const completeDraft = React.useCallback((selection?: PreviewCompletionTime) => saveDraft('complete', selection), [saveDraft]);
 
     const discardDraft = React.useCallback(() => {
         if (submissionRef.current || pendingCompletionRef.current) return;

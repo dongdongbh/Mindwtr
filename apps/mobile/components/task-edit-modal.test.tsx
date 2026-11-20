@@ -1220,6 +1220,30 @@ describe('TaskEditModal', () => {
     }));
   });
 
+  it('completes from the preview button only after confirming a chosen time', async () => {
+    const completedAt = '2026-07-14T18:30:00.000Z';
+    const onSave = vi.fn();
+    const onClose = vi.fn();
+    const task: Task = {
+      id: 't1', title: 'Test task', status: 'next', tags: [], contexts: [],
+      createdAt: '2025-01-01T00:00:00.000Z', updatedAt: '2025-01-01T00:00:00.000Z',
+    };
+    let tree!: renderer.ReactTestRenderer;
+    act(() => { tree = renderer.create(<TaskEditModal visible task={task} onSave={onSave} onClose={onClose} />); });
+    const choose = () => tree.root.find((node) => typeof node.type === 'string' && typeof node.props.onChooseCompletionTime === 'function')
+      .props.onChooseCompletionTime();
+    const picker = () => tree.root.findByType('CompletedAtPicker' as any);
+    act(choose);
+    act(() => picker().props.onCancel());
+    expect(onSave).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+    act(choose);
+    await act(async () => picker().props.onConfirm(completedAt));
+    expect(onSave).toHaveBeenCalledExactlyOnceWith('t1', expect.objectContaining({ status: 'done', completedAt }));
+    expect(onClose).toHaveBeenCalledOnce();
+    act(() => tree.unmount());
+  });
+
   describe('pending preview checklist item', () => {
     const checklistTask = {
       id: 't1',

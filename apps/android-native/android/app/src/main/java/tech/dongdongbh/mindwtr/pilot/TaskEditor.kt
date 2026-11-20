@@ -330,10 +330,10 @@ data class TaskEditor(
     } ?: this
 
 
-    fun previewCompletionQueued(): TaskEditor {
+    fun previewCompletionQueued(backdated: JSONObject? = null): TaskEditor {
         if (previewCompletionSeq != null || readOnly || text("status") !in setOf("inbox", "next", "waiting", "someday")) return this
         val prepared = checklistAddQueued()
-        val done = JSONObject().put("type", "fields").put("patch", JSONObject().put("status", "done"))
+        val done = backdated ?: JSONObject().put("type", "fields").put("patch", JSONObject().put("status", "done"))
         return prepared.queued(done.toString(), "status").copy(previewCompletionSeq = prepared.nextSeq)
     }
 
@@ -737,13 +737,13 @@ fun DayPickerDialog(start: String?, dismiss: () -> Unit, pick: (String) -> Unit)
 
 
 @Composable
-fun ClockPickerDialog(hour: Int, minute: Int, dismiss: () -> Unit, pick: (String) -> Unit) {
+fun ClockPickerDialog(hour: Int, minute: Int, dismiss: () -> Unit, is24Hour: Boolean? = null, pick: (String) -> Unit) {
     val context = LocalContext.current
     val dark = LocalTheme.current.isDark
     val picked by rememberUpdatedState(pick)
     val dismissed by rememberUpdatedState(dismiss)
-    DisposableEffect(hour, minute, dark) {
-        val dialog = TimePickerDialog(systemDialogContext(context, dark), { _, hour, minute -> picked(pickedTime(hour, minute)) }, hour, minute, DateFormat.is24HourFormat(context))
+    DisposableEffect(hour, minute, dark, is24Hour) {
+        val dialog = TimePickerDialog(systemDialogContext(context, dark), { _, hour, minute -> picked(pickedTime(hour, minute)) }, hour, minute, is24Hour ?: DateFormat.is24HourFormat(context))
         dialog.setOnDismissListener { dismissed() }
         dialog.show()
         onDispose { dialog.setOnDismissListener(null); dialog.dismiss() }

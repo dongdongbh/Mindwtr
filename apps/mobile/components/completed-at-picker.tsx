@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Modal, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
-import { normalizeTimeSpentMinutes, resolveTaskEditorBackdatedCompletion, tFallback } from '@mindwtr/core';
+import { getDateFormattingConfig, normalizeTimeSpentMinutes, resolveTaskEditorBackdatedCompletion, safeFormatDate, tFallback } from '@mindwtr/core';
 import type { ThemeColors } from '@/hooks/use-theme-colors';
 
 type CompletedAtPickerProps = {
@@ -14,6 +14,11 @@ type CompletedAtPickerProps = {
     t: (key: string) => string;
     tc: ThemeColors;
 };
+
+type AndroidPickerStep =
+    | { mode: 'date'; revising: boolean }
+    | { mode: 'time'; revising: boolean; day: Date }
+    | { mode: 'details' };
 
 const toValidDate = (value?: string): Date => {
     if (!value) return new Date();
@@ -35,7 +40,7 @@ export function CompletedAtPicker({
     const [timeSpentDraft, setTimeSpentDraft] = useState(
         () => normalizeTimeSpentMinutes(initialTimeSpentMinutes)?.toString() ?? ''
     );
-    const [androidStep, setAndroidStep] = useState<'date' | 'time' | 'details'>('date');
+    const [androidStep, setAndroidStep] = useState<AndroidPickerStep>({ mode: 'date', revising: false });
 
     const confirm = (date: Date) => {
         const patch = resolveTaskEditorBackdatedCompletion({
@@ -47,30 +52,32 @@ export function CompletedAtPicker({
         else onConfirm(patch.completedAt);
     };
 
-    if (Platform.OS === 'android' && androidStep !== 'details') {
+    if (Platform.OS === 'android' && androidStep.mode !== 'details') {
+        const { timeFormat } = getDateFormattingConfig();
         return (
             <DateTimePicker
-                key={androidStep}
-                value={draft}
-                mode={androidStep}
+                key={androidStep.mode}
+                value={androidStep.mode === 'time' ? androidStep.day : draft}
+                mode={androidStep.mode}
                 display="default"
+                is24Hour={androidStep.mode === 'time' && (timeFormat === '12h' || timeFormat === '24h') ? timeFormat === '24h' : undefined}
                 onChange={(event: DateTimePickerEvent, selected?: Date) => {
                     if (event.type === 'dismissed' || !selected) {
-                        onCancel();
+                        if (androidStep.revising) setAndroidStep({ mode: 'details' });
+                        else onCancel();
                         return;
                     }
-                    if (androidStep === 'date') {
+                    if (androidStep.mode === 'date') {
                         const next = new Date(draft);
                         next.setFullYear(selected.getFullYear(), selected.getMonth(), selected.getDate());
-                        setDraft(next);
-                        setAndroidStep('time');
+                        setAndroidStep({ mode: 'time', day: next, revising: androidStep.revising });
                         return;
                     }
-                    const next = new Date(draft);
+                    const next = new Date(androidStep.day);
                     next.setHours(selected.getHours(), selected.getMinutes(), 0, 0);
                     if (showTimeSpent) {
                         setDraft(next);
-                        setAndroidStep('details');
+                        setAndroidStep({ mode: 'details' });
                         return;
                     }
                     confirm(next);
@@ -79,6 +86,7 @@ export function CompletedAtPicker({
         );
     }
 
+    const timestamp = safeFormatDate(draft, 'Pp');
     return (
         <Modal visible transparent animationType="fade" onRequestClose={onCancel} accessibilityViewIsModal>
             <Pressable style={styles.overlay} onPress={onCancel}>
@@ -90,9 +98,15 @@ export function CompletedAtPicker({
                         {tFallback(t, 'task.completedAtPromptTitle', 'Completion time')}
                     </Text>
                     {Platform.OS === 'android' ? (
-                        <Text style={[styles.completionValue, { color: tc.text }]}>
-                            {draft.toLocaleString()}
-                        </Text>
+                        <Pressable
+                            accessibilityRole="button"
+                            accessibilityLabel={`${tFallback(t, 'task.editCompletedAt', 'Edit completion time')}, ${timestamp}`}
+                            onPress={() => setAndroidStep({ mode: 'date', revising: true })}
+                            style={styles.completionButton}
+                            testID="completed-at-timestamp"
+                        >
+                            <Text style={[styles.completionValue, { color: tc.tint }]}>{timestamp}</Text>
+                        </Pressable>
                     ) : (
                         <DateTimePicker
                             value={draft}
@@ -172,10 +186,14 @@ const styles = StyleSheet.create({
         marginBottom: 8,
         textAlign: 'center',
     },
+    completionButton: {
+        minHeight: 48,
+        justifyContent: 'center',
+        marginBottom: 8,
+    },
     completionValue: {
         fontSize: 15,
         textAlign: 'center',
-        marginBottom: 16,
     },
     fieldLabel: {
         fontSize: 13,

@@ -150,7 +150,7 @@ The native client is a Kotlin and Jetpack Compose app in `apps/android-native`. 
 - Typing help: With Settings › Editor typing help on, the description (inline and full screen) pairs `[`, `(` and a backtick typed at a plain caret (Backspace right after the pair appears removes the closer, and a second Backspace removes the opener, as in RN), wraps selected text in the Markdown mark typed over it, continues a list on Enter, turns a URL pasted over selected text into a link, and lists up to six tasks and projects after `[[` (the edited task is left out). Core's `markdownTextChange` and the bundle's `markdownReferences` read do the work. The suggestion card sits above the keyboard, or above the typed line when the space below it is too small; it never covers the typed line. A rewrite lands only if the editor is still open and the text and caret are still the ones it was computed for. The tab highlight follows a swipe as the page passes halfway.
 - Notes: The draft survives rotation and process death. If a save was in flight at a death, the relaunch sends that same save again and closes the editor. Destination lists None, Areas, active Projects, then Someday / Waiting projects under their own heading, preserving existing order within each group and direct project selection. Destination has RN's search field: it filters projects and areas by title, ignoring case and outer spaces.
 
-- View completion: Mark Done in the visible Status card queues pending checklist text before draft Done, then sends one normal owned Save. The draft queue and retained save request survive recovery; a refused draft edit cancels queued completion. Repeat taps, draft changes and Close are blocked during completion. A failed save retains the draft and existing Retry; acknowledgement precedes closing. Reference, terminal, Trash, projected and read-only/archived-project previews have no action.
+- View completion: Mark Done in the visible Status card queues pending checklist text before draft Done, then sends one normal owned Save. Long-press Mark Done to choose a completion time and save through the same path. The draft queue and retained save request survive recovery; a refused draft edit cancels queued completion. Repeat taps, draft changes and Close are blocked during completion. A failed save retains the draft and existing Retry; acknowledgement precedes closing. Reference, terminal, Trash, projected and read-only/archived-project previews have no action.
 
 ## Task View tab and checklist
 
@@ -179,11 +179,11 @@ The native client is a Kotlin and Jetpack Compose app in `apps/android-native`. 
 
 ## Completion time
 
-- Reach: Tap the completion date on a done row (History › Done or Archived). A date dialog opens, then a time dialog.
-- Selectors: `row-completed-at`, `completed-at-card`, `completed-at-minutes`, `completed-at-save`, `completed-at-cancel`
+- Reach: Tap the completion date on a done row (History › Done or Archived), or long-press Done in the row actions or Mark Done in the task preview. A date dialog opens, then a time dialog.
+- Selectors: `row-completed-at`, `completed-at-card`, `completed-at-timestamp`, `completed-at-minutes`, `completed-at-save`, `completed-at-cancel`
 - Code: `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/CompletedAtFlow.kt`
 - Checks: `apps/android-native/scripts/check-backdate-device.mjs`, `apps/android-native/scripts/check-toolbars-device.mjs`
-- Notes: Core stores the picked local day and time as a whole minute. Moving the date keeps the task done.
+- Notes: Core stores the picked local day and time as a whole minute. Moving the date keeps a finished task done. When opened by long-press, the clock uses the selected 12/24-hour preference. When Time Spent is shown, its summary uses the selected date and time formats. Tap the timestamp to change it while keeping the entered duration. Dismissing either picker during a correction returns to the last reviewed timestamp.
 
 ## Global search
 

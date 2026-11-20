@@ -118,7 +118,7 @@ fun EditorTabs(model: InboxViewModel, editor: TaskEditor) {
 }
 
 
-@OptIn(ExperimentalLayoutApi::class)
+@OptIn(ExperimentalLayoutApi::class, ExperimentalFoundationApi::class)
 @Composable
 fun TaskViewTab(model: InboxViewModel, editor: TaskEditor, locked: Boolean, pickStatus: () -> Unit, follow: (JSONObject) -> Unit, modifier: Modifier) = with(model) {
     val c = LocalTheme.current.colors
@@ -142,7 +142,8 @@ fun TaskViewTab(model: InboxViewModel, editor: TaskEditor, locked: Boolean, pick
                     val enabled = !locked && writable && editor.previewCompletionSeq == null && !editor.checklistStructurePending && ai.working != "editor"
                     val shape = RoundedCornerShape(10.dp)
                     Box(Modifier.padding(top = 10.dp).heightIn(min = 48.dp).clip(shape).rnBorder(1.dp, c.tint, shape)
-                        .testTag("task-preview-mark-done").clickable(enabled = enabled, role = Role.Button) { completeEditor() }
+                        .testTag("task-preview-mark-done").combinedClickable(enabled = enabled, role = Role.Button,
+                            onLongClickLabel = t("task.completeBackdateHintMobile"), onLongClick = { completedAt.openEditor(saveOnPick = true) }) { completeEditor() }
                         .padding(horizontal = 14.dp, vertical = 10.dp), contentAlignment = Alignment.CenterStart) {
                         Text(label, style = rnText(14, 600), color = c.tint, modifier = Modifier.fade(if (enabled) 1f else 0.5f))
                     }

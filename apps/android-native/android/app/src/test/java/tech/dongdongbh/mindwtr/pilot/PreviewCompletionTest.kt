@@ -54,6 +54,21 @@ class PreviewCompletionTest {
         assertEquals("next", refused.text("status"))
     }
 
+    @Test fun backdatedCompletionPreservesSelectedTimeAndMinutesInTheOwnedSaveQueue() {
+        val current = model()
+        val edit = JSONObject().put("type", "backdatedCompletion").put("day", "2026-11-18").put("time", "15:45").put("timeSpentText", "35")
+        val original = TaskEditor.open(current, "view").edit(mapOf("title" to "Edited")).copy(checklistAdd = "Item")
+        val queued = original.previewCompletionQueued(edit)
+        val restored = TaskEditor.restore(current, queued.state())
+        assertEquals("Edited", restored.text("title"))
+        assertEquals("Item", JSONObject(restored.pending.first().edit).getJSONObject("checklist").getString("title"))
+        val completion = restored.pending.last()
+        assertEquals(completion.seq, restored.previewCompletionSeq)
+        assertEquals(edit.toString(), completion.edit)
+        assertSame(restored, restored.previewCompletionQueued(edit))
+        assertTrue(restored.refused(restored.pending.first()).pending.isEmpty())
+    }
+
     @Test fun queuedAndReadyCompletionIntentsSurviveDraftRecovery() {
         val current = model()
         val queued = TaskEditor.open(current, "view").copy(checklistAdd = "Item").previewCompletionQueued()

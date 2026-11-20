@@ -56,6 +56,7 @@ type TaskEditViewTabProps = {
   onBackdatedComplete?: () => void;
   onStatusUpdate?: (status: TaskStatus) => void;
   onComplete?: () => void;
+  onChooseCompletionTime?: () => void;
   completionPending?: boolean;
   completionRetryPending?: boolean;
   completionError?: string | null;
@@ -90,6 +91,7 @@ function TaskEditViewTabComponent({
   onBackdatedComplete,
   onStatusUpdate,
   onComplete,
+  onChooseCompletionTime,
   completionPending = false,
   completionRetryPending = false,
   completionError,
@@ -181,6 +183,8 @@ function TaskEditViewTabComponent({
     if (result) applyChecklistUpdate(result.checklist);
     return result;
   };
+  const longPressDone = Platform.OS === 'android' && !readOnly && !completionPending && !completionRetryPending
+    ? onChooseCompletionTime : undefined;
 
   const renderRow = (row: TaskViewRow) => {
     switch (row.type) {
@@ -210,9 +214,14 @@ function TaskEditViewTabComponent({
               <TouchableOpacity
                 testID="task-preview-mark-done"
                 onPress={onComplete}
+                onLongPress={longPressDone}
                 disabled={completionPending}
                 accessibilityRole="button"
                 accessibilityLabel={completionRetryPending ? t('common.retry') : row.completeLabel}
+                accessibilityActions={longPressDone ? [{ name: 'longpress', label: t('task.editCompletedAt') }] : undefined}
+                onAccessibilityAction={longPressDone ? (event) => {
+                  if (event.nativeEvent.actionName === 'longpress') longPressDone();
+                } : undefined}
                 accessibilityState={{ disabled: completionPending, busy: completionPending }}
                 style={{ minHeight: Platform.OS === 'android' ? 48 : 44, alignSelf: 'flex-start', justifyContent: 'center', paddingHorizontal: 14, paddingVertical: 10, marginTop: 10, borderWidth: 1, borderRadius: 10, borderColor: tc.tint, opacity: completionPending ? 0.5 : 1, maxWidth: '100%' }}
               >

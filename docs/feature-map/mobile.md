@@ -112,7 +112,15 @@ Source: `apps/mobile`. Routes live in `apps/mobile/app` (expo-router). Labels be
 - Notes: Destination lists None, Areas, active Projects, then Someday / Waiting projects, preserving order within each group and direct project selection. Edits stay in the Task draft until Save. Sending a draft back to Inbox drops its Focus star. Field order and visibility come from Settings › GTD › Task editor layout.
 - Reference contexts: Menu › Reference › open an item › Edit › Contexts. Existing contexts remain visible in rows and Preview; edit or clear them and Save while keeping Reference status. An empty Contexts field follows the task editor layout. The shared editor and preview models also supply native Android and iOS. Frozen parity fixtures retain their original observations; parity tests apply only the approved Reference-context visibility delta (#1565), backed by current RN editor, preview, and row render tests.
 
-- Preview completion: Mark Done appears inside the visible Status card for editable active tasks. It saves the complete current draft, including pending checklist input, through one normal completion write. Repeated taps and competing Save/Close are blocked until persistence finishes; a failed barrier keeps the Done draft/files with inline error and Retry in Preview/header. Retry actively persists the applied state without creating another recurring successor. iOS sheet swipe attempts run the same Save/Discard/Cancel decision as Close before the sheet can disappear; Cancel and failed saves keep the draft visible. Close is blocked while submitting or retrying. Reference, terminal, Trash, projected and archived-project previews have no action.
+- Preview completion: Mark Done appears inside the visible Status card for editable active tasks. On Android, long-press Mark Done to choose a completion time. Both actions save the complete current draft, including pending checklist input, through one normal completion write. Repeated taps and competing Save/Close are blocked until persistence finishes; a failed barrier keeps the Done draft/files with inline error and Retry in Preview/header. Retry actively persists the applied state without creating another recurring successor. iOS sheet swipe attempts run the same Save/Discard/Cancel decision as Close before the sheet can disappear; Cancel and failed saves keep the draft visible. Close is blocked while submitting or retrying. Reference, terminal, Trash, projected and archived-project previews have no action.
+
+## Completion time
+
+- Reach: Long-press Done in a task's swipe tray or status menu, or long-press Mark Done in the Android task preview.
+- Selectors: `completed-at-timestamp` on Android when Time Spent is shown.
+- Code: `apps/mobile/components/completed-at-picker.tsx`
+- Checks: `apps/mobile/components/completed-at-picker.test.tsx`
+- Notes: The Android clock honors the selected 12/24-hour preference. When Time Spent is shown, the summary uses the selected date and time formats. Tap the timestamp to change it and keep the entered duration. Dismissing either picker during a correction returns to the last reviewed timestamp.
 
 ## Checklist and attachments
 

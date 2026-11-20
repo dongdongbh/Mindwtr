@@ -2,6 +2,7 @@
 
 
 import { getArchiveCompletedAtPickerStart, resolvePickedCompletedAt } from './archive-view-model';
+import { normalizeTimeFormatSetting } from './date';
 import type { DateFormatter } from './date';
 import { tFallback } from './i18n';
 import { logInfo } from './logger';
@@ -23,7 +24,7 @@ export type NativeCompletedAtPickerMode = 'complete' | 'edit' | 'editor';
 export type NativeCompletedAtPicker = {
     mode: NativeCompletedAtPickerMode; taskId: string; taskRevision: string;
 
-    day: string; time: string;
+    day: string; time: string; is24Hour: boolean | null;
 
     timeSpent: null | { title: string; label: string; placeholder: string; value: string; cancel: string; save: string };
 };
@@ -96,8 +97,10 @@ export function createTaskBackdateMethods(deps: {
             const minutes = mode === 'editor' ? start?.initialTimeSpentMinutes : normalizeTimeSpentMinutes(task.timeSpentMinutes);
             const t = deps.t();
             const showTimeSpent = mode !== 'edit' && isTaskEditorTimeSpentEnabled(state.settings);
+            const timeFormat = normalizeTimeFormatSetting(state.settings.timeFormat);
             return { ok: true, value: { picker: {
                 mode, taskId: task.id, taskRevision: taskRevisionOf(task), day, time,
+                is24Hour: timeFormat === 'system' ? null : timeFormat === '24h',
                 timeSpent: showTimeSpent ? {
                     title: tFallback(t, 'task.completedAtPromptTitle', 'Completion time'),
                     label: tFallback(t, 'taskEdit.timeSpentLabel', 'Time Spent'),

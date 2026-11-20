@@ -79,6 +79,28 @@ async function open(task: Task = original) {
 }
 
 describe('Preview completion through the real store and SQLite adapter', () => {
+    it('completes the pending draft using the chosen timestamp and duration in one durable write', async () => {
+        const completedAt = new Date(2026, 10, 17, 15, 40).toISOString();
+        const env = await open({ ...original, recurrence: { rule: 'daily', strategy: 'fluid' } });
+        renderer.act(() => { env.state().checklistDraftRef.current = 'Pending item'; });
+        await renderer.act(async () => {
+            expect(await env.state().draftLifecycle.complete({ completedAt, timeSpentMinutes: 35 })).toBe(true);
+        });
+        expect(env.onSave).toHaveBeenCalledOnce();
+        expect(env.onClose).toHaveBeenCalledOnce();
+        const saved = await env.read();
+        expect(saved?.tasks.find((task) => task.id === original.id)).toMatchObject({
+            status: 'done', completedAt, timeSpentMinutes: 35, checklist: [expect.objectContaining({ title: 'Pending item' })],
+        });
+        expect(saved?.tasks.filter((task) => task.id !== original.id)).toMatchObject([
+            { startTime: '2026-11-18' },
+        ]);
+        expect(logInfo).toHaveBeenCalledWith('Preview task saved with selected completion time', {
+            scope: 'task-edit', force: true,
+            extra: { releaseCheck: 'v1.3.10/preview-backdated-completion', platform: 'rn', outcome: 'saved' },
+        });
+    });
+
     it('saves raw fields, pending checklist input, attachments and edited recurrence in one durable completion', async () => {
         const env = await open({ ...original, recurrence: { rule: 'daily' }, checklist: [{ id: 'first', title: 'First', isCompleted: false }] });
         const attachment: Attachment = { id: 'link', kind: 'link', title: 'Reference', uri: 'https://example.com', createdAt: at, updatedAt: at };

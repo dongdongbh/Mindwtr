@@ -1,6 +1,6 @@
 import React from 'react';
 import renderer from 'react-test-renderer';
-import { Text } from 'react-native';
+import { Platform, Text } from 'react-native';
 import { FALLBACK_THEME_COLORS } from '../../hooks/use-theme-colors';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -58,6 +58,38 @@ describe('TaskEditViewTab', () => {
     renderer.act(() => { tree.update(<TaskEditViewTab {...props} showStatusField={false} />); });
     expect(tree.root.findAllByProps({ testID: 'task-preview-mark-done' })).toHaveLength(0);
     renderer.act(() => tree.unmount());
+  });
+
+  it('long-presses Android Mark Done to choose a completion time and keeps Retry tap-only', () => {
+    const originalPlatform = Platform.OS;
+    Object.defineProperty(Platform, 'OS', { configurable: true, value: 'android' });
+    const complete = vi.fn();
+    const backdate = vi.fn();
+    const props: React.ComponentProps<typeof TaskEditViewTab> = {
+      t: (key) => key, tc: FALLBACK_THEME_COLORS, styles: taskEditStyles,
+      mergedTask: { id: 'task', status: 'next' }, projects: [], sections: [], areas: [],
+      prioritiesEnabled: false, timeEstimatesEnabled: false, formatTimeEstimateLabel: String, formatDate: String, formatDueDate: String,
+      getRecurrenceRuleValue: () => '', getRecurrenceStrategyValue: () => 'strict', applyChecklistUpdate: vi.fn(),
+      visibleAttachments: [], openAttachment: vi.fn(), isImageAttachment: () => false, textDirectionStyle: {}, resolvedDirection: 'ltr',
+      onComplete: complete, onChooseCompletionTime: backdate,
+    };
+    let tree!: renderer.ReactTestRenderer;
+    try {
+      renderer.act(() => { tree = renderer.create(<TaskEditViewTab {...props} />); });
+      const button = () => tree.root.findByProps({ testID: 'task-preview-mark-done' });
+      renderer.act(() => button().props.onLongPress());
+      expect(backdate).toHaveBeenCalledOnce();
+      expect(complete).not.toHaveBeenCalled();
+      expect(button().props.accessibilityActions).toEqual([{ name: 'longpress', label: 'task.editCompletedAt' }]);
+      renderer.act(() => button().props.onAccessibilityAction({ nativeEvent: { actionName: 'longpress' } }));
+      expect(backdate).toHaveBeenCalledTimes(2);
+      renderer.act(() => { tree.update(<TaskEditViewTab {...props} readOnly completionRetryPending />); });
+      expect(button().props.onLongPress).toBeUndefined();
+      expect(button().props.accessibilityActions).toBeUndefined();
+    } finally {
+      if (tree) renderer.act(() => tree.unmount());
+      Object.defineProperty(Platform, 'OS', { configurable: true, value: originalPlatform });
+    }
   });
 
   it('lets preview metadata values wrap across the full row width', () => {

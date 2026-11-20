@@ -477,11 +477,11 @@ function TaskEditModalInner({
         try { await pickImageAttachment(); }
         finally { pendingAttachmentImportsRef.current -= 1; }
     }, [pickImageAttachment]);
+    const canCompletePreview = useCallback(() => !readOnlyRef.current && pendingAttachmentImportsRef.current === 0
+        && !isAIWorking && !audioLoading && !audioTranscribing, [audioLoading, audioTranscribing, isAIWorking]);
     const handleCompletePreview = useCallback(() => {
-        if (!readOnlyRef.current && pendingAttachmentImportsRef.current === 0 && !isAIWorking && !audioLoading && !audioTranscribing) {
-            void draftLifecycle.complete();
-        }
-    }, [audioLoading, audioTranscribing, draftLifecycle, isAIWorking]);
+        if (canCompletePreview()) void draftLifecycle.complete();
+    }, [canCompletePreview, draftLifecycle]);
 
     const {
         contextTokenSuggestions,
@@ -690,9 +690,9 @@ function TaskEditModalInner({
     const [customMonthDays, setCustomMonthDays] = useState<number[]>([monthlyAnchorDate.getDate()]);
     const [waitingAssignmentModalVisible, setWaitingAssignmentModalVisible] = useState(false);
     const [waitingAssignmentInput, setWaitingAssignmentInput] = useState('');
-    const [completedAtPickerVisible, setCompletedAtPickerVisible] = useState(false);
+    const [completedAtPickerMode, setCompletedAtPickerMode] = useState<'draft' | 'complete' | null>(null);
     useEffect(() => {
-        setCompletedAtPickerVisible(false);
+        setCompletedAtPickerMode(null);
     }, [task?.id, visible]);
     const waitingAssignmentSuggestions = useMemo(
         () => getAssignedToSuggestions(tasks, waitingAssignmentInput, MAX_VISIBLE_SUGGESTIONS, people),
@@ -853,16 +853,25 @@ function TaskEditModalInner({
         requestStatusChange('next');
     }, [requestStatusChange]);
     const requestBackdatedCompletion = useCallback(() => {
-        setCompletedAtPickerVisible(true);
+        setCompletedAtPickerMode('draft');
     }, []);
+    const requestPreviewCompletionTime = useCallback(() => {
+        if (canCompletePreview()) setCompletedAtPickerMode('complete');
+    }, [canCompletePreview]);
     const confirmBackdatedCompletion = useCallback((completedAt: string, timeSpentMinutes?: number) => {
-        setCompletedAtPickerVisible(false);
+        setCompletedAtPickerMode(null);
+        if (completedAtPickerMode === 'complete') {
+            if (canCompletePreview()) {
+                void draftLifecycle.complete(timeSpentEnabled ? { completedAt, timeSpentMinutes } : { completedAt });
+            }
+            return;
+        }
         setDraftField('status', 'done');
         setDraftField('completedAt', completedAt);
         if (timeSpentEnabled) {
             setDraftField('timeSpentMinutes', timeSpentMinutes);
         }
-    }, [setDraftField, timeSpentEnabled]);
+    }, [canCompletePreview, completedAtPickerMode, draftLifecycle, setDraftField, timeSpentEnabled]);
     const toggleQuickContextToken = useCallback((token: string) => {
         updateContextInput(toggleTaskEditorToken(contextInputDraft, token, '@'));
     }, [contextInputDraft, updateContextInput]);
@@ -1161,7 +1170,7 @@ function TaskEditModalInner({
             || pendingAttachmentImportsRef.current > 0 || isAIWorking || audioLoading || audioTranscribing
             || audioModalVisible || linkModalVisible || imagePreviewAttachment || aiModal
             || showDatePicker || showAreaPicker || showProjectPicker || showSectionPicker
-            || customRecurrenceVisible || waitingAssignmentModalVisible || completedAtPickerVisible
+            || customRecurrenceVisible || waitingAssignmentModalVisible || completedAtPickerMode !== null
             || projectConversionOpen || descriptionEditor.descriptionExpanded)) return 'preserved-draft';
         if (readOnly) onClose();
         else draftLifecycle.discard();
@@ -1392,6 +1401,7 @@ function TaskEditModalInner({
                                     showStatusField={showStatusField}
                                     readOnly={submissionPending || completionRetryPending}
                                     onComplete={handleCompletePreview}
+                                    onChooseCompletionTime={requestPreviewCompletionTime}
                                     completionPending={submissionPending || pendingAttachmentImportsRef.current > 0 || isAIWorking || audioLoading || audioTranscribing}
                                     completionRetryPending={completionRetryPending}
                                     completionError={completionError}
@@ -1497,12 +1507,12 @@ function TaskEditModalInner({
             {                                                                      }
             <ThemedAlertHost />
         </Modal>
-        {visible && !readOnly && completedAtPickerVisible ? (
+        {visible && !readOnly && completedAtPickerMode ? (
             <CompletedAtPicker
                 initialValue={backdatedCompletionStart?.initialValue ?? undefined}
                 initialTimeSpentMinutes={backdatedCompletionStart?.initialTimeSpentMinutes ?? undefined}
                 showTimeSpent={timeSpentEnabled}
-                onCancel={() => setCompletedAtPickerVisible(false)}
+                onCancel={() => setCompletedAtPickerMode(null)}
                 onConfirm={confirmBackdatedCompletion}
                 t={t}
                 tc={tc}

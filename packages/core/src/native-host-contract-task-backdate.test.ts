@@ -128,4 +128,14 @@ describe('native host contract: completion-time picker', () => {
         expect(lines.find((line) => line.context?.releaseCheck === 'v1.3.8/native-backdated-completion')).toMatchObject({ force: true, context: { outcome: 'complete' } });
         expect(JSON.stringify(lines)).not.toContain('Title a');
     });
+
+    it.each([
+        ['24h', true, '2026-09-20 17:05'],
+        ['12h', false, '2026-09-20 05:05 PM'],
+        ['system', null, '2026-09-20 5:05 PM'],
+    ] as const)('formats the date summary and sends the %s clock preference to Android', async (timeFormat, is24Hour, label) => {
+        const host = await openHost({ settings: { dateFormat: 'ymd', timeFormat }, tasks: [task('a', 'next')] });
+        expect(value(host.getCompletedAtPicker({ taskId: 'a', mode: 'complete' })).picker?.is24Hour).toBe(is24Hour);
+        expect(value(host.getPickedCompletedAtLabel({ day: '2026-09-20', time: '17:05' })).label).toBe(label);
+    });
 });

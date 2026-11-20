@@ -1019,6 +1019,7 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
     fun closeEditor(settle: Boolean = true) {
         if (settle && editor?.previewCompletionSeq != null) return
         val closed = editor
+        completedAt.closeEditorPicker()
 
         editor?.takeIf { discardSettles(settle, pendingSave != null, it.attachments != null, it.readOnly) }?.let { closing ->
             val from = closing.attachmentsFrom ?: closing.model.attachmentsBase
@@ -1064,13 +1065,13 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
             attachments = current.attachmentsSave), failedAction)
 
 
-    fun completeEditor() {
+    fun completeEditor(backdated: JSONObject? = null) {
         val current = editor ?: return
         if (!writable || busy || failedAction != null || pendingSave != null || current.readOnly || current.previewCompletionSeq != null
             || current.checklistStructurePending || ai.working == "editor") return
         val view = taskView?.takeIf { it.optString("id") == current.id } ?: return
         if (view.menuObjects("rows").none { it.optString("type") == "status" && it.menuText("completeLabel") != null }) return
-        val queued = current.previewCompletionQueued()
+        val queued = current.previewCompletionQueued(backdated)
         if (queued === current) return
         keepEditor(queued)
         saveQueued = true
@@ -1106,7 +1107,13 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
             }
             acknowledged(action)
             if (action.attachments.isNotEmpty()) attachments.settleSaved(runtime, action.id, JSONObject(action.attachments))
-            if (previewCompletion) Log.i(CoreHost.TAG, "Native Android Preview task completion saved releaseCheck=v1.3.9/preview-mark-done platform=android outcome=saved")
+            if (previewCompletion) {
+                if (action.patch["completedAt"] != null) {
+                    Log.i(CoreHost.TAG, "Preview task saved with selected completion time releaseCheck=v1.3.10/preview-backdated-completion platform=android outcome=saved")
+                } else {
+                    Log.i(CoreHost.TAG, "Native Android Preview task completion saved releaseCheck=v1.3.9/preview-mark-done platform=android outcome=saved")
+                }
+            }
             ui {
                 if (!previewCompletion || editor?.session == owner?.session) {
                     editorMenu.saved(action.id)
