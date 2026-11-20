@@ -267,7 +267,7 @@ fn read_kde_color_scheme_preference() -> Option<&'static str> {
     None
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub(crate) fn get_windows_regional_date() -> Option<(String, String)> {
     #[cfg(windows)]
     {
