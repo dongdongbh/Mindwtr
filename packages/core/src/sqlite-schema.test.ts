@@ -191,7 +191,8 @@ describeSqlite('schema replay through single-statement execute (op-sqlite emulat
     });
 
     it('adds the optional repeat interval to a legacy project and keeps changes across a reload', async () => {
-        db.exec(SQLITE_BASE_SCHEMA.replace(',\n  repeatAfterMonths INTEGER', ''));
+        db.exec(SQLITE_BASE_SCHEMA);
+        db.exec('ALTER TABLE projects DROP COLUMN repeatAfterMonths');
         db.exec("INSERT INTO projects (id, title, status, color, createdAt, updatedAt, rev) VALUES ('old', 'Old project', 'active', '#6b7280', '2026-01-01', '2026-01-01', 1)");
         const client = createSingleStatementClient(db);
         const adapter = new SqliteAdapter(client);

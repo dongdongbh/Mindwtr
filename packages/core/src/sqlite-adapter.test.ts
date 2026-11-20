@@ -153,12 +153,13 @@ describeSqlite('SqliteAdapter', () => {
     };
 
     it('migrates storage without the Flow mode columns and keeps never-set apart from false (#1429)', async () => {
-        const legacy = SQLITE_BASE_SCHEMA
-            .replace('  viewSectionIds TEXT,\n  perSectionFlow INTEGER,\n  calendarReference TEXT\n);', '  viewSectionIds TEXT\n);')
-            .replace('  projectArchivedAt TEXT,\n  isSequential INTEGER\n);', '  projectArchivedAt TEXT\n);');
-        expect(legacy).not.toContain('perSectionFlow');
-        expect(legacy).not.toMatch(/projectArchivedAt TEXT,\n  isSequential/);
-        db.exec(legacy);
+        db.exec(SQLITE_BASE_SCHEMA);
+        db.exec(`
+            ALTER TABLE projects DROP COLUMN perSectionFlow;
+            ALTER TABLE projects DROP COLUMN calendarReference;
+            ALTER TABLE projects DROP COLUMN repeatAfterMonths;
+            ALTER TABLE sections DROP COLUMN isSequential;
+        `);
         runSql(db, "INSERT INTO projects (id,title,status,color,createdAt,updatedAt) VALUES ('trip','Camping Trip','active','#6B7280','2026-10-01','2026-10-01')");
         runSql(db, "INSERT INTO sections (id,projectId,title,createdAt,updatedAt) VALUES ('book','trip','Book campsite','2026-10-01','2026-10-01')");
         const loaded = await adapter.getData();
@@ -185,7 +186,11 @@ describeSqlite('SqliteAdapter', () => {
     });
 
     it('migrates and persists a calendar reference and explicit removal across reopen', async () => {
-        db.exec(SQLITE_BASE_SCHEMA.replace('  perSectionFlow INTEGER,\n  calendarReference TEXT', '  perSectionFlow INTEGER'));
+        db.exec(SQLITE_BASE_SCHEMA);
+        db.exec(`
+            ALTER TABLE projects DROP COLUMN calendarReference;
+            ALTER TABLE projects DROP COLUMN repeatAfterMonths;
+        `);
         const at = '2026-11-01T10:00:00.000Z';
         const reference = { sourceId: 'feed', uid: 'event', sourceName: 'Calendar', title: 'Meeting',
             start: at, end: '2026-11-01T11:00:00.000Z', allDay: false };

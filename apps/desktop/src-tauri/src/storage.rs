@@ -7279,16 +7279,15 @@ mod tests {
         let temp = tempfile::tempdir().expect("tempdir");
         let db_path = temp.path().join("version-six-projects.sqlite");
         let conn = Connection::open(&db_path).expect("open legacy database");
-        let version_six_schema = SQLITE_SCHEMA.replace(
-            "  purgedAt TEXT,\n  startDate TEXT,\n  cancelledAt TEXT,\n  archivedAt TEXT,\n  viewSectionIds TEXT\n);",
-            "  purgedAt TEXT,\n  cancelledAt TEXT\n);",
-        );
-        assert_ne!(
-            version_six_schema, SQLITE_SCHEMA,
-            "fixture must omit projects.startDate"
-        );
-        conn.execute_batch(&version_six_schema)
+        conn.execute_batch(SQLITE_SCHEMA)
             .expect("create version six schema");
+        conn.execute_batch(
+            "ALTER TABLE projects DROP COLUMN startDate;
+             ALTER TABLE projects DROP COLUMN archivedAt;
+             ALTER TABLE projects DROP COLUMN viewSectionIds;
+             ALTER TABLE projects DROP COLUMN repeatAfterMonths;",
+        )
+        .expect("remove columns from the version six fixture");
         let schema_generation = sqlite_schema_generation(&conn).expect("read legacy generation");
         conn.execute(
             "INSERT INTO storage_schema_state (id, storage_version, schema_generation) VALUES (1, 6, ?1)",
@@ -7300,6 +7299,8 @@ mod tests {
         let reopened = open_sqlite_path(&db_path).expect("migrate version six database");
 
         assert!(has_column(&reopened, "projects", "startDate").expect("inspect project columns"));
+        assert!(has_column(&reopened, "projects", "repeatAfterMonths")
+            .expect("inspect project columns"));
         let state = stored_sqlite_schema_state(&reopened)
             .expect("read migrated state")
             .expect("migrated state row");
@@ -7311,16 +7312,14 @@ mod tests {
         let temp = tempfile::tempdir().expect("tempdir");
         let db_path = temp.path().join("version-nine-projects.sqlite");
         let conn = Connection::open(&db_path).expect("open legacy database");
-        let version_nine_schema = SQLITE_SCHEMA.replace(
-            "  cancelledAt TEXT,\n  archivedAt TEXT,\n  viewSectionIds TEXT\n);",
-            "  cancelledAt TEXT\n);",
-        );
-        assert_ne!(
-            version_nine_schema, SQLITE_SCHEMA,
-            "fixture must omit projects.viewSectionIds"
-        );
-        conn.execute_batch(&version_nine_schema)
+        conn.execute_batch(SQLITE_SCHEMA)
             .expect("create version nine schema");
+        conn.execute_batch(
+            "ALTER TABLE projects DROP COLUMN archivedAt;
+             ALTER TABLE projects DROP COLUMN viewSectionIds;
+             ALTER TABLE projects DROP COLUMN repeatAfterMonths;",
+        )
+        .expect("remove columns from the version nine fixture");
         conn.execute(
             "INSERT INTO projects (id, title, status, color, createdAt, updatedAt) VALUES ('kept-project', 'Keep project', 'someday', '#6B7280', '2026-09-01', '2026-09-01')",
             [],
@@ -7358,18 +7357,14 @@ mod tests {
         let temp = tempfile::tempdir().expect("tempdir");
         let db_path = temp.path().join("version-ten-archive.sqlite");
         let conn = Connection::open(&db_path).expect("open legacy database");
-        let version_ten_schema = SQLITE_SCHEMA
-            .replace(
-                "  cancelledAt TEXT,\n  archivedAt TEXT,\n  statusBeforeProjectArchive TEXT,",
-                "  cancelledAt TEXT,\n  statusBeforeProjectArchive TEXT,",
-            )
-            .replace(
-                "  archivedAt TEXT,\n  viewSectionIds TEXT\n);",
-                "  viewSectionIds TEXT\n);",
-            );
-        assert_ne!(version_ten_schema, SQLITE_SCHEMA);
-        conn.execute_batch(&version_ten_schema)
+        conn.execute_batch(SQLITE_SCHEMA)
             .expect("create version ten schema");
+        conn.execute_batch(
+            "ALTER TABLE tasks DROP COLUMN archivedAt;
+             ALTER TABLE projects DROP COLUMN archivedAt;
+             ALTER TABLE projects DROP COLUMN repeatAfterMonths;",
+        )
+        .expect("remove columns from the version ten fixture");
         assert!(!has_column(&conn, "tasks", "archivedAt").expect("legacy task columns"));
         assert!(!has_column(&conn, "projects", "archivedAt").expect("legacy project columns"));
         conn.execute("INSERT INTO tasks (id, title, status, createdAt, updatedAt) VALUES ('kept-task', 'Keep task', 'archived', '2026-09-01', '2026-09-01')", []).expect("seed task");
@@ -7393,17 +7388,13 @@ mod tests {
         let temp = tempfile::tempdir().expect("tempdir");
         let db_path = temp.path().join("version-eleven-without-archive.sqlite");
         let conn = Connection::open(&db_path).expect("open database");
-        let missing_columns_schema = SQLITE_SCHEMA
-            .replace(
-                "  cancelledAt TEXT,\n  archivedAt TEXT,\n  statusBeforeProjectArchive TEXT,",
-                "  cancelledAt TEXT,\n  statusBeforeProjectArchive TEXT,",
-            )
-            .replace(
-                "  archivedAt TEXT,\n  viewSectionIds TEXT\n);",
-                "  viewSectionIds TEXT\n);",
-            );
-        conn.execute_batch(&missing_columns_schema)
+        conn.execute_batch(SQLITE_SCHEMA)
             .expect("create incomplete schema");
+        conn.execute_batch(
+            "ALTER TABLE tasks DROP COLUMN archivedAt;
+             ALTER TABLE projects DROP COLUMN archivedAt;",
+        )
+        .expect("remove archive columns from the current schema fixture");
         let schema_generation = sqlite_schema_generation(&conn).expect("schema generation");
         conn.execute("INSERT INTO storage_schema_state (id, storage_version, schema_generation) VALUES (1, ?1, ?2)", params![STORAGE_SCHEMA_VERSION, schema_generation]).expect("record current state");
         drop(conn);
@@ -7439,21 +7430,16 @@ mod tests {
         let temp = tempfile::tempdir().expect("tempdir");
         let db_path = temp.path().join("version-seven-cancellation.sqlite");
         let conn = Connection::open(&db_path).expect("open legacy database");
-        let version_seven_schema = SQLITE_SCHEMA
-            .replace(
-                "  completedAt TEXT,\n  cancelledAt TEXT,\n",
-                "  completedAt TEXT,\n",
-            )
-            .replace(
-                "  startDate TEXT,\n  cancelledAt TEXT,\n  archivedAt TEXT,\n  viewSectionIds TEXT\n);",
-                "  startDate TEXT\n);",
-            );
-        assert_ne!(
-            version_seven_schema, SQLITE_SCHEMA,
-            "fixture must omit cancellation columns"
-        );
-        conn.execute_batch(&version_seven_schema)
+        conn.execute_batch(SQLITE_SCHEMA)
             .expect("create version seven schema");
+        conn.execute_batch(
+            "ALTER TABLE tasks DROP COLUMN cancelledAt;
+             ALTER TABLE projects DROP COLUMN cancelledAt;
+             ALTER TABLE projects DROP COLUMN archivedAt;
+             ALTER TABLE projects DROP COLUMN viewSectionIds;
+             ALTER TABLE projects DROP COLUMN repeatAfterMonths;",
+        )
+        .expect("remove columns from the version seven fixture");
         conn.execute(
             "INSERT INTO tasks (id, title, status, createdAt, updatedAt) VALUES ('kept-task', 'Keep task', 'next', '2026-09-01', '2026-09-01')",
             [],
