@@ -1079,6 +1079,12 @@ assert.match(editorUi, /\.semantics \{ contentDescription = description \}\s+\.t
 assert.match(editorUi, /val backdate = if \(status == "done"\) t\("task\.completeBackdateHintMobile"\) to \{ completedAt\.openEditor\(\) \} else null/);
 assert.match(source('TaskView.kt'), /StatusPill\(status, row\.getString\("value"\), editable, pickStatus,\s+if \(status == "done"\) \{ \{ completedAt\.openEditor\(\) \} \} else null\)/);
 assert.match(source('TaskView.kt'), /if \(enabled && backdate != null\) onLongClick\(t\("task\.completeBackdateHintMobile"\)\) \{ backdate\(\); true \}/);
+assert.match(source('TaskView.kt'), /\.testTag\("task-preview-mark-done"\)\.combinedClickable\(enabled = enabled, role = Role\.Button,\s+onLongClickLabel = t\("task\.completeBackdateHintMobile"\), onLongClick = \{ completedAt\.openEditor\(saveOnPick = true\) \}\) \{ completeEditor\(\) \}/);
+const completedAtFlow = source('CompletedAtFlow.kt');
+assert.match(completedAtFlow, /if \(owner\.saveOnPick\) shell\.completeEditor\(edit\) else shell\.editDraft\(edit\)/);
+assert.match(model, /val queued = current\.previewCompletionQueued\(backdated\)\s+if \(queued === current\) return\s+keepEditor\(queued\)\s+saveQueued = true\s+pumpEdits\(\)/);
+assert.match(completedAtFlow, /ClockPickerDialog\(hour, minute, [^\n]+, open\.opt\("is24Hour"\) as\? Boolean\)/);
+assert.match(completedAtFlow, /\.testTag\("completed-at-timestamp"\)\s+\.clickable\([^\n]+\) \{\s+focus\.clearFocus\(\)\s+flow\.repick\(\)/);
 assert.equal(code(editorUi).match(/toggle = true/g).length, 2, 'only the quick token chips and "Repeat after completion" toggle');
 
 assert.match(editorUi, /if \(status == "waiting" && !active\) openWaitingPrompt\(\) else editFields\(mapOf\("status" to status\)\)/);
@@ -1202,7 +1208,8 @@ assert.match(model, /focus = pending\.focus\s+focusRevision = pending\.focus\?\.
 assert.equal(model.match(/ProcessCoreHost\.failure\?\.let \{ pending -> ui \{ host = runtime; restore\(pending, storedProcessing, storedCapture\); keepRoutes\(\) \}/g).length, 2);
 assert.match(model, /runtime\.completeTask\(id, taskRevision\)\s+acknowledged\(action\)/);
 const sendDraftFn = model.slice(model.indexOf('private fun sendDraft('), model.indexOf('\n    fun reloadEditor('));
-assert.match(sendDraftFn, /runtime\.saveTaskDraft\(action\.id, draftJson\(action\.base\), draftJson\(action\.patch\), action\.title, action\.attachments, action\.requestId\)\s+\} catch \(failure: Exception\) \{\s+if \(UPDATE_REFUSALS\.any \{ failure\.message\?\.startsWith\(it\) == true \}\) ui \{\s+pendingSave = null; failedAction = null\s+editor\?\.let \{ keepEditor\(it\.copy\(previewCompletionSeq = null\)\)\s*\}\s+\}\s+throw failure\s+\}\s+acknowledged\(action\)\s+if \(action\.attachments\.isNotEmpty\(\)\) attachments\.settleSaved\(runtime, action\.id, JSONObject\(action\.attachments\)\)\s+if \(previewCompletion\) Log\.i\(CoreHost\.TAG, "Native Android Preview task completion saved releaseCheck=v1\.3\.9\/preview-mark-done platform=android outcome=saved"\)\s+ui \{\s+if \(!previewCompletion \|\| editor\?\.session == owner\?\.session\) \{\s+editorMenu\.saved\(action\.id\)\s+closeEditor\(settle = false\)\s+\}\s+\}/);
+assert.match(sendDraftFn, /runtime\.saveTaskDraft\(action\.id, draftJson\(action\.base\), draftJson\(action\.patch\), action\.title, action\.attachments, action\.requestId\)\s+\} catch \(failure: Exception\) \{\s+if \(UPDATE_REFUSALS\.any \{ failure\.message\?\.startsWith\(it\) == true \}\) ui \{\s+pendingSave = null; failedAction = null\s+editor\?\.let \{ keepEditor\(it\.copy\(previewCompletionSeq = null\)\)\s*\}\s+\}\s+throw failure\s+\}\s+acknowledged\(action\)\s+if \(action\.attachments\.isNotEmpty\(\)\) attachments\.settleSaved\(runtime, action\.id, JSONObject\(action\.attachments\)\)\s+if \(previewCompletion\) \{/);
+assert.match(sendDraftFn, /if \(previewCompletion\) \{\s+if \(action\.patch\["completedAt"\] != null\) \{\s+Log\.i\(CoreHost\.TAG, "Preview task saved with selected completion time releaseCheck=v1\.3\.10\/preview-backdated-completion platform=android outcome=saved"\)\s+\} else \{\s+Log\.i\(CoreHost\.TAG, "Native Android Preview task completion saved releaseCheck=v1\.3\.9\/preview-mark-done platform=android outcome=saved"\)\s+\}\s+\}\s+ui \{\s+if \(!previewCompletion \|\| editor\?\.session == owner\?\.session\) \{\s+editorMenu\.saved\(action\.id\)\s+closeEditor\(settle = false\)\s+\}\s+\}/);
 
 for (const [call, fn] of [
     ['runtime\\.setTaskFocus\\(id, focused, taskRevision\\)', 'fun setTaskFocus('], ['runtime\\.setProjectFocus\\(id, focused, projectRevision\\)', 'fun setProjectFocus('],
@@ -1946,7 +1953,7 @@ assert.equal(editorUi.match(/pickerStart\(/g).length, 2, 'defined once, used onc
 
 
 assert.match(editorUi, /val dialog = DatePickerDialog\(systemDialogContext\(context, dark\)\)\s+pickerStart\(start\)\?\.let \{ \(year, month, day\) -> dialog\.updateDate\(year, month, day\) \}\s+dialog\.setOnDateSetListener \{ _, year, month, day -> picked\(pickedDay\(year, month, day\)\) \}/);
-assert.match(editorUi, /TimePickerDialog\(systemDialogContext\(context, dark\), \{ _, hour, minute -> picked\(pickedTime\(hour, minute\)\) \}, hour, minute, DateFormat\.is24HourFormat\(context\)\)/);
+assert.match(editorUi, /TimePickerDialog\(systemDialogContext\(context, dark\), \{ _, hour, minute -> picked\(pickedTime\(hour, minute\)\) \}, hour, minute, is24Hour \?: DateFormat\.is24HourFormat\(context\)\)/);
 assert.match(editorUi, /^import android\.app\.DatePickerDialog$/m);
 {
     const { readdirSync } = await import('node:fs');
