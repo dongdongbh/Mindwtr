@@ -1,5 +1,5 @@
 import type { Page } from '@playwright/test';
-import type { Attachment, TimeEstimate } from '@mindwtr/core';
+import type { Attachment, ChecklistItem, TimeEstimate } from '@mindwtr/core';
 
 
 const DATA_KEY = 'mindwtr-data';
@@ -13,6 +13,8 @@ export type SeedTask = {
     id?: string;
     title: string;
     status: SeedTaskStatus;
+    description?: string;
+    checklist?: ChecklistItem[];
     dueDate?: string;
     startTime?: string;
     reviewAt?: string;
@@ -77,6 +79,8 @@ export const seedAppData = async (page: Page, data: SeedData): Promise<void> => 
             id: task.id ?? `seed-task-${index + 1}`,
             title: task.title,
             status: task.status,
+            description: task.description,
+            checklist: task.checklist,
             tags: [],
             contexts: task.contexts ?? [],
             createdAt: SEED_TIMESTAMP,
