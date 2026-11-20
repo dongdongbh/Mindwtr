@@ -391,6 +391,9 @@ jobs:
         with:
           workspaces: apps/desktop/src-tauri
 
+      - name: Clear cached Whisper native build
+        run: cargo clean --locked --manifest-path apps/desktop/src-tauri/Cargo.toml -p whisper-rs-sys
+
       - name: Check Windows Rust
         run: cargo check --locked --manifest-path apps/desktop/src-tauri/Cargo.toml
 
