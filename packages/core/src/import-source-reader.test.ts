@@ -173,6 +173,11 @@ describe('import-source-reader', () => {
         expect(rows).toEqual([['a', 'b']]);
     });
 
+    it('parseCsvRows keeps best-effort parsing for callers that do not opt in to strict CSV', () => {
+        const { rows } = parseCsvRows('a,b\nc"d"e,f\ng\nh,i,j', ',');
+        expect(rows).toEqual([['a', 'b'], ['cde', 'f'], ['g'], ['h', 'i', 'j']]);
+    });
+
     it('parseCsvRows enforces row, column, and cell boundaries while accepting exact limits', () => {
         expect(parseCsvRows('abcd,x,y\na,b,c', ',', TEST_CSV_LIMITS).rows).toHaveLength(2);
         expect(() => parseCsvRows('abcd,x,y\na,b,c\nx,y,z', ',', TEST_CSV_LIMITS)).toThrowError(

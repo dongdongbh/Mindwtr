@@ -64,6 +64,22 @@ describe('Microsoft To Do CSV', () => {
         expect(parsed.diagnostics[0]?.severity).toBe('error');
     });
 
+    it.each([
+        ['short row', 'Task,Not Started', 'different number of fields'],
+        ['long row', 'Task,Not Started,Note,Extra', 'different number of fields'],
+        ['empty short row', ',', 'different number of fields'],
+        ['stray quotes', 'Ta"sk",Not Started,Note', 'malformed quotes'],
+        ['characters after a closing quote', '"Task"extra,Not Started,Note', 'malformed quotes'],
+    ])('rejects the whole Tasks export when it has a %s', (_, row, error) => {
+        const parsed = parseImportSource('microsoft-todo', {
+            fileName: 'Tasks.csv',
+            text: `Subject,Status,Notes\nValid task,Not Started,Note\n${row}`,
+        });
+        expect(parsed).toMatchObject({ valid: false, parsedData: null, preview: null });
+        expect(parsed.errors[0]).toContain(error);
+        expect(parsed.errors[0]).toContain('row 3');
+    });
+
     it.each([true, false])('reads UTF-16 byte order with littleEndian=%s', (littleEndian) => {
         const text = '主题,状态\n归档📂,已完成';
         const bytes = new Uint8Array(text.length * 2 + 2);

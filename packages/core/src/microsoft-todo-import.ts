@@ -135,8 +135,8 @@ export const parseMicrosoftTodoImportSource = (
 
         const text = sanitizeCsvText(source.text);
         const recordNumbers: number[] = [];
-        const { rows, hasUnclosedQuote } = parseCsvRows(text, detectDelimiter(text), undefined, undefined, recordNumbers);
-        if (hasUnclosedQuote || rows.length === 0) return invalid(INVALID_TASK_EXPORT);
+        const { rows } = parseCsvRows(text, detectDelimiter(text), undefined, undefined, recordNumbers, { strict: true });
+        if (rows.length === 0) return invalid(INVALID_TASK_EXPORT);
         const headers = buildHeaderIndex(rows[0]);
         const column = (key: keyof typeof TASK_COLUMNS): number | undefined => {
             for (const alias of TASK_COLUMNS[key]) {

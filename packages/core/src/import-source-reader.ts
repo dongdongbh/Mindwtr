@@ -209,12 +209,18 @@ export const parseCsvRows = (
     limits: Readonly<ImportCsvLimits> = DEFAULT_IMPORT_CSV_LIMITS,
     archiveBudget?: ImportArchiveBudget,
     recordNumbers?: number[],
+    { strict = false }: { strict?: boolean } = {},
 ): { hasUnclosedQuote: boolean; rows: string[][] } => {
     const rows: string[][] = [];
     let currentRow: string[] = [];
     let currentCell = '';
     let inQuotes = false;
+    let closedQuote = false;
     let recordNumber = 0;
+
+    const rejectQuote = (): never => {
+        throw new Error(`The CSV has malformed quotes in row ${recordNumber + 1}.`);
+    };
 
     const appendCharacter = (character: string): void => {
         if (currentCell.length >= limits.maxCellChars) {
@@ -235,15 +241,21 @@ export const parseCsvRows = (
         }
         currentRow.push(currentCell);
         currentCell = '';
+        closedQuote = false;
     };
 
     const finishRow = (): void => {
         recordNumber += 1;
-        if (currentCell.length === 0 && currentRow.every((cell) => cell.length === 0)) {
+        if (currentCell.length === 0 && (strict
+            ? currentRow.length === 0 && !closedQuote
+            : currentRow.every((cell) => cell.length === 0))) {
             currentRow = [];
             return;
         }
         finishCell();
+        if (strict && rows.length > 0 && currentRow.length !== rows[0].length) {
+            throw new Error(`The CSV has a different number of fields than the header in row ${recordNumber}.`);
+        }
         if (rows.length >= limits.maxRows) {
             throw new ImportSourceLimitError(
                 'csv-too-many-rows',
@@ -266,6 +278,7 @@ export const parseCsvRows = (
                     index += 1;
                 } else {
                     inQuotes = false;
+                    closedQuote = true;
                 }
             } else {
                 appendCharacter(char);
@@ -274,6 +287,7 @@ export const parseCsvRows = (
         }
 
         if (char === '"') {
+            if (strict && (currentCell.length > 0 || closedQuote)) rejectQuote();
             inQuotes = true;
             continue;
         }
@@ -288,9 +302,11 @@ export const parseCsvRows = (
             finishRow();
             continue;
         }
+        if (strict && closedQuote) rejectQuote();
         appendCharacter(char);
     }
 
+    if (strict && inQuotes) rejectQuote();
     finishRow();
     if (rows.length === 0 && text.length === 0) rows.push(['']);
 
