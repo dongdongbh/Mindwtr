@@ -834,7 +834,7 @@ export function Layout({
                     {savedSearches.length > 0 && (
                         <div className={cn("mb-2 space-y-1", isCollapsed && "mb-2")}>
                             {!isCollapsed && (
-                                <div className="px-2 text-[10px] font-semibold text-muted-foreground uppercase tracking-[0.16em]">
+                                <div className="px-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
                                     {t('search.savedSearches')}
                                 </div>
                             )}
@@ -877,7 +877,7 @@ export function Layout({
                                         aria-expanded={!isSectionCollapsed}
                                         aria-controls={sectionId}
                                         data-sidebar-section-toggle
-                                        className="group w-full flex h-7 items-center gap-1 rounded-md px-2.5 text-[10px] font-semibold text-muted-foreground uppercase tracking-[0.16em] transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 cursor-pointer"
+                                        className="group w-full flex h-7 items-center gap-1 rounded-md px-2.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 cursor-pointer"
                                     >
                                         <ChevronDown
                                             className={cn(
