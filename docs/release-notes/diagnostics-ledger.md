@@ -60,6 +60,8 @@ The v1.3.6 task-editor correction is confirmed by the visible disappearance of t
 
 ## v1.3.10 (add before tagging, trim in the release after)
 
+- **`v1.3.10/local-api-section-write`** — `apps/desktop/src-tauri/src/local_api.rs`. Create or rename a project section through the desktop Local API. After commit, expect `outcome=created`, `existing`, `renamed`, or `unchanged`. (#1595)
+
 - **`v1.3.10/preview-backdated-completion`** — React Native `apps/mobile/components/task-edit/use-task-edit-state.ts` and native Android `InboxViewModel.kt`. Long-press Mark Done from the task preview and choose a date and time. After the owned save is acknowledged, expect `Preview task saved with selected completion time` with `platform=rn` or `platform=android` and `outcome=saved`. No task text, identifier, timestamp or duration is logged. (#835)
 
 - **`v1.3.10/windows-regional-date`** — `apps/desktop/src/main.tsx`. After restarting Mindwtr on Windows, `outcome=native` confirms the current user's regional locale and short-date pattern were read. Check the System default date example against Windows. (#1594)

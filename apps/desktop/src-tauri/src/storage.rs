@@ -4257,6 +4257,8 @@ impl TaskMutationReadScope {
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ProjectMutationReadScope {
+    section_id: Option<String>,
+    include_sections: bool,
     project_id: Option<String>,
     reopen_task_id: Option<String>,
     area_name: Option<String>,
@@ -4268,6 +4270,19 @@ pub(crate) struct ProjectMutationReadScope {
 }
 
 impl ProjectMutationReadScope {
+    pub(crate) fn section_write(target: &crate::local_api::SectionTarget) -> Self {
+        use crate::local_api::SectionTarget;
+        let mut scope = Self {
+            include_sections: true,
+            ..Self::default()
+        };
+        match target {
+            SectionTarget::Project(id) => scope.project_id = Some(id.clone()),
+            SectionTarget::Section(id) => scope.section_id = Some(id.clone()),
+        }
+        scope
+    }
+
     pub(crate) fn reopen(task_id: &str) -> Self {
         Self {
             reopen_task_id: Some(task_id.to_string()),
@@ -4814,6 +4829,9 @@ fn read_project_mutation_data(
     let mut areas = Vec::new();
 
     let mut project_id = scope.project_id.clone();
+    if let Some(id) = scope.section_id.as_deref() {
+        project_id = load_scoped_section(conn, id, &mut sections, &mut stats)?;
+    }
     let mut source_area_id = None;
     if let Some(task_id) = scope.reopen_task_id.as_deref() {
         if let Some(task) = read_scoped_task(conn, task_id, &mut stats)? {
@@ -4920,6 +4938,8 @@ fn read_project_mutation_data(
                 &mut tasks,
                 &mut stats,
             )?;
+        }
+        if scope.include_children || scope.include_sections {
             stats.statements += 1;
             let mut statement = conn
                 .prepare("SELECT * FROM sections WHERE projectId = ?1")

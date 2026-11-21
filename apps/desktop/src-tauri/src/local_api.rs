@@ -851,6 +851,7 @@ pub(crate) fn is_request_authorized(request: &ApiRequest, token: &str) -> bool {
 
 pub(crate) fn api_error_response(error: String) -> ApiResponse {
     if let Some((status, message)) = match error.as_str() {
+        "section_name_conflict" => Some((409, "Another section in this project has that title")),
         "task_version_conflict" => Some((412, "Task version does not match")),
         "idempotency_conflict" => Some((
             409,
@@ -879,7 +880,7 @@ pub(crate) fn api_error_response(error: String) -> ApiResponse {
     }
     if matches!(
         error.as_str(),
-        "Task not found" | "Project not found" | "Area not found"
+        "Task not found" | "Project not found" | "Area not found" | "Section not found"
     ) {
         return ApiResponse::error(404, error);
     }
@@ -969,6 +970,8 @@ fn health_response() -> Value {
         "conditionalTaskListGet": true,
         "referenceLists": true,
         "ordinaryTaskReopen": true,
+        "sectionCreate": true,
+        "sectionRename": true,
         "areaCreate": true
     }})
 }
@@ -1056,7 +1059,17 @@ fn ensure_task_version(
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub(crate) enum SectionTarget {
+    Project(String),
+    Section(String),
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) enum LocalOperation {
+    WriteSection {
+        target: SectionTarget,
+        title: String,
+    },
     Health,
     ListTasks(HashMap<String, String>),
     QueryTasks(Map<String, Value>),
@@ -1131,6 +1144,7 @@ impl LocalOperation {
             self,
             Self::CreateProject(_)
                 | Self::CreateArea { .. }
+                | Self::WriteSection { .. }
                 | Self::ReopenTask { .. }
                 | Self::PatchProject { .. }
                 | Self::PatchArea { .. }
@@ -1208,6 +1222,18 @@ pub(crate) fn operation_from_api_request(
                 },
                 None => LocalOperation::CreateTask(body),
             }
+        }
+        ("POST", "/sections") => {
+            let body = body()?;
+            let project_id = body
+                .get("projectId")
+                .and_then(Value::as_str)
+                .filter(|id| !id.trim().is_empty())
+                .ok_or("Invalid projectId")?;
+            section_write_operation(SectionTarget::Project(project_id.into()), &body)?
+        }
+        ("PATCH", _) if segments.len() == 2 && segments[0] == "sections" => {
+            section_write_operation(SectionTarget::Section(id()), &body()?)?
         }
         ("POST", "/projects") => LocalOperation::CreateProject(body()?),
         ("POST", "/areas") => area_create_operation(&body()?)?,
@@ -1475,6 +1501,16 @@ pub(crate) fn execute_operation(
                 .filter(|area| !has_string_field(area, "deletedAt"))
                 .collect::<Vec<_>>();
             return Ok(json!({ "areas": areas }));
+        }
+        LocalOperation::WriteSection { target, title } => {
+            let _guard = access.lock_write(write_lock)?;
+            let ((section, outcome), _) = mutate_project_rows_with_retries(
+                app,
+                ProjectMutationReadScope::section_write(&target),
+                |data| write_section(data, &target, &title),
+            )?;
+            log::info!("Desktop Local API section write completed extra.releaseCheck=v1.3.10/local-api-section-write outcome={outcome}");
+            return Ok(json!({"section":section}));
         }
         LocalOperation::CreateArea { name, props } => {
             let _guard = access.lock_write(write_lock)?;
@@ -2159,6 +2195,112 @@ pub(crate) fn area_create_operation(body: &Map<String, Value>) -> Result<LocalOp
         name: name.into(),
         props,
     })
+}
+
+fn section_write_operation(
+    target: SectionTarget,
+    body: &Map<String, Value>,
+) -> Result<LocalOperation, String> {
+    if body.keys().any(|key| {
+        key != "title" && !(key == "projectId" && matches!(target, SectionTarget::Project(_)))
+    }) {
+        return Err("Unsupported section field".into());
+    }
+    let title = body
+        .get("title")
+        .and_then(Value::as_str)
+        .map(trim_area_name)
+        .filter(|title| !title.is_empty() && js_string_length(title) <= MAX_TASK_TITLE_LENGTH)
+        .ok_or("Invalid section title")?;
+    Ok(LocalOperation::WriteSection {
+        target,
+        title: title.into(),
+    })
+}
+
+fn write_section(
+    data: &mut Value,
+    target: &SectionTarget,
+    title: &str,
+) -> Result<((Value, &'static str), ProjectMutationRows), String> {
+    let device_id = device_id_from_data(data);
+    let sections = data["sections"].as_array().ok_or("Invalid sections")?;
+    let live = |s: &Value| !has_string_field(s, "deletedAt") && !has_string_field(s, "purgedAt");
+    let (project_id, current) = match target {
+        SectionTarget::Project(id) => (id.as_str(), None),
+        SectionTarget::Section(id) => {
+            let section = sections
+                .iter()
+                .find(|row| row["id"] == id.as_str() && live(row))
+                .ok_or("Section not found")?;
+            (
+                section["projectId"].as_str().ok_or("Project not found")?,
+                Some(section),
+            )
+        }
+    };
+    let project = data["projects"]
+        .as_array()
+        .and_then(|rows| rows.iter().find(|p| p["id"] == project_id && live(p)))
+        .ok_or("Project not found")?;
+    if project["status"] == "archived" {
+        return Err("Project update conflict: project is archived".into());
+    }
+    let siblings = sections
+        .iter()
+        .filter(|s| s["projectId"] == project_id && live(s));
+    let normalized = title.to_lowercase();
+    if let Some(row) = siblings.clone().find(|s| {
+        current.is_none_or(|row| row["id"] != s["id"])
+            && s["title"]
+                .as_str()
+                .is_some_and(|v| trim_area_name(v).to_lowercase() == normalized)
+    }) {
+        if current.is_some() {
+            return Err("section_name_conflict".into());
+        }
+        let mut existing = row.clone();
+        existing["existing"] = Value::Bool(true);
+        return Ok(((existing, "existing"), ProjectMutationRows::default()));
+    }
+    if let Some(row) = current.filter(|row| row["title"] == title) {
+        return Ok(((row.clone(), "unchanged"), ProjectMutationRows::default()));
+    }
+
+    let now = now_iso();
+    let (section, outcome) = if let Some(row) = current {
+        let mut section = row.clone();
+        section["title"] = json!(title);
+        stamp_entity(
+            section.as_object_mut().ok_or("Invalid section")?,
+            &now,
+            &device_id,
+        );
+        (section, "renamed")
+    } else {
+        let order = siblings
+            .filter_map(|s| s["order"].as_f64())
+            .fold(-1.0, f64::max)
+            + 1.0;
+        (
+            json!({"id":generate_uuid_v4(),"projectId":project_id,"title":title,"order":order,"isCollapsed":false,
+            "rev":1,"revBy":device_id,"createdAt":now,"updatedAt":now}),
+            "created",
+        )
+    };
+    let sections = data["sections"].as_array_mut().ok_or("Invalid sections")?;
+    if let Some(row) = sections.iter_mut().find(|s| s["id"] == section["id"]) {
+        *row = section.clone();
+    } else {
+        sections.push(section.clone());
+    }
+    Ok((
+        (section.clone(), outcome),
+        ProjectMutationRows {
+            sections: vec![section],
+            ..Default::default()
+        },
+    ))
 }
 
 fn changed_entity_rows(before: &Value, after: &Value, collection: &str) -> Vec<Value> {
@@ -7342,7 +7484,7 @@ mod tests {
                 assert_eq!(response.body["apiVersion"], 2);
                 assert_eq!(
                     response.body["capabilities"],
-                    json!({"taskListVersions":true,"conditionalTaskPatch":true,"idempotentTaskCreate":true,"conditionalTaskActions":true,"conditionalTaskListGet":true,"referenceLists":true,"ordinaryTaskReopen":true,"areaCreate":true})
+                    json!({"taskListVersions":true,"conditionalTaskPatch":true,"idempotentTaskCreate":true,"conditionalTaskActions":true,"conditionalTaskListGet":true,"referenceLists":true,"ordinaryTaskReopen":true,"areaCreate":true,"sectionCreate":true,"sectionRename":true})
                 );
             }
         }
@@ -8717,6 +8859,105 @@ mod tests {
             assert_eq!(api_error_response(error).status, 409);
             assert_eq!(data, before);
         }
+    }
+
+    #[test]
+    fn section_writes_route_through_project_scoped_sqlite() {
+        let mut conn = rusqlite::Connection::open_in_memory().unwrap();
+        let mut seed = reopen_fixture()["cases"][0]["before"].clone();
+        for id in ["p1", "p2", "archived"] {
+            seed["projects"].as_array_mut().unwrap().push(json!({"id":id,"title":id,"status":if id == "archived" {"archived"} else {"active"},"createdAt":"2026-01-01","updatedAt":"2026-01-01","color":"#112233"}));
+        }
+        seed["sections"] = json!([{"id":"old","projectId":"p1","title":"Inbox","order":55,"createdAt":"2026-01-01","updatedAt":"2026-01-01","deletedAt":"2026-01-02"}]);
+        crate::storage::local_operation_test_seed(&mut conn, &seed).unwrap();
+        let snapshot = || crate::storage::read_sqlite_data(&conn).unwrap();
+        let request = |method: &str, path: &str, body: Value, allow_write| {
+            let access = LocalApiAccess {
+                allow_write,
+                shutdown: Arc::new(AtomicBool::new(false)),
+            };
+            handle_api_operation(
+                "token",
+                &access,
+                ApiRequest {
+                    method: method.into(),
+                    path: path.into(),
+                    query: HashMap::new(),
+                    headers: HashMap::from([("authorization".into(), "Bearer token".into())]),
+                    body: body.to_string().into_bytes(),
+                },
+                |operation| {
+                    assert!(operation.writes());
+                    let LocalOperation::WriteSection { target, title } = operation else {
+                        panic!("expected section write")
+                    };
+                    let mut response = Value::Null;
+                    crate::storage::local_project_operation_test_commit(
+                        &conn,
+                        ProjectMutationReadScope::section_write(&target),
+                        |data| {
+                            let ((row, outcome), rows) = write_section(data, &target, &title)?;
+                            response = json!({"section":row,"outcome":outcome});
+                            Ok(((), rows))
+                        },
+                    )?;
+                    Ok(response)
+                },
+            )
+        };
+        let create = |project: &str, title: &str| {
+            request(
+                "POST",
+                "/sections",
+                json!({"projectId":project,"title":title}),
+                true,
+            )
+        };
+        assert_eq!(request("POST", "/sections", json!({}), false).status, 403);
+        assert_eq!(create("missing", "Inbox").status, 404);
+        assert_eq!(create("archived", "Inbox").status, 409);
+        let first = create("p1", " Inbox ");
+        assert_eq!(first.status, 200);
+        let row = &first.body["section"];
+        assert_eq!(row["order"], 0.0);
+        assert_eq!(row["rev"], 1);
+        assert_ne!(row["id"], "old");
+        let before = snapshot();
+        assert_eq!(create("p1", "inBOX").body["section"]["id"], row["id"]);
+        assert_eq!(create("p1", "Inbox").body["section"]["existing"], true);
+        assert_eq!(before, snapshot());
+        assert_ne!(create("p2", "Inbox").body["section"]["id"], row["id"]);
+        let second = create("p1", "Later");
+        assert_eq!(second.body["section"]["order"], 1.0);
+        let path = format!("/sections/{}", row["id"].as_str().unwrap());
+        let before = snapshot();
+        assert_eq!(
+            request("PATCH", &path, json!({"title":" later "}), true).status,
+            409
+        );
+        assert_eq!(
+            request("PATCH", &path, json!({"title":" "}), true).status,
+            400
+        );
+        assert_eq!(
+            request("PATCH", &path, json!({"title":"Y","projectId":"p2"}), true).status,
+            400
+        );
+        assert_eq!(
+            request("PATCH", "/sections/old", json!({"title":"Y"}), true).status,
+            404
+        );
+        assert_eq!(before, snapshot());
+        let rename = request("PATCH", &path, json!({"title":"INBOX"}), true);
+        assert_eq!(rename.body["section"]["rev"], 2);
+        assert_eq!(rename.body["section"]["id"], row["id"]);
+        let after = snapshot();
+        assert_eq!(before["tasks"], after["tasks"]);
+        assert_eq!(
+            request("PATCH", &path, json!({"title":"INBOX"}), true).body["outcome"],
+            "unchanged"
+        );
+        assert_eq!(after, snapshot());
     }
 
     #[test]
