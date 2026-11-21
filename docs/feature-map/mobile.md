@@ -98,9 +98,10 @@ Source: `apps/mobile`. Routes live in `apps/mobile/app` (expo-router). Labels be
 ## Full-screen capture (system entry)
 
 - Reach: Opened by the share sheet, Control Center, a capture deep link, and `mindwtr:///capture-quick` without `entry=details`.
-- Code: `apps/mobile/app/capture-modal.tsx`, `packages/core/src/entry-points.ts`
+- Code: `apps/mobile/app/capture-modal.tsx`, `apps/mobile/components/CaptureForm.tsx`, `packages/core/src/entry-points.ts`
 - Checks: `apps/mobile/tests/capture-modal.test.tsx`, `apps/mobile/tests/capture-modal.parity.test.tsx`
 - Notes: System URLs are rewritten to `/capture-modal?origin=system` in `apps/mobile/app/+native-intent.ts`. After a system-launched capture, the app returns to the previous app.
+- Android project details › Add task opens the capture form over the project. Save and Cancel reveal the same project, and Save & edit opens the new task there.
 
 ## Task editor
 

@@ -14,6 +14,7 @@ import { act, create } from 'react-test-renderer';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createAIProvider } from '@mindwtr/core';
 
+import { CaptureForm } from '@/components/CaptureForm';
 import CaptureScreen, { sanitizeCaptureReturnToParam } from '@/app/capture-modal';
 import { logInfo, logWarn } from '@/lib/app-log';
 
@@ -1679,6 +1680,24 @@ describe('CaptureScreen', () => {
       projectId: 'project-launch',
       areaId: undefined,
     });
+  });
+
+  it.each(['Save', 'Save & edit'])('handles %s inside the open Android project', async (action) => {
+    setPlatform('android');
+    storeState.projects = [{ id: 'project-1', title: 'Launch', status: 'active' }];
+    const projectModal = { close: vi.fn(), edit: vi.fn() };
+    const params = { initialValue: 'Project task', initialProps: JSON.stringify({ projectId: 'project-1', status: 'next' }) };
+    let tree!: ReturnType<typeof create>;
+    act(() => { tree = create(<CaptureForm params={params} projectModal={projectModal} />); });
+    await act(async () => { findTouchableByText(tree, action).props.onPress(); });
+
+    expect(storeState.addTask).toHaveBeenCalledWith('Project task', { status: 'next', projectId: 'project-1' });
+    if (action === 'Save') expect(projectModal.close).toHaveBeenCalledOnce();
+    else expect(projectModal.edit).toHaveBeenCalledWith('task-created');
+    expect(routerMocks.back).not.toHaveBeenCalled();
+    expect(routerMocks.replace).not.toHaveBeenCalled();
+    expect(openTaskScreen).not.toHaveBeenCalled();
+    act(() => tree.unmount());
   });
 
   it('opens the created task when save and edit is requested', async () => {

@@ -315,6 +315,8 @@ The native client is a Kotlin and Jetpack Compose app in `apps/android-native`. 
 
 ## Project details
 
+- Add task keeps the current project open while the capture form is visible.
+
 - Reach: Projects › a project › Details. It holds status, area, dates (Review date), a repeat interval (Repeat every N days, weeks, months or years after completion, with Save), scope (Sequential, Parallel), notes with Preview, tags, sections, and attachments. The ⋯ sheet has Duplicate, Archive, Convert to section, and Delete.
 - Shortcuts: Link `mindwtr-native-dev:///open?project=<id>`.
 - Selectors: `project-title-input`, `project-details-toggle`, `project-details-status`, `project-area-sheet`, `project-notes-input`, `project-notes-preview`, `project-tag-input`, `project-section-manager`, `project-section-title-input`, `project-details-attachments`, `project-convert-sheet`, `project-delete-button`, `project-repeat-after-count`, `project-repeat-after-unit`, `project-repeat-after-save`, `project-repeat-error`

@@ -32,6 +32,7 @@ import {
   openProjectTagPicker,
 } from '@/components/projects-screen/project-meta-pickers';
 import { ProjectAreaModals } from '@/components/projects-screen/ProjectAreaModals';
+import { CaptureForm } from '@/components/CaptureForm';
 import { ProjectDetailModal } from '@/components/projects-screen/ProjectDetailModal';
 import { ProjectImagePreviewModal, ProjectLinkModal, ProjectTagPickerModal } from '@/components/projects-screen/ProjectOverlayModals';
 import { ProjectRow } from '@/components/projects-screen/ProjectRow';
@@ -405,6 +406,10 @@ export default function ProjectsScreen() {
     }
   }, [projects, selectedProject, updateProject]);
 
+  const [captureProjectId, setCaptureProjectId] = useState<string | null>(null);
+  useEffect(() => {
+    if (captureProjectId && selectedProject?.id !== captureProjectId) setCaptureProjectId(null);
+  }, [captureProjectId, selectedProject?.id]);
   const reopenProjectIdAfterCaptureRef = useRef<string | null>(null);
   const pendingGettingStartedAction = useRef<GettingStartedAction | null>(null);
   const pendingProjectDismissActionRef = useRef<(() => void) | null>(null);
@@ -837,6 +842,10 @@ export default function ProjectsScreen() {
   const openProjectQuickAdd = useCallback((projectToAddTo: Project) => {
     commitSelectedProjectNotes();
     persistSelectedProjectEdits(selectedProject);
+    if (Platform.OS === 'android') {
+      setCaptureProjectId(projectToAddTo.id);
+      return;
+    }
     reopenProjectIdAfterCaptureRef.current = projectToAddTo.id;
     setSelectedProject(null);
     const openCapture = () => openQuickCapture({
@@ -1192,6 +1201,24 @@ export default function ProjectsScreen() {
         taskSortBy={projectTaskSortBy}
         tasks={selectedProjectTasks}
       />
+
+      {captureProjectId && selectedProject?.id === captureProjectId && (
+        <CaptureForm
+          params={{ initialProps: JSON.stringify({ projectId: captureProjectId, status: 'next' }) }}
+          projectModal={{
+            close: () => setCaptureProjectId(null),
+            edit: (id) => {
+              setCaptureProjectId(null);
+              const task = useTaskStore.getState()._allTasks.find((item) => item.id === id && !item.deletedAt);
+              if (!task) return;
+              setHighlightTask(id);
+              setTaskModalDefaultTab('task');
+              setTaskModalOpenKey(`capture:${id}`);
+              setEditingTask(task);
+            },
+          }}
+        />
+      )}
 
       <TaskEditModal
         key={taskModalOpenKey}

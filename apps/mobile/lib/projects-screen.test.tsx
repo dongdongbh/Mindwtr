@@ -21,6 +21,10 @@ const asyncStorageMock = vi.hoisted(() => ({
 
 const routeParams = vi.hoisted(() => ({ current: {} as Record<string, string> }));
 const areaModals = vi.hoisted(() => ({ props: null as React.ComponentProps<typeof import('../components/projects-screen/ProjectAreaModals').ProjectAreaModals> | null }));
+const projectCapture = vi.hoisted(() => ({ props: null as Record<string, any> | null }));
+vi.mock('@/components/CaptureForm', () => ({
+  CaptureForm: (props: Record<string, any>) => { projectCapture.props = props; return null; },
+}));
 const detailModal = vi.hoisted(() => ({ props: null as Record<string, any> | null }));
 const tagPicker = vi.hoisted(() => ({ props: null as Record<string, any> | null }));
 const taskEditModal = vi.hoisted(() => ({ props: null as Record<string, any> | null }));
@@ -550,11 +554,15 @@ describe('ProjectsScreen project quick add ordering', () => {
     }
   });
 
-  it('on Android opens capture at once (Modal.onDismiss is iOS-only)', async () => {
+  it('on Android keeps the same project open behind capture and on cancel', async () => {
     Platform.OS = 'android';
     const tree = await openProjectAndQuickAdd();
 
-    expect(openQuickCaptureMock).toHaveBeenCalledTimes(1);
+    expect(openQuickCaptureMock).not.toHaveBeenCalled();
+    expect(detailModal.props?.project?.id).toBe(testProject.id);
+    expect(JSON.parse(projectCapture.props?.params.initialProps)).toEqual({ projectId: testProject.id, status: 'next' });
+    await act(async () => projectCapture.props?.projectModal.close());
+    expect(detailModal.props?.project?.id).toBe(testProject.id);
 
     await act(async () => {
       tree.unmount();

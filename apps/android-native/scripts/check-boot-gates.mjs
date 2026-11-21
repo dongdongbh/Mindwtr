@@ -4190,7 +4190,7 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
 
 
     assert.match(captureModalUi, /Box\(Modifier\.fillMaxSize\(\)\.background\(c\.bg\)\.imePadding\(\)\.semantics \{ testTagsAsResourceId = true \}\.testTag\("capture-modal"\)\)/);
-    assert.match(readFileSync(resolve(app, '../mobile/app/capture-modal.tsx'), 'utf8'), /behavior=\{Platform\.OS === 'ios' \? 'padding' : 'height'\}/);
+    assert.match(readFileSync(resolve(app, '../mobile/components/CaptureForm.tsx'), 'utf8'), /behavior=\{Platform\.OS === 'ios' \? 'padding' : 'height'\}/);
 
 
     assert.match(model, /internal fun openSavedTask\(taskId: String, projectId: String\?\) = menu\.whenIdle \{\s+closeSearch\(\)\s+menu\.closeSheet\(\)\s+if \(projectId != null\) openFromSearch\(Screen\.Projects, projectId\) else \{ menu\.toTabs\(\); show\(Screen\.Focus\); highlight\(taskId\) \}\s+menu\.whenIdle \{ openEditor\(taskId, "task"\) \}/);
@@ -10278,7 +10278,7 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
 
 
     assert.match(header, /\{ openProjectId\?\.let\(::openProjectCapture\) \}[\s\S]{0,200}testTag\("project-add-task-button"\)/);
-    assert.match(source('InboxViewModel.kt'), /fun openProjectCapture\(projectId: String\) \{[\s\S]{0,200}put\("initialProps", JSONObject\(\)\.put\("projectId", projectId\)\.put\("status", "next"\)\.toString\(\)\)\s+\.put\("returnTo", "\/projects-screen\?projectId=\$\{android\.net\.Uri\.encode\(projectId\)\}"\)[\s\S]{0,300}ui \{ val back = projectReturn; closeProject\(\); keepProjectReturn\(back\); captureModal\.opened\(params, reply\) \}/);
+    assert.match(source('InboxViewModel.kt'), /fun openProjectCapture\(projectId: String\) \{[\s\S]{0,200}put\("initialProps", JSONObject\(\)\.put\("projectId", projectId\)\.put\("status", "next"\)\.toString\(\)\)\s+\.put\("returnTo", "\/projects-screen\?projectId=\$\{android\.net\.Uri\.encode\(projectId\)\}"\)[\s\S]{0,300}ui \{ captureModal\.opened\(params, reply\) \}/);
     assert.match(source('CaptureModalModel.kt'), /private fun end\(close: JSONObject, leave: Boolean = true\) \{\s+keep\(null\)\s+inFlight = null\s+close\.menuText\("returnToProjectId"\)\?\.let \{ id -> shell\.menu\.whenIdle \{ shell\.openProject\(id\) \} \}/);
 
     assert.doesNotMatch(source('CaptureScreen.kt') + source('InboxViewModel.kt'), /presetPatch|withPreset|val preset: JSONObject/);

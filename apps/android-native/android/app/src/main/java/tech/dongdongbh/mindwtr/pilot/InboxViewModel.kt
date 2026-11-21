@@ -1697,7 +1697,7 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
             .put("returnTo", "/projects-screen?projectId=${android.net.Uri.encode(projectId)}")
         perform { runtime ->
             val reply = runtime.menuRead("captureModalOpen", JSONObject().put("params", params).toString())
-            ui { val back = projectReturn; closeProject(); keepProjectReturn(back); captureModal.opened(params, reply) }
+            ui { captureModal.opened(params, reply) }
         }
     }
 
