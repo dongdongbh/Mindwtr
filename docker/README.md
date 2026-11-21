@@ -254,4 +254,4 @@ docker build -f docker/cloud/Dockerfile -t mindwtr-cloud .
 ## Notes
 
 - The PWA uses client-side rendering; Nginx is configured with `try_files` to avoid 404s on refresh.
-- Bun is pinned to `1.3.5` and the build uses C++20 flags for `better-sqlite3`.
+- The Docker builds use the Bun version pinned in `.bun-version` and the build uses C++20 flags for `better-sqlite3`.

@@ -284,6 +284,30 @@ type BunRuntime = {
 
 const BUN_DEFAULT_MAX_REQUEST_BODY_BYTES = 128 * 1024 * 1024;
 
+async function drainRejectedWindowsUpload(req: Request, byteLimit: number, signal: AbortSignal): Promise<void> {
+    const length = Number(req.headers.get('content-length'));
+    if (!Number.isSafeInteger(length) || length <= 0 || length > byteLimit || req.bodyUsed || !req.body || signal.aborted) return;
+
+    const reader = req.body.getReader();
+    const release = () => reader.releaseLock();
+    const timer = setTimeout(release, 500);
+    signal.addEventListener('abort', release, { once: true });
+    try {
+        let remaining = length;
+        while (remaining > 0) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            remaining -= value.byteLength;
+        }
+    } catch {
+        return;
+    } finally {
+        clearTimeout(timer);
+        signal.removeEventListener('abort', release);
+        reader.releaseLock();
+    }
+}
+
 const getBunRuntime = (): BunRuntime | undefined => (
     (globalThis as typeof globalThis & { Bun?: BunRuntime }).Bun
 );
@@ -1358,15 +1382,16 @@ export async function startCloudServer(options: CloudServerOptions = {}): Promis
         throw new Error('Mindwtr Cloud requires the Bun runtime.');
     }
 
+    const maxRequestBodySize = Math.max(
+        BUN_DEFAULT_MAX_REQUEST_BODY_BYTES,
+        Math.max(maxBodyBytes, maxDataBodyBytes, maxAttachmentBytes) + 1_048_576,
+    );
     const server = bunRuntime.serve({
         hostname: host,
         port,
 
 
-        maxRequestBodySize: Math.max(
-            BUN_DEFAULT_MAX_REQUEST_BODY_BYTES,
-            Math.max(maxBodyBytes, maxDataBodyBytes, maxAttachmentBytes) + 1_048_576,
-        ),
+        maxRequestBodySize,
         async fetch(req: Request) {
             const requestId = generateRequestId();
             const requestStartedAt = performance.now();
@@ -1861,6 +1886,9 @@ export async function startCloudServer(options: CloudServerOptions = {}): Promis
                 attachRequestId(response, requestId);
 
 
+                if (process.platform === 'win32' && response.status === 413) {
+                    await drainRejectedWindowsUpload(req, maxRequestBodySize, requestAbortController.signal);
+                }
                 if (req.body && (!req.bodyUsed || response.status === 413)) response.headers.set('Connection', 'close');
                 const completion: CloudRequestCompletion = {
                     requestId,
