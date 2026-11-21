@@ -1,5 +1,5 @@
 {
-  "lockfileVersion": 1,
+  "lockfileVersion": 3,
   "configVersion": 1,
   "workspaces": {
     "": {
@@ -274,6 +274,9 @@
   },
   "overrides": {
     "@babel/core": "7.29.7",
+    "@eslint/eslintrc": {
+      "ajv": "6.14.0",
+    },
     "@hono/node-server": "2.1.6",
     "@humanfs/node": "0.16.8",
     "@xmldom/xmldom": "0.8.15",
@@ -283,6 +286,9 @@
     "compression": "1.8.2",
     "decode-uri-component": "0.5.1",
     "esbuild": "0.25.12",
+    "eslint": {
+      "ajv": "6.14.0",
+    },
     "expo-linking": "8.0.12",
     "fast-uri": "3.1.9",
     "flatted": "3.4.2",
