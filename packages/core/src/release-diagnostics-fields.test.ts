@@ -242,7 +242,7 @@ const RELEASE_CHECK_FIELD_NAMES = [
 
     'action', 'focusCount', 'timerPhase', 'timerRunning',
 
-    'operation',
+    'operation', 'tasks', 'projects', 'sections', 'areas', 'checklistItems', 'standaloneTasks',
 
 
     'format', 'artifactKind',

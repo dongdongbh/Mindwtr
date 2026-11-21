@@ -3157,6 +3157,9 @@ export const daOverrides: Record<string, string> = {
     'settings.importOmniFocusDesc':
         'Importer OmniFocus CSV, JSON eller ZIP-eksport til Mindwtr-projekter og indbakkeopgaver.',
     'settings.importMindwtrCsv': 'Importer fra Mindwtr CSV',
+    "settings.importMicrosoftTodo": "Importer fra Microsoft To Do",
+    "settings.importMicrosoftTodoDesc": "Importer en CSV-fil med opgaver eksporteret fra klassisk Outlook til Windows.",
+    "settings.importMicrosoftTodoConfirm": "Vil du importere opgaver fra Microsoft To Do?",
     'settings.importMindwtrCsvDesc':
         'Importer en generisk Mindwtr CSV-fil til Mindwtr-områder, projekter, sektioner og opgaver.',
     'settings.syncBackendCloudkit': 'iCloud',
@@ -3321,6 +3324,7 @@ export const daOverrides: Record<string, string> = {
     'settings.importDiagnostics.unmappedDate': '{{count}} datoværdi(er) kunne ikke tilknyttes og blev udeladt.',
     'settings.importDiagnostics.unmappedStatus':
         '{{count}} statusværdi(er) kunne ikke kortlægges og bruges som en sikker standard.',
+    "settings.importDiagnostics.unsupportedTextEncoding": "Mindwtr kunne ikke læse tekstkodningen. Gem filen som CSV med UTF-8-kodning, og prøv igen.",
     'settings.importDiagnostics.unsupportedRecurrence':
         '{{count}} ikke-understøttede gentagelsesregler blev holdt som noter.',
     'settings.syncRemoteBusy':

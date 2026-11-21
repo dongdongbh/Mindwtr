@@ -34,6 +34,9 @@ import {
     useTaskStore,
     type AppData,
     type ImportDiagnostic,
+    type ImportParseResult,
+    type MindwtrCsvImportExecutionResult,
+    type MindwtrCsvImportPreview,
     type SyncBackend,
 } from '@mindwtr/core';
 import {
@@ -41,12 +44,14 @@ import {
     exportDesktopBackup,
     exportDesktopCsv,
     exportDesktopTaskNotes,
+    importDesktopMicrosoftTodoData,
     importDesktopMindwtrCsvData,
     importDesktopOmniFocusData,
     importDesktopTickTickData,
     importDesktopTodoistData,
     inspectDesktopDgtImport,
     inspectDesktopBackup,
+    inspectDesktopMicrosoftTodoImport,
     inspectDesktopMindwtrCsvImport,
     inspectDesktopOmniFocusImport,
     inspectDesktopTickTickImport,
@@ -96,6 +101,7 @@ const IMPORT_DIAGNOSTIC_FALLBACKS: Record<string, string> = {
     'settings.importDiagnostics.unmappedDate': '{{count}} date value(s) could not be mapped and were omitted.',
     'settings.importDiagnostics.unmappedStatus': '{{count}} status value(s) could not be mapped and used a safe default.',
     'settings.importDiagnostics.unsupportedRecurrence': '{{count}} unsupported repeat rule(s) were kept as notes.',
+    'settings.importDiagnostics.unsupportedTextEncoding': 'Mindwtr could not read the text encoding. Save the file as UTF-8 CSV and try again.',
 };
 
 
@@ -1983,14 +1989,25 @@ export const useSyncSettings = ({
         }
     }, [buildUndoAction, formatImportError, formatImportMessages, formatText, isTauri, requestConfirmation, resolveText, showToast, toErrorMessage]);
 
-    const handleImportMindwtrCsv = useCallback(async () => {
+    const handleImportCsv = useCallback(async <Parsed,>({
+        source,
+        inspect,
+        apply,
+    }: {
+        source: 'mindwtr-csv' | 'microsoft-todo';
+        inspect: () => Promise<(ImportParseResult<Parsed, MindwtrCsvImportPreview> & { diagnostics: ImportDiagnostic[] }) | null>;
+        apply: (parsed: Parsed) => Promise<{ snapshotName: string | null; result: MindwtrCsvImportExecutionResult }>;
+    }) => {
         addBreadcrumb('transfer:restore');
-        setTransferAction('import:mindwtr-csv');
+        setTransferAction(`import:${source}`);
         try {
-            const parseResult = await inspectDesktopMindwtrCsvImport();
+            const parseResult = await inspect();
             if (!parseResult) return;
             if (!parseResult.valid || !parseResult.preview || !parseResult.parsedData) {
-                showToast(formatImportError(parseResult.diagnostics, resolveText('settings.backupMobile.theSelectedFileIsNotASupportedMindwtrCsvFile', 'The selected file is not a supported Mindwtr CSV file.')), 'error');
+                const fallback = source === 'microsoft-todo'
+                    ? resolveText('settings.importMicrosoftTodoDesc', 'Import a Tasks CSV exported from classic Outlook for Windows.')
+                    : resolveText('settings.backupMobile.theSelectedFileIsNotASupportedMindwtrCsvFile', 'The selected file is not a supported Mindwtr CSV file.');
+                showToast(formatImportError(parseResult.diagnostics, fallback), 'error');
                 return;
             }
 
@@ -2003,7 +2020,9 @@ export const useSyncSettings = ({
             }
 
             const confirmed = await requestConfirmation({
-                title: resolveText('settings.backupMobile.importMindwtrCsvData', 'Import Mindwtr CSV data?'),
+                title: source === 'microsoft-todo'
+                    ? resolveText('settings.importMicrosoftTodoConfirm', 'Import Microsoft To Do tasks?')
+                    : resolveText('settings.backupMobile.importMindwtrCsvData', 'Import Mindwtr CSV data?'),
                 message: [
                     formatText('settings.backupMobile.importTaskCountFromFile', 'Import {{taskCount}} task(s) from {{fileName}}?', { taskCount: preview.taskCount, fileName: preview.fileName }),
                     preview.areaCount > 0 ? formatText('settings.backupMobile.mindwtrCsvAreasWillBeCreated', '{{areaCount}} area(s) will be created from the Area column.', { areaCount: preview.areaCount }) : null,
@@ -2014,12 +2033,12 @@ export const useSyncSettings = ({
                         ? formatText('settings.backupMobile.tasksWillStayOutsideProjects', '{{taskCount}} task(s) will stay outside projects so you can process them in Mindwtr.', { taskCount: preview.standaloneTaskCount })
                         : null,
                     ...(projectLines.length > 0 ? ['', ...projectLines] : []),
-                    ...(preview.warnings.length > 0 ? ['', ...formatImportMessages(preview.warnings)] : []),
+                    ...parseResult.diagnostics.filter((item) => item.severity === 'warning').map(formatImportDiagnosticText),
                 ].filter(Boolean).join('\n'),
             });
             if (!confirmed) return;
 
-            const { snapshotName, result } = await importDesktopMindwtrCsvData(parseResult.parsedData);
+            const { snapshotName, result } = await apply(parseResult.parsedData);
             if (isTauri) {
                 setSnapshots(await SyncService.listDataSnapshots());
             }
@@ -2044,7 +2063,7 @@ export const useSyncSettings = ({
         } finally {
             setTransferAction(null);
         }
-    }, [buildUndoAction, formatImportError, formatImportMessages, formatText, isTauri, requestConfirmation, resolveText, showToast, toErrorMessage]);
+    }, [buildUndoAction, formatImportDiagnosticText, formatImportError, formatImportMessages, formatText, isTauri, requestConfirmation, resolveText, showToast, toErrorMessage]);
 
     const syncPreferences = settings?.syncPreferences ?? {};
     const handleUpdateSyncPreferences = useCallback(
@@ -2214,7 +2233,16 @@ export const useSyncSettings = ({
             onImportTickTick: handleImportTickTick,
             onImportDgt: handleImportDgt,
             onImportOmniFocus: handleImportOmniFocus,
-            onImportMindwtrCsv: handleImportMindwtrCsv,
+            onImportMicrosoftTodo: () => handleImportCsv({
+                source: 'microsoft-todo',
+                inspect: inspectDesktopMicrosoftTodoImport,
+                apply: importDesktopMicrosoftTodoData,
+            }),
+            onImportMindwtrCsv: () => handleImportCsv({
+                source: 'mindwtr-csv',
+                inspect: inspectDesktopMindwtrCsvImport,
+                apply: importDesktopMindwtrCsvData,
+            }),
         } satisfies SettingsDataTransferProps,
     };
 };

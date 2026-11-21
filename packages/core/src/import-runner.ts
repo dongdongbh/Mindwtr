@@ -14,7 +14,9 @@ import {
     type ParsedDgtImportData,
 } from './dgt-import';
 import { addBreadcrumb } from './log-breadcrumbs';
+import type { ImportExecutionResult, ImportSource } from './import-apply';
 import { createImportDiagnostics, type ImportDiagnostic } from './import-diagnostics';
+import { applyMicrosoftTodoImport, parseMicrosoftTodoImportSource } from './microsoft-todo-import';
 import type { ImportSourceInput } from './import-source-reader';
 import type { LocalAttachmentPresence } from './attachment-transfer';
 import {
@@ -47,7 +49,7 @@ import {
 import type { AppData, Attachment } from './types';
 import { retainTaxonomyEffects } from './taxonomy-catalog';
 
-export type ImportSourceId = 'backup' | 'backup-merge' | 'dgt' | 'mindwtr-csv' | 'omnifocus' | 'ticktick' | 'todoist';
+export type ImportSourceId = 'backup' | 'backup-merge' | 'dgt' | 'microsoft-todo' | 'mindwtr-csv' | 'omnifocus' | 'ticktick' | 'todoist';
 export type ImportPickerSourceId = Exclude<ImportSourceId, 'backup' | 'backup-merge'>;
 
 export type ImportDescriptorInput = ImportSourceInput & {
@@ -59,6 +61,7 @@ type RawImportSourceParseResultMap = {
     backup: BackupValidation;
     'backup-merge': BackupValidation;
     dgt: DgtImportParseResult;
+    'microsoft-todo': ReturnType<typeof parseMicrosoftTodoImportSource>;
     'mindwtr-csv': MindwtrCsvImportParseResult;
     omnifocus: OmniFocusImportParseResult;
     ticktick: TickTickImportParseResult;
@@ -84,7 +87,7 @@ export type DataTransferBoundaries = {
 
 export type TransferLogInfo = (
     message: string,
-    context?: { extra?: Record<string, unknown>; scope?: string }
+    context?: { extra?: Record<string, unknown>; scope?: string; force?: boolean }
 ) => unknown;
 export type TransferLogError = (
     error: unknown,
@@ -103,6 +106,7 @@ type ImportTypeMap = {
     todoist: { parsed: ParsedTodoistProject[]; result: ReturnType<typeof applyTodoistImport> };
     ticktick: { parsed: ParsedTickTickImportData; result: ReturnType<typeof applyTickTickImport> };
     dgt: { parsed: ParsedDgtImportData; result: ReturnType<typeof applyDgtImport> };
+    'microsoft-todo': { parsed: ImportSource; result: ImportExecutionResult };
     'mindwtr-csv': { parsed: ParsedMindwtrCsvImportData; result: ReturnType<typeof applyMindwtrCsvImport> };
     omnifocus: { parsed: ParsedOmniFocusImportData; result: ReturnType<typeof applyOmniFocusImport> };
 };
@@ -144,6 +148,15 @@ export const summarizeBackupMerge = (result: MergeResult): { added: number; upda
 const toMergeCountExtra = (entity: string, stats: EntityMergeStats): Record<string, string> => ({
     [`${entity}Added`]: String(stats.incomingOnly),
     [`${entity}Updated`]: String(Math.max(0, stats.resolvedUsingIncoming - stats.incomingOnly)),
+});
+
+const toCsvCountExtra = (result: ImportExecutionResult): Record<string, string> => ({
+    tasks: String(result.importedTaskCount),
+    projects: String(result.importedProjectCount),
+    sections: String(result.importedSectionCount),
+    areas: String(result.importedAreaCount),
+    checklistItems: String(result.importedChecklistItemCount),
+    standaloneTasks: String(result.importedStandaloneTaskCount),
 });
 
 const parseBackupInput = (input: ImportDescriptorInput): BackupValidation => validateBackupJson(
@@ -297,6 +310,21 @@ const IMPORT_DESCRIPTORS: { [S in ImportSourceId]: ImportDescriptor<S> } = {
             standaloneTasks: String(result.importedStandaloneTaskCount),
         }),
     },
+    'microsoft-todo': {
+        operation: 'importMicrosoftTodo',
+        source: 'microsoft-todo',
+        startLabel: 'Microsoft To Do import started',
+        completeLabel: 'Microsoft To Do import complete',
+        parse: parseMicrosoftTodoImportSource,
+        apply: (data, parsed) => {
+            const result = applyMicrosoftTodoImport(data, parsed);
+            return { data: result.data, result };
+        },
+        countExtra: (result) => ({
+            ...toCsvCountExtra(result),
+            releaseCheck: 'v1.3.10/microsoft-todo-import',
+        }),
+    },
     'mindwtr-csv': {
         operation: 'importMindwtrCsv',
         source: 'mindwtr-csv',
@@ -307,14 +335,7 @@ const IMPORT_DESCRIPTORS: { [S in ImportSourceId]: ImportDescriptor<S> } = {
             const result = applyMindwtrCsvImport(data, parsed);
             return { data: result.data, result };
         },
-        countExtra: (result) => ({
-            tasks: String(result.importedTaskCount),
-            projects: String(result.importedProjectCount),
-            sections: String(result.importedSectionCount),
-            areas: String(result.importedAreaCount),
-            checklistItems: String(result.importedChecklistItemCount),
-            standaloneTasks: String(result.importedStandaloneTaskCount),
-        }),
+        countExtra: toCsvCountExtra,
     },
 };
 
@@ -377,12 +398,14 @@ export async function runImport<S extends ImportSourceId>(
             apply: (currentData: AppData) => applyImportSource(source, currentData, parsed),
         });
         const result = transaction.result;
+        const countExtra = descriptor.countExtra(result);
         void log.logInfo(descriptor.completeLabel, {
             scope: 'transfer',
+            ...(countExtra.releaseCheck ? { force: true } : {}),
             extra: {
                 operation: descriptor.operation,
                 source: descriptor.source,
-                ...descriptor.countExtra(result),
+                ...countExtra,
             },
         });
         return { snapshotName: transaction.snapshot, result };

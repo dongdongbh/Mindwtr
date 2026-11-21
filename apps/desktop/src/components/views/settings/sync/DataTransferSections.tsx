@@ -25,6 +25,7 @@ type ImportSectionProps = Pick<
     | 'onImportTickTick'
     | 'onImportDgt'
     | 'onImportOmniFocus'
+    | 'onImportMicrosoftTodo'
     | 'onImportMindwtrCsv'
 >;
 
@@ -135,6 +136,7 @@ export function BackupSection({
 
 export function ImportSection({
     onImportDgt,
+    onImportMicrosoftTodo,
     onImportMindwtrCsv,
     onImportOmniFocus,
     onImportTickTick,
@@ -194,6 +196,14 @@ export function ImportSection({
                 description={t.importOmniFocusDesc}
                 statusText={transferAction === 'import:omnifocus' ? t.syncing : null}
                 onClick={() => void onImportOmniFocus()}
+            />
+            <TransferActionButton
+                disabled={disabled}
+                settingsKey="importMicrosoftTodo"
+                label={t.importMicrosoftTodo}
+                description={t.importMicrosoftTodoDesc}
+                statusText={transferAction === 'import:microsoft-todo' ? t.syncing : null}
+                onClick={() => void onImportMicrosoftTodo()}
             />
             <TransferActionButton
                 disabled={disabled}

@@ -107,7 +107,9 @@ vi.mock('./app-log', () => ({
 import {
     createDesktopRecoverySnapshot,
     exportDesktopCsv,
+    importDesktopMicrosoftTodoData,
     importDesktopTodoistData,
+    inspectDesktopMicrosoftTodoImport,
     inspectDesktopMindwtrCsvImport,
     inspectDesktopBackup,
     mergeDesktopBackup,
@@ -243,6 +245,54 @@ describe('desktop data transfer', () => {
         );
 
         expect(nativePickerMocks.readFile).not.toHaveBeenCalled();
+    });
+
+    it('inspects a native Outlook Tasks CSV without saving, then snapshots before writing it', async () => {
+        runtimeRef.isTauri = true;
+        const contents = new TextEncoder().encode('Subject,Status,Notes\nImported task,Not Started,Imported notes');
+        nativePickerMocks.open.mockResolvedValue('/home/dd/Outlook Tasks.csv');
+        nativePickerMocks.stat.mockResolvedValue({ size: contents.length });
+        nativePickerMocks.readFile.mockResolvedValue(contents);
+
+        const preview = await inspectDesktopMicrosoftTodoImport();
+
+        expect(nativePickerMocks.open).toHaveBeenCalledWith(expect.objectContaining({
+            filters: [expect.objectContaining({ extensions: ['csv'] })],
+        }));
+        expect(preview).toMatchObject({ valid: true, preview: { taskCount: 1, projectCount: 1 } });
+        expect(syncServiceMocks.createDataSnapshot).not.toHaveBeenCalled();
+        expect(storageMocks.saveData).not.toHaveBeenCalled();
+        if (!preview?.parsedData) throw new Error('Expected parsed Outlook Tasks CSV');
+
+        const imported = await importDesktopMicrosoftTodoData(preview.parsedData);
+
+        expect(imported).toMatchObject({ snapshotName: 'data.snapshot.json', result: { importedTaskCount: 1 } });
+        expect(syncServiceMocks.createDataSnapshot.mock.invocationCallOrder[0])
+            .toBeLessThan(storageMocks.saveData.mock.invocationCallOrder[0]);
+        expect(storageMocks.saveData).toHaveBeenCalledWith(expect.objectContaining({
+            tasks: [expect.objectContaining({ title: 'Imported task', description: 'Imported notes' })],
+            projects: [expect.objectContaining({ title: 'Outlook Tasks' })],
+        }));
+        expect(logMocks.logInfo).toHaveBeenCalledWith(
+            'Microsoft To Do import complete',
+            expect.objectContaining({
+                force: true,
+                extra: expect.objectContaining({ releaseCheck: 'v1.3.10/microsoft-todo-import', tasks: '1' }),
+            }),
+        );
+    });
+
+    it('returns when the web file chooser is cancelled', async () => {
+        const click = vi.spyOn(HTMLInputElement.prototype, 'click').mockImplementation(function (this: HTMLInputElement) {
+            expect(this.accept).toBe('.csv,text/csv');
+            this.dispatchEvent(new Event('cancel'));
+        });
+        try {
+            await expect(inspectDesktopMicrosoftTodoImport()).resolves.toBeNull();
+            expect(storageMocks.saveData).not.toHaveBeenCalled();
+        } finally {
+            click.mockRestore();
+        }
     });
 
     it('rejects an oversized native backup before reading it into memory', async () => {

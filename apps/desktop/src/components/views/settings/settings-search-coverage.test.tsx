@@ -263,6 +263,7 @@ const dataProps: Parameters<typeof SettingsDataPage>[0] = {
     onImportDgt: noop,
     onImportOmniFocus: noop,
     onImportMindwtrCsv: noop,
+    onImportMicrosoftTodo: noop,
     onAddGettingStartedContent: noop,
     attachmentsLastCleanupDisplay: 'Never',
     pendingRemoteDeleteCount: 0,

@@ -22,7 +22,8 @@ export type ImportDiagnosticCode =
     | 'unknown-columns'
     | 'unmapped-date'
     | 'unmapped-status'
-    | 'unsupported-recurrence';
+    | 'unsupported-recurrence'
+    | 'unsupported-text-encoding';
 
 export type ImportDiagnostic = {
     code: ImportDiagnosticCode;
@@ -62,6 +63,9 @@ export const createImportDiagnostic = (
         }
         if (/no importable|contained no tasks|contains no tasks/u.test(normalized)) {
             return { code: 'no-importable-records', params: {}, severity };
+        }
+        if (/text encoding.*utf-8/u.test(normalized)) {
+            return { code: 'unsupported-text-encoding', params: {}, severity };
         }
         if (/archive.*(?:too many|too large|expands to too much)/u.test(normalized)) {
             return { code: 'archive-limit-exceeded', params: {}, severity };
@@ -139,6 +143,9 @@ export const formatImportDiagnostic = (
         }
         if (diagnostic.code === 'no-importable-records') {
             return translate('settings.importDiagnostics.noImportableRecords');
+        }
+        if (diagnostic.code === 'unsupported-text-encoding') {
+            return translate('settings.importDiagnostics.unsupportedTextEncoding');
         }
         if (diagnostic.code === 'resource-limit-exceeded' || diagnostic.code === 'archive-limit-exceeded') {
             return translate('settings.importDiagnostics.limitExceeded');

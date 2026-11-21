@@ -26,6 +26,8 @@ const labels = {
     importDgtDesc: 'Import DGT GTD exports.',
     importOmniFocus: 'Import from OmniFocus',
     importOmniFocusDesc: 'Import OmniFocus exports.',
+    importMicrosoftTodo: 'Import from Microsoft To Do',
+    importMicrosoftTodoDesc: 'Import a Tasks CSV exported from classic Outlook for Windows.',
     importMindwtrCsv: 'Import from Mindwtr CSV',
     importMindwtrCsvDesc: 'Import a Mindwtr CSV file.',
     syncing: 'Working...',
@@ -49,6 +51,7 @@ const importProps = {
     onImportTickTick: vi.fn(),
     onImportDgt: vi.fn(),
     onImportOmniFocus: vi.fn(),
+    onImportMicrosoftTodo: vi.fn(),
     onImportMindwtrCsv: vi.fn(),
 } as unknown as ComponentProps<typeof ImportSection>;
 
@@ -147,6 +150,7 @@ describe('ImportSection', () => {
         ['import:ticktick', /import from ticktick/i],
         ['import:dgt', /import from dgt gtd/i],
         ['import:omnifocus', /import from omnifocus/i],
+        ['import:microsoft-todo', /import from microsoft to do/i],
         ['import:mindwtr-csv', /import from mindwtr csv/i],
     ] as const)('shows progress only on the active %s row', (transferAction, activeLabel) => {
         const { getAllByText, getByRole } = render(

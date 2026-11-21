@@ -51,6 +51,8 @@ export type SettingsSyncLabels = {
     importDgtDesc: string;
     importOmniFocus: string;
     importOmniFocusDesc: string;
+    importMicrosoftTodo: string;
+    importMicrosoftTodoDesc: string;
     importMindwtrCsv: string;
     importMindwtrCsvDesc: string;
     diagnostics: string;
@@ -401,6 +403,7 @@ export type TransferAction =
     | 'import:ticktick'
     | 'import:dgt'
     | 'import:omnifocus'
+    | 'import:microsoft-todo'
     | 'import:mindwtr-csv';
 
 export type SettingsDataTransferProps = {
@@ -414,6 +417,7 @@ export type SettingsDataTransferProps = {
     onImportTickTick: () => Promise<void> | void;
     onImportDgt: () => Promise<void> | void;
     onImportOmniFocus: () => Promise<void> | void;
+    onImportMicrosoftTodo: () => Promise<void> | void;
     onImportMindwtrCsv: () => Promise<void> | void;
 };
 

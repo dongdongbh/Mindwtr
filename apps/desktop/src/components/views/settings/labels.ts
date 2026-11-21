@@ -383,6 +383,8 @@ export const SETTINGS_LABEL_KEYS = [
     'importDgtDesc',
     'importOmniFocus',
     'importOmniFocusDesc',
+    'importMicrosoftTodo',
+    'importMicrosoftTodoDesc',
     'importMindwtrCsv',
     'importMindwtrCsvDesc',
     'diagnostics',

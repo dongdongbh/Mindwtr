@@ -50,7 +50,7 @@ describe('Settings › Data model: RN\'s Backup and Import folds', () => {
     });
 
 
-    it('keeps RN\'s picker types for each importer', () => {
+    it('keeps picker types for each importer', () => {
         const csvZip = ['text/csv', 'text/comma-separated-values', 'application/zip', 'application/x-zip-compressed', 'application/octet-stream'];
         expect(IMPORT_PICKER_MIME_TYPES).toEqual({
             todoist: csvZip,
@@ -58,6 +58,7 @@ describe('Settings › Data model: RN\'s Backup and Import folds', () => {
             dgt: ['application/json', 'application/zip', 'application/x-zip-compressed', 'application/octet-stream'],
             omnifocus: ['text/csv', 'text/comma-separated-values', 'application/json', 'application/zip', 'application/x-zip-compressed', 'application/octet-stream'],
             'mindwtr-csv': csvZip,
+            'microsoft-todo': ['text/csv', 'text/comma-separated-values'],
         });
     });
 

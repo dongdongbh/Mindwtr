@@ -400,7 +400,7 @@ Source: `apps/desktop/src` (Tauri + React). Labels come from `packages/core/src/
 
 ## Settings › Data
 
-- Reach: Settings › Data. Expand Workspaces to add, rename, or switch workspaces. Backup contains Export Backup, Export CSV, Export as TaskNotes, Restore Backup, and Merge Backup. Expand Import Data for Todoist, TickTick, DGT GTD, OmniFocus, and Mindwtr CSV. Expand Archive retention, Attachment cleanup, or Diagnostics for their controls. Open sandbox is available directly.
+- Reach: Settings › Data. Expand Workspaces to add, rename, or switch workspaces. Backup contains Export Backup, Export CSV, Export as TaskNotes, Restore Backup, and Merge Backup. Expand Import Data for Todoist, TickTick, DGT GTD, OmniFocus, Microsoft To Do, and Mindwtr CSV. Choose Microsoft To Do to preview a classic Outlook Tasks CSV before importing. Expand Archive retention, Attachment cleanup, or Diagnostics for their controls. Open sandbox is available directly.
 - Code: `apps/desktop/src/components/views/settings/SettingsDataPage.tsx`, `apps/desktop/src/components/views/settings/sync/DataTransferSections.tsx`, `apps/desktop/src/components/views/settings/sync/AttachmentsCleanupSection.tsx`, `apps/desktop/src/components/views/settings/ArchiveRetentionSection.tsx`, `apps/desktop/src/lib/data-transfer.ts`
 - Checks: `apps/desktop/src/components/views/settings/sync/DataTransferSections.test.tsx`, `apps/desktop/src/components/views/settings/useSettingsDataPage.test.tsx`, `apps/desktop/src/components/views/settings/ArchiveRetentionSection.test.tsx`
 

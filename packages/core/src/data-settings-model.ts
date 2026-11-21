@@ -43,6 +43,7 @@ export const IMPORT_PICKER_MIME_TYPES: Readonly<Record<ImportPickerSourceId, rea
         'application/x-zip-compressed',
         'application/octet-stream',
     ],
+    'microsoft-todo': ['text/csv', 'text/comma-separated-values'],
     'mindwtr-csv': [
         'text/csv',
         'text/comma-separated-values',

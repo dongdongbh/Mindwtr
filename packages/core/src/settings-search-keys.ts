@@ -118,6 +118,7 @@ export const SETTINGS_SEARCH_PAGE_KEYS: Record<SettingsSearchPageId, readonly Se
         { key: 'importTickTick', section: 'importData' },
         { key: 'importDgt', section: 'importData' },
         { key: 'importOmniFocus', section: 'importData' },
+        { key: 'importMicrosoftTodo', section: 'importData' },
         { key: 'importMindwtrCsv', section: 'importData' },
         'attachmentsCleanup',
         'archiveRetention',
@@ -267,6 +268,7 @@ export const SETTINGS_SEARCH_INDEX: readonly SettingsSearchIndexEntry[] =
 
 
 export const SETTINGS_SEARCH_MOBILE_EXCLUSIONS: Record<string, string> = {
+    importMicrosoftTodo: 'Microsoft To Do CSV import is available in desktop settings only.',
     mcpTitle: 'Bundled local MCP server is available in the desktop app only.',
     sandboxWorkspace: 'Sandbox workspace entry exists in desktop settings; mobile exposes it in its own settings screen.',
     featureTimeline: 'Timeline view exists on desktop only; the mobile GTD > Features screen has no row for it (#1145).',

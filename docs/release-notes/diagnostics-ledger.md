@@ -60,6 +60,8 @@ The v1.3.6 task-editor correction is confirmed by the visible disappearance of t
 
 ## v1.3.10 (add before tagging, trim in the release after)
 
+- **`v1.3.10/microsoft-todo-import`** — `packages/core/src/import-runner.ts`. On desktop, confirm an Outlook Tasks CSV import in Settings › Data › Import Data. Look for `Microsoft To Do import complete` with `source=microsoft-todo` and aggregate counts after the save and refresh. The marker is written with Debug logging off and contains no task text, filenames, or identifiers.
+
 - **`v1.3.10/local-api-section-write`** — `apps/desktop/src-tauri/src/local_api.rs`. Create or rename a project section through the desktop Local API. After commit, expect `outcome=created`, `existing`, `renamed`, or `unchanged`. (#1595)
 
 - **`v1.3.10/preview-backdated-completion`** — React Native `apps/mobile/components/task-edit/use-task-edit-state.ts` and native Android `InboxViewModel.kt`. Long-press Mark Done from the task preview and choose a date and time. After the owned save is acknowledged, expect `Preview task saved with selected completion time` with `platform=rn` or `platform=android` and `outcome=saved`. No task text, identifier, timestamp or duration is logged. (#835)

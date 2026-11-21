@@ -89,6 +89,7 @@ const pickBrowserFile = (accept: string): Promise<File | null> => new Promise((r
     input.type = 'file';
     input.accept = accept;
     input.onchange = () => resolve(input.files?.[0] ?? null);
+    input.addEventListener('cancel', () => resolve(null), { once: true });
     input.click();
 });
 
@@ -370,6 +371,11 @@ const IMPORT_PICKER_DESCRIPTORS: Record<ImportPickerSourceId, ImportPickerDescri
         extensions: ['csv', 'json', 'zip'],
         title: 'OmniFocus Export',
     },
+    'microsoft-todo': {
+        accept: '.csv,text/csv',
+        extensions: ['csv'],
+        title: 'Outlook Tasks CSV',
+    },
     'mindwtr-csv': {
         accept: '.csv,.zip,text/csv,application/zip',
         extensions: ['csv', 'zip'],
@@ -405,6 +411,9 @@ export const inspectDesktopOmniFocusImport = (): Promise<ImportSourceParseResult
 
 export const inspectDesktopMindwtrCsvImport = (): Promise<ImportSourceParseResultMap['mindwtr-csv'] | null> =>
     inspectDesktopImportSource('mindwtr-csv');
+
+export const inspectDesktopMicrosoftTodoImport = (): Promise<ImportSourceParseResultMap['microsoft-todo'] | null> =>
+    inspectDesktopImportSource('microsoft-todo');
 
 const desktopLog = { logInfo, logError };
 
@@ -442,3 +451,7 @@ export const importDesktopMindwtrCsvData = (
     parsedData: ParsedMindwtrCsvImportData
 ): Promise<DesktopTransferResult & { result: MindwtrCsvImportExecutionResult }> =>
     runImport('mindwtr-csv', parsedData, desktopBoundaries, desktopLog);
+
+export const importDesktopMicrosoftTodoData = (
+    parsedData: NonNullable<ImportSourceParseResultMap['microsoft-todo']['parsedData']>
+) => runImport('microsoft-todo', parsedData, desktopBoundaries, desktopLog);

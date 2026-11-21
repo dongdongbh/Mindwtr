@@ -71,6 +71,7 @@ describe('useSettingsDataPage', () => {
                 onImportDgt: vi.fn(),
                 onImportOmniFocus: vi.fn(),
                 onImportMindwtrCsv: vi.fn(),
+                onImportMicrosoftTodo: vi.fn(),
             },
         }));
 

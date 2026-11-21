@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+    applyImportSource,
     parseImportSource,
     runImport,
     summarizeBackupMerge,
     type DataTransferBoundaries,
     type ImportRunnerLog,
+    type TransferLogInfo,
 } from './import-runner';
 import { SYNC_BACKUP_RESTORE_REV_BY } from './sync-revision';
 import {
@@ -38,7 +40,7 @@ const buildBoundaries = (currentData: AppData) => {
 };
 
 const buildLog = () => {
-    const infoCalls: { message: string; context?: { extra?: Record<string, unknown>; scope?: string } }[] = [];
+    const infoCalls: { message: string; context?: Parameters<TransferLogInfo>[1] }[] = [];
     const errorCalls: { error: unknown; context: { extra?: Record<string, unknown>; scope: string } }[] = [];
     const log: ImportRunnerLog = {
         logInfo: (message, context) => {
@@ -87,6 +89,100 @@ describe('runImport', () => {
             params: { column: 'Title' },
             severity: 'error',
         });
+    });
+
+    it('imports a classic Outlook Tasks file into the named project and logs after persistence', async () => {
+        const parsed = parseImportSource('microsoft-todo', {
+            fileName: 'C:\\Exports\\My Tasks.csv',
+            text: [
+                '"Subject","Start Date","Due Date","Reminder On/Off","Reminder Date","Reminder Time","Date Completed","% Complete","Total Work","Actual Work","Billing Information","Categories","Companies","Contacts","Mileage","Notes","Priority","Private","Role","Schedule+ Priority","Sensitivity","Status"',
+                '"File report","11/30/2026","12/15/2026","True","12/15/2026","9:00:00 AM",,"0.050","0","0",,"Work, Follow Up",,,,"Say ""hello""\r\nThen send it","High","False",,,"Normal","In Progress"',
+                '"Paid",,,,,,"2026-11-20T15:30:00Z","1.000",,,,,,,,,"Normal",,,,,"Complete"',
+            ].join('\r\n'),
+        });
+        expect(parsed.preview).toMatchObject({
+            fileName: 'My Tasks.csv', projectCount: 1, standaloneTaskCount: 0, taskCount: 2,
+            projects: [{ name: 'My Tasks', taskCount: 2 }],
+        });
+        expect(parsed.diagnostics).toEqual([]);
+        if (!parsed.parsedData) throw new Error('Expected valid Outlook Tasks data');
+
+        const { boundaries, persisted, refreshedCount } = buildBoundaries(mockAppData());
+        const { log, infoCalls } = buildLog();
+        const { result, snapshotName } = await runImport('microsoft-todo', parsed.parsedData, boundaries, {
+            ...log,
+            logInfo: (message, context) => {
+                if (context?.force) expect(persisted).toHaveLength(1);
+                return log.logInfo(message, context);
+            },
+        });
+        expect(snapshotName).toBe('snapshot-1');
+        expect(result).toMatchObject({ importedTaskCount: 2, importedProjectCount: 1, importedStandaloneTaskCount: 0 });
+        expect(persisted).toHaveLength(1);
+        expect(refreshedCount()).toBe(1);
+        const project = persisted[0].projects.find(({ title }) => title === 'My Tasks');
+        expect(project?.status).toBe('active');
+        expect(persisted[0].tasks).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                projectId: project?.id, title: 'File report', status: 'next', priority: 'high',
+                description: 'Say "hello"\nThen send it', tags: ['#work', '#follow up'],
+                startTime: '2026-11-30', dueDate: '2026-12-15',
+            }),
+            expect.objectContaining({
+                projectId: project?.id, title: 'Paid', status: 'done', priority: 'medium', completedAt: '2026-11-20T15:30:00.000Z',
+            }),
+        ]));
+        expect(infoCalls.at(-1)).toEqual({
+            message: 'Microsoft To Do import complete',
+            context: {
+                scope: 'transfer',
+                force: true,
+                extra: {
+                    operation: 'importMicrosoftTodo', source: 'microsoft-todo', releaseCheck: 'v1.3.10/microsoft-todo-import',
+                    areas: '0', checklistItems: '0', projects: '1', sections: '0', standaloneTasks: '0', tasks: '2',
+                },
+            },
+        });
+    });
+
+    it('skips previously imported Outlook rows and retains deleted tasks on a reordered re-import', () => {
+        const fileName = 'Weekend.csv';
+        const header = 'Subject,Status';
+        const first = parseImportSource('microsoft-todo', {
+            fileName, text: [header, 'Edit me,Not Started', 'Same,Not Started', 'Same,Not Started'].join('\n'),
+        });
+        if (!first.parsedData) throw new Error('Expected valid Outlook Tasks data');
+        const applied = applyImportSource('microsoft-todo', mockAppData(), first.parsedData);
+        expect(applied.result.importedTaskCount).toBe(3);
+        const originalProject = applied.data.projects.find(({ title }) => title === 'Weekend');
+        const editedTask = applied.data.tasks.find(({ title }) => title === 'Edit me');
+        const deletedTask = applied.data.tasks.find(({ title }) => title === 'Same');
+        const deletedAt = '2026-11-21T12:00:00.000Z';
+        const current = {
+            ...applied.data,
+            projects: applied.data.projects.map((project) => project.id === originalProject?.id ? { ...project, title: 'Renamed' } : project),
+            tasks: applied.data.tasks.map((task) => {
+                if (task.id === editedTask?.id) return { ...task, title: 'Edited here' };
+                if (task.id === deletedTask?.id) return { ...task, deletedAt };
+                return task;
+            }),
+        };
+        const reordered = parseImportSource('microsoft-todo', {
+            fileName, text: [header, 'New task,Not Started', 'Same,Not Started', 'Same,Not Started', 'Edit me,Not Started'].join('\n'),
+        });
+        if (!reordered.parsedData) throw new Error('Expected valid Outlook Tasks data');
+        const retried = applyImportSource('microsoft-todo', current, reordered.parsedData);
+        expect(retried.result).toMatchObject({ importedTaskCount: 1, importedProjectCount: 0 });
+        expect(retried.data.tasks).toEqual(expect.arrayContaining([
+            expect.objectContaining({ id: editedTask?.id, title: 'Edited here' }),
+            expect.objectContaining({ id: deletedTask?.id, deletedAt }),
+            expect.objectContaining({ title: 'New task', status: 'next', projectId: originalProject?.id }),
+        ]));
+        expect(retried.data.projects).toContainEqual(expect.objectContaining({ id: originalProject?.id, title: 'Renamed' }));
+        expect(retried.result.warnings).toEqual([
+            '2 tasks were skipped because they were already imported earlier.',
+            '1 task was skipped because it was imported earlier and then deleted here; deletions are kept on re-import.',
+        ]);
     });
 
     it('dispatches to the backup descriptor, persists, and logs start/complete', async () => {
