@@ -22,6 +22,8 @@ export const ruOverrides: Record<string, string> = {
     "projects.calendarLastKnown": "Последние известные данные события",
 
     "quickAdd.invalidReminderCommand": "Недопустимое напоминание: укажите поддерживаемый интервал и точные дату и время",
+    'task.copyDescription': "Скопировать описание",
+    'task.descriptionCopied': "Описание скопировано",
     'task.copyDetails': "Копировать сведения о задаче",
     "taskEdit.startAdvanceReminderLabel": "До начала",
     "settings.speechUseGemini": "Использовать Gemini",

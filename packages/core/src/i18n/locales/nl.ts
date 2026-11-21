@@ -28,6 +28,8 @@ export const nlOverrides: Record<string, string> = {
 
     'inbox.completedInSession': 'Voltooid in deze sessie',
     "quickAdd.invalidReminderCommand": "Ongeldige herinnering: gebruik een ondersteunde duur en een expliciete datum en tijd",
+    'task.copyDescription': "Beschrijving kopiëren",
+    'task.descriptionCopied': "Beschrijving gekopieerd",
     'task.copyDetails': "Taakdetails kopiëren",
     "review.startDailyReview": "Dagelijkse terugblik starten",
     "review.startWeeklyReview": "Wekelijkse terugblik starten",

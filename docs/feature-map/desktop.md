@@ -251,7 +251,7 @@ Source: `apps/desktop/src` (Tauri + React). Labels come from `packages/core/src/
 
 ## Task menu
 
-- Copy task details copies the title, project name, start/due values, description and checklist as plain text. Copy Title and copy shortcuts retain their existing behavior.
+- Copy description appears for nonblank descriptions and copies the original Markdown and line breaks. Copy task details copies the title, project name, start/due values, description and checklist as plain text. Copy Title and copy shortcuts retain their existing behavior.
 
 - Reach: Right-click a task row, or its more-options button. Items include Move to…, Dates…, Contexts…, Copy Title, Copy task details, Copy Mindwtr link, Copy task ID, Rename task, Add to checklist…, Create project from task, Convert to Section, Cancel task.
 - Shortcuts: `.` (Vim, Standard), `Ctrl+.` (Emacs). `F2` renames (Standard).

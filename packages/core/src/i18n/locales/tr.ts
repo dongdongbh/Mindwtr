@@ -22,6 +22,8 @@ export const trOverrides: Record<string, string> = {
     "projects.calendarLastKnown": "Etkinliğin son bilinen bilgileri",
 
     "quickAdd.invalidReminderCommand": "Geçersiz hatırlatıcı: desteklenen bir süre ve açık tarih ve saat kullanın",
+    'task.copyDescription': "Açıklamayı kopyala",
+    'task.descriptionCopied': "Açıklama kopyalandı",
     'task.copyDetails': "Görev ayrıntılarını kopyala",
     "taskEdit.startAdvanceReminderLabel": "Başlamadan önce",
     "settings.speechUseGemini": "Gemini'yi kullan",

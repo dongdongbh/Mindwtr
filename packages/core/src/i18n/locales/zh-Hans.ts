@@ -473,6 +473,8 @@ export const zhHans: Record<string, string> = {
         'list.confirmBatchDelete': '删除选中的任务？',
         'list.taskDeleted': '任务已删除',
         'list.taskCopied': '任务已复制到剪贴板',
+    'task.copyDescription': "复制描述",
+    'task.descriptionCopied': "已复制描述",
     'task.copyDetails': "复制任务详情",
         'task.copyTitle': '复制标题',
         "task.copyTaskLink": "复制 Mindwtr 链接",

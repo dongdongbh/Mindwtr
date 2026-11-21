@@ -17,6 +17,8 @@ export const ukOverrides: Record<string, string> = {
     "projects.calendarLastKnown": "Останні відомі дані події",
 
     "quickAdd.invalidReminderCommand": "Недійсне нагадування: вкажіть підтримувану тривалість і точну дату та час",
+    'task.copyDescription': "Копіювати опис",
+    'task.descriptionCopied': "Опис скопійовано",
     'task.copyDetails': "Копіювати деталі завдання",
     "taskEdit.startAdvanceReminderLabel": "До початку",
     "taskEdit.advanceReminderLabel": "Завчасне нагадування",

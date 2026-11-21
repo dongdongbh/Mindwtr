@@ -87,6 +87,9 @@ test('Copy task details includes organizing fields and checklist while title cop
     await expect.poll(clipboard).toBe('Renew certificate\n\nProject: Homeserver\nStart Date: 2026-11-16\nDue Date: 2026-11-20T15:30:00+01:00\n\n  Check expiry first.\nKeep the backup.  \n\n[x] Back up\n[ ] Renew');
     await expect(page.getByText('Task copied to clipboard', { exact: true })).toBeVisible();
     await task.click({ button: 'right' });
+    await page.getByRole('menuitem', { name: 'Copy description', exact: true }).click();
+    await expect.poll(clipboard).toBe('  Check expiry first.\nKeep the backup.  ');
+    await task.click({ button: 'right' });
     await page.getByRole('menuitem', { name: 'Copy Title', exact: true }).click();
     await expect.poll(clipboard).toBe('Renew certificate');
     await task.focus();

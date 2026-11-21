@@ -16,6 +16,8 @@ export const viOverrides: Record<string, string> = {
     "projects.calendarLastKnown": "Chi tiết sự kiện được biết gần nhất",
 
     "quickAdd.invalidReminderCommand": "Lời nhắc không hợp lệ: dùng khoảng thời gian được hỗ trợ và ngày giờ rõ ràng",
+    'task.copyDescription': "Sao chép mô tả",
+    'task.descriptionCopied': "Đã sao chép mô tả",
     'task.copyDetails': "Sao chép chi tiết công việc",
     "taskEdit.startAdvanceReminderLabel": "Trước khi bắt đầu",
     "settings.speechUseGemini": "Dùng Gemini",

@@ -28,6 +28,8 @@ export const frOverrides: Record<string, string> = {
     "settings.syncEncryptionErrorTrustedLocal": "Ouvrez une bibliothèque locale complète et enregistrée sur cet appareil avant la mise à niveau. La synchronisation reste suspendue.",
 
     "quickAdd.invalidReminderCommand": "Rappel invalide : indiquez une durée prise en charge et une date et heure explicites",
+    'task.copyDescription': "Copier la description",
+    'task.descriptionCopied': "Description copiée",
     'task.copyDetails': "Copier les détails de la tâche",
     "taskEdit.startAdvanceReminderLabel": "Avant le début",
     "settings.speechUseGemini": "Utiliser Gemini",

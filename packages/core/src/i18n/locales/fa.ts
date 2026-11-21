@@ -417,6 +417,8 @@ export const faOverrides: Record<string, string> = {
         'list.confirmBatchDelete': 'کارهای انتخاب‌شده حذف شوند؟',
         'list.taskDeleted': 'کار حذف شد',
         'list.taskCopied': 'کار در کلیپ‌بورد کپی شد',
+    'task.copyDescription': "کپی توضیحات",
+    'task.descriptionCopied': "توضیحات کپی شد",
     'task.copyDetails': "کپی جزئیات کار",
         'task.copyTitle': 'کپی عنوان',
         "task.copyTaskLink": "کپی پیوند Mindwtr",

@@ -17,6 +17,8 @@ export const csOverrides: Record<string, string> = {
     "projects.calendarLastKnown": "Poslední známé údaje události",
 
     "quickAdd.invalidReminderCommand": "Neplatná připomínka: zadejte podporovanou dobu a výslovné datum a čas",
+    'task.copyDescription': "Kopírovat popis",
+    'task.descriptionCopied': "Popis zkopírován",
     'task.copyDetails': "Kopírovat podrobnosti úkolu",
     "taskEdit.startAdvanceReminderLabel": "Před začátkem",
     "settings.speechUseGemini": "Použít Gemini",

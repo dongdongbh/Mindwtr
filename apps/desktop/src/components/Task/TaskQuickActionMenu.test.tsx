@@ -445,6 +445,24 @@ describe('TaskQuickActionMenu', () => {
         }
     });
 
+    it('copies the original description including Markdown and whitespace from a read-only task', () => {
+        const writeText = vi.fn().mockResolvedValue(undefined);
+        vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } });
+        try {
+            const description = '  # Notes\n\n- **Follow up**  \n';
+            const props = renderMenu({ readOnly: true, task: { ...task, description } });
+            fireEvent.click(screen.getByRole('menuitem', { name: 'Copy description' }));
+            expect(writeText).toHaveBeenCalledExactlyOnceWith(description);
+            expect(props.onClose).toHaveBeenCalledOnce();
+            expect(props.onUpdateTask).not.toHaveBeenCalled();
+        } finally { vi.unstubAllGlobals(); }
+    });
+
+    it.each([undefined, '', '  \n'])('omits Copy description for a blank body (%j)', (description) => {
+        renderMenu({ task: { ...task, description } });
+        expect(screen.queryByRole('menuitem', { name: 'Copy description' })).toBeNull();
+    });
+
     it.each([false, true])('copies only the title from the menu, including read-only=%s', async (readOnly) => {
         const writeText = vi.fn().mockResolvedValue(undefined);
         const showToast = vi.fn();

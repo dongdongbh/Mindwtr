@@ -22,6 +22,8 @@ export const ptOverrides: Record<string, string> = {
     "projects.calendarLastKnown": "Últimos detalhes conhecidos do evento",
 
     "quickAdd.invalidReminderCommand": "Lembrete inválido: use uma duração compatível e data e hora explícitas",
+    'task.copyDescription': "Copiar descrição",
+    'task.descriptionCopied': "Descrição copiada",
     'task.copyDetails': "Copiar detalhes da tarefa",
     "taskEdit.startAdvanceReminderLabel": "Antes do início",
     "settings.speechUseGemini": "Usar Gemini",

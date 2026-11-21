@@ -419,6 +419,8 @@ export const jaOverrides: Record<string, string> = {
         'list.confirmBatchDelete': '選択したタスクを削除しますか？',
         'list.taskDeleted': 'タスクを削除しました',
         'list.taskCopied': 'タスクをクリップボードにコピーしました',
+    'task.copyDescription': "説明をコピー",
+    'task.descriptionCopied': "説明をコピーしました",
     'task.copyDetails': "タスクの詳細をコピー",
         'task.copyTitle': 'タイトルをコピー',
         "task.copyTaskLink": "Mindwtrリンクをコピー",

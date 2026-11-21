@@ -24,6 +24,14 @@ export async function copyTaskTitles(
     await writeTaskClipboard(text, t, message, source, input);
 }
 
+export async function copyTaskDescription(
+    description: string,
+    t: (key: string) => string,
+    input: TaskClipboardInput,
+): Promise<void> {
+    await writeTaskClipboard(description, t, translateWithFallback(t, 'task.descriptionCopied', 'Description copied'), 'menu', input);
+}
+
 export async function copyTaskDetails(
     task: Pick<Task, 'title' | 'description' | 'checklist' | 'startTime' | 'dueDate'>,
     projectTitle: string | undefined,

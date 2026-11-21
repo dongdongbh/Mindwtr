@@ -17,6 +17,8 @@ export const deOverrides: Record<string, string> = {
     "projects.calendarLastKnown": "Letzte bekannte Termindetails",
 
     "quickAdd.invalidReminderCommand": "Ungültige Erinnerung: unterstützte Dauer und ausdrückliches Datum mit Uhrzeit angeben",
+    'task.copyDescription': "Beschreibung kopieren",
+    'task.descriptionCopied': "Beschreibung kopiert",
     'task.copyDetails': "Aufgabendetails kopieren",
     "taskEdit.startAdvanceReminderLabel": "Vor dem Start",
     "settings.speechUseGemini": "Gemini verwenden",

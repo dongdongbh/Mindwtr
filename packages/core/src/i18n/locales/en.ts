@@ -415,6 +415,8 @@ export const en: Record<string, string> = {
         'list.confirmBatchDelete': 'Delete selected tasks?',
         'list.taskDeleted': 'Task deleted',
         'list.taskCopied': 'Task copied to clipboard',
+    'task.copyDescription': "Copy description",
+    'task.descriptionCopied': "Description copied",
     'task.copyDetails': "Copy task details",
         'task.copyTitle': 'Copy Title',
         "task.copyTaskLink": "Copy Mindwtr link",
