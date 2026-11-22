@@ -1,5 +1,7 @@
 
 export const frOverrides: Record<string, string> = {
+    "settings.fetchLinkTitles": "Récupérer les titres des pages",
+    "settings.fetchLinkTitlesHint": "Consulter le site pour nommer les liens enregistrés sur cet appareil.",
     "projects.calendarLimit": "Les 200 premiers résultats sont affichés. Recherchez pour trouver un autre événement.",
     'bulk.keepEstimate': "Conserver la valeur actuelle",
     'bulk.clearEstimate': "Effacer l’estimation",

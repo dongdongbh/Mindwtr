@@ -52,6 +52,7 @@ export const SETTINGS_SEARCH_PAGE_KEYS: Record<SettingsSearchPageId, readonly Se
         { key: 'defaultArea', section: 'captureDefault' },
         { key: 'captureSaveAudio', section: 'captureDefault' },
         { key: 'quickAddAutoClean', section: 'captureDefault' },
+        { key: 'fetchLinkTitles', section: 'captureDefault' },
         { key: 'naturalLanguageDates', section: 'captureDefault' },
         { key: 'markdownEditorAssist', section: 'captureDefault' },
         'weeklyReviewConfig',

@@ -20,6 +20,7 @@ import { getSavedTaxonomyTokens } from './taxonomy-catalog';
 import { getUsedTaskTokens } from './task-token-usage';
 import type { AppSettings, Area, Attachment, Project, Task, TimeEstimate } from './types';
 import { readCaptureDestination, type CaptureDestination } from './capture-destination';
+import { getBareHttpUrl } from './attachment-link-utils';
 
 export type CaptureModalParam = string | string[] | undefined;
 
@@ -376,18 +377,21 @@ export async function saveCaptureModalLines(input: {
     for (const line of input.lines) {
         const request = await input.buildRequest(line, projects);
         if (!request) return { kind: 'failed', stage: 'validation-rejected' };
-        const prepared = await prepareCaptureTask(request.input, input.actions, request.options);
+        const laterLine = items.length > 0;
+        const bareUrl = getBareHttpUrl(line);
+        const captureInput = laterLine && bareUrl && request.input.initialProps?.attachments
+            ? { ...request.input, initialProps: { ...request.input.initialProps, attachments: undefined } }
+            : request.input;
+        const prepared = await prepareCaptureTask(captureInput, input.actions, request.options);
         if (!prepared.success && prepared.reason === 'invalid-date-command') {
             return { kind: 'refused', invalidDateCommands: prepared.invalidDateCommands };
         }
         if (!prepared.success) return { kind: 'failed', stage: 'prepare-failed' };
+        if (laterLine && bareUrl !== prepared.title) delete prepared.props.attachments;
         const captureId = input.captureIds?.[items.length];
         items.push({ title: prepared.title, initialProps: prepared.props, ...(captureId ? { captureId } : {}) });
         if (prepared.createdProject) projects = [...projects, prepared.createdProject];
     }
-    items.forEach((item, index) => {
-        if (index > 0) delete item.initialProps.attachments;
-    });
     input.onWrite?.();
     const result = await input.actions.addTasks(items);
     if (result && typeof result === 'object' && result.success === false) return { kind: 'failed', stage: 'transaction-rejected' };

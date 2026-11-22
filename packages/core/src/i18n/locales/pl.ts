@@ -1,5 +1,7 @@
 
 export const plOverrides: Record<string, string> = {
+    "settings.fetchLinkTitles": "Pobieraj tytuły stron",
+    "settings.fetchLinkTitlesHint": "Łączy się z witryną, aby nadać nazwę odnośnikom zapisanym na tym urządzeniu.",
     "projects.calendarLimit": "Wyświetlono pierwszych 200 wyników. Wyszukaj inne wydarzenie.",
     'bulk.keepEstimate': "Zachowaj obecną wartość",
     'bulk.clearEstimate': "Wyczyść oszacowanie",

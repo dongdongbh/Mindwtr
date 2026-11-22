@@ -1,5 +1,7 @@
 
 export const ukOverrides: Record<string, string> = {
+    "settings.fetchLinkTitles": "Завантажувати заголовки сторінок",
+    "settings.fetchLinkTitlesHint": "Звертатися до сайту, щоб дати назву посиланням, збереженим на цьому пристрої.",
     "projects.calendarLimit": "Показано перші 200 збігів. Скористайтеся пошуком, щоб знайти іншу подію.",
     "projects.calendarTitle": "Календар",
     "projects.calendarLink": "Пов’язати подію календаря",

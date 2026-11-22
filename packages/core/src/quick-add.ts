@@ -4,7 +4,7 @@ import type { Area, AppSettings, Attachment, Person, Project, Task, TaskEnergyLe
 import { resolveFeatureFlags } from './resolve-feature-flags';
 import { generateUUID } from './uuid';
 import { normalizeTaskStatus } from './task-status';
-import { normalizeLinkAttachmentInput } from './attachment-link-utils';
+import { getBareHttpUrl, normalizeLinkAttachmentInput } from './attachment-link-utils';
 import { getActiveLanguage, getMonthNamesForLanguage, isActiveDateFormatDayFirst, normalizeClockTimeInput } from './date';
 import { chronoLocale } from './quick-add-chrono';
 import type { Language } from './i18n/i18n-types';
@@ -888,6 +888,8 @@ export function parseQuickAdd(
     areas?: Area[],
     options: QuickAddParseOptions = {},
 ): QuickAddResult {
+    const bareUrl = getBareHttpUrl(input);
+    if (bareUrl) return { title: bareUrl, props: {} };
     let working = protectEscapes(input.trim());
     const preserveText = options.preserveText === true;
     const hadExplicitDueCommand = /(?:^|\s)\/due:/i.test(working);

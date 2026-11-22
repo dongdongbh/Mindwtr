@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { useTaskStore } from '@mindwtr/core';
+import { useTaskStore, type Task } from '@mindwtr/core';
 import { setNativeInvokeTransport } from './tauri-invoke';
 
 const invokeMock = vi.fn();
@@ -52,6 +52,40 @@ const entityIds = (tasks: string[] = []) => ({
 
 const emptyData = () => ({
     tasks: [], projects: [], sections: [], areas: [], people: [], settings: {},
+});
+
+describe('tauriStorage canonical read', () => {
+    afterEach(() => { vi.clearAllMocks(); });
+
+    it('rejects an unavailable canonical database and permits JSON recovery on ordinary loads', async () => {
+        const backup = { ...emptyData(), settings: { fetchLinkTitles: true } };
+        invokeMock.mockImplementation(async (command: string) => {
+            if (command === 'get_data') throw new Error('SQLite is unavailable');
+            return backup;
+        });
+
+        await expect(tauriStorage.getData({ requireCanonical: true })).rejects.toThrow('SQLite is unavailable');
+        expect(invokeMock).toHaveBeenCalledExactlyOnceWith('get_data', { requireCanonical: true });
+        await expect(tauriStorage.getData()).resolves.toEqual(backup);
+        expect(invokeMock).toHaveBeenLastCalledWith('read_data_json');
+    });
+
+    it('keeps the observed baseline for writes after a canonical read sees newer data', async () => {
+        const observedTask: Task = {
+            id: 'task-1', title: 'Observed', status: 'inbox', tags: [], contexts: [], rev: 1,
+            createdAt: '2026-11-22T00:00:00.000Z', updatedAt: '2026-11-22T00:00:00.000Z',
+        };
+        const observed = { ...emptyData(), tasks: [observedTask] };
+        const concurrent = { ...observed, tasks: [{ ...observedTask, title: 'Concurrent edit', rev: 2 }] };
+        const editedTask = { ...observedTask, tags: ['new-tag'], rev: 2 };
+        invokeMock.mockResolvedValueOnce(observed).mockResolvedValueOnce(concurrent).mockResolvedValueOnce({ ...observed, tasks: [editedTask] });
+
+        await tauriStorage.getData();
+        await expect(tauriStorage.getData({ requireCanonical: true })).resolves.toEqual(concurrent);
+        await tauriStorage.saveTask?.(editedTask);
+
+        expect(invokeMock).toHaveBeenCalledWith('save_task', { task: editedTask, baselineTask: observedTask });
+    });
 });
 
 const originalFetchData = useTaskStore.getState().fetchData;

@@ -9,6 +9,8 @@ import {
     generateUUID,
     getAttachmentOpenLinkFailedMessage,
     getAttachmentLinkEditText,
+    getBareHttpUrl,
+    enrichAttachmentLinkTitle,
     getAttachmentResolutionMessage,
     isAttachmentFileInUse,
     isImageAttachment,
@@ -44,6 +46,7 @@ import { hasAttachmentDownloadIdentity } from '../../lib/attachment-sync-availab
 import { attachmentAvailabilityPort } from '../../lib/attachment-availability-port';
 import { loadAIKey } from '../../lib/ai-config';
 import { tryOpenWithAndroidViewer } from '../../lib/open-file-externally';
+import { fetchMobileLinkTitle } from '../../lib/link-title';
 import { openExternalLink } from '../../lib/open-external-link';
 import { ensureWhisperModelPathForConfigAsync, processAudioCapture, resolveSpeechToTextRuntimeSettings } from '../../lib/speech-to-text';
 import { normalizeAudioUri } from '../../lib/speech-to-text.helpers';
@@ -89,6 +92,7 @@ export function useTaskEditAttachments({
     t,
     visible,
 }: UseTaskEditAttachmentsParams) {
+    const bareLinks = React.useRef(new Map<string, { taskId: string; attachment: Attachment }>());
     const attachmentsRef = React.useRef(attachments);
     attachmentsRef.current = attachments;
     const showSandboxUnavailable = React.useCallback(() => {
@@ -96,6 +100,13 @@ export function useTaskEditAttachments({
     }, [t]);
     const settleDraftAttachments = React.useCallback((input: AttachmentDraftSettlementInput) => {
         if (isSandboxMode()) return;
+        for (const committed of input.committedAttachments ?? []) {
+            const pending = bareLinks.current.get(committed.id);
+            if (pending && !committed.deletedAt && committed.uri === pending.attachment.uri && committed.title === pending.attachment.title) {
+                void enrichAttachmentLinkTitle({ kind: 'task', id: pending.taskId }, committed, fetchMobileLinkTitle);
+            }
+        }
+        bareLinks.current.clear();
         for (const { attachment } of planAttachmentDraftSettlement(input)) {
 
             void deleteManagedAttachmentFile(attachment, {
@@ -252,6 +263,7 @@ export function useTaskEditAttachments({
                 Alert.alert(t('attachments.title'), edit.message);
                 return;
             }
+            bareLinks.current.delete(editingLinkAttachmentId);
             setAttachments((current) => patchAttachment(current || [], editingLinkAttachmentId, edit.patch));
             setLinkInput('');
             setLinkInputTouched(false);
@@ -266,12 +278,18 @@ export function useTaskEditAttachments({
         }
         if (batch.kind === 'nothing') return;
         const { added } = batch;
+        if (taskId) {
+            const lines = linkInput.split(/\r\n|\r|\n/).map((line) => line.trim()).filter(Boolean);
+            added.forEach((attachment, index) => {
+                if (getBareHttpUrl(lines[index])) bareLinks.current.set(attachment.id, { taskId, attachment });
+            });
+        }
         setAttachments((current) => [...(current || []), ...added]);
         setLinkInput('');
         setLinkInputTouched(false);
         setEditingLinkAttachmentId(null);
         setLinkModalVisible(false);
-    }, [editingLinkAttachmentId, linkInput, setAttachments, showSandboxUnavailable, t]);
+    }, [editingLinkAttachmentId, linkInput, setAttachments, showSandboxUnavailable, t, taskId]);
 
     const closeLinkModal = React.useCallback(() => {
         setLinkModalVisible(false);

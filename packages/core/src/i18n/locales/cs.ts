@@ -1,5 +1,7 @@
 
 export const csOverrides: Record<string, string> = {
+    "settings.fetchLinkTitles": "Načítat názvy stránek",
+    "settings.fetchLinkTitlesHint": "Pro pojmenování odkazů uložených na tomto zařízení se připojí k odkazovanému webu.",
     "projects.calendarLimit": "Zobrazuje se prvních 200 výsledků. Další událost najdete vyhledáváním.",
     "projects.calendarTitle": "Kalendář",
     "projects.calendarLink": "Propojit událost kalendáře",

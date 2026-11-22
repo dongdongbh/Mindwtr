@@ -1,5 +1,7 @@
 
 export const hiOverrides: Record<string, string> = {
+    "settings.fetchLinkTitles": "पेज के शीर्षक प्राप्त करें",
+    "settings.fetchLinkTitlesHint": "इस डिवाइस पर सहेजे गए लिंक को नाम देने के लिए संबंधित वेबसाइट से संपर्क करें।",
     "projects.calendarLimit": "पहले 200 परिणाम दिखाए जा रहे हैं। अन्य इवेंट खोजने के लिए खोजें।",
     'bulk.keepEstimate': "मौजूदा मान रखें",
     'bulk.clearEstimate': "अनुमान हटाएँ",

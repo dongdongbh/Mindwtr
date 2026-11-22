@@ -64,6 +64,7 @@ import { InboxProcessor } from './InboxProcessor';
 import { MindSweepModal, MindSweepTrigger } from '../MindSweepModal';
 import { TaskBulkOrganizeModal } from './list/TaskBulkOrganizeModal';
 import { useLanguage } from '../../contexts/language-context';
+import { enrichDesktopCapturedLinkTitle, getLinkTitleCapture } from '../../lib/link-title';
 import { useKeybindings } from '../../contexts/keybinding-context';
 import { useListCopilot } from './list/useListCopilot';
 import { useUiStore } from '../../store/ui-store';
@@ -1059,6 +1060,8 @@ const ListViewContent = memo(function ListViewContent({ title, statusFilter }: L
 
             if (transaction.createdTaskId) {
                 setHighlightTask(transaction.createdTaskId);
+                const linkCapture = getLinkTitleCapture(transaction.createdTaskId, newTaskTitle);
+                if (linkCapture) enrichDesktopCapturedLinkTitle(linkCapture);
             }
         } catch (error) {
             reportError('Failed to add task from quick add', error);

@@ -348,6 +348,72 @@ describe('QuickAddModal', () => {
         expect(addTask).toHaveBeenCalledWith('Fast capture', expect.objectContaining({ status: 'inbox' }));
     });
 
+    it('hands a bare URL to the main window after the standalone capture is durable', async () => {
+        (window as typeof window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {};
+        const url = 'https://example.org/@next/+tomorrow?query=one#part';
+        const addTask = vi.fn(async () => ({ success: true, id: 'web-link' }));
+        const deferred = createDeferred();
+        const flush = vi.spyOn(core, 'flushPendingSave').mockImplementationOnce(() => deferred.promise);
+        act(() => useTaskStore.setState({ addTask, fetchData: vi.fn(async () => undefined) }));
+
+        try {
+            renderQuickAddModal({ standaloneWindow: true });
+            await act(async () => {
+                window.dispatchEvent(new CustomEvent('mindwtr:quick-add', { detail: { initialValue: url } }));
+            });
+            fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+            await waitFor(() => expect(flush).toHaveBeenCalled());
+            expect(addTask).toHaveBeenCalledWith(url, expect.objectContaining({
+                attachments: [expect.objectContaining({ uri: url, kind: 'link' })],
+            }));
+            expect(tauriMocks.emitTo).not.toHaveBeenCalled();
+            await act(async () => deferred.resolve());
+
+            await waitFor(() => expect(tauriMocks.emitTo).toHaveBeenCalledWith(
+                QUICK_ADD_MAIN_WINDOW_LABEL,
+                QUICK_ADD_SAVED_EVENT,
+                expect.objectContaining({ linkCapture: { taskId: 'web-link', url } }),
+            ));
+        } finally {
+            flush.mockRestore();
+        }
+    });
+
+    it('retries a failed standalone URL save using the original task and attachment', async () => {
+        (window as typeof window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {};
+        const url = 'https://example.org/source';
+        const flush = vi.spyOn(core, 'flushPendingSave').mockImplementationOnce(async () => {
+            useTaskStore.setState({ persistenceFailure: { message: 'storage unavailable', failedAt: new Date().toISOString(), retrying: false } });
+            throw new Error('storage unavailable');
+        }).mockResolvedValue(undefined);
+        const fetchData = vi.fn(async () => { useTaskStore.setState({ _allTasks: [] }); });
+        const retryPersistence = vi.fn(async () => { useTaskStore.setState({ persistenceFailure: null }); });
+
+        try {
+            act(() => useTaskStore.setState({ _allTasks: [], fetchData, retryPersistence }));
+            renderQuickAddModal({ standaloneWindow: true });
+            await act(async () => { window.dispatchEvent(new CustomEvent('mindwtr:quick-add', { detail: { initialValue: url } })); });
+            fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+            await screen.findByText(/Retry Save or remove the file/);
+            expect(tauriMocks.emitTo).not.toHaveBeenCalled();
+            const [admitted] = useTaskStore.getState().tasks;
+            expect(admitted.attachments).toEqual([expect.objectContaining({ uri: url })]);
+
+            fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+            await waitFor(() => expect(screen.queryByPlaceholderText('Add Task')).not.toBeInTheDocument());
+
+            expect(useTaskStore.getState().tasks).toEqual([admitted]);
+            expect(retryPersistence).toHaveBeenCalledOnce();
+            expect(tauriMocks.emitTo).toHaveBeenCalledExactlyOnceWith(
+                QUICK_ADD_MAIN_WINDOW_LABEL, QUICK_ADD_SAVED_EVENT,
+                expect.objectContaining({ linkCapture: { taskId: admitted.id, url } }),
+            );
+        } finally {
+            flush.mockRestore();
+        }
+    });
+
     it('shows the opening default, freezes it through settings changes, and saves explicit None over inline syntax (#1559)', async () => {
         const addTask = vi.fn(async () => ({ success: true, id: 'captured' }));
         const addProject = vi.fn();
@@ -825,6 +891,50 @@ describe('QuickAddModal', () => {
         } finally {
             await finish?.();
             flush.mockRestore(); fetcher.mockRestore(); addTask.mockRestore();
+        }
+    });
+
+    it.each([
+        { name: 'keeps the original source', nextTitle: undefined, expectedSource: 'https://example.org/source' },
+        { name: 'removes the source when the draft becomes text', nextTitle: 'Edited draft', expectedSource: undefined },
+        { name: 'replaces the source when the draft URL changes', nextTitle: 'https://example.org/replacement', expectedSource: 'https://example.org/replacement' },
+    ])('$name when retrying an image capture after a peer adds an attachment', async ({ nextTitle, expectedSource }) => {
+        const url = 'https://example.org/source';
+        const flush = vi.spyOn(core, 'flushPendingSave').mockRejectedValueOnce(new Error('storage unavailable')).mockResolvedValue(undefined);
+        const fetcher = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null, { status: 200 }));
+        try {
+            act(() => useTaskStore.setState({ _allTasks: [], settings: { deviceId: 'browser-device', fetchLinkTitles: false } }));
+            renderQuickAddModal();
+            await act(async () => { window.dispatchEvent(new CustomEvent('mindwtr:quick-add', { detail: { initialValue: url } })); });
+            const input = screen.getByPlaceholderText('Add Task');
+            fireEvent.paste(input, { clipboardData: createImageClipboardData(new File(['png'], 'image.png', { type: 'image/png' })) });
+            await screen.findByText('1 image attached');
+            fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+            await screen.findByText(/Retry Save or remove the file/);
+
+            const admitted = useTaskStore.getState().tasks[0];
+            const source = admitted.attachments?.find((attachment) => attachment.uri === url);
+            if (!source) throw new Error('Expected the original URL attachment');
+            const peer = { ...source, id: 'peer-link', uri: 'https://example.org/peer', title: 'Peer link' };
+            act(() => useTaskStore.setState({ _allTasks: [{ ...admitted, attachments: [...(admitted.attachments ?? []), peer], rev: (admitted.rev ?? 0) + 1 }] }));
+            if (nextTitle) fireEvent.change(input, { target: { value: nextTitle } });
+            fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+            await waitFor(() => expect(screen.queryByPlaceholderText('Add Task')).not.toBeInTheDocument());
+
+            const [saved] = useTaskStore.getState().tasks;
+            const liveLinks = saved.attachments?.filter((attachment) => attachment.kind === 'link' && !attachment.deletedAt);
+            expect(saved).toMatchObject({ id: admitted.id, title: nextTitle ?? url });
+            expect(liveLinks).toContainEqual(peer);
+            expect(liveLinks?.filter((attachment) => attachment.id !== peer.id)).toEqual(
+                expectedSource === url ? [source] : expectedSource ? [expect.objectContaining({ uri: expectedSource })] : [],
+            );
+            if (nextTitle) expect(useTaskStore.getState()._tasksById.get(saved.id)?.attachments)
+                .toContainEqual(expect.objectContaining({ id: source.id, deletedAt: expect.any(String) }));
+            expect(saved.attachments?.filter((attachment) => attachment.kind === 'file' && !attachment.deletedAt)).toHaveLength(1);
+            expect(fetcher).toHaveBeenCalledOnce();
+        } finally {
+            flush.mockRestore();
+            fetcher.mockRestore();
         }
     });
 

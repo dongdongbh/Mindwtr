@@ -292,7 +292,8 @@ const logStorageInitIfNeeded = () => {
 };
 
 export const tauriStorage: StorageAdapter = {
-    getData: async (): Promise<AppData> => {
+    getData: async (options): Promise<AppData> => {
+        if (options?.requireCanonical) return invokeNative<AppData>('get_data', { requireCanonical: true });
         try {
             const data = await invokeNative<AppData>('get_data');
             lastObservedData = data;

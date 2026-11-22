@@ -7,6 +7,7 @@ import { isSelectableProjectForTaskAssignment } from './project-utils';
 import { DEFAULT_AREA_COLOR, DEFAULT_PROJECT_COLOR } from './color-constants';
 import { resolveCaptureStatusForStart } from './store-helpers';
 import { logInfo } from './logger';
+import { createCapturedWebLinkAttachment, getBareHttpUrl } from './attachment-link-utils';
 
 
 export type CaptureAssemblyInput = {
@@ -364,6 +365,10 @@ export async function prepareCaptureTask(
     if (!plan.success) return plan;
 
     let props = plan.props;
+    const bareUrl = getBareHttpUrl(input.rawInput);
+    if (bareUrl === plan.title && !props.attachments?.some((item) => item.kind === 'link' && item.uri === bareUrl && !item.deletedAt)) {
+        props = { ...props, attachments: [...(props.attachments ?? []), createCapturedWebLinkAttachment(bareUrl)] };
+    }
     let createdProject: Project | undefined;
     if (plan.projectToCreate) {
         try {

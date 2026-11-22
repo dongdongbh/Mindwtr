@@ -1,5 +1,7 @@
 
 export const svOverrides: Record<string, string> = {
+    "settings.fetchLinkTitles": "Hämta sidtitlar",
+    "settings.fetchLinkTitlesHint": "Kontakta webbplatsen för att namnge länkar som sparas på den här enheten.",
     "projects.calendarLimit": "Visar de första 200 träffarna. Sök för att hitta en annan händelse.",
     "projects.calendarTitle": "Kalender",
     "projects.calendarLink": "Länka kalenderhändelse",

@@ -1,4 +1,6 @@
 export const viOverrides: Record<string, string> = {
+    "settings.fetchLinkTitles": "Lấy tiêu đề trang",
+    "settings.fetchLinkTitlesHint": "Truy cập trang web được liên kết để đặt tên cho các liên kết đã lưu trên thiết bị này.",
     "projects.calendarLimit": "Hiển thị 200 kết quả đầu tiên. Tìm kiếm để tìm sự kiện khác.",
     "projects.calendarTitle": "Lịch",
     "projects.calendarLink": "Liên kết sự kiện lịch",

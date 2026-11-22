@@ -2,6 +2,8 @@
 
 
 export const jaOverrides: Record<string, string> = {
+    "settings.fetchLinkTitles": "ページタイトルを取得",
+    "settings.fetchLinkTitlesHint": "リンク先のサイトに接続して、この端末に保存したリンクに名前を付けます。",
     "projects.calendarLimit": "最初の200件を表示しています。別の予定を探すには検索してください。",
     "projects.calendarTitle": "カレンダー",
     "projects.calendarLink": "カレンダーの予定を関連付ける",

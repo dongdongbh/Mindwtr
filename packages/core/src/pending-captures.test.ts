@@ -401,6 +401,21 @@ describe('Android capture description persistence', () => {
         });
     });
 
+    it('starts title lookup once when a saved URL survives a queue cleanup retry', async () => {
+        await openStore([]);
+        const title = 'https://example.org/article';
+        const file = CAPTURE_ID + '.json';
+        const queue = fakeQueue({ [file]: { kind: 'text', id: CAPTURE_ID, title, source: 'android-quick-capture' } });
+        const onTextCaptureSaved = vi.fn();
+        queue.failDelete.add(file);
+        await drainPendingCaptureQueue(storeDeps(queue.port, { onTextCaptureSaved }));
+        expect(onTextCaptureSaved).not.toHaveBeenCalled();
+        await restartStore();
+        await drainPendingCaptureQueue(storeDeps(queue.port, { onTextCaptureSaved }));
+        expect(saved().tasks).toHaveLength(1);
+        expect(onTextCaptureSaved).toHaveBeenCalledExactlyOnceWith(CAPTURE_ID, title);
+    });
+
     it.each(['text', 'audio'] as const)('persists literal notes once across %s queue cleanup retry', async (kind) => {
         await openStore([]);
         const note = '- Tell @Todd\n- /due:tomorrow is supporting text';

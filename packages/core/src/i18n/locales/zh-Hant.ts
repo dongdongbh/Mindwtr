@@ -1,5 +1,7 @@
 
 export const zhHant: Record<string, string> = {
+    "settings.fetchLinkTitles": "取得網頁標題",
+    "settings.fetchLinkTitlesHint": "連線至連結指向的網站，為此裝置上儲存的連結命名。",
     "projects.calendarLimit": "顯示前 200 個符合項目。搜尋以尋找其他事件。",
     "projects.calendarTitle": "行事曆",
     "projects.calendarLink": "連結行事曆事件",

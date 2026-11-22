@@ -1,3 +1,4 @@
+import { enrichMobileCaptureTitle } from '../lib/link-title';
 import React, { useEffect, useRef, useState } from 'react';
 import {
   AccessibilityInfo,
@@ -447,6 +448,7 @@ export function CaptureForm({ params, projectModal }: {
       }
       return false;
     }
+    enrichMobileCaptureTitle(result.createdTaskId, inputValue);
     if (launchedFromShare) {
       logIosShareDiagnostic({ stage: 'transaction-returned', type: 'single', outcome: 'success', count: 1 });
     }

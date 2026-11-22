@@ -39,6 +39,7 @@ import { useTaskStore } from './store';
 import type { Project, Task } from './types';
 import type { NativeAttachmentsHost } from './native-host-contract-attachments';
 import { logInfo } from './logger';
+import { getBareHttpUrl } from './attachment-link-utils';
 
 type CaptureModalDeps = {
     readiness: () => NativeHostResult<null>;
@@ -135,11 +136,14 @@ const DRAFT_FIELDS = ['description', 'startTime', 'reviewAt', 'assignedTo', 'ene
 const sameValue = (left: unknown, right: unknown) => JSON.stringify(left ?? null) === JSON.stringify(right ?? null);
 
 
-const isTaskOfDraft = (task: Task, plan: CaptureTaskPlan, requestId: string): boolean => (
-    isTaskOfPlan(task, plan, requestId)
-    && DRAFT_FIELDS.every((field) => sameValue(task[field], plan.props[field]))
-    && sameValue(task.attachments?.map((attachment) => attachment.uri), plan.props.attachments?.map((attachment) => attachment.uri))
-);
+const isTaskOfDraft = (task: Task, plan: CaptureTaskPlan, requestId: string, text: string, first = true): boolean => {
+    if (!isTaskOfPlan(task, plan, requestId) || !DRAFT_FIELDS.every((field) => sameValue(task[field], plan.props[field]))) return false;
+    const actual = task.attachments?.map((attachment) => attachment.uri);
+    const planned = first ? plan.props.attachments?.map((attachment) => attachment.uri) : undefined;
+    if (sameValue(actual, planned)) return true;
+    const bareUrl = getBareHttpUrl(text);
+    return bareUrl === plan.title && sameValue(actual, [...(planned ?? []), bareUrl]);
+};
 
 const isEdit = (edit: unknown): edit is NativeCaptureModalEdit => {
     if (!isObjectRecord(edit)) return false;
@@ -394,7 +398,7 @@ export function createCaptureModalMethods(deps: CaptureModalDeps) {
                     const existing = useTaskStore.getState()._allTasks.find((task) => task.id === captureId.toLowerCase());
                     if (existing) {
                         const plan = planCaptureModalRequest(request);
-                        return plan.success && isTaskOfDraft(existing, plan, captureId)
+                        return plan.success && isTaskOfDraft(existing, plan, captureId, draft.text)
                             ? saved(existing.id, existing.projectId)
                             : fail('INVALID_INPUT', 'Capture ID already belongs to another task');
                     }
@@ -459,7 +463,7 @@ export function createCaptureModalMethods(deps: CaptureModalDeps) {
                     if (existing.some(Boolean)) {
                         const matches = existing.every((task, index) => {
                             const plan = task && planCaptureModalRequest(requestFor(params, draft, lines[index], owned));
-                            return Boolean(task && plan?.success && isTaskOfDraft(task, plan, ids[0]));
+                            return Boolean(task && plan?.success && isTaskOfDraft(task, plan, ids[0], lines[index], index === 0));
                         });
                         return matches
                             ? { ok: true, value: { kind: 'saved', taskIds, close } }

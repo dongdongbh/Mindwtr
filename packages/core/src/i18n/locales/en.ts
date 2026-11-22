@@ -1,5 +1,7 @@
 
 export const en: Record<string, string> = {
+    "settings.fetchLinkTitles": "Look up page titles",
+    "settings.fetchLinkTitlesHint": "Contact the linked website to name saved links on this device.",
     "projects.calendarLimit": "Showing the first 200 matches. Search to find another event.",
     "projects.calendarTitle": "Calendar",
     "projects.calendarLink": "Link calendar event",

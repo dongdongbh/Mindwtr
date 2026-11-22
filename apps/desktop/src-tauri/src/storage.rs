@@ -3811,6 +3811,13 @@ fn row_to_area_value(row: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
 }
 
 pub(crate) fn read_sqlite_data(conn: &Connection) -> Result<Value, String> {
+    read_sqlite_data_with_settings_validation(conn, false)
+}
+
+fn read_sqlite_data_with_settings_validation(
+    conn: &Connection,
+    require_valid_settings: bool,
+) -> Result<Value, String> {
     let mut tasks_stmt = conn
         .prepare("SELECT * FROM tasks")
         .map_err(|e| e.to_string())?;
@@ -3885,10 +3892,12 @@ pub(crate) fn read_sqlite_data(conn: &Connection) -> Result<Value, String> {
         })
         .optional()
         .map_err(|e| e.to_string())?;
-    let settings_val = parse_json_value(settings_raw)
-        .as_object()
-        .cloned()
-        .unwrap_or_default();
+    let has_stored_settings = settings_raw.is_some();
+    let settings = parse_json_value(settings_raw);
+    if require_valid_settings && has_stored_settings && !settings.is_object() {
+        return Err("canonical SQLite settings are unreadable".into());
+    }
+    let settings_val = settings.as_object().cloned().unwrap_or_default();
 
     Ok(Value::Object(
         serde_json::json!({
@@ -4089,23 +4098,42 @@ pub(crate) fn ensure_data_file(app: &tauri::AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub(crate) async fn get_data(app: tauri::AppHandle) -> Result<Value, String> {
-    tauri::async_runtime::spawn_blocking(move || load_data_snapshot(&app))
-        .await
-        .map_err(|e| e.to_string())?
+pub(crate) async fn get_data(
+    app: tauri::AppHandle,
+    require_canonical: Option<bool>,
+) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        if require_canonical == Some(true) {
+            read_canonical_sqlite_snapshot(&get_db_path(&app))
+        } else {
+            load_data_snapshot(&app)
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
-fn read_trusted_sqlite_for_encryption_upgrade(db_path: &Path) -> Result<Value, String> {
+fn read_only_sqlite_snapshot(
+    db_path: &Path,
+    read: impl FnOnce(&Connection) -> Result<Value, String>,
+) -> Result<Value, String> {
     if !db_path.is_file() {
-        return Err(
-            "SYNC_ENCRYPTION_TRUSTED_LOCAL_REQUIRED: canonical SQLite database is unavailable"
-                .into(),
-        );
+        return Err("canonical SQLite database is unavailable".into());
     }
     let connection =
         Connection::open_with_flags(db_path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
-            .map_err(|error| format!("SYNC_ENCRYPTION_TRUSTED_LOCAL_REQUIRED: {error}"))?;
-    read_sqlite_snapshot(&connection)
+            .map_err(|error| error.to_string())?;
+    with_sqlite_read_transaction(&connection, false, read)
+}
+
+fn read_canonical_sqlite_snapshot(db_path: &Path) -> Result<Value, String> {
+    read_only_sqlite_snapshot(db_path, |connection| {
+        read_sqlite_data_with_settings_validation(connection, true)
+    })
+}
+
+fn read_trusted_sqlite_for_encryption_upgrade(db_path: &Path) -> Result<Value, String> {
+    read_only_sqlite_snapshot(db_path, read_sqlite_data)
         .map_err(|error| format!("SYNC_ENCRYPTION_TRUSTED_LOCAL_REQUIRED: {error}"))
 }
 
@@ -6166,6 +6194,23 @@ mod tests {
     use super::*;
     use rusqlite::Connection;
     use std::sync::{Arc, Barrier};
+
+    #[test]
+    fn canonical_sqlite_read_rejects_unreadable_settings() {
+        let directory = tempfile::tempdir().unwrap();
+        let database = directory.path().join("mindwtr.db");
+        let conn = open_sqlite_path(&database).unwrap();
+        conn.execute(
+            "INSERT OR REPLACE INTO settings (id, data) VALUES (1, ?1)",
+            params!["damaged settings"],
+        )
+        .unwrap();
+        assert_eq!(
+            read_sqlite_snapshot(&conn).unwrap()["settings"],
+            serde_json::json!({})
+        );
+        assert!(read_canonical_sqlite_snapshot(&database).is_err());
+    }
 
     #[test]
     fn encryption_upgrade_never_uses_json_when_canonical_sqlite_is_unreadable() {

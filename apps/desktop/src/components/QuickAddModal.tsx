@@ -9,6 +9,7 @@ import {
     useTaskStore,
     buildTaskUpdatesFromSpeechResult,
     flushPendingSave,
+    getBareHttpUrl,
     runStoreCommand,
     saveTaskDraftOntoLatest,
     isSandboxMode,
@@ -68,7 +69,8 @@ import {
     QUICK_ADD_NATIVE_TARGET_WINDOW,
     shouldHandleQuickAddNativeEvent,
 } from '../lib/quick-add-native-event';
-import { QUICK_ADD_MAIN_WINDOW_LABEL, QUICK_ADD_SAVED_EVENT } from '../lib/quick-add-saved-event';
+import { QUICK_ADD_MAIN_WINDOW_LABEL, QUICK_ADD_SAVED_EVENT, type QuickAddSavedEvent } from '../lib/quick-add-saved-event';
+import { enrichDesktopCapturedLinkTitle, getLinkTitleCapture, type LinkTitleCapture } from '../lib/link-title';
 import { consumeQuickAddPending, hideQuickAddWindow } from '../lib/quick-add-window';
 import { TaskInput } from './Task/TaskInput';
 import { DestinationSelector } from './ui/DestinationSelector';
@@ -196,7 +198,7 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
     }, []);
     const [pastedImageError, setPastedImageError] = useState<string | null>(null);
     const webDraftRef = useRef(createWebAttachmentDraft());
-    const admittedBrowserTaskRef = useRef<{ id: string; baseline: Task; attachments: Attachment[] } | null>(null);
+    const admittedTaskRef = useRef<{ id: string; baseline: Task; attachments: Attachment[] } | null>(null);
     const latestValueRef = useRef(value);
     latestValueRef.current = value;
     const [pastingImageCount, setPastingImageCount] = useState(0);
@@ -303,7 +305,7 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
         }
         webDraftRef.current.discard();
         webDraftRef.current = createWebAttachmentDraft();
-        admittedBrowserTaskRef.current = null;
+        admittedTaskRef.current = null;
         pastedImageAttachmentsRef.current = [];
         setPastedImageAttachments([]);
         setPastedImageError(null);
@@ -451,11 +453,14 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
             .catch((error) => reportError('Failed to hide quick add window', error));
     }, [standaloneWindow]);
 
-    const notifyStandaloneTaskSaved = useCallback(async () => {
+    const notifyStandaloneTaskSaved = useCallback(async (linkCapture?: LinkTitleCapture) => {
         if (!standaloneWindow || !isTauriRuntime()) return;
         try {
             const { emitTo } = await import('@tauri-apps/api/event');
-            await emitTo(QUICK_ADD_MAIN_WINDOW_LABEL, QUICK_ADD_SAVED_EVENT, { savedAt: new Date().toISOString() });
+            await emitTo<QuickAddSavedEvent>(QUICK_ADD_MAIN_WINDOW_LABEL, QUICK_ADD_SAVED_EVENT, {
+                savedAt: new Date().toISOString(),
+                ...(linkCapture && { linkCapture }),
+            });
         } catch (error) {
             reportError('Failed to notify main window after quick add save', error);
         }
@@ -1067,7 +1072,8 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
         try {
             let currentProjects = projects;
             let currentAreas = areas;
-            if (standaloneWindow) {
+            const priorAdmission = admittedTaskRef.current;
+            if (standaloneWindow && !priorAdmission) {
 
 
                 await refreshStandaloneData().catch((error) => reportError('Failed to refresh quick add data', error));
@@ -1078,7 +1084,6 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
             }
             const webDraft = webDraftRef.current;
             const hasBrowserFiles = !isTauriRuntime() && webDraft.has(pastedAttachments);
-            const priorAdmission = admittedBrowserTaskRef.current;
             let preparedAttachments = pastedAttachments;
             const hasNewFiles = hasBrowserFiles && (!priorAdmission
                 || pastedAttachments.some((attachment) => !priorAdmission.attachments.some((saved) => saved.id === attachment.id)));
@@ -1095,6 +1100,7 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
             }
             if (!submissionCoordinatorRef.current.isCurrent(session)) return;
             const savedInput = latestValueRef.current;
+            const sourceUrl = getBareHttpUrl(savedInput);
             const parsed = parseQuickAdd(savedInput, currentProjects, new Date(), currentAreas, quickAddParseOptions);
             if (parsed.invalidDateCommands && parsed.invalidDateCommands.length > 0) {
                 showToast(`${t('quickAdd.invalidDateCommand')}: ${parsed.invalidDateCommands.join(', ')}`, 'error');
@@ -1109,11 +1115,14 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
             let admittedAttachments = preparedAttachments;
             let result: { success: boolean; createdTaskId?: string; props?: Partial<Task>; baseline?: Task };
             if (priorAdmission) {
+                const retainedSource = priorAdmission.attachments.find((attachment) =>
+                    attachment.kind === 'link' && !attachment.deletedAt && attachment.uri === sourceUrl);
+                const captureAttachments = retainedSource ? [...preparedAttachments, retainedSource] : preparedAttachments;
                 const prepared = await prepareCaptureTask(buildQuickAddCaptureInput({ currentProjects,
-                    extraAttachments: preparedAttachments, input: savedInput, parsed }), { addProject });
+                    extraAttachments: captureAttachments, input: savedInput, parsed }), { addProject });
                 if (!submissionCoordinatorRef.current.isCurrent(session)) return;
                 if (!prepared.success) { showToast(t('task.addFailed'), 'error'); return; }
-                const removed = priorAdmission.attachments.filter((saved) => !preparedAttachments.some((item) => item.id === saved.id))
+                const removed = priorAdmission.attachments.filter((saved) => !captureAttachments.some((item) => item.id === saved.id))
                     .map((saved) => saved.deletedAt ? saved : ({ ...saved, deletedAt: new Date().toISOString(), updatedAt: new Date().toISOString() }));
                 const props = { ...prepared.props, attachments: [...(prepared.props.attachments ?? []), ...removed] };
                 webDraft.retainBeforeStore(preparedAttachments);
@@ -1133,22 +1142,37 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
                     extraAttachments: preparedAttachments, input: savedInput, parsed,
                     beforeTaskWrite });
             }
-            if (submissionCoordinatorRef.current.isCurrent(session) && (hasBrowserFiles || priorAdmission) && result.success && result.createdTaskId) {
+            const canRetryAdmission = hasBrowserFiles || priorAdmission !== null || (standaloneWindow && sourceUrl !== null);
+            if (submissionCoordinatorRef.current.isCurrent(session) && canRetryAdmission && result.success && result.createdTaskId) {
                 const baseline = submittedBaseline ?? result.baseline;
-                if (baseline) admittedBrowserTaskRef.current = { id: result.createdTaskId, baseline, attachments: admittedAttachments };
+                if (baseline) {
+                    const capturedSource = result.props?.attachments?.find((attachment) => attachment.kind === 'link'
+                        && !attachment.deletedAt && attachment.uri === sourceUrl
+                        && !initialProps?.attachments?.some((initial) => initial.id === attachment.id));
+                    admittedTaskRef.current = {
+                        id: result.createdTaskId,
+                        baseline,
+                        attachments: capturedSource ? [...admittedAttachments, capturedSource] : admittedAttachments,
+                    };
+                }
             }
             if (!submissionCoordinatorRef.current.isCurrent(session)) return;
             if (!result.success) { showToast(tFallback(t, 'task.addFailed', 'Failed to add task'), 'error'); return; }
+            const linkCapture = getLinkTitleCapture(result.createdTaskId, savedInput);
             if (standaloneWindow || hasBrowserFiles || priorAdmission) {
-                try { await flushPendingSave(); }
-                catch (error) {
+                try {
+                    const state = useTaskStore.getState();
+                    if (priorAdmission && state.persistenceFailure) await state.retryPersistence();
+                    else await flushPendingSave();
+                } catch (error) {
                     if (submissionCoordinatorRef.current.isCurrent(session)) setPastedImageError(webAttachmentUploadMessage(error, t));
                     return;
                 }
                 if (!submissionCoordinatorRef.current.isCurrent(session)) return;
-                await notifyStandaloneTaskSaved();
+                await notifyStandaloneTaskSaved(linkCapture);
                 if (!submissionCoordinatorRef.current.isCurrent(session)) return;
             }
+            if (!standaloneWindow && linkCapture) enrichDesktopCapturedLinkTitle(linkCapture);
             if (latestValueRef.current !== savedInput || pastedImageAttachmentsRef.current.some((item) =>
                 !preparedAttachments.some((saved) => saved.id === item.attachment.id))) return;
             if (addAnother) {

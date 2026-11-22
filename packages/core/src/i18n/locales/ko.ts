@@ -1,5 +1,7 @@
 
 export const koOverrides: Record<string, string> = {
+    "settings.fetchLinkTitles": "페이지 제목 가져오기",
+    "settings.fetchLinkTitlesHint": "연결된 웹사이트에 접속하여 이 기기에 저장한 링크에 이름을 붙입니다.",
     "projects.calendarLimit": "처음 200개의 결과를 표시합니다. 다른 일정을 찾으려면 검색하세요.",
     "projects.calendarTitle": "캘린더",
     "projects.calendarLink": "캘린더 일정 연결",

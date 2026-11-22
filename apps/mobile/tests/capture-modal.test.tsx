@@ -89,12 +89,16 @@ vi.mock('@react-navigation/native', () => ({
   },
 }));
 
+const enrichCapture = vi.hoisted(() => vi.fn());
+
 vi.mock('@mindwtr/core', async () => {
 
   const actual = await vi.importActual<typeof import('@mindwtr/core')>('@mindwtr/core');
   return {
   executeCaptureTransaction: actual.executeCaptureTransaction,
   prepareCaptureTask: actual.prepareCaptureTask,
+  getBareHttpUrl: actual.getBareHttpUrl,
+  enrichCapturedTaskLinkTitle: enrichCapture,
   buildQuickAddParseOptions: actual.buildQuickAddParseOptions,
   buildQuickAddPreviewEntries: actual.buildQuickAddPreviewEntries,
   getPersonOptionNames: actual.getPersonOptionNames,
@@ -1105,6 +1109,24 @@ describe('CaptureScreen', () => {
 
     expect(storeState.addTask).toHaveBeenCalledTimes(2);
     expect(routerMocks.replace).toHaveBeenCalledWith('/inbox');
+  });
+
+  it.each(['https://example.org/story', 'A shared headline'])('only looks up a URL-only share after saving %s', async (title) => {
+    const url = 'https://example.org/story';
+    routeParams.current = {
+      initialValue: encodeURIComponent(title),
+      initialProps: encodeURIComponent(JSON.stringify(title === url ? {} : { description: url })),
+    };
+    storeState.addTask.mockResolvedValueOnce({ success: true, id: 'shared-task' });
+    let tree!: ReturnType<typeof create>;
+    act(() => { tree = create(<CaptureScreen />); });
+    await act(async () => { await findTouchableByText(tree, 'Save').props.onPress(); });
+    expect(storeState.addTask).toHaveBeenCalledWith(title, expect.objectContaining(
+      title === url ? { attachments: [expect.objectContaining({ uri: url })] } : { description: url },
+    ));
+    if (title === url) expect(enrichCapture).toHaveBeenCalledWith('shared-task', url, expect.any(Function));
+    else expect(enrichCapture).not.toHaveBeenCalled();
+    act(() => tree.unmount());
   });
 
   it('saves App Action capture details from initial props after confirmation', async () => {

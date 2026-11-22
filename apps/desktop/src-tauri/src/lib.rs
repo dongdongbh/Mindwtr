@@ -47,6 +47,7 @@ mod email_capture;
 mod gmail_capture;
 mod file_sync_attachment_publication;
 mod install;
+mod link_title;
 mod system_fonts;
 #[cfg(target_os = "linux")]
 mod linux_deep_link;
@@ -2237,6 +2238,7 @@ pub fn run() {
             gmail_capture_poll,
             gmail_capture_validate,
             gmail_capture_commit,
+            link_title::load_public_link_html,
             get_desktop_rendering_config,
             set_desktop_rendering_config,
             write_macos_widget_payload,

@@ -2,6 +2,8 @@
 
 
 export const huOverrides: Record<string, string> = {
+    "settings.fetchLinkTitles": "Oldalcímek lekérése",
+    "settings.fetchLinkTitlesHint": "A készüléken mentett hivatkozások elnevezéséhez kapcsolódik a hivatkozott webhelyhez.",
     "projects.calendarLimit": "Az első 200 találat látható. Másik esemény kereséssel található meg.",
     "projects.calendarTitle": "Naptár",
     "projects.calendarLink": "Naptáresemény csatolása",

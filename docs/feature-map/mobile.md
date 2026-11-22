@@ -80,6 +80,8 @@ Source: `apps/mobile`. Routes live in `apps/mobile/app` (expo-router). Labels be
 - Destination is always visible, showing the contextual project/section, default Area, or None. A picker choice overrides title syntax without changing status; defaults stay fixed for the draft. An unavailable destination preserves the draft/audio for correction. Typing `@`, `+`, or `#` offers local suggestions at the caret; accepting a project selects its ID and replaces the whole token.
 - Autocomplete code and checks: `apps/mobile/components/quick-capture-sheet/QuickCaptureTitleInput.tsx`, `apps/mobile/components/quick-capture-sheet/QuickCaptureTitleInput.test.tsx`, `packages/core/src/capture-autocomplete.test.ts`
 
+- Saving one HTTP(S) URL keeps its link and looks up its page title after capture. The full-screen share and capture form uses the same lookup. A supplied article title takes precedence. Settings › General › Privacy › Look up page titles controls requests to linked websites. Adding a bare URL in the task editor looks up its attachment label after Save.
+
 ## Voice capture and Whisper
 
 - Reach: Long press Add Task (or tap it when voice is the default) › Start recording › Stop recording.

@@ -15,6 +15,7 @@ const speechMocks = vi.hoisted(() => ({
   processAudioCapture: vi.fn(),
   resolveSpeechToTextRuntimeSettings: vi.fn(),
 }));
+const enrichLink = vi.hoisted(() => vi.fn());
 const draftFieldMock = vi.hoisted(() => ({ setDraftField: vi.fn() }));
 const coreStoreState = vi.hoisted(() => ({
   tasks: [] as Task[],
@@ -29,6 +30,7 @@ const coreStoreState = vi.hoisted(() => ({
 vi.mock('@mindwtr/core', async (importOriginal) => {
   const { mockCore } = await import('../../test-support/mock-core');
   return mockCore(importOriginal, () => coreStoreState, {
+    enrichAttachmentLinkTitle: enrichLink,
     buildTaskUpdatesFromSpeechResult: speechMocks.buildTaskUpdatesFromSpeechResult,
   });
 });
@@ -244,6 +246,11 @@ describe('useTaskEditAttachments download settlement', () => {
     act(() => { expose.current!.confirmAddLink(); });
     expect(expose.current!.attachments).toHaveLength(3);
     expect(expose.current!.attachments[0]).toMatchObject({ id: initial.id, uri: 'https://edited.example' });
+    expect(enrichLink).not.toHaveBeenCalled();
+    const committed = expose.current!.attachments;
+    act(() => expose.current!.settleDraftAttachments({ committedAttachments: committed }));
+    expect(enrichLink).toHaveBeenCalledExactlyOnceWith({ kind: 'task', id: 'task-1' }, committed[1], expect.any(Function));
+
     act(() => tree.unmount());
   });
 

@@ -1,5 +1,7 @@
 
 export const itOverrides: Record<string, string> = {
+    "settings.fetchLinkTitles": "Recupera i titoli delle pagine",
+    "settings.fetchLinkTitlesHint": "Contatta il sito web per dare un nome ai link salvati su questo dispositivo.",
     "projects.calendarLimit": "Sono mostrati i primi 200 risultati. Cerca per trovare un altro evento.",
     'bulk.keepEstimate': "Mantieni il valore attuale",
     'bulk.clearEstimate': "Cancella stima",

@@ -1,5 +1,7 @@
 
 export const deOverrides: Record<string, string> = {
+    "settings.fetchLinkTitles": "Seitentitel abrufen",
+    "settings.fetchLinkTitlesHint": "Die verlinkte Website kontaktieren, um gespeicherte Links auf diesem Gerät zu benennen.",
     "projects.calendarLimit": "Die ersten 200 Treffer werden angezeigt. Suche nach einem anderen Termin.",
     "projects.calendarTitle": "Kalender",
     "projects.calendarLink": "Kalendertermin verknüpfen",

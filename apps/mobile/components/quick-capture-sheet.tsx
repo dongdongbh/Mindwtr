@@ -9,6 +9,7 @@ import {
   View,
   useWindowDimensions,
 } from 'react-native';
+import { enrichMobileCaptureTitle } from '../lib/link-title';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
 
@@ -1158,6 +1159,7 @@ export function QuickCaptureSheet({
 
       if (outcome.kind === 'refused') showToast(outcome.notice);
       durableSucceeded = outcome.kind === 'saved';
+      if (outcome.kind === 'saved') enrichMobileCaptureTitle(outcome.taskId, plan.text);
       if (!submissionCoordinatorRef.current.isCurrent(session) || outcome.kind !== 'saved') return;
 
       if (outcome.next === 'open') {

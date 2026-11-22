@@ -234,6 +234,8 @@ export * from './retry-utils';
 export * from './async-queue';
 export * from './attachment-hash';
 export * from './attachment-link-utils';
+export { extractWebPageTitle, fetchWebPageTitle } from './web-page-title';
+export { enrichCapturedTaskLinkTitle, enrichAttachmentLinkTitle } from './link-title-enrichment';
 export * from './cloudkit-attachments';
 export * from './attachment-validation';
 export * from './attachment-change-detection';

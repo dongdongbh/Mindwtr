@@ -1,5 +1,7 @@
 
 export const trOverrides: Record<string, string> = {
+    "settings.fetchLinkTitles": "Sayfa başlıklarını getir",
+    "settings.fetchLinkTitlesHint": "Bu cihaza kaydedilen bağlantıları adlandırmak için ilgili siteye bağlanır.",
     "projects.calendarLimit": "İlk 200 eşleşme gösteriliyor. Başka bir etkinlik bulmak için arayın.",
     'bulk.keepEstimate': "Mevcut değeri koru",
     'bulk.clearEstimate': "Tahmini temizle",

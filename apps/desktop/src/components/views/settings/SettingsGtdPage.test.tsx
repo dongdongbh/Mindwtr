@@ -14,6 +14,22 @@ describe('SettingsGtdPage', () => {
         useTaskStore.setState(initialTaskState, true);
     });
 
+    it('allows turning off page title lookup for this device', async () => {
+        const t = getEnglishSettingsLabels();
+        const updateSettings = vi.fn().mockResolvedValue(undefined);
+        const { getByRole } = render(
+            <SettingsGtdPage t={t} language="en" settings={{}} updateSettings={updateSettings}
+                showSaved={vi.fn()} autoArchiveDays={7} areas={[]} />
+        );
+
+        fireEvent.click(getByRole('button', { name: new RegExp(t.captureDefault) }));
+        const lookup = getByRole('switch', { name: t.fetchLinkTitles });
+        expect(lookup).toBeChecked();
+        fireEvent.click(lookup);
+
+        await waitFor(() => expect(updateSettings).toHaveBeenCalledWith({ fetchLinkTitles: false }));
+    });
+
     it('keeps a GTD key another device synced while the page showed older settings', async () => {
         const updateSettings = useTaskStore.getState().updateSettings;
         useTaskStore.setState({ settings: { gtd: { defaultProjectFlowMode: 'parallel' } } });

@@ -1,4 +1,5 @@
 import type { Attachment, AttachmentKind } from './types';
+import { generateUUID } from './uuid';
 
 const FILE_URI_PREFIX = /^file:\/\//i;
 const WINDOWS_DRIVE = /^[A-Za-z]:[\\/]/;
@@ -114,6 +115,21 @@ export function createCompactLinkTitle(uri: string): string {
     }
 }
 
+export function getBareHttpUrl(input: string): string | null {
+    const value = input.trim();
+    if (!/^https?:\/\/[^/?#]/i.test(value) || /[\s\\|<>\p{Cc}]/u.test(value)) return null;
+    try {
+        return new URL(value).hostname ? value : null;
+    } catch {
+        return null;
+    }
+}
+
+export function createCapturedWebLinkAttachment(uri: string, now = new Date()): Attachment {
+    const createdAt = now.toISOString();
+    return { id: generateUUID(), kind: 'link', title: createCompactLinkTitle(uri), uri, createdAt, updatedAt: createdAt };
+}
+
 export function normalizeLinkAttachmentInput(input: string): NormalizedAttachmentInput {
     const trimmed = collapseWhitespace(input);
     if (!trimmed) {
@@ -179,6 +195,6 @@ export function getAttachmentDisplayTitle(attachment: Pick<Attachment, 'kind' | 
     if (attachment.kind !== 'link') return rawTitle || rawUri;
     if (!rawTitle && !rawUri) return '';
 
-    if (rawTitle && rawTitle !== rawUri && !isLikelyLinkUri(rawTitle)) return rawTitle;
+    if (rawTitle && rawTitle !== rawUri) return rawTitle;
     return createCompactLinkTitle(rawUri || rawTitle);
 }

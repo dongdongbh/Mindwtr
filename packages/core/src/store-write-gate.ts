@@ -75,3 +75,6 @@ export const runSyncStoreSave = async <T>(saveAndPublish: (gateWaitMs: number) =
         releaseSyncSave();
     }
 };
+
+export const tryRunIdleStoreSave = (save: () => Promise<boolean>): Promise<boolean> =>
+    pendingSyncSave || activeStoreCommandCount > 0 ? Promise.resolve(false) : runSyncStoreSave(save);

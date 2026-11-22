@@ -10,6 +10,7 @@ import {
     type PendingCaptureStoreDeps,
 } from '@mindwtr/core';
 
+import { enrichMobileCaptureTitle } from './link-title';
 import { logError, logInfo, logWarn } from './app-log';
 import { settleWatchChecklist } from '../modules/watch-connectivity';
 import { deleteAsync, documentDirectory, getInfoAsync, readAsStringAsync, readDirectoryAsync } from './file-system';
@@ -130,6 +131,7 @@ export async function ingestPendingCaptures({ transcribeAudio, ...deps }: Ingest
         getAreas: deps.getAreas ?? (() => useTaskStore.getState()._allAreas),
         getSections: deps.getSections ?? (() => useTaskStore.getState()._allSections),
         settleWatchChecklist,
+        onTextCaptureSaved: enrichMobileCaptureTitle,
         queue: {
             list: async () => ((await getInfoAsync(dir)).exists ? readDirectoryAsync(dir) : null),
             read: (name) => readAsStringAsync(`${dir}/${name}`),

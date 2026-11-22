@@ -598,6 +598,7 @@ export interface AppSettings extends NotificationSettings {
 
 
     quickAddAutoClean?: boolean;
+    fetchLinkTitles?: boolean;
 
 
     markdownEditorAssist?: boolean;

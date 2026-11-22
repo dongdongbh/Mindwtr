@@ -133,7 +133,8 @@ import { useConfirmDialog } from './hooks/useConfirmDialog';
 import { useArchiveRetentionRunner } from './hooks/useArchiveRetentionRunner';
 import { subscribeNavigateEvent } from './lib/navigation-events';
 import { shouldOpenDesktopFirstRunOnboarding, subscribeDesktopOnboardingEvent } from './lib/desktop-onboarding-events';
-import { QUICK_ADD_SAVED_EVENT } from './lib/quick-add-saved-event';
+import { QUICK_ADD_SAVED_EVENT, type QuickAddSavedEvent } from './lib/quick-add-saved-event';
+import { enrichDesktopCapturedLinkTitle } from './lib/link-title';
 import {
     readLocalUserPromptState,
     recordLocalPromptActivity,
@@ -1064,8 +1065,13 @@ function App() {
 
         const setup = async () => {
             const { listen } = await import('@tauri-apps/api/event');
-            const nextUnlisten = await listen(QUICK_ADD_SAVED_EVENT, async () => {
-                await LocalDataWatcher.refreshFromDiskNow().catch(reportQuickAddRefreshError);
+            const nextUnlisten = await listen<QuickAddSavedEvent>(QUICK_ADD_SAVED_EVENT, async ({ payload }) => {
+                try {
+                    await LocalDataWatcher.refreshFromDiskNow();
+                    if (!disposed && payload?.linkCapture) enrichDesktopCapturedLinkTitle(payload.linkCapture);
+                } catch (error) {
+                    reportQuickAddRefreshError(error);
+                }
             });
             if (disposed) {
                 nextUnlisten();

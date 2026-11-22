@@ -180,6 +180,14 @@ export function GeneralSettingsScreen() {
                         </SettingRow>
                     )}
 
+                    <SettingToggleRow
+                        divider
+                        label={tr('settings.fetchLinkTitles')}
+                        description={tr('settings.fetchLinkTitlesHint')}
+                        value={settings.fetchLinkTitles !== false}
+                        onChange={(fetchLinkTitles) => { void updateSettings({ fetchLinkTitles }).catch(console.error); }}
+                        trackColor={{ false: tc.secondaryText, true: tc.tint }}
+                    />
                     {privacy.appSearch && (
                         <SettingToggleRow
                             divider

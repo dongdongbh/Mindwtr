@@ -1,5 +1,7 @@
 
 export const ptOverrides: Record<string, string> = {
+    "settings.fetchLinkTitles": "Buscar títulos das páginas",
+    "settings.fetchLinkTitlesHint": "Acessa o site para nomear links salvos neste dispositivo.",
     "projects.calendarLimit": "Exibindo os primeiros 200 resultados. Pesquise para encontrar outro evento.",
     'bulk.keepEstimate': "Manter valor atual",
     'bulk.clearEstimate': "Limpar estimativa",

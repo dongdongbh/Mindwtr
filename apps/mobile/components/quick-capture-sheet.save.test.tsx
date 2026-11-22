@@ -90,6 +90,8 @@ const quickCaptureSpies = vi.hoisted(() => ({
   saveQuickCapture: vi.fn(),
 }));
 
+const enrichCaptured = vi.hoisted(() => vi.fn());
+
 vi.mock('@mindwtr/core', async () => {
 
   const actual = await vi.importActual<typeof import('@mindwtr/core')>('@mindwtr/core');
@@ -101,6 +103,7 @@ vi.mock('@mindwtr/core', async () => {
   );
   return {
   ...actual,
+  enrichCapturedTaskLinkTitle: enrichCaptured,
   CaptureSessionCoordinator: sessionActual.CaptureSessionCoordinator,
 
 
@@ -337,6 +340,17 @@ const contextScans = () => quickCaptureSpies.getQuickCaptureContextChoices.mock.
   .filter(([tasks]) => tasks === selectStore.getState().tasks).length;
 
 describe('QuickCaptureSheet save handling', () => {
+  it('saves a bare URL and then starts title lookup with the saved ID', async () => {
+    addTask.mockResolvedValue({ success: true, id: 'saved-url' });
+    const url = 'https://example.org/reading';
+    let tree!: ReturnType<typeof create>;
+    await act(async () => { tree = create(<QuickCaptureSheet visible openRequestId={1} initialValue={url} onClose={vi.fn()} />); });
+    await act(async () => { await tree.root.findByType('QuickCaptureSheetBody' as any).props.handleSave(); });
+    expect(addTask).toHaveBeenCalledWith(url, expect.objectContaining({ attachments: [expect.objectContaining({ uri: url })] }));
+    expect(enrichCaptured).toHaveBeenCalledExactlyOnceWith('saved-url', url, expect.any(Function));
+    act(() => tree.unmount());
+  });
+
   it('shows and freezes the default, then saves explicit None over conflicting inline destination (#1559)', async () => {
     addTask.mockResolvedValue({ success: true, id: 'captured' });
     const state = selectStore.getState();

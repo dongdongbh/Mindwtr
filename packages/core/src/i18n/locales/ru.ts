@@ -1,5 +1,7 @@
 
 export const ruOverrides: Record<string, string> = {
+    "settings.fetchLinkTitles": "Загружать заголовки страниц",
+    "settings.fetchLinkTitlesHint": "Обращаться к сайту, чтобы дать название ссылкам, сохранённым на этом устройстве.",
     "projects.calendarLimit": "Показаны первые 200 совпадений. Используйте поиск, чтобы найти другое событие.",
     'bulk.keepEstimate': "Оставить как есть",
     'bulk.clearEstimate': "Очистить оценку",

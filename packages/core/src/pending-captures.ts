@@ -353,6 +353,7 @@ export type PendingCaptureDrainDeps = PendingCaptureStoreDeps & {
     audioOnly?: boolean;
 
 
+    onTextCaptureSaved?: (id: string, text: string) => void;
     onUnfinished?: (state: 'owed' | 'queued') => void;
 };
 
@@ -1089,6 +1090,9 @@ export async function drainPendingCaptureQueue(deps: PendingCaptureDrainDeps): P
         const storedTask = captureId ? (getTasks?.() ?? tasks).find((task) => task.id.toLowerCase() === captureId) : undefined;
         const stored = storedTask !== undefined;
         let destinationProps: Partial<Task> = storedTask ?? {};
+        let savedTaskId = storedTask?.title === capture.title && storedTask.attachments?.some(
+            (item) => item.kind === 'link' && !item.deletedAt && item.uri === capture.title,
+        ) ? storedTask.id : undefined;
         if (!stored) {
             if (!captureDestinationReady(capture)) continue;
             const assembled = await assembleCaptureTask(capture, { addProject: captureAddProject(captureId), projects: capture.destination ? getProjects?.() ?? projects : projects, areas: deps.getAreas?.() ?? areas, sections: deps.getSections?.() ?? sections, tasks, people, settings }, log);
@@ -1107,6 +1111,7 @@ export async function drainPendingCaptureQueue(deps: PendingCaptureDrainDeps): P
                 onUnfinished?.('queued');
                 continue;
             }
+            savedTaskId = resultId(result);
         }
 
 
@@ -1118,6 +1123,7 @@ export async function drainPendingCaptureQueue(deps: PendingCaptureDrainDeps): P
             continue;
         }
         ingested += 1;
+        if (savedTaskId) deps.onTextCaptureSaved?.(savedTaskId, capture.title);
         logAndroidCaptureDestination(log, capture, destinationProps.status, stored, destinationProps);
         if (capture.source === ANDROID_QUICK_CAPTURE_SOURCE) {
             void log.info('Quick capture dialog item ingested', {

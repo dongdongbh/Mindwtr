@@ -661,7 +661,7 @@ export const fetchWithTimeoutAndConsume = async <T>(
     url: string,
     init: RequestInit,
     timeoutMs: number,
-    fetcher: typeof fetch,
+    fetcher: (url: string, init: RequestInit) => Promise<Response>,
     timeoutMessage: string,
     consume: (response: Response, signal?: AbortSignal) => PromiseLike<T> | T,
 ): Promise<T> => {

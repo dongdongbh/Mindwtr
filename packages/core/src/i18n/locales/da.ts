@@ -1,5 +1,7 @@
 
 export const daOverrides: Record<string, string> = {
+    "settings.fetchLinkTitles": "Hent sidetitler",
+    "settings.fetchLinkTitlesHint": "Kontakt webstedet for at navngive links gemt på denne enhed.",
     "projects.calendarLimit": "Viser de første 200 resultater. Søg for at finde en anden begivenhed.",
     "projects.calendarTitle": "Kalender",
     "projects.calendarLink": "Tilknyt kalenderbegivenhed",

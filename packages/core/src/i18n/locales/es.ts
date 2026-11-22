@@ -2,6 +2,8 @@
 
 
 export const esOverrides: Record<string, string> = {
+    "settings.fetchLinkTitles": "Obtener títulos de páginas",
+    "settings.fetchLinkTitlesHint": "Contactar con el sitio web para dar nombre a los enlaces guardados en este dispositivo.",
     "projects.calendarLimit": "Se muestran las primeras 200 coincidencias. Busca para encontrar otro evento.",
     "projects.calendarTitle": "Calendario",
     "projects.calendarLink": "Vincular evento del calendario",

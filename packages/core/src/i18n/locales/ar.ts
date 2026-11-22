@@ -1,5 +1,7 @@
 
 export const arOverrides: Record<string, string> = {
+    "settings.fetchLinkTitles": "جلب عناوين الصفحات",
+    "settings.fetchLinkTitlesHint": "الاتصال بالموقع المرتبط لتسمية الروابط المحفوظة على هذا الجهاز.",
     "projects.calendarLimit": "تُعرض أول 200 نتيجة. ابحث للعثور على حدث آخر.",
     'bulk.keepEstimate': "الاحتفاظ بالقيمة الحالية",
     'bulk.clearEstimate': "مسح التقدير",

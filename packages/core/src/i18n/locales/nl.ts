@@ -1,5 +1,7 @@
 
 export const nlOverrides: Record<string, string> = {
+    "settings.fetchLinkTitles": "Paginatitels ophalen",
+    "settings.fetchLinkTitlesHint": "Bezoek de gekoppelde website om opgeslagen links op dit apparaat een naam te geven.",
         'inbox.browseProjects': 'Projecten bekijken',
         'bulk.keepEstimate': "Huidige waarde behouden",
         'bulk.clearEstimate': "Tijdsinschatting wissen",

@@ -1,5 +1,7 @@
 
 export const faOverrides: Record<string, string> = {
+    "settings.fetchLinkTitles": "دریافت عنوان صفحه‌ها",
+    "settings.fetchLinkTitlesHint": "برای نام‌گذاری پیوندهای ذخیره‌شده در این دستگاه به وب‌سایت مقصد متصل می‌شود.",
     "projects.calendarLimit": "۲۰۰ نتیجهٔ نخست نمایش داده می‌شود. برای یافتن رویداد دیگر جست‌وجو کنید.",
     "projects.calendarTitle": "تقویم",
     "projects.calendarLink": "پیوند رویداد تقویم",

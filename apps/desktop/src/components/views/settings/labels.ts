@@ -72,6 +72,8 @@ export const SETTINGS_LABEL_KEYS = [
     'captureSaveAudioDesc',
     'quickAddAutoClean',
     'quickAddAutoCleanDesc',
+    'fetchLinkTitles',
+    'fetchLinkTitlesHint',
     'naturalLanguageDates',
     'naturalLanguageDatesDesc',
     'markdownEditorAssist',

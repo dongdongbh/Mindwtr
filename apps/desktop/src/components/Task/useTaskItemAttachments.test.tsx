@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi, beforeEach } from 'vitest';
 import { act, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
+import * as core from '@mindwtr/core';
 import { useTaskStore, type Attachment, type Task } from '@mindwtr/core';
 import { readFile } from '@tauri-apps/plugin-fs';
 import { processAudioCapture, resolveSpeechCapture } from '../../lib/speech-to-text';
@@ -655,6 +656,27 @@ describe('useTaskItemAttachments resetAttachmentState orphan cleanup', () => {
 
         expect(result.current.editAttachments).toHaveLength(0);
         expect(removeMock).not.toHaveBeenCalled();
+    });
+
+    it('looks up an unnamed link only after the attachment save and leaves an identical explicit label alone', async () => {
+        const enrich = vi.spyOn(core, 'enrichAttachmentLinkTitle').mockResolvedValue(false);
+        try {
+            const { result } = renderHook(() => useTaskItemAttachments({ task, t }));
+            act(() => result.current.addLinkAttachment());
+            act(() => { result.current.handleAddLinkAttachment('https://example.org\n\nexample.org | https://example.org'); });
+            const [unnamed, named] = result.current.editAttachments;
+            expect(unnamed.title).toBe(named.title);
+            expect(enrich).not.toHaveBeenCalled();
+
+            act(() => result.current.settlePersistedAttachmentSave([unnamed, named]));
+            await waitFor(() => expect(enrich).toHaveBeenCalledExactlyOnceWith(
+                { kind: 'task', id: task.id },
+                unnamed,
+                expect.any(Function),
+            ));
+        } finally {
+            enrich.mockRestore();
+        }
     });
 
     it('keeps a local file path added through the link prompt a pointer', async () => {

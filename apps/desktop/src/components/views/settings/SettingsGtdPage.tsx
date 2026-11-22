@@ -75,6 +75,8 @@ type Labels = {
     captureSaveAudioDesc: string;
     quickAddAutoClean: string;
     quickAddAutoCleanDesc: string;
+    fetchLinkTitles: string;
+    fetchLinkTitlesHint: string;
     naturalLanguageDates: string;
     naturalLanguageDatesDesc: string;
     markdownEditorAssist: string;
@@ -222,6 +224,7 @@ export function SettingsGtdPage({
         : defaultAreaId;
     const saveAudioAttachments = safeSettings.gtd?.saveAudioAttachments !== false;
     const quickAddAutoClean = safeSettings.quickAddAutoClean === true;
+    const fetchLinkTitles = safeSettings.fetchLinkTitles !== false;
     const naturalLanguageDates = safeSettings.gtd?.naturalLanguageDates !== false;
     const markdownEditorAssist = safeSettings.markdownEditorAssist !== false;
     const speechEnabled = safeSettings.ai?.speechToText?.enabled === true;
@@ -801,6 +804,15 @@ export function SettingsGtdPage({
                             updateSettings({ quickAddAutoClean: !quickAddAutoClean })
                                 .then(showSaved)
                                 .catch((error) => reportSettingsFailure('Failed to update quick add settings', error, t.settingsSaveFailed));
+                        }}
+                    />
+                </SettingRow>
+                <SettingRow padded settingsKey="fetchLinkTitles" title={t.fetchLinkTitles} description={t.fetchLinkTitlesHint}>
+                    <Switch
+                        aria-label={t.fetchLinkTitles}
+                        checked={fetchLinkTitles}
+                        onCheckedChange={(checked) => {
+                            saveFromLatest(() => ({ fetchLinkTitles: checked }), 'Failed to update link title settings');
                         }}
                     />
                 </SettingRow>

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { buildCaptureModalRequest, buildCaptureModalView, createCaptureModalDraft, formatCaptureModalCopilotApplied, planCaptureModalRequest, saveCaptureModalLines } from './capture-modal-model';
 import { parseQuickAdd } from './quick-add';
 import type { AppSettings, Project, Task } from './types';
+import { createCapturedWebLinkAttachment } from './attachment-link-utils';
 
 const NOW = new Date('2026-09-28T14:00:00.000Z');
 const request = (text: string, extra: { projects?: readonly Project[]; initialProps?: Partial<Task>; description?: string } = {}) => {
@@ -47,6 +48,25 @@ describe('capture confirmation screen model', () => {
         expect(outcome).toEqual({ kind: 'refused', invalidDateCommands: ['/due:whenever'] });
         expect(addProject).not.toHaveBeenCalled();
         expect(addTasks).not.toHaveBeenCalled();
+    });
+
+    it('saves an independent source attachment with every bare URL in a batch', async () => {
+        const uri = 'https://example.com/read';
+        const shared = createCapturedWebLinkAttachment(uri, NOW);
+        const addTasks = vi.fn(async (items: { initialProps: Partial<Task> }[]) => {
+            const [first, second] = items.map((item) => item.initialProps.attachments?.[0]);
+            expect(first).toEqual(shared);
+            expect(second).toMatchObject({ uri, kind: 'link' });
+            expect(second?.id).not.toBe(first?.id);
+            return { success: true };
+        });
+        await expect(saveCaptureModalLines({
+            lines: [uri, uri],
+            projects: [],
+            buildRequest: async (line) => request(line, { initialProps: { attachments: [shared] } }),
+            actions: { addTasks, addProject: async () => null },
+        })).resolves.toEqual({ kind: 'saved', count: 2 });
+        expect(addTasks).toHaveBeenCalledOnce();
     });
 
 

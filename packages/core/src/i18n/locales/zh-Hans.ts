@@ -1,5 +1,7 @@
 
 export const zhHans: Record<string, string> = {
+    "settings.fetchLinkTitles": "获取网页标题",
+    "settings.fetchLinkTitlesHint": "访问链接指向的网站，为此设备上保存的链接命名。",
     "projects.calendarLimit": "显示前 200 个匹配项。搜索以查找其他事件。",
     "projects.calendarTitle": "日历",
     "projects.calendarLink": "关联日历事件",

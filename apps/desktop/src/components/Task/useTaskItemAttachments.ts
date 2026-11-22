@@ -1,6 +1,6 @@
 import { isUpNoteHref, showExternalLinkFailure } from '../../lib/external-link';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Attachment, DEFAULT_PROJECT_COLOR, areDraftAttachmentsDirty, buildTaskUpdatesFromSpeechResult, findSelectableProjectByTitleAndArea, generateUUID, isSandboxMode, normalizeLinkAttachmentInput, parseAttachmentLinkBatch, planAttachmentDraftSettlement, translateWithFallback, updateTaskFromLatest, useTaskStore, type Task } from '@mindwtr/core';
+import { Attachment, DEFAULT_PROJECT_COLOR, areDraftAttachmentsDirty, buildTaskUpdatesFromSpeechResult, enrichAttachmentLinkTitle, findSelectableProjectByTitleAndArea, generateUUID, getBareHttpUrl, isSandboxMode, normalizeLinkAttachmentInput, parseAttachmentLinkBatch, planAttachmentDraftSettlement, translateWithFallback, updateTaskFromLatest, useTaskStore, type Task } from '@mindwtr/core';
 import { dataDir } from '@tauri-apps/api/path';
 import { BaseDirectory, readFile, readTextFile } from '@tauri-apps/plugin-fs';
 import { importDroppedFileAttachment, importPickedFileAttachment, pickFolderLinkAttachment } from '../../lib/attachment-import';
@@ -8,6 +8,7 @@ import { normalizeAttachmentPathForUrl, resolveAttachmentReadPath } from '../../
 import { normalizeAttachmentInput } from '../../lib/attachment-utils';
 import { openAttachmentTarget } from '../../lib/open-attachment-target';
 import { isTauriRuntime } from '../../lib/runtime';
+import { loadDesktopLinkTitle } from '../../lib/link-title';
 import {
     fetchWebCloudAttachmentBlob,
     fetchWebCloudAttachmentText,
@@ -80,6 +81,7 @@ export function useTaskItemAttachments({ task, t }: UseTaskItemAttachmentsProps)
     editAttachmentsRef.current = editAttachments;
     const baselineAttachmentsRef = useRef<Attachment[]>(task.attachments || []);
     const observedStoreFileGenerationsRef = useRef(new Set<string>());
+    const unnamedLinksRef = useRef(new Map<string, Attachment>());
 
 
     const attachmentSaveAwaitingDurabilityRef = useRef(false);
@@ -550,6 +552,7 @@ export function useTaskItemAttachments({ task, t }: UseTaskItemAttachmentsProps)
         if (!normalized.uri) return false;
         const now = new Date().toISOString();
         if (editingLinkAttachmentId) {
+            unnamedLinksRef.current.delete(editingLinkAttachmentId);
             setEditAttachments((prev) => prev.map((attachment) => (
                 attachment.id === editingLinkAttachmentId
                     ? {
@@ -574,14 +577,15 @@ export function useTaskItemAttachments({ task, t }: UseTaskItemAttachmentsProps)
             ? parseAttachmentLinkBatch(value, true)
             : { entries: [normalized], invalidLine: null };
         if (batch.invalidLine !== null || batch.entries.length === 0) return false;
-        setEditAttachments((prev) => [...prev, ...batch.entries.map((entry): Attachment => ({
-            id: generateUUID(),
-            kind: entry.kind,
-            title: entry.title,
-            uri: entry.uri,
-            createdAt: now,
-            updatedAt: now,
-        }))]);
+        const lines = value.split(/\r\n|\n|\r/).filter((line) => line.trim());
+        const added = batch.entries.map((entry, index): Attachment => {
+            const attachment = { ...entry, id: generateUUID(), createdAt: now, updatedAt: now };
+            if (linkPromptVariant === 'link' && getBareHttpUrl(lines[index] ?? '')) {
+                unnamedLinksRef.current.set(attachment.id, attachment);
+            }
+            return attachment;
+        });
+        setEditAttachments((prev) => [...prev, ...added]);
         return true;
     }, [editingLinkAttachmentId, linkPromptVariant]);
 
@@ -606,6 +610,7 @@ export function useTaskItemAttachments({ task, t }: UseTaskItemAttachmentsProps)
     }, []);
 
     const removeAttachment = useCallback((id: string) => {
+        unnamedLinksRef.current.delete(id);
         webDraftRef.current.remove(id);
         setAttachmentError(null);
         const now = new Date().toISOString();
@@ -685,7 +690,20 @@ export function useTaskItemAttachments({ task, t }: UseTaskItemAttachmentsProps)
         settleAttachmentFiles(committedAttachments);
         observedStoreFileGenerationsRef.current.clear();
         attachmentSaveAwaitingDurabilityRef.current = false;
-    }, [settleAttachmentFiles]);
+        if (unnamedLinksRef.current.size === 0) return;
+        const committedUnnamedLinks = committedAttachments.filter((attachment) => {
+            const original = unnamedLinksRef.current.get(attachment.id);
+            if (!original) return false;
+            unnamedLinksRef.current.delete(attachment.id);
+            return !attachment.deletedAt && attachment.kind === 'link'
+                && attachment.title === original.title && attachment.uri === original.uri;
+        });
+        void (async () => {
+            for (const attachment of committedUnnamedLinks) {
+                await enrichAttachmentLinkTitle({ kind: 'task', id: task.id }, attachment, loadDesktopLinkTitle).catch(() => undefined);
+            }
+        })();
+    }, [settleAttachmentFiles, task.id]);
 
     useEffect(() => () => {
         importGenerationRef.current += 1;
@@ -696,6 +714,7 @@ export function useTaskItemAttachments({ task, t }: UseTaskItemAttachmentsProps)
 
     const resetAttachmentState = useCallback((attachments: Attachment[] | undefined) => {
         importGenerationRef.current += 1;
+        unnamedLinksRef.current.clear();
         webDraftRef.current.discard();
         webDraftRef.current = createWebAttachmentDraft();
         setPendingFileImports(0);
