@@ -1722,6 +1722,26 @@ describe('alarm manifest entries', () => {
     expect(receiverNamed(manifest, ALARM_BOOT_RECEIVER).$['android:exported']).toBe('true');
   });
 
+  it('keeps only post-unlock boot delivery when updating an existing manifest', () => {
+    const bootCompleted = { $: { 'android:name': 'android.intent.action.BOOT_COMPLETED' } };
+    const oldReceiver = {
+      $: { 'android:name': ALARM_BOOT_RECEIVER, 'android:directBootAware': 'true', 'android:enabled': 'false' },
+      'intent-filter': [
+        { action: [bootCompleted, { $: { 'android:name': 'android.intent.action.LOCKED_BOOT_COMPLETED' } }] },
+        { action: [{ $: { 'android:name': 'com.htc.intent.action.QUICKBOOT_POWERON' } }] },
+      ],
+    };
+    const manifest = { manifest: { application: [{ receiver: [oldReceiver] }] } };
+
+    applyAlarmManifestEntries(manifest);
+    applyAlarmManifestEntries(manifest);
+
+    const receiver = receiverNamed(manifest, ALARM_BOOT_RECEIVER);
+    expect(receiver.$).not.toHaveProperty('android:directBootAware');
+    expect(receiver.$['android:enabled']).toBe('true');
+    expect(receiver['intent-filter']).toEqual([{ action: [bootCompleted] }]);
+  });
+
   it('flips an already-exported alarm receiver back to unexported', () => {
     const manifest = {
       manifest: {

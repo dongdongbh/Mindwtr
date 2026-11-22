@@ -2111,6 +2111,7 @@ const ensureReceiver = (application, name, attrs, actions = []) => {
     };
   }
   mergeIntentActions(receiver, actions);
+  return receiver;
 };
 
 const applyAlarmManifestEntries = (manifest) => {
@@ -2143,21 +2144,16 @@ const applyAlarmManifestEntries = (manifest) => {
   );
 
 
-  ensureReceiver(
+  const bootReceiver = ensureReceiver(
     application,
     'com.emekalites.react.alarm.notification.AlarmBootReceiver',
     {
-      'android:directBootAware': 'true',
       'android:enabled': 'true',
       'android:exported': 'true',
-    },
-    [
-      'android.intent.action.BOOT_COMPLETED',
-      'android.intent.action.QUICKBOOT_POWERON',
-      'com.htc.intent.action.QUICKBOOT_POWERON',
-      'android.intent.action.LOCKED_BOOT_COMPLETED',
-    ]
+    }
   );
+  delete bootReceiver.$['android:directBootAware'];
+  bootReceiver['intent-filter'] = [{ action: [{ $: { 'android:name': 'android.intent.action.BOOT_COMPLETED' } }] }];
 };
 
 function withAlarmNotificationGradlePatch(config) {
