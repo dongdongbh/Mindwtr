@@ -361,7 +361,7 @@ describe('useRootLayoutNotificationOpenHandler', () => {
     const platform = Object.getOwnPropertyDescriptor(Platform, 'OS');
     Object.defineProperty(Platform, 'OS', { configurable: true, value: 'ios' });
     const router = createRouter();
-    const payload = { actionIdentifier: 'open', kind: 'task-start', taskId: 'task-1', notificationId: 'reminder-1' };
+    const payload = { actionIdentifier: 'open', kind: 'task-reminder', taskId: 'task-1', notificationId: 'reminder-1' };
     let tree!: ReturnType<typeof create>;
 
     try {
