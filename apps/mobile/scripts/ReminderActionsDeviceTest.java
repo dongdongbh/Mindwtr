@@ -81,12 +81,13 @@ public class ReminderActionsDeviceTest extends InstrumentationTestCase {
         PackageManager pm = app.getPackageManager();
         int previous = pm.getComponentEnabledSetting(receiver);
         try {
-            pm.setComponentEnabledSetting(receiver, PackageManager.COMPONENT_ENABLED_STATE_DEFAULT, PackageManager.DONT_KILL_APP);
+            pm.setComponentEnabledSetting(receiver, PackageManager.COMPONENT_ENABLED_STATE_DISABLED, PackageManager.DONT_KILL_APP);
             AlarmModel alarm = alarm(TASK, 1360001, "task-reminder");
             Calendar soon = Calendar.getInstance(); soon.add(Calendar.SECOND, 15);
             util.setAlarmFromCalendar(alarm, soon); db.update(alarm);
             util.setAlarm(alarm);
-            assertEquals(PackageManager.COMPONENT_ENABLED_STATE_ENABLED, pm.getComponentEnabledSetting(receiver));
+            assertEquals(PackageManager.COMPONENT_ENABLED_STATE_DEFAULT, pm.getComponentEnabledSetting(receiver));
+            assertTrue(pm.getReceiverInfo(receiver, 0).enabled);
             PendingIntent pending = PendingIntent.getBroadcast(app, alarm.getAlarmId(), new Intent(app, AlarmReceiver.class), PendingIntent.FLAG_IMMUTABLE);
             app.getSystemService(AlarmManager.class).cancel(pending);
             assertTrue(util.rearmFutureAlarm(alarm.getId()));
@@ -100,6 +101,8 @@ public class ReminderActionsDeviceTest extends InstrumentationTestCase {
             }
             assertTrue("Rearmed OS alarm must deliver a notification", delivered);
             assertFalse("Delivered one-shot must not be replayed", util.rearmFutureAlarm(alarm.getId()));
+            assertEquals(PackageManager.COMPONENT_ENABLED_STATE_DEFAULT, pm.getComponentEnabledSetting(receiver));
+            assertTrue(pm.getReceiverInfo(receiver, 0).enabled);
         } finally {
             cleanup();
             pm.setComponentEnabledSetting(receiver, previous, PackageManager.DONT_KILL_APP);

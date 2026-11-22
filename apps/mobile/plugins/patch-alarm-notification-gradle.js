@@ -1562,15 +1562,15 @@ ${marker}`
 };
 
 const applyAlarmBootRecoveryUtilPatchToSource = (original) => {
-  const disabled = 'if (setting == PackageManager.COMPONENT_ENABLED_STATE_DISABLED) {';
-  const enabled = 'if (setting != PackageManager.COMPONENT_ENABLED_STATE_ENABLED) {';
-  const marker = '    private void enableBootReceiver(Context context) {';
-  if (!original.includes(marker) || (!original.includes(disabled) && !original.includes(enabled))) {
-    throw new Error('alarm-boot-recovery-util: boot enable anchor missing');
+  const patched = 'boolean setBootReceiver()';
+  if (original.includes(patched)) return original;
+  const setReceiver = /^    void setBootReceiver\(\) \{\n[\s\S]*?^    \}/m;
+  const enableReceiver = /^    private void enableBootReceiver\(Context context\) \{\n[\s\S]*?^    \}\n+/m;
+  const disableReceiver = /^    private void disableBootReceiver\(Context context\) \{\n[\s\S]*?^    \}\n+/m;
+  if (![setReceiver, enableReceiver, disableReceiver].every((marker) => marker.test(original))) {
+    throw new Error('alarm-boot-recovery-util: boot receiver anchor missing');
   }
-  let next = original.replace(disabled, enabled);
-  if (next.includes('boolean rearmFutureAlarm(int id)')) return next;
-  return next.replace(marker, `    boolean rearmFutureAlarm(int id) {
+  const rearmFutureAlarm = `    boolean rearmFutureAlarm(int id) {
         AlarmModel alarm = getAlarmDB().getAlarm(id);
         if (alarm == null || alarm.getActive() != 1) return false;
         String scheduleType = alarm.getScheduleType();
@@ -1578,16 +1578,39 @@ const applyAlarmBootRecoveryUtilPatchToSource = (original) => {
         Calendar fireTime = getCalendarFromAlarm(alarm);
         fireTime.setLenient(false);
         if ("once".equals(scheduleType) && fireTime.getTimeInMillis() <= System.currentTimeMillis()) return false;
-        // Reuse the existing row and alarmId-backed PendingIntent; never insert or replay a delivered one-shot.
         setAlarm(alarm);
         return true;
     }
 
-${marker}`);
+`;
+  return original.replace(setReceiver, `    boolean setBootReceiver() {
+        ComponentName receiver = new ComponentName(mContext, AlarmBootReceiver.class);
+        PackageManager pm = mContext.getPackageManager();
+        int setting = pm.getComponentEnabledSetting(receiver);
+        if (setting == PackageManager.COMPONENT_ENABLED_STATE_DISABLED) {
+            pm.setComponentEnabledSetting(receiver,
+                    PackageManager.COMPONENT_ENABLED_STATE_DEFAULT, PackageManager.DONT_KILL_APP);
+            setting = pm.getComponentEnabledSetting(receiver);
+        }
+        return setting == PackageManager.COMPONENT_ENABLED_STATE_DEFAULT
+                || setting == PackageManager.COMPONENT_ENABLED_STATE_ENABLED;
+    }`)
+    .replace(enableReceiver, original.includes('boolean rearmFutureAlarm(int id)') ? '' : rearmFutureAlarm)
+    .replace(disableReceiver, '');
 };
 
 const applyAlarmBootRecoveryModulePatchToSource = (original) => {
-  if (original.includes('public void rearmAlarms(')) return original;
+  const bootEnabled = '                boolean bootEnabled = alarmUtil.setBootReceiver();';
+  if (original.includes(bootEnabled)) return original;
+  if (original.includes('public void rearmAlarms(')) {
+    return replaceRequiredAnchors(original, 'alarm-boot-recovery-module', [[
+      `                alarmUtil.setBootReceiver();
+                android.content.ComponentName receiver = new android.content.ComponentName(mReactContext, AlarmBootReceiver.class);
+                boolean bootEnabled = mReactContext.getPackageManager().getComponentEnabledSetting(receiver)
+                        == android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_ENABLED;`,
+      bootEnabled,
+    ]]);
+  }
   const marker = `    @ReactMethod
     public void removeAllFiredNotifications() {`;
   if (!original.includes(marker)) throw new Error('alarm-boot-recovery-module: method anchor missing');
@@ -1615,10 +1638,7 @@ const applyAlarmBootRecoveryModulePatchToSource = (original) => {
                 }
             }
             try {
-                alarmUtil.setBootReceiver();
-                android.content.ComponentName receiver = new android.content.ComponentName(mReactContext, AlarmBootReceiver.class);
-                boolean bootEnabled = mReactContext.getPackageManager().getComponentEnabledSetting(receiver)
-                        == android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_ENABLED;
+${bootEnabled}
                 android.app.AlarmManager manager = (android.app.AlarmManager) mReactContext
                         .getSystemService(android.content.Context.ALARM_SERVICE);
                 boolean exactAllowed = android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.S
@@ -1929,7 +1949,7 @@ const PATCHES = [
     transform: applyAlarmBootRecoveryUtilPatchToSource,
     required: true,
     firstMatchOnly: false,
-    appliedMarker: 'boolean rearmFutureAlarm(int id)',
+    appliedMarker: 'boolean setBootReceiver()',
   },
   {
     id: 'alarm-boot-recovery-module',
@@ -1938,7 +1958,7 @@ const PATCHES = [
     transform: applyAlarmBootRecoveryModulePatchToSource,
     required: true,
     firstMatchOnly: false,
-    appliedMarker: 'public void rearmAlarms(',
+    appliedMarker: 'boolean bootEnabled = alarmUtil.setBootReceiver();',
   },
   {
     id: 'alarm-ios-complete-action',
@@ -2128,7 +2148,7 @@ const applyAlarmManifestEntries = (manifest) => {
     'com.emekalites.react.alarm.notification.AlarmBootReceiver',
     {
       'android:directBootAware': 'true',
-      'android:enabled': 'false',
+      'android:enabled': 'true',
       'android:exported': 'true',
     },
     [

@@ -587,10 +587,10 @@ async function rearmRetainedNativeAlarms(api: AlarmNotificationsApi): Promise<vo
     }
     const result = await native.rearmAlarms(Array.from(ids));
     if (isLoggingEnabled()) logNotificationInfo('Reminder boot recovery complete', {
-      releaseCheck: REMINDER_BOOT_RECOVERY_RELEASE_CHECK,
+      releaseCheck: 'v1.3.10/android-reminder-boot-receiver',
       requested: result.requested, rearmed: result.rearmed, skipped: result.skipped, failed: result.failed,
       bootEnabled: result.bootEnabled, exactAllowed: result.exactAllowed,
-      outcome: result.failed > 0 || (result.rearmed > 0 && !result.bootEnabled) ? 'incomplete' : 'rearmed',
+      outcome: result.failed > 0 || !result.bootEnabled ? 'incomplete' : 'rearmed',
     });
   } catch {
     if (isLoggingEnabled()) logNotificationWarn('Reminder boot recovery failed', { releaseCheck: REMINDER_BOOT_RECOVERY_RELEASE_CHECK, outcome: 'failed' });

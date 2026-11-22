@@ -68,13 +68,26 @@ const patchInstalledPackage = () => {
 };
 
 describe('Android boot recovery', () => {
-  const bootSource = `    private void enableBootReceiver(Context context) {
+  const bootSource = `    void setBootReceiver() {
+        if (getAlarmDB().getAlarmList(1).size() > 0) {
+            enableBootReceiver(mContext);
+        } else {
+            disableBootReceiver(mContext);
+        }
+    }
+
+    private void enableBootReceiver(Context context) {
         ComponentName receiver = new ComponentName(context, AlarmBootReceiver.class);
         PackageManager pm = context.getPackageManager();
         int setting = pm.getComponentEnabledSetting(receiver);
         if (setting == PackageManager.COMPONENT_ENABLED_STATE_DISABLED) {
             pm.setComponentEnabledSetting(receiver, PackageManager.COMPONENT_ENABLED_STATE_ENABLED, PackageManager.DONT_KILL_APP);
         }
+    }
+
+    private void disableBootReceiver(Context context) {
+        ComponentName receiver = new ComponentName(context, AlarmBootReceiver.class);
+        context.getPackageManager().setComponentEnabledSetting(receiver, PackageManager.COMPONENT_ENABLED_STATE_DISABLED, PackageManager.DONT_KILL_APP);
     }
 `;
   const moduleSource = `    @ReactMethod
@@ -89,15 +102,36 @@ describe('Android boot recovery', () => {
     }
   });
 
-  it('enables manifest-default/disabled receivers and rearms only retained future active rows (compiled, mutation sensitive)', () => {
+  it('migrates source already patched for v1.3.9 without duplicating recovery methods', () => {
+    const patchUtil = transformFor('alarm-boot-recovery-util');
+    const patchModule = transformFor('alarm-boot-recovery-module');
+    const oldRearm = `    boolean rearmFutureAlarm(int id) {
+        return id > 0;
+    }
+
+`;
+    const oldUtil = bootSource
+      .replace('    private void enableBootReceiver(', oldRearm + '    private void enableBootReceiver(')
+      .replace('setting == PackageManager.COMPONENT_ENABLED_STATE_DISABLED', 'setting != PackageManager.COMPONENT_ENABLED_STATE_ENABLED');
+    const oldModule = patchModule(moduleSource).replace('                boolean bootEnabled = alarmUtil.setBootReceiver();', `                alarmUtil.setBootReceiver();
+                android.content.ComponentName receiver = new android.content.ComponentName(mReactContext, AlarmBootReceiver.class);
+                boolean bootEnabled = mReactContext.getPackageManager().getComponentEnabledSetting(receiver)
+                        == android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_ENABLED;`);
+    const updatedUtil = patchUtil(oldUtil);
+    expect(updatedUtil).toContain(oldRearm);
+    expect(updatedUtil.match(/boolean rearmFutureAlarm\(/g)).toHaveLength(1);
+    expect(updatedUtil).not.toMatch(/getAlarmList|disableBootReceiver/);
+    expect(patchUtil(updatedUtil)).toBe(updatedUtil);
+    expect(patchModule(oldModule)).toBe(patchModule(moduleSource));
+  });
+
+  it('keeps the boot receiver eligible independently of inventory and rearms only retained future active rows (compiled, mutation sensitive)', () => {
     const util = transformFor('alarm-boot-recovery-util')(bootSource);
     const patchedModule = transformFor('alarm-boot-recovery-module')(moduleSource);
     const method = patchedModule.slice(0, patchedModule.indexOf('    @ReactMethod\n    public void removeAllFiredNotifications()'))
       .replaceAll('@ReactMethod', '')
       .replaceAll('com.facebook.react.bridge.ReadableArray', 'ReadableArray')
       .replaceAll('com.facebook.react.bridge.UiThreadUtil', 'UiThreadUtil')
-      .replaceAll('android.content.ComponentName', 'ComponentName')
-      .replaceAll('android.content.pm.PackageManager', 'PackageManager')
       .replaceAll('android.app.AlarmManager', 'AlarmManager')
       .replaceAll('android.content.Context', 'Context')
       .replaceAll('android.os.Build', 'Build');
@@ -112,8 +146,12 @@ class ComponentName { ComponentName(Context c, Class<?> type) {} }
 class PackageManager {
   static final int COMPONENT_ENABLED_STATE_DEFAULT=0, COMPONENT_ENABLED_STATE_ENABLED=1, COMPONENT_ENABLED_STATE_DISABLED=2, DONT_KILL_APP=1;
   int state=0, writes=0;
+  boolean ignoreWrites=false;
   int getComponentEnabledSetting(ComponentName c) { return state; }
-  void setComponentEnabledSetting(ComponentName c, int value, int flags) { state=value; writes++; }
+  void setComponentEnabledSetting(ComponentName c, int value, int flags) {
+    if (!ignoreWrites) state=value;
+    writes++;
+  }
 }
 class Build { static class VERSION { static int SDK_INT=36; } static class VERSION_CODES { static int S=31; } }
 class AlarmManager { boolean canScheduleExactAlarms() { return true; } }
@@ -131,17 +169,17 @@ class AlarmModel {
 class AlarmDatabase {
   final Map<Integer,AlarmModel> rows=new HashMap<>();
   AlarmModel getAlarm(int id) { return rows.get(id); }
+  List<AlarmModel> getAlarmList(int active) { return Collections.emptyList(); }
 }
 class AlarmUtil {
-  final Context context; final AlarmDatabase db=new AlarmDatabase(); final Set<String> pending=new HashSet<>(); final List<Integer> calls=new ArrayList<>();
-  AlarmUtil(Context context) { this.context=context; }
+  final Context mContext; final AlarmDatabase db=new AlarmDatabase(); final Set<String> pending=new HashSet<>(); final List<Integer> calls=new ArrayList<>();
+  AlarmUtil(Context context) { this.mContext=context; }
   AlarmDatabase getAlarmDB() { return db; }
   Calendar getCalendarFromAlarm(AlarmModel alarm) { Calendar c=Calendar.getInstance();c.setTimeInMillis(alarm.fireAt);return c; }
   void setAlarm(AlarmModel alarm) {
     if (alarm.id==5) throw new SecurityException("denied");
     calls.add(alarm.id);pending.add(alarm.id+":"+alarm.alarmId);setBootReceiver();
   }
-  void setBootReceiver() { enableBootReceiver(context); }
 ${methods}
 }
 class ReadableArray {
@@ -163,9 +201,10 @@ ${onMain ? method : method.replace('UiThreadUtil.runOnUiThread(() -> {', '{').re
   static void check(boolean condition) { if (!condition) throw new AssertionError(); }
   public static void main(String[] args) {
     BootRecoveryCheck module=new BootRecoveryCheck();AlarmUtil util=module.alarmUtil;
+    PackageManager pm=module.mReactContext.pm;
     for (int state : new int[]{0,2,1}) {
-      module.mReactContext.pm.state=state;module.mReactContext.pm.writes=0;util.setBootReceiver();
-      check(module.mReactContext.pm.state==1 && module.mReactContext.pm.writes==(state==1?0:1));
+      pm.state=state;pm.writes=0;util.setBootReceiver();
+      check(pm.state==(state==2?0:state) && pm.writes==(state==2?1:0));
     }
     long now=System.currentTimeMillis();
     util.db.rows.put(1,new AlarmModel(1,101,1,"once",now+3600000));
@@ -174,6 +213,7 @@ ${onMain ? method : method.replace('UiThreadUtil.runOnUiThread(() -> {', '{').re
     util.db.rows.put(4,new AlarmModel(4,104,1,"repeat",now-3600000));
     util.db.rows.put(5,new AlarmModel(5,105,1,"once",now+3600000));
     util.db.rows.put(6,new AlarmModel(6,106,1,"once",now+3600000));
+    pm.state=2;
     ReadableArray ids=new ReadableArray(1,1,2,3,4,5,6,99,-1,1.5);
     Promise first=new Promise();module.rearmAlarms(ids,first);
     check(first.value==null && util.calls.isEmpty());
@@ -182,10 +222,17 @@ ${onMain ? method : method.replace('UiThreadUtil.runOnUiThread(() -> {', '{').re
     check(first.value.get("rearmed").equals(3) && first.value.get("skipped").equals(3) && first.value.get("failed").equals(3));
     check(first.value.get("bootEnabled").equals(true) && first.value.get("exactAllowed").equals(true));
     check(util.calls.equals(Arrays.asList(1,4,6)) && util.pending.size()==3);
+    check(pm.state==0);
+    pm.state=2;pm.ignoreWrites=true;
     Promise second=new Promise();module.rearmAlarms(ids,second);
     check(second.value==null && util.calls.size()==3);
     UiThreadUtil.drain();
     check(util.pending.size()==3 && util.db.rows.size()==6 && util.db.rows.get(1).alarmId==101);
+    check(second.value.get("rearmed").equals(3) && second.value.get("bootEnabled").equals(false));
+    pm.ignoreWrites=false;
+    Promise empty=new Promise();module.rearmAlarms(new ReadableArray(),empty);
+    UiThreadUtil.drain();
+    check(empty.value.get("rearmed").equals(0) && empty.value.get("bootEnabled").equals(true) && pm.state==0);
   }
 }`;
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'alarm-java-boot-'));
@@ -198,7 +245,7 @@ ${onMain ? method : method.replace('UiThreadUtil.runOnUiThread(() -> {', '{').re
     try {
       const result = run(util);
       expect(result.status, result.stderr).toBe(0);
-      expect(run(util.replace('setting != PackageManager.COMPONENT_ENABLED_STATE_ENABLED', 'setting == PackageManager.COMPONENT_ENABLED_STATE_DISABLED')).status).not.toBe(0);
+      expect(run(util.replace('            setting = pm.getComponentEnabledSetting(receiver);', '            setting = PackageManager.COMPONENT_ENABLED_STATE_DEFAULT;')).status).not.toBe(0);
       expect(run(util.replace('fireTime.getTimeInMillis() <= System.currentTimeMillis()', 'false')).status).not.toBe(0);
       expect(run(util.replace('alarm.getActive() != 1', 'false')).status).not.toBe(0);
       expect(run(util, false).status).not.toBe(0);
@@ -1662,7 +1709,7 @@ describe('alarm manifest entries', () => {
     manifest.manifest.application[0].receiver.find((entry) => entry?.$?.['android:name'] === name)
   );
 
-  it('keeps the alarm action receivers unexported and the boot receiver exported', () => {
+  it('enables the boot receiver by default and keeps the alarm action receivers unexported', () => {
     const manifest = { manifest: { application: [{}] } };
 
     applyAlarmManifestEntries(manifest);
@@ -1671,6 +1718,7 @@ describe('alarm manifest entries', () => {
     expect(receiverNamed(manifest, ALARM_DISMISS_RECEIVER).$['android:exported']).toBe('false');
 
 
+    expect(receiverNamed(manifest, ALARM_BOOT_RECEIVER).$['android:enabled']).toBe('true');
     expect(receiverNamed(manifest, ALARM_BOOT_RECEIVER).$['android:exported']).toBe('true');
   });
 

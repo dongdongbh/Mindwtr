@@ -914,11 +914,20 @@ describe('notification-service-local', () => {
       mockNativeModule.rearmAlarms!.mockResolvedValue({ ...successfulRecovery, rearmed: 0, failed: 1 });
       await startLocalMobileNotifications();
       expect(mockLogInfo).toHaveBeenCalledWith('[Local Notifications] Reminder boot recovery complete', expect.objectContaining({
-        extra: { releaseCheck: 'v1.3.5/reminder-boot-recovery', ...successfulRecovery, rearmed: 0, failed: 1, outcome: 'incomplete' },
+        extra: { releaseCheck: 'v1.3.10/android-reminder-boot-receiver', ...successfulRecovery, rearmed: 0, failed: 1, outcome: 'incomplete' },
       }));
       mockNativeModule.rearmAlarms!.mockResolvedValue(successfulRecovery);
       await startLocalMobileNotifications();
       expect(mockNativeModule.rearmAlarms).toHaveBeenCalledTimes(2);
+    });
+
+    it.each([0, 2])('reports a disabled boot receiver with %i rearmed reminders', async (rearmed) => {
+      const recovery = { ...successfulRecovery, requested: rearmed, rearmed, bootEnabled: false };
+      mockNativeModule.rearmAlarms!.mockResolvedValue(recovery);
+      await startLocalMobileNotifications();
+      expect(mockLogInfo).toHaveBeenCalledWith('[Local Notifications] Reminder boot recovery complete', expect.objectContaining({
+        extra: { releaseCheck: 'v1.3.10/android-reminder-boot-receiver', ...recovery, outcome: 'incomplete' },
+      }));
     });
 
     it('keeps an older native build working and identifies unavailable recovery', async () => {
