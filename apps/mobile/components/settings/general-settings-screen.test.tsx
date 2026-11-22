@@ -93,6 +93,16 @@ describe('GeneralSettingsScreen pickers', () => {
     await renderer.act(async () => tree.unmount());
   });
 
+  it('lets the user turn off page title lookup without changing another preference', async () => {
+    let tree!: renderer.ReactTestRenderer;
+    await renderer.act(async () => { tree = renderer.create(<GeneralSettingsScreen />); });
+    const control = tree.root.findAllByType(Switch).find((node) => node.props.accessibilityLabel === 'settings.fetchLinkTitles')!;
+    expect(control.props.value).toBe(true);
+    await renderer.act(async () => control.props.onValueChange(false));
+    expect(updateSettingsMock).toHaveBeenCalledExactlyOnceWith({ fetchLinkTitles: false });
+    await renderer.act(async () => tree.unmount());
+  });
+
   it('previews the actual native System date pattern even with an explicit format selected', () => {
     let tree!: renderer.ReactTestRenderer;
     renderer.act(() => { tree = renderer.create(<GeneralSettingsScreen />); });

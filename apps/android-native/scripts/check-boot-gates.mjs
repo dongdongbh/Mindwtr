@@ -4051,7 +4051,9 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     assert(gtd.includes('<SettingToggleRow') && !/trackColor|thumbColor/.test(gtd), 'RN\'s GTD switches keep SettingToggleRow\'s default');
 
     const general = rnSource('components/settings/general-settings-screen.tsx');
-    assert.equal(general.match(/trackColor=\{\{ false: tc\.secondaryText, true: tc\.tint \}\}/g)?.length, 3);
+    const generalSwitches = general.match(/<(?:Switch|SettingToggleRow)\b[\s\S]*?\/>/g) ?? [];
+    assert.ok(generalSwitches.length > 0);
+    for (const control of generalSwitches) assert.match(control, /trackColor=\{\{ false: tc\.secondaryText, true: tc\.tint \}\}/);
     assert.doesNotMatch(general, /thumbColor/);
     assert.equal(props('generalSwitch'), 'colors.secondaryText, colors.tint');
 

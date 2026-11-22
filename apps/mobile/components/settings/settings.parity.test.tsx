@@ -594,9 +594,18 @@ function observeGeneral(root: ReactTestInstance, seen: Seen) {
     picker = { title: textsIn(modal, true)[0], groups };
   }
   const toggle = byTestId(root, 'regional-formats-toggle');
+  const linkTitle = translate('settings.fetchLinkTitles');
+  const texts = textsIn(root);
+  const linkIndex = texts.indexOf(linkTitle);
+  expect(linkIndex).toBeGreaterThan(-1);
+  expect(texts.splice(linkIndex, 2)).toEqual([linkTitle, translate('settings.fetchLinkTitlesHint')]);
+  const switches = hosts(root, 'Switch');
+  const linkSwitches = switches.filter((node) => node.props.accessibilityLabel === linkTitle);
+  expect(linkSwitches).toHaveLength(1);
+  expect(linkSwitches[0].props.value).toBe(useTaskStore.getState().settings.fetchLinkTitles !== false);
   return normalize({
-    texts: textsIn(root),
-    switches: hosts(root, 'Switch').map((node) => [node.props.value, node.props.disabled === true]),
+    texts,
+    switches: switches.filter((node) => node !== linkSwitches[0]).map((node) => [node.props.value, node.props.disabled === true]),
     expanded: toggle.props.accessibilityState?.expanded === true,
     picker,
     ...drain(seen),
@@ -637,7 +646,7 @@ const GENERAL_ROW_KEYS: Record<string, string> = {
   theme: 'settings.theme', quickAccess: 'settings.mobile.quickAccessView', appLockRelock: 'settings.mobile.appLockRelock', language: 'settings.language',
   weekStart: 'settings.weekStart', dateFormat: 'settings.dateFormat', calendarSystem: 'settings.calendarSystem', timeFormat: 'settings.timeFormat',
 };
-const GENERAL_SWITCHES: Record<string, number> = { showTaskAge: 0, appLock: 1, appSearch: 2 };
+const GENERAL_SWITCHES: Record<string, number> = { showTaskAge: 0, appLock: 1 };
 
 async function run(what: string, fn: (() => unknown) | undefined) {
   if (!fn) throw new Error(`Nothing to do for ${what}`);
@@ -681,6 +690,10 @@ async function perform(renderer: ReactTestRenderer, action: [string, ...unknown[
     case 'dismiss':
       return run('dismiss', hosts(modal()!, 'Pressable', true)[0]?.props.onPress);
     case 'toggle': {
+      if (target === 'appSearch') {
+        const control = hosts(root, 'Switch').find((node) => node.props.accessibilityLabel === translate('settings.appSearchLabel'));
+        return run('App Search switch', control && (() => control.props.onValueChange(!control.props.value)));
+      }
       if (typeof target === 'string' && target in GENERAL_SWITCHES) {
         const control = hosts(root, 'Switch')[GENERAL_SWITCHES[target]];
         return run('switch', () => control.props.onValueChange(!control.props.value));
