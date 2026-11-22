@@ -207,3 +207,17 @@ test('creating a project from task details saves the edited title first', async 
     const task = await page.evaluate(() => JSON.parse(localStorage.getItem('mindwtr-data') ?? '{}').tasks.find((item: { id: string }) => item.id === 'convert-task'));
     expect(task.title).toBe('Edited conversion title');
 });
+
+test('sidebar group titles are at least as large as their navigation items', async ({ page }) => {
+    await dismissOnboarding(page);
+    await seedAppData(page, {});
+    await page.goto('/?view=inbox');
+    const inbox = page.locator('[data-sidebar-item][data-view="inbox"] span.truncate');
+    await expect(inbox).toBeVisible();
+    const itemSize = await inbox.evaluate(el => parseFloat(getComputedStyle(el).fontSize));
+    const titles = page.locator('[data-sidebar-section-toggle] span');
+    await expect(titles).toHaveCount(4);
+    for (const title of await titles.all()) {
+        expect(await title.evaluate(el => parseFloat(getComputedStyle(el).fontSize))).toBeGreaterThanOrEqual(itemSize);
+    }
+});
