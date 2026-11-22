@@ -208,7 +208,7 @@ test('creating a project from task details saves the edited title first', async 
     expect(task.title).toBe('Edited conversion title');
 });
 
-test('sidebar group titles are at least as large as their navigation items', async ({ page }) => {
+test('sidebar group titles match their navigation items in size', async ({ page }) => {
     await dismissOnboarding(page);
     await seedAppData(page, {});
     await page.goto('/?view=inbox');
@@ -218,6 +218,6 @@ test('sidebar group titles are at least as large as their navigation items', asy
     const titles = page.locator('[data-sidebar-section-toggle] span');
     await expect(titles).toHaveCount(4);
     for (const title of await titles.all()) {
-        expect(await title.evaluate(el => parseFloat(getComputedStyle(el).fontSize))).toBeGreaterThanOrEqual(itemSize);
+        expect(await title.evaluate(el => parseFloat(getComputedStyle(el).fontSize))).toBe(itemSize);
     }
 });
