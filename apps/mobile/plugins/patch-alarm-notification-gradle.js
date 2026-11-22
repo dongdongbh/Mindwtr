@@ -1374,6 +1374,7 @@ API_AVAILABLE(ios(10.0)) {
 + (void)didReceiveNotificationResponse:(UNNotificationResponse *)response
                      cacheForColdStart:(BOOL)cacheForColdStart
 API_AVAILABLE(ios(10.0)) {
+    if ([response.actionIdentifier isEqualToString:UNNotificationDismissActionIdentifier]) return;
     if (!admitNotificationResponse(response)) return;
     NSLog(@"show notification");
     [[UIApplication sharedApplication] setIdleTimerDisabled:NO];

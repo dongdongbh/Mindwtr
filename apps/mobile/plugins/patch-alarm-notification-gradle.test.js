@@ -1176,6 +1176,7 @@ API_AVAILABLE(ios(10.0)) {
     expect(coldCapableOwner).toContain('cachePendingNotificationOpenPayload(formattedNotification);\n            return;');
     expect(output).toContain('- (void)startObserving {\n    hasNotificationResponseObserver = YES;');
     expect(output).toContain('- (void)stopObserving {\n    hasNotificationResponseObserver = NO;');
+    expect(coldCapableOwner).toContain('if ([response.actionIdentifier isEqualToString:UNNotificationDismissActionIdentifier]) return;');
     expect(output).toContain('@[response.notification.request.identifier, response.notification.date, response.actionIdentifier]');
     expect(output).toContain('if ([lastNotificationResponse isEqualToArray:identity]) return NO;');
     expect(coldCapableOwner).toContain('if (!admitNotificationResponse(response)) return;');
