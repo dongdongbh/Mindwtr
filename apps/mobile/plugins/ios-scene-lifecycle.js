@@ -14,6 +14,21 @@ const SCENE_DELEGATE_CLASS = '$(PRODUCT_MODULE_NAME).MindwtrSceneDelegate';
 const SCENE_CONFIGURATION_NAME = 'Default Configuration';
 const SCENE_ROLE = 'UIWindowSceneSessionRoleApplication';
 const MIGRATION_MARKER = 'MINDWTR_SCENE_LIFECYCLE_BEGIN';
+const RUN_LAUNCH_SUBSCRIBERS = '    return mindwtrRunLaunchSubscribers(application, launchOptions: launchOptions)';
+const NOTIFICATION_CENTER_DELEGATE = `
+extension AppDelegate: UNUserNotificationCenterDelegate {
+  public func userNotificationCenter(
+    _ center: UNUserNotificationCenter,
+    didReceive response: UNNotificationResponse,
+    withCompletionHandler completionHandler: @escaping () -> Void
+  ) {
+    DispatchQueue.main.async {
+      RnAlarmNotification.didReceive(response)
+      completionHandler()
+    }
+  }
+}
+`;
 
 const LEGACY_ROOT_STARTUP = `#if os(iOS) || os(tvOS)
     window = UIWindow(frame: UIScreen.main.bounds)
@@ -242,8 +257,20 @@ const replaceExactlyOnce = (contents, search, replacement, label) => {
   return contents.replace(search, replacement);
 };
 
+const registerNotificationCenterDelegate = (contents) => {
+  if (contents.includes(NOTIFICATION_CENTER_DELEGATE)) return contents;
+  const imported = replaceExactlyOnce(contents, 'import ExpoModulesCore\n', 'import ExpoModulesCore\nimport UserNotifications\n', 'ExpoModulesCore import');
+  const registered = replaceExactlyOnce(
+    imported,
+    RUN_LAUNCH_SUBSCRIBERS,
+    `    UNUserNotificationCenter.current().delegate = self\n${RUN_LAUNCH_SUBSCRIBERS}`,
+    'scene didFinishLaunching return',
+  );
+  return `${registered.trimEnd()}\n${NOTIFICATION_CENTER_DELEGATE}`;
+};
+
 const migrateAppDelegate = (contents) => {
-  if (contents.includes(MIGRATION_MARKER)) return contents;
+  if (contents.includes(MIGRATION_MARKER)) return registerNotificationCenterDelegate(contents);
   if (!contents.includes('public class AppDelegate: ExpoAppDelegate {')) {
     throw new Error(
       '[ios-scene-lifecycle] Unsupported Expo AppDelegate template: AppDelegate class not found'
@@ -264,11 +291,11 @@ const migrateAppDelegate = (contents) => {
   next = replaceExactlyOnce(
     next,
     '    return super.application(application, didFinishLaunchingWithOptions: launchOptions)',
-    '    return mindwtrRunLaunchSubscribers(application, launchOptions: launchOptions)',
+    RUN_LAUNCH_SUBSCRIBERS,
     'didFinishLaunching return'
   );
   next = replaceExactlyOnce(next, '  // Linking API\n', `${APP_DELEGATE_METHODS}  // Linking API\n`, 'Linking API marker');
-  return next;
+  return registerNotificationCenterDelegate(next);
 };
 
 const migrateBridgingHeader = (contents) => {

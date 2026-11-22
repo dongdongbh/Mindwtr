@@ -1300,6 +1300,26 @@ static NSString *stringify(NSDictionary *notification) {`
     );
   }
 
+  if (!next.includes('static BOOL hasNotificationResponseObserver')) {
+    next = next.replace(
+      'static void cachePendingNotificationOpenPayload',
+      `static BOOL hasNotificationResponseObserver = NO;
+static NSArray *lastNotificationResponse = nil;
+
+API_AVAILABLE(ios(10.0))
+static BOOL admitNotificationResponse(UNNotificationResponse *response) {
+    NSArray *identity = @[response.notification.request.identifier, response.notification.date, response.actionIdentifier];
+    if ([lastNotificationResponse isEqualToArray:identity]) return NO;
+    lastNotificationResponse = identity;
+    return YES;
+}
+
+static void cachePendingNotificationOpenPayload`
+    );
+    next = next.replace('- (void)startObserving {', '- (void)startObserving {\n    hasNotificationResponseObserver = YES;');
+    next = next.replace('- (void)stopObserving {', '- (void)stopObserving {\n    hasNotificationResponseObserver = NO;');
+  }
+
   if (!next.includes('RCTFormatUNNotificationWithAction')) {
     next = next.replace(
       /API_AVAILABLE\(ios\(10\.0\)\)\nstatic NSDictionary \*RCTFormatUNNotification\(UNNotification \*notification\) \{[\s\S]*?\n\}\n\nstatic NSDateComponents \*parseDate/,
@@ -1354,6 +1374,7 @@ API_AVAILABLE(ios(10.0)) {
 + (void)didReceiveNotificationResponse:(UNNotificationResponse *)response
                      cacheForColdStart:(BOOL)cacheForColdStart
 API_AVAILABLE(ios(10.0)) {
+    if (!admitNotificationResponse(response)) return;
     NSLog(@"show notification");
     [[UIApplication sharedApplication] setIdleTimerDisabled:NO];
     NSString *mindwtrActionIdentifier = @"open";
@@ -1381,7 +1402,12 @@ API_AVAILABLE(ios(10.0)) {
     }
 
     NSDictionary *formattedNotification = RCTFormatUNNotificationWithAction(response.notification, mindwtrActionIdentifier);
-    if (cacheForColdStart || [mindwtrActionIdentifier isEqualToString:@"complete"]) {
+    if ([mindwtrActionIdentifier isEqualToString:@"open"]) {
+        if (!hasNotificationResponseObserver) {
+            cachePendingNotificationOpenPayload(formattedNotification);
+            return;
+        }
+    } else if (cacheForColdStart || [mindwtrActionIdentifier isEqualToString:@"complete"]) {
         cachePendingNotificationOpenPayload(formattedNotification);
     }
     [[NSNotificationCenter defaultCenter] postNotificationName:kLocalNotificationReceived

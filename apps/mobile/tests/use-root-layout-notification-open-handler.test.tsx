@@ -356,6 +356,46 @@ describe('useRootLayoutNotificationOpenHandler', () => {
 
     expect(setNotificationOpenHandler).toHaveBeenLastCalledWith(null);
   });
+
+  it.each(['live', 'pending'] as const)('routes a %s iOS reminder tap once after startup', async (delivery) => {
+    const platform = Object.getOwnPropertyDescriptor(Platform, 'OS');
+    Object.defineProperty(Platform, 'OS', { configurable: true, value: 'ios' });
+    const router = createRouter();
+    const payload = { actionIdentifier: 'open', kind: 'task-start', taskId: 'task-1', notificationId: 'reminder-1' };
+    let tree!: ReturnType<typeof create>;
+
+    try {
+      await act(async () => {
+        tree = create(<TestHarnessWithState appReady={false} pathname="/inbox" router={router} />);
+      });
+      if (delivery === 'pending') {
+        consumePendingNotificationOpenPayload.mockResolvedValueOnce(payload);
+      } else {
+        act(() => setNotificationOpenHandler.mock.calls[0]?.[0](payload));
+      }
+      expect(router.push).not.toHaveBeenCalled();
+
+      await act(async () => {
+        tree.update(<TestHarnessWithState appReady pathname="/inbox" router={router} />);
+      });
+      await act(async () => {
+        tree.update(<TestHarnessWithState appReady pathname="/focus" router={router} />);
+      });
+      expect(router.push).toHaveBeenCalledExactlyOnceWith({
+        pathname: '/focus',
+        params: { taskId: 'task-1', taskTab: 'view', openToken: expect.any(String) },
+      });
+      const marker = vi.mocked(logInfo).mock.calls.filter((call) => call[1]?.extra?.releaseCheck === 'v1.3.10/ios-reminder-tap');
+      expect(marker).toEqual([['[Local Notifications] iOS task reminder routed to Focus', {
+        scope: 'notifications',
+        extra: { releaseCheck: 'v1.3.10/ios-reminder-tap', outcome: 'routed' },
+      }]]);
+    } finally {
+      if (tree) act(() => tree.unmount());
+      if (platform) Object.defineProperty(Platform, 'OS', platform);
+    }
+  });
+
   it.each([false, true])('records iOS completion update outcome without task data (failure=%s)', async (failed) => {
     const originalOs = Platform.OS;
     Object.defineProperty(Platform, 'OS', { configurable: true, value: 'ios' });

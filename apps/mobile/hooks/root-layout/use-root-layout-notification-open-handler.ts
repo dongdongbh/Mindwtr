@@ -120,6 +120,12 @@ export function useRootLayoutNotificationOpenHandler({
             case 'task':
                 useTaskStore.getState().setHighlightTask(route.taskId);
                 router.push({ pathname: '/focus', params: { taskId: route.taskId, openToken: route.openToken, taskTab: 'view' } });
+                if (Platform.OS === 'ios') {
+                    logNotificationOutcome('iOS task reminder routed to Focus', {
+                        releaseCheck: 'v1.3.10/ios-reminder-tap',
+                        outcome: 'routed',
+                    });
+                }
                 return;
             case 'project':
                 router.push({ pathname: '/projects-screen', params: { projectId: route.projectId } });

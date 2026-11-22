@@ -1117,6 +1117,9 @@ API_AVAILABLE(ios(10.0)) {
 - (void)startObserving {
 }
 
+- (void)stopObserving {
+}
+
 - (void)demo {
             if([details[@"has_button"] isEqualToNumber: [NSNumber numberWithInt: 1]]){
                 content.categoryIdentifier = @"CUSTOM_ACTIONS";
@@ -1157,7 +1160,6 @@ API_AVAILABLE(ios(10.0)) {
     expect(output).toContain('cachePendingNotificationOpenPayload(formattedNotification)');
     expect(output).toContain('cacheForColdStart:(BOOL)cacheForColdStart');
     expect(output).toContain('[RnAlarmNotification didReceiveNotificationResponse:response cacheForColdStart:NO]');
-    expect(output).toContain('if (cacheForColdStart || [mindwtrActionIdentifier isEqualToString:@"complete"])');
     const warmEntry = output.slice(
       output.indexOf('+ (void)didReceiveNotificationResponse:(UNNotificationResponse *)response'),
       output.indexOf('+ (void)didReceiveNotificationResponse:(UNNotificationResponse *)response\n                     cacheForColdStart:'),
@@ -1169,8 +1171,17 @@ API_AVAILABLE(ios(10.0)) {
       output.indexOf('- (void)startObserving'),
     );
     expect(coldCapableOwner).toContain(
-      'if (cacheForColdStart || [mindwtrActionIdentifier isEqualToString:@"complete"])',
+      'if ([mindwtrActionIdentifier isEqualToString:@"open"]) {\n        if (!hasNotificationResponseObserver)',
     );
+    expect(coldCapableOwner).toContain('cachePendingNotificationOpenPayload(formattedNotification);\n            return;');
+    expect(output).toContain('- (void)startObserving {\n    hasNotificationResponseObserver = YES;');
+    expect(output).toContain('- (void)stopObserving {\n    hasNotificationResponseObserver = NO;');
+    expect(output).toContain('@[response.notification.request.identifier, response.notification.date, response.actionIdentifier]');
+    expect(output).toContain('if ([lastNotificationResponse isEqualToArray:identity]) return NO;');
+    expect(coldCapableOwner).toContain('if (!admitNotificationResponse(response)) return;');
+    expect(coldCapableOwner.indexOf('if (!admitNotificationResponse(response)) return;'))
+      .toBeLessThan(coldCapableOwner.indexOf('[RnAlarmNotification snoozeAlarm:'));
+    expect(coldCapableOwner).toContain('if (cacheForColdStart || [mindwtrActionIdentifier isEqualToString:@"complete"])');
     expect(coldCapableOwner.match(/\[RnAlarmNotification snoozeAlarm:/g)).toHaveLength(1);
     expect(coldCapableOwner.match(/removeDeliveredNotificationsWithIdentifiers:/g)).toHaveLength(1);
 

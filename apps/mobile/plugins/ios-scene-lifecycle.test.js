@@ -128,6 +128,21 @@ describe('ios-scene-lifecycle', () => {
     );
   });
 
+  it('receives notification responses while the existing scene is connected', () => {
+    const migrated = migrateAppDelegate(appDelegateFixture);
+
+    expect(migrated).toContain('extension AppDelegate: UNUserNotificationCenterDelegate');
+    expect(migrated).toContain('UNUserNotificationCenter.current().delegate = self');
+    const callback = migrated.slice(migrated.indexOf('extension AppDelegate: UNUserNotificationCenterDelegate'));
+    expect(callback).toContain('didReceive response: UNNotificationResponse');
+    expect(callback).toContain('RnAlarmNotification.didReceive(response)');
+    expect(callback.match(/completionHandler\(\)/g)).toHaveLength(1);
+
+    const olderGeneratedDelegate = migrated.replace(callback, '').replace('import UserNotifications\n', '')
+      .replace('    UNUserNotificationCenter.current().delegate = self\n', '');
+    expect(migrateAppDelegate(olderGeneratedDelegate)).toBe(migrated);
+  });
+
   it('exposes the maintained RNAlarm cold-start API to generated Swift once', () => {
     const fixture = '// Generated bridging header\n';
     const migrated = migrateBridgingHeader(fixture);

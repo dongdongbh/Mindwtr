@@ -389,6 +389,7 @@ function parseEventPayload(value: unknown): Record<string, string> | null {
 }
 
 function attachNativeEventListeners(): void {
+  if (Platform.OS === 'ios' && openSubscription && dismissSubscription) return;
   const nativeModule = (NativeModules as Record<string, unknown>).RNAlarmNotification;
   if (!nativeModule) return;
 
