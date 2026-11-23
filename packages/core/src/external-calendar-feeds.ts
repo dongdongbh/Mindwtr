@@ -1,6 +1,10 @@
 
 
 
+import { sha256 } from '@noble/hashes/sha2.js';
+import { bytesToHex } from '@noble/hashes/utils.js';
+import { strToU8 } from 'fflate';
+import { format } from 'date-fns';
 import { hasCalendarPushTaskMarker } from './calendar-scheduling';
 import { normalizeExternalCalendarColor } from './external-calendar-colors';
 import { readResponseText, ResponseTooLargeError } from './http-utils';
@@ -75,6 +79,9 @@ export type DeviceCalendarEvent = {
     startDate?: unknown;
     endDate?: unknown;
     allDay?: boolean;
+    externalIdentifier?: string;
+    originalStartDate?: unknown;
+    isRecurring?: boolean;
     notes?: string | null;
     location?: string | null;
 };
@@ -212,6 +219,20 @@ export function getDeviceCalendarDisplayName(calendar: DeviceCalendar): string {
             ? legacyName
             : 'Calendar';
     return preferred.trim() || 'Calendar';
+}
+
+function appleCalendarReferenceSources(calendars: DeviceCalendar[]): Map<string, string> {
+    const sources = new Map<string, string>();
+    const unique = new Map<string, string | null>();
+    for (const calendar of calendars) {
+        if (!calendar.title || !calendar.source?.type || !calendar.source.name) continue;
+        const identity = JSON.stringify([calendar.source.type, calendar.source.name, calendar.title]);
+        unique.set(identity, unique.has(identity) ? null : calendar.id);
+    }
+    for (const [identity, id] of unique) {
+        if (id) sources.set(id, `eventkit:${bytesToHex(sha256(strToU8(identity)))}`);
+    }
+    return sources;
 }
 
 function isMindwtrNamedCalendar(calendar: DeviceCalendar): boolean {
@@ -593,6 +614,8 @@ export function createExternalCalendarFeeds(host: ExternalCalendarFeedsHost) {
         }));
 
         const events: ExternalCalendarEvent[] = [];
+        const referenceSources = platform === 'ios' ? appleCalendarReferenceSources(availableCalendars) : undefined;
+        let linkedIdentityCount = 0;
         let mirroredNativeEventCount = 0;
         for (const event of rawEvents) {
             const nativeCalendarId = typeof event.calendarId === 'string' && event.calendarId.trim().length > 0
@@ -629,7 +652,7 @@ export function createExternalCalendarFeeds(host: ExternalCalendarFeedsHost) {
             const rawTitle = typeof event.title === 'string' ? event.title.trim() : '';
             const eventId = typeof event.id === 'string' && event.id.trim().length > 0 ? event.id : generateUUID();
 
-            events.push({
+            const mapped: ExternalCalendarEvent = {
                 id: `${sourceId}:${eventId}:${startIso}`,
                 sourceId,
                 nativeEventId: eventId,
@@ -639,9 +662,25 @@ export function createExternalCalendarFeeds(host: ExternalCalendarFeedsHost) {
                 allDay: event.allDay === true,
                 description: typeof event.notes === 'string' && event.notes.trim().length > 0 ? event.notes : undefined,
                 location: typeof event.location === 'string' && event.location.trim().length > 0 ? event.location : undefined,
-            });
+            };
+            const calendarSourceId = nativeCalendarId && referenceSources?.get(nativeCalendarId);
+            const uid = event.externalIdentifier;
+            const original = event.isRecurring ? toDateSafe(event.originalStartDate) : null;
+            if (calendarSourceId && typeof uid === 'string' && uid.trim() && uid.length <= 2048
+                && typeof event.isRecurring === 'boolean' && (!event.isRecurring || original)) {
+                mapped.calendarSourceId = calendarSourceId;
+                mapped.uid = uid;
+                if (original) mapped.recurrenceId = event.allDay ? format(original, 'yyyy-MM-dd') : original.toISOString();
+                linkedIdentityCount++;
+            }
+            events.push(mapped);
         }
 
+        if (linkedIdentityCount > 0) {
+            void host.logInfo('Apple calendar event identities loaded', {
+                scope: 'calendar', extra: { releaseCheck: 'v1.3.10/apple-project-event', count: String(linkedIdentityCount) },
+            });
+        }
         if (mirroredNativeEventCount > 0) {
             void host.logInfo('Mirrored device calendar events excluded', {
                 scope: 'calendar',

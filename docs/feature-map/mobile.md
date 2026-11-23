@@ -190,6 +190,7 @@ Source: `apps/mobile`. Routes live in `apps/mobile/app` (expo-router). Labels be
 - Code: `apps/mobile/components/projects-screen/ProjectDetailModal.tsx`, `apps/mobile/components/projects-screen/ProjectCalendarReference.tsx`, `apps/mobile/components/projects-screen/ProjectTaskList.tsx`, `apps/mobile/components/projects-screen/ProjectToSectionModal.tsx`
 - Checks: `apps/mobile/components/projects-screen/ProjectCalendarReference.test.tsx`, `apps/mobile/components/projects-screen/ProjectDetailModal.test.tsx`, `apps/mobile/components/projects-screen/ProjectToSectionModal.test.tsx`, `apps/mobile/components/project-next-action-prompt.test.tsx`, `apps/mobile/components/task-list.test.tsx`, `apps/mobile/tests/capture-modal.test.tsx`
 - Notes: Details › Link calendar event selects an existing read-only event from the next 90 days as the scheduled next step. Search by event title or calendar name across the full upcoming list; at most 200 matches are displayed. Replace and Unlink change only the reference. Elapsed events invite an outcome review; unavailable calendars preserve last known details.
+- On iPhone, enabled Apple device calendars can supply read-only project links. A unique calendar and event occurrence must match; unavailable or ambiguous matches retain the saved title and date.
 - Notes: An Archived project is read-only and accepts no new tasks. Tasks moved in land at the end of the Unsectioned group.
 
 ## Contexts and tags

@@ -430,6 +430,7 @@ App Intents and Siri belong to the RN app. They are not in `apps/ios-native`. Th
 - Compatibility: older clients skip these selective reminders and cannot edit or preserve the new policy reliably. Update every device before using the new modes.
 
 ## Project calendar reference
+- On iPhone, enabled Apple device calendars can supply read-only project links. A unique calendar and event occurrence must match; unavailable or ambiguous matches retain the saved title and date.
 
 - Reach: Projects › open a Project › expand Details › the calendar card (first in Details, as in RN) › Link calendar event, Replace linked event, or Unlink calendar event. The picker opens inside the card. Search the upcoming 90-day events by event title or calendar name.
 - Selectors: `project-calendar-reference`, `project-calendar-link`, `project-calendar-unlink`, `project-calendar-search`, `project-calendar-cancel`, `project-calendar-title`, `project-calendar-date`, `project-calendar-status`, `project-calendar-picker-status`, `project-calendar-save-failed`; each picker row is `project-calendar-event-` plus its index

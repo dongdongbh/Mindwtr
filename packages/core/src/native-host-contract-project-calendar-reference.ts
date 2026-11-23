@@ -118,7 +118,7 @@ export function createProjectCalendarReferenceMethods(deps: {
             const feed = await deps.load({ slot: 'projectCalendar', start: now.toISOString(), end: new Date(now.getTime() + 90 * 86_400_000).toISOString() });
             const available = feed.ok && feed.value.status === 'ready' && feed.value.warning === undefined;
             const candidates = feed.ok && feed.value.status === 'ready' && feed.value.warning === undefined
-                ? getProjectCalendarReferenceCandidates(feed.value.events, state.settings.externalCalendars ?? [], now) : [];
+                ? getProjectCalendarReferenceCandidates(feed.value.events, feed.value.calendars, now) : [];
             let status: 'scheduled' | 'elapsed' | 'unavailable' = 'unavailable';
             let current = project.calendarReference ?? null;
             let superseded = !feed.ok && feed.error.code === 'STALE_REVISION';
@@ -133,7 +133,8 @@ export function createProjectCalendarReferenceMethods(deps: {
                 const resolved = resolveProjectCalendarReference(current, linked.ok && linked.value.status === 'ready' && linked.value.warning === undefined ? linked.value.events : [],
                     linked.ok && linked.value.status === 'ready' && linked.value.warning === undefined, now);
                 status = resolved.status;
-                if (resolved.event) current = createProjectCalendarReference(resolved.event, state.settings.externalCalendars ?? []) ?? current;
+                if (resolved.event && linked.ok && linked.value.status === 'ready')
+                    current = createProjectCalendarReference(resolved.event, linked.value.calendars) ?? current;
             }
             const fresh = useTaskStore.getState()._projectsById.get(input.projectId);
             if (getStorageAdapter() !== adapter || subscriptions() !== source || !fresh || !sameProjectSqliteRow(project, fresh))

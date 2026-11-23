@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { createProjectCalendarReferenceMethods, projectCalendarReferenceDateLabel, type NativeProjectCalendarReferenceRequest } from './native-host-contract-project-calendar-reference';
+import { mergeAppData } from './sync';
 import { createDateFormatter } from './date';
 import { flushPendingSave, resetForTests, setStorageAdapter, useTaskStore } from './store';
 import type { NativeCalendarFeed } from './native-host-contract-calendar';
@@ -16,7 +17,9 @@ const event = (index = 0): ExternalCalendarEvent => ({ id: `event-${index}`, sou
     end: new Date(Date.now() + (index + 2) * 60_000).toISOString(), allDay: false });
 
 async function open(change: Partial<Project> = {}, events = [event()]) {
-    await flushPendingSave(); resetForTests();
+    await flushPendingSave();
+    resetForTests();
+    useTaskStore.setState(useTaskStore.getInitialState());
     let data: AppData = { tasks: [], projects: [project(change)], sections: [], areas: [], people: [],
         settings: { deviceId: 'calendar-device', externalCalendars: calendars } };
     let rejected = false;
@@ -49,6 +52,31 @@ async function open(change: Partial<Project> = {}, events = [event()]) {
 afterEach(async () => { await flushPendingSave(); resetForTests(); });
 
 describe('native Project calendar reference command', () => {
+    it('offers an enabled device calendar from the loaded feed without an ICS subscription', async () => {
+        const fixture = await open();
+        const device = { id: 'system:local', name: 'Holidays', url: 'system://local', enabled: true };
+        fixture.feed({ status: 'ready', calendars: [device], events: [
+            { ...event(), sourceId: device.id, calendarSourceId: 'eventkit:source', uid: 'holiday' },
+        ] });
+        const request = await fixture.request();
+        expect(request.value).toMatchObject({ sourceId: 'eventkit:source', uid: 'holiday', sourceName: 'Holidays' });
+        const plan = fixture.methods.prepareProjectCalendarReference(request);
+        if (!plan.ok || plan.value.kind !== 'prepared') throw new Error('prepare failed');
+        expect(await fixture.methods.commitPreparedProjectCalendarReference({ request, prepared: plan.value.prepared })).toMatchObject({ ok: true });
+        const saved = fixture.data().projects[0].calendarReference;
+        const peerData = { ...fixture.data(), projects: [project()] };
+        const merged = mergeAppData(peerData, JSON.parse(JSON.stringify(fixture.data())));
+        expect(merged.projects[0].calendarReference).toEqual(saved);
+        const peer = await open(merged.projects[0]);
+        const otherDevice = { ...device, id: 'system:peer' };
+        peer.feed({ status: 'ready', calendars: [otherDevice], events: [
+            { ...event(), title: 'Updated', sourceId: otherDevice.id, calendarSourceId: 'eventkit:source', uid: 'holiday' },
+        ] });
+        expect(await peer.options()).toMatchObject({ status: 'scheduled', current: { title: 'Updated' } });
+        peer.feed({ status: 'ready', calendars: [], events: [] });
+        expect(await peer.options()).toMatchObject({ status: 'unavailable', current: saved });
+    });
+
     it('persists linking and replacement once, replays the frozen command and preserves unrelated fields', async () => {
         const fixture = await open({ supportNotes: 'Untouched notes', dueDate: '2026-12-01' });
         const request = await fixture.request(), prepared = fixture.methods.prepareProjectCalendarReference(request);
