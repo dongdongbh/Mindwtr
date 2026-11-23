@@ -106,6 +106,25 @@ for (const theme of ['dark', 'light']) {
         await page.getByRole('menuitemcheckbox', { name: 'Columns', exact: true }).click();
         await workspace.locator('.project-details-header').getByRole('button', { name: 'Details', exact: true }).click();
         await expect(workspace.getByText('Review Date', { exact: true })).toBeVisible();
+        const reviewDate = workspace.getByRole('textbox', { name: 'Review Date', exact: true });
+        const reviewTime = workspace.locator('input[aria-describedby="project-review-date-hint"]');
+        for (const width of [1920, 1280, 900, 1920]) {
+            await page.setViewportSize({ width, height: 1000 });
+            await reviewTime.focus();
+            const date = (await reviewDate.boundingBox())!;
+            const time = (await reviewTime.boundingBox())!;
+            const dateFits = await reviewDate.evaluate(input => {
+                const field = input as HTMLInputElement;
+                const style = getComputedStyle(field);
+                const context = document.createElement('canvas').getContext('2d')!;
+                context.font = `${style.fontSize} ${style.fontFamily}`;
+                return field.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight)
+                    >= context.measureText(field.value).width;
+            });
+            expect(dateFits, `Selected review date at ${width}px`).toBe(true);
+            expect(time.x >= date.x + date.width + 4 || time.y >= date.y + date.height + 4).toBe(true);
+        }
+        await page.setViewportSize({ width: 1440, height: 1000 });
         await page.screenshot({ path: testInfo.outputPath(`projects-${theme}-details.png`) });
         const after = await page.evaluate(() => JSON.parse(localStorage.getItem('mindwtr-data')!).projects);
         expect(after).toEqual(before);

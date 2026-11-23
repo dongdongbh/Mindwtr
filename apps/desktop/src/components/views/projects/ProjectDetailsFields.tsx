@@ -390,7 +390,7 @@ export function ProjectDetailsFields({
                     {repeatError && <p id="project-repeat-error" role="alert" className="text-xs text-destructive">{t(repeatError)}</p>}
                 </div>
 
-                <div className="min-w-0 space-y-1">
+                <div className="min-w-0 space-y-1 sm:col-span-2">
                     <label className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider flex items-center gap-1.5 truncate">
                         <CalendarClock className="h-3.5 w-3.5" />
                         {t('projects.reviewAt')}

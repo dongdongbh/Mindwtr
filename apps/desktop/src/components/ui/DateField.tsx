@@ -408,8 +408,8 @@ export function DateField({
                     {labelToken && <QuickAddTokenBadge t={t} token={labelToken} />}
                 </TaskEditorFieldLabel>
             ) : null}
-            <div className="flex w-full items-center gap-2">
-                <div className="relative min-w-0 flex-1">
+            <div className={cn('flex w-full items-center gap-2', timeInput && 'flex-wrap')}>
+                <div className={cn('relative min-w-0 flex-1', timeInput && 'basis-36')}>
                     <input
                         ref={inputRef}
                         autoFocus={autoFocus}
