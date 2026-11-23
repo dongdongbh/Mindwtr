@@ -605,7 +605,7 @@ export const nlOverrides: Record<string, string> = {
         'settings.showTray': 'Systeemvakpictogram weergeven',
         'settings.showTrayDesc': 'Geef het app-pictogram weer in uw systeemvak voor snelle toegang.',
         'settings.aiConsentTitle': 'AI-functies inschakelen?',
-        'settings.aiConsentDescription': 'Om deze functie te gebruiken worden je taakgegevens ter verwerking naar {provider} gestuurd. Deze gegevens vallen onder het privacybeleid van die dienst. Mindwtr verzamelt deze gegevens niet. Wil je doorgaan?',
+        'settings.aiConsentDescription': 'Voor gebiedssuggesties worden ook de namen en ID’s van beschikbare gebieden verzonden. Om deze functie te gebruiken worden je taakgegevens ter verwerking naar {provider} gestuurd. Deze gegevens vallen onder het privacybeleid van die dienst. Mindwtr verzamelt deze gegevens niet. Wil je doorgaan?',
         'settings.aiConsentCancel': 'Annuleren',
         'settings.aiConsentAgree': 'Mee eens zijn',
         'settings.on': 'Op',

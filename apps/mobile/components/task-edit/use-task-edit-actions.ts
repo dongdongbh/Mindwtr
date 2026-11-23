@@ -22,12 +22,14 @@ import {
     appendTaskBreakdownSteps,
     buildTaskBreakdownInput,
     buildTaskClarifyInput,
+    getAIAreaCandidates,
     getAIClarifyDialog,
     getAIErrorAlert,
     getTaskBreakdownDialog,
     getTaskBreakdownSteps,
     getTaskClarifySuggestionEdit,
     redactAIError,
+    resolveSuggestedArea,
     type TaskAIProjectContext,
 } from '@mindwtr/core/ai-task-actions';
 import type { AIResponseAction } from '../ai-response-modal';
@@ -42,6 +44,7 @@ import {
 } from './task-edit-draft-adapter';
 import type {
     SetTaskEditDraftValue,
+    TaskAIAreaDestination,
     TaskEditDraftLifecycle,
 } from './use-task-edit-state';
 
@@ -75,6 +78,7 @@ type TaskEditActionsParams = {
     formatDate: (dateStr?: string) => string;
     formatDueDate: (dateStr?: string) => string;
     formatTimeEstimateLabel: (estimate: TimeEstimate) => string;
+    getAreaDestination?: () => TaskAIAreaDestination | null;
     isAIWorking: boolean;
     onClose: () => void;
     prioritiesEnabled: boolean;
@@ -112,6 +116,7 @@ export function useTaskEditActions({
     formatDate,
     formatDueDate,
     formatTimeEstimateLabel,
+    getAreaDestination,
     isAIWorking,
     onClose,
     prioritiesEnabled,
@@ -474,6 +479,8 @@ export function useTaskEditActions({
         if (!task || isAIWorking || !canMutate()) return;
         const title = String(titleDraftRef.current ?? mergedTask.title ?? task.title ?? '').trim();
         if (!title) return;
+        const destination = getAreaDestination?.();
+        const candidates = destination ? getAIAreaCandidates(useTaskStore.getState().areas, destination) : [];
         setIsAIWorking(true);
         let apiKey = '';
         try {
@@ -486,6 +493,7 @@ export function useTaskEditActions({
                 task,
                 merged: mergedTask,
                 projectContext,
+                areas: candidates,
             }));
             const dialog = getAIClarifyDialog(response, t);
             const actions: AIResponseAction[] = dialog.choices.map((choice) => {
@@ -506,6 +514,30 @@ export function useTaskEditActions({
                             : closeAIModal,
                 };
             });
+            const resolveArea = () => {
+                const current = getAreaDestination?.();
+                const suggested = candidates.find((area) => area.id === response.suggestedAction?.areaId);
+                return current && current.revision === destination?.revision && current.title.trim() === title && suggested
+                    ? resolveSuggestedArea(suggested.id, useTaskStore.getState().areas, current)
+                    : undefined;
+            };
+            const area = resolveArea();
+            if (area) {
+                const action = {
+                    label: `${t('taskEdit.areaLabel')}: ${area.name}`,
+                    onPress: () => {
+                        const selected = resolveArea();
+                        if (selected) {
+                            setDraftField('areaId', selected.id);
+                            void logInfo('AI Area suggestion accepted', {
+                                scope: 'ai', extra: { releaseCheck: 'v1.3.10/ai-area-suggestion', surface: 'editor-clarify' },
+                            });
+                        }
+                        setAiModal((modal) => modal && { ...modal, actions: modal.actions.filter((entry) => entry !== action) });
+                    },
+                };
+                actions.splice(-1, 0, action);
+            }
             setAiModal({
                 title: dialog.title,
                 actions,
@@ -522,10 +554,12 @@ export function useTaskEditActions({
         canMutate,
         closeAIModal,
         mergedTask,
+        getAreaDestination,
         getAIProvider,
         isAIWorking,
         projectContext,
         setAiModal,
+        setDraftField,
         setIsAIWorking,
         setTitleImmediate,
         settings,

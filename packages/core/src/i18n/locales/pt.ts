@@ -1549,7 +1549,7 @@ export const ptOverrides: Record<string, string> = {
         'settings.showTray': 'Mostrar ícone da bandeja do sistema',
         'settings.showTrayDesc': 'Exiba o ícone do aplicativo na bandeja do sistema para acesso rápido.',
         'settings.aiConsentTitle': 'Ativar recursos de IA?',
-        'settings.aiConsentDescription': 'Para usar este recurso, os dados das suas tarefas serão enviados para {provider} para processamento. Esses dados estão sujeitos à política de privacidade desse serviço. O Mindwtr não coleta esses dados. Deseja continuar?',
+        'settings.aiConsentDescription': 'As sugestões de áreas também enviam os nomes e os IDs das áreas disponíveis. Para usar este recurso, os dados das suas tarefas serão enviados para {provider} para processamento. Esses dados estão sujeitos à política de privacidade desse serviço. O Mindwtr não coleta esses dados. Deseja continuar?',
         'settings.aiConsentCancel': 'Cancelar',
         'settings.aiConsentAgree': 'Concordar',
         'settings.on': 'Sobre',

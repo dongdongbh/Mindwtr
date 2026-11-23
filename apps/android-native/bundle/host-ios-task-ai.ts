@@ -1,3 +1,4 @@
+import { getAIAreaCandidates } from '../../../packages/core/src/ai/areas';
 import type { createNativeHostContract } from '../../../packages/core/src/native-host-contract';
 import type { NativeAIHost } from '../../../packages/core/src/native-host-contract-ai';
 import type { SqliteAdapter } from '../../../packages/core/src/sqlite-adapter';
@@ -84,6 +85,7 @@ export function createIOSTaskAI(deps: { contract: Contract; adapter: () => Sqlit
         const projectIds = Array.from(new Set([task.projectId, request.draft.projectId].filter(Boolean)));
         return {
             task,
+            areaIds: task.projectId || task.areaId ? [] : getAIAreaCandidates(state.areas, request.draft).map(area => area.id),
             projects: projectIds.map(id => state._allProjects.find(project => project.id === id) ?? null),
             projectContext: getTaskAIProjectContext({ projectId: request.draft.projectId,
                 projects: state.projects, tasks: state.tasks, taskId: request.id }),
@@ -108,7 +110,8 @@ export function createIOSTaskAI(deps: { contract: Contract; adapter: () => Sqlit
             const contextTaskIDs = draft.projectId ? useTaskStore.getState().tasks
                 .filter(task => task.projectId === draft.projectId && task.id !== id && !task.deletedAt)
                 .slice(0, 20).map(task => task.id) : [];
-            return { language: value.language, projectContext: value.projectContext, contextTaskIDs };
+            return { language: value.language, projectContext: value.projectContext, contextTaskIDs,
+                ...(value.areaIds.length ? { areaIds: value.areaIds } : {}) };
         },
         async request(json: string, owner: unknown, signal: AbortSignal) {
             const adapter = ready();

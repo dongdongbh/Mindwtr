@@ -1,3 +1,4 @@
+import { getTaskCopilotText, resolveSuggestedArea } from './ai-task-actions';
 import { getDocsGuideUrl } from './docs-guidance';
 import { buildContextsFilterModel, CONTEXTS_FILTER_STATUSES, getContextsSaveCriteria } from './contexts-filter';
 import { isGettingStartedProject } from './getting-started-seed';
@@ -874,7 +875,7 @@ const isSameDraftValue = (left: unknown, right: unknown): boolean => (
 
 export type NativeTaskDraftEdit =
 
-    | { type: 'fields'; patch: Partial<TaskDraft> }
+    | { type: 'fields'; patch: Partial<TaskDraft>; suggestedAreaId?: string; areaRequestText?: string }
     | { type: 'date'; field: TaskEditorDateField; value: string }
 
     | { type: 'pickDate'; field: TaskEditorDateField; date: string }
@@ -974,6 +975,10 @@ const readRecurrenceEdit = (value: unknown, draft: TaskDraft): TaskDraftRecurren
 };
 
 
+const logAcceptedAIArea = () => {
+    void logInfo('AI area suggestion applied to draft', { scope: 'ai', force: true, context: { releaseCheck: 'v1.3.10/ai-area-suggestion' } });
+};
+
 const applyNativeTaskDraftEdit = (
     draft: TaskDraft,
     edit: unknown,
@@ -988,7 +993,16 @@ const applyNativeTaskDraftEdit = (
             const fields = Object.keys(edit.patch) as TaskDraftField[];
             if (fields.some((key) => !DRAFT_FIELD_SET.has(key))) return null;
             const patch = toDraftValues(edit.patch);
-            return fields.every((key) => DRAFT_VALUE_CHECKS[key](patch[key])) ? applyTaskDraftPatch(draft, patch) : null;
+            if (!fields.every((key) => DRAFT_VALUE_CHECKS[key](patch[key]))) return null;
+            if (edit.suggestedAreaId !== undefined) {
+                const area = resolveSuggestedArea(edit.suggestedAreaId, useTaskStore.getState().areas, draft);
+                const textMatches = edit.areaRequestText === undefined || edit.areaRequestText === getTaskCopilotText(draft.title, draft.description);
+                if (area && textMatches && !context.task.projectId && !context.task.areaId && !fields.includes('areaId') && !fields.includes('projectId')) {
+                    logAcceptedAIArea();
+                    return applyTaskDraftPatch(draft, { ...patch, areaId: area.id });
+                }
+            }
+            return applyTaskDraftPatch(draft, patch);
         }
         case 'date':
             if (!EDITOR_DATE_FIELDS.includes(field) || !isDraftDate(edit.value)) return null;
@@ -3662,6 +3676,7 @@ export type NativeInboxProcessingView = ProcessInboxStepView & {
     progress: { processed: number; total: number; label: string };
     draft: ProcessInboxDraft;
 
+    suggestionRevision: number;
     aiClarify: { label: string; working: string } | null;
 };
 
@@ -3697,6 +3712,7 @@ type InboxProcessingDeps = {
 type InboxProcessingEntry = {
     id: string;
     mode: ProcessInboxMode;
+    suggestionRevision: number;
     session: ProcessInboxSession;
     answers: ProcessInboxAnswers;
     draft: ProcessInboxDraft;
@@ -3857,6 +3873,7 @@ function createInboxProcessingMethods(deps: InboxProcessingDeps) {
             version: NATIVE_HOST_CONTRACT_VERSION,
             revision: deps.revision(now),
             sessionId: entry.id,
+            suggestionRevision: entry.suggestionRevision,
             taskId: task.id,
             progress: { ...progress, label: formatProcessInboxProgressLabel(t, progress.processed, progress.total) },
             draft: entry.draft,
@@ -4117,6 +4134,7 @@ function createInboxProcessingMethods(deps: InboxProcessingDeps) {
                 session: startProcessInboxSession(queue),
                 answers: { ...INITIAL_PROCESS_INBOX_ANSWERS },
                 draft: createProcessInboxDraft(queue[0], processInboxDefaultAreaId()),
+                suggestionRevision: 0,
                 taskRevision: inboxTaskRevision(queue[0]),
                 base: queue[0],
                 mergeSyncedChanges: input.mergeSyncedChanges === true,
@@ -4192,6 +4210,14 @@ function createInboxProcessingMethods(deps: InboxProcessingDeps) {
                 && useTaskStore.getState().sections.find((section) => section.id === sectionEdit)?.projectId !== entry.draft.projectId) {
                 return fail('INVALID_INPUT', 'The section is not in the chosen project');
             }
+            if (input.edit?.type === 'setArea' && input.edit.expectedSuggestionRevision !== undefined
+                && (input.edit.expectedSuggestionRevision !== entry.suggestionRevision || entry.draft.convertToProject
+                    || task.projectId || task.areaId || !resolveSuggestedArea(input.edit.value, useTaskStore.getState().areas, entry.draft))) {
+                return fail('INVALID_INPUT', 'The suggested Area is no longer available for this task');
+            }
+            if (input.edit?.type === 'setArea' && input.edit.expectedSuggestionRevision !== undefined) logAcceptedAIArea();
+            if (input.edit?.type === 'setArea' || input.edit?.type === 'selectProject'
+                || (input.edit?.type === 'set' && input.edit.field === 'title')) entry.suggestionRevision++;
             if (input.edit) entry.draft = applyProcessInboxDraftEdit(entry.draft, input.edit, context().plan);
             if (input.mode) entry.mode = input.mode;
             return { ok: true, value: buildView(entry)! };

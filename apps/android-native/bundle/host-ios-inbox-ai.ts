@@ -1,3 +1,4 @@
+import { getAIAreaCandidates } from '../../../packages/core/src/ai/areas';
 import type { createNativeHostContract } from '../../../packages/core/src/native-host-contract';
 import type { NativeAIHost } from '../../../packages/core/src/native-host-contract-ai';
 import type { SqliteAdapter } from '../../../packages/core/src/sqlite-adapter';
@@ -47,7 +48,9 @@ export function createIOSInboxAI(deps: { contract: Contract; adapter: () => Sqli
         const view = unwrap(deps.contract.getInboxProcessingStep(input)), state = useTaskStore.getState();
         const task = state._tasksById.get(input.taskId);
         if (!task || task.deletedAt || view.taskId !== input.taskId || view.step !== input.step) throw stale();
-        return { view: { draft: view.draft, mode: view.mode, step: view.step,
+        const areaIds = view.draft.convertToProject || task.projectId || task.areaId
+            ? [] : getAIAreaCandidates(state.areas, view.draft).map(area => area.id);
+        return { view: { ...(areaIds.length ? { areaIds } : {}), draft: view.draft, mode: view.mode, step: view.step,
             contexts: getProcessInboxTokenPools(state.tasks).contexts,
             language: unwrap(deps.contract.getStrings({ keys: [] })).language },
             task, configuration: state.settings.ai ?? {}, timeEstimates: resolveFeatureFlags(state.settings).timeEstimates };
@@ -87,6 +90,12 @@ export function createIOSInboxAI(deps: { contract: Contract; adapter: () => Sqli
                 || !record(value.expected) || !Array.isArray(value.edits) || value.edits.length < 1 || value.edits.length > 2) throw invalid();
             const input = request(value.request);
             const edits: ProcessInboxDraftEdit[] = value.edits.map((edit, index) => {
+                if (record(edit) && edit.type === 'setArea' && value.edits instanceof Array && value.edits.length === 1
+                    && exact(edit, ['type', 'value', 'expectedSuggestionRevision']) && text(edit.value, 500)
+                    && typeof edit.expectedSuggestionRevision === 'number' && Number.isSafeInteger(edit.expectedSuggestionRevision)
+                    && edit.expectedSuggestionRevision >= 0) {
+                    return { type: 'setArea', value: edit.value, expectedSuggestionRevision: edit.expectedSuggestionRevision };
+                }
                 if (!record(edit) || index === 0 && (!exact(edit, ['type', 'field', 'value']) || edit.type !== 'set'
                     || edit.field !== 'title' || !text(edit.value, 10_000, false))
                     || index === 1 && (!exact(edit, ['type', 'value']) || edit.type !== 'addContext' || !text(edit.value, 500))) throw invalid();

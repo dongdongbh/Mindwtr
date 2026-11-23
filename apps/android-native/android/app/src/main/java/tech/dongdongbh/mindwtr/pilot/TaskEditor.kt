@@ -519,7 +519,7 @@ fun TaskEditorScreen(model: InboxViewModel, editor: TaskEditor) = with(model) {
     LaunchedEffect(editor.id, busy, failed) { if (!busy && !failed) TYPED_FIELDS.forEach { suggest(it, editor.input(it)) } }
 
     val aiDraft = editor.fullDraft().toString()
-    LaunchedEffect(editor.session, aiDraft, busy) { if (!busy) { delay(150); ai.readEditor() } }
+    LaunchedEffect(editor.session, aiDraft, ai.destinationRevision, busy) { if (!busy) { delay(150); ai.readEditor() } }
 
     Column(Modifier.fillMaxSize().background(c.bg).systemBarsPadding().semantics { testTagsAsResourceId = true }.testTag("task-editor")) {
 

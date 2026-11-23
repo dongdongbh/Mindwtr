@@ -2750,6 +2750,69 @@ describe('InboxProcessingModal', () => {
     expect(root.findByProps({ children: 'Working...' })).toBeTruthy();
   });
 
+  it.each([false, true])('keeps the configured Area suggestion in the current Inbox draft (destination edited: %s)', async (edited) => {
+    mockSettings.ai = { enabled: true, provider: 'openai' };
+    storeState.areas = [workArea, homeArea, { ...homeArea, id: 'deleted', deletedAt: homeArea.updatedAt }];
+    clarifyTask.mockReset().mockResolvedValue({
+      options: [], suggestedAction: { title: 'Call dentist', context: '@calls', areaId: workArea.id },
+    });
+    let tree!: ReturnType<typeof create>;
+    act(() => { tree = create(<InboxProcessingModal visible onClose={vi.fn()} />); });
+    const root = tree.root;
+    pressStep(root, 'taskEdit.aiClarify');
+    await flushAsyncActions();
+    expect(clarifyTask).toHaveBeenLastCalledWith(expect.objectContaining({
+      areas: [{ id: workArea.id, name: workArea.name }, { id: homeArea.id, name: homeArea.name }],
+    }));
+    const apply = findPressableWithText(root, 'taskEdit.areaLabel: Work').props.onPress;
+    if (edited) {
+      revealDeferredOptions(root);
+      pressStep(root, 'Work');
+      pressStep(root, 'projects.noArea');
+    }
+    act(() => { apply(); });
+    expect(findTextInputByAccessibilityLabel(root, 'taskEdit.titleLabel').props.value).toBe(baseInboxTask.title);
+    pressStep(root, 'common.cancel');
+    if (!edited) revealDeferredOptions(root);
+    const areaButton = root.findByProps({
+      accessibilityLabel: `taskEdit.areaLabel: ${edited ? 'projects.noArea' : 'Work'}`,
+      accessibilityRole: 'button',
+    });
+    expect(areaButton.props.accessibilityState.selected).toBe(true);
+    expect(updateTask).not.toHaveBeenCalled();
+    if (!edited) {
+      pressStep(root, 'File it');
+      await flushAsyncActions();
+      expect(updateTask).toHaveBeenCalledWith(baseInboxTask.id, expect.objectContaining({ areaId: workArea.id }));
+    }
+    act(() => tree.unmount());
+  });
+
+  it.each(['assigned', 'converting'] as const)('withholds Area candidates in the %s Inbox draft', async (destination) => {
+    mockSettings.ai = { enabled: true, provider: 'openai' };
+    storeState.areas = [workArea, homeArea];
+    if (destination === 'assigned') storeState.tasks = [{ ...baseInboxTask, areaId: homeArea.id }];
+    clarifyTask.mockReset().mockResolvedValue({
+      options: [], suggestedAction: { title: 'Call dentist', areaId: workArea.id },
+    });
+    let tree!: ReturnType<typeof create>;
+    act(() => { tree = create(<InboxProcessingModal visible onClose={vi.fn()} />); });
+    const root = tree.root;
+    if (destination === 'converting') {
+      walkToProjectConversion(root);
+    } else {
+      revealDeferredOptions(root);
+      pressStep(root, 'projects.noArea');
+    }
+    pressStep(root, 'taskEdit.aiClarify');
+    await flushAsyncActions();
+    expect(clarifyTask.mock.lastCall?.[0]).not.toHaveProperty('areas');
+    expect(findNodesWithText(root, 'ai.applySuggestion').length).toBeGreaterThan(0);
+    const areaAction = root.findAll((node) => node.props.children === 'taskEdit.areaLabel: Work');
+    expect(areaAction).toHaveLength(0);
+    act(() => tree.unmount());
+  });
+
   it('keeps an on-device suggestion in the editable draft until the normal workflow saves', async () => {
     setPlatform('ios');
     appleClarificationMocks.prototypeEnabled = true;

@@ -74,7 +74,7 @@ final class NativeInboxAIHostTests: XCTestCase {
     }
 
     private func fixture(faults: HostIOFaults = HostIOFaults(), state: InboxAIHTTPState = InboxAIHTTPState(),
-                         suffix: String = "", contextSiblings: Int = 0) async throws -> (CoreHost, InboxAIHTTPState, String) {
+                         suffix: String = "", contextSiblings: Int = 0, withArea: Bool = false) async throws -> (CoreHost, InboxAIHTTPState, String) {
         let seed = CoreHost(databaseURL: database, bundleURL: bundle)
         _ = try await seed.start()
         let original = try await createTask(seed, title: "Target AI title")
@@ -82,6 +82,9 @@ final class NativeInboxAIHostTests: XCTestCase {
         let sqlite = try SQLiteBridge(url: database)
         _ = try sqlite.execute("UPDATE tasks SET id=? WHERE id=?", parametersJSON: json([id, original]))
         _ = try sqlite.execute("UPDATE tasks SET id=? WHERE id=?", parametersJSON: json([sibling, originalSibling]))
+        if withArea {
+            _ = try sqlite.execute("INSERT INTO areas (id,name,orderNum,createdAt,updatedAt) VALUES ('vehicle','Vehicle',0,'2026-10-30','2026-10-30')")
+        }
         if contextSiblings > 0 {
             let at = "2026-10-30T00:00:00.000Z"
             _ = try sqlite.execute("INSERT INTO projects (id,title,status,color,createdAt,updatedAt) VALUES (?,?,?,?,?,?)", parametersJSON: json(["context-project", "Context project", "active", "#123456", at, at]))
@@ -173,6 +176,33 @@ final class NativeInboxAIHostTests: XCTestCase {
         let rows = try XCTUnwrap(NativeJSON.jsonObject(with: Data(sqlite.execute("SELECT title,status,contexts FROM tasks WHERE id=?", parametersJSON: json([id])).utf8)) as? [[String: Any]])
         XCTAssertEqual(rows.first?["title"] as? String, "Suggested title"); XCTAssertEqual(rows.first?["status"] as? String, "done"); sqlite.close()
         XCTAssertEqual(state.requests.value.count, 1); XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path)); await core.close()
+    }
+
+    func testAreaChoiceEditsOnlyTheDraftAndRefusesDeletedCandidate() async throws {
+        let (core, state, service) = try await fixture(withArea: true)
+        try seedSecret(service)
+        state.content.update { $0 = #"{"question":"Where?","options":[],"suggestedAction":{"title":"Choose tires","areaId":"vehicle"}}"# }
+        let input = try await request(core)
+        let handle = try await core.beginInboxAI(requestJSON: input, lease: NativeTaskAIEditorLease(), readmit: { true })
+        let answer = try object(await core.awaitInboxAI(handle))
+        let choices = try XCTUnwrap(answer["choices"] as? [[String: Any]])
+        let index = try XCTUnwrap(choices.firstIndex { $0["label"] as? String == "Area: Vehicle" })
+        let before = try snapshot()
+        let applied = try object(await core.applyInboxAIChoice(handle, index: index))
+        let draft = try XCTUnwrap(applied["draft"] as? [String: Any])
+        XCTAssertEqual(draft["areaId"] as? String, "vehicle")
+        XCTAssertEqual(draft["title"] as? String, "Target AI title")
+        XCTAssertEqual(try snapshot(), before)
+        var edit = try object(input)
+        edit["edit"] = ["type":"setArea","value":NSNull()] as [String: Any]
+        _ = try await core.call("inboxStep", argumentsJSON: json([json(edit)]))
+        let second = try await core.beginInboxAI(requestJSON: input, lease: NativeTaskAIEditorLease(), readmit: { true })
+        _ = try await core.awaitInboxAI(second)
+        let sqlite = try SQLiteBridge(url: database)
+        _ = try sqlite.execute("UPDATE areas SET deletedAt='2026-11-23' WHERE id='vehicle'")
+        sqlite.close()
+        await refused { _ = try await core.applyInboxAIChoice(second, index: index) }
+        await core.close()
     }
 
     func testHeldRequestAllowsUnrelatedOrdinarySaveAndRefusesChangedProcessingDraft() async throws {

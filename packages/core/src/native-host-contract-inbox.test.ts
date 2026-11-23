@@ -406,10 +406,11 @@ describe('native host contract: Process Inbox', () => {
         const started = host.startInboxProcessing({ mode: 'guided' });
         expect(started).toMatchObject({ ok: true, value: { queue: { total: 3, taskIds: ['inbox-a', 'inbox-c', 'inbox-b'] } } });
         if (!started.ok || !started.value.view) return;
-        const { version, revision, sessionId, taskId, progress, draft, aiClarify, ...view } = started.value.view;
+        const { version, revision, sessionId, taskId, progress, draft, aiClarify, suggestionRevision, ...view } = started.value.view;
         expect({ version, sessionId, taskId, progress, aiClarify }).toEqual({
             version: 1, sessionId: started.value.sessionId, taskId: 'inbox-a', progress: { processed: 0, total: 3, label: '0/3 tasks' }, aiClarify: null,
         });
+        expect(suggestionRevision).toBe(0);
         expect(revision).toEqual(expect.any(String));
         const state = useTaskStore.getState();
         const task = state._tasksById.get('inbox-a')!;

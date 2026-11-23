@@ -136,6 +136,7 @@ Source: `apps/mobile`. Routes live in `apps/mobile/app` (expo-router). Labels be
 
 ## AI clarify and breakdown
 
+- On an unassigned task, configured-provider Clarify and inline suggestions can offer an existing Area. Tap the Area name to apply it to the draft.
 - Reach: Task editor › AI clarify or AI breakdown. Needs Settings › Advanced › AI assistant › Enable AI assistant.
 - Code: `apps/mobile/components/task-edit/use-task-edit-copilot.ts`, `apps/mobile/components/ai-response-modal.tsx`
 - Checks: `apps/mobile/components/task-edit/use-task-edit-copilot.test.tsx`, `apps/mobile/components/ai-actions.parity.test.tsx`

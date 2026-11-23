@@ -1484,7 +1484,7 @@ export const trOverrides: Record<string, string> = {
         'settings.showTray': 'Sistem tepsisi simgesini göster',
         'settings.showTrayDesc': 'Hızlı erişim için uygulama simgesini sistem tepsinizde görüntüleyin.',
         'settings.aiConsentTitle': 'Yapay Zeka Özellikleri etkinleştirilsin mi?',
-        'settings.aiConsentDescription': 'Bu özelliği kullanmak için görev verileriniz işlenmek üzere {provider} hizmetine gönderilir. Bu veriler ilgili hizmetin gizlilik politikasına tabidir. Mindwtr bu verileri toplamaz. Devam etmek istiyor musunuz?',
+        'settings.aiConsentDescription': 'Alan önerileri için uygun alanların adları ve kimlikleri de gönderilir. Bu özelliği kullanmak için görev verileriniz işlenmek üzere {provider} hizmetine gönderilir. Bu veriler ilgili hizmetin gizlilik politikasına tabidir. Mindwtr bu verileri toplamaz. Devam etmek istiyor musunuz?',
         'settings.aiConsentCancel': 'İptal',
         'settings.aiConsentAgree': 'Kabul etmek',
         'settings.on': 'Açık',

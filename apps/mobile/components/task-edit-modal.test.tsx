@@ -20,6 +20,10 @@ import { resolveAdaptiveWindow } from '../lib/adaptive-window';
 
 import { restoreRecoveredTaskEditInput, TaskEditModal } from './task-edit-modal';
 import { TaskEditCustomRecurrenceModal } from './task-edit/TaskEditCustomRecurrenceModal';
+import { TaskEditDestinationPicker } from './task-edit/TaskEditDestinationPicker';
+import { TaskEditHeader } from './task-edit/TaskEditHeader';
+import { TaskEditOverlayStack } from './task-edit/TaskEditOverlayStack';
+import { AIResponseModal } from './ai-response-modal';
 import { MarkdownFormatToolbar } from './markdown-format-toolbar';
 import { syncTaskEditPagerPosition } from './task-edit/task-edit-modal.utils';
 
@@ -29,6 +33,10 @@ vi.mock('@react-navigation/native', async () => {
 });
 
 const referenceClipboard = vi.hoisted(() => ({ write: vi.fn(), toast: vi.fn() }));
+const taskAI = vi.hoisted(() => ({
+  clarifyTask: vi.fn(),
+  predictMetadata: vi.fn(),
+}));
 const widgetLaunchListeners = vi.hoisted(() => new Set<() => string>());
 vi.mock('@/hooks/use-widget-launch', () => ({ subscribeWidgetLaunch: (listener: () => string) => {
   widgetLaunchListeners.add(listener);
@@ -102,6 +110,7 @@ vi.mock('@mindwtr/core', async () => {
   });
   return {
     ...actual,
+    createAIProvider: () => taskAI,
     useTaskStore,
   };
 });
@@ -236,6 +245,7 @@ describe('TaskEditModal', () => {
       taskEditStore.current._allProjects = taskEditStore.current.projects;
       taskEditStore.current.sections = [];
       taskEditStore.current._allSections = [];
+      taskEditStore.current.areas = [];
       taskEditStore.current.tasks = [];
       taskEditStore.current._allTasks = [];
       taskEditStore.current._tasksById = new Map();
@@ -249,6 +259,118 @@ describe('TaskEditModal', () => {
       });
     }
   });
+
+  it.each(['clarify', 'inline'] as const)('keeps the %s Area suggestion in the draft and rejects a stale choice', async (surface) => {
+    vi.useFakeTimers();
+    let tree: renderer.ReactTestRenderer | undefined;
+    try {
+      const timestamp = '2026-11-23T00:00:00.000Z';
+      const task: Task = { id: 'area-test', title: 'Call dentist', status: 'inbox', contexts: [], tags: [], createdAt: timestamp, updatedAt: timestamp };
+      const area: core.Area = { id: 'area-health', name: 'Health', color: '#16a34a', order: 0, createdAt: timestamp, updatedAt: timestamp };
+      const store = taskEditStore.current!;
+      store.areas = [area, { ...area, id: 'deleted', deletedAt: timestamp }];
+      store.tasks = [task];
+      store._tasksById = new Map([[task.id, task]]);
+      store.settings.ai = { enabled: true };
+      taskAI.clarifyTask.mockReset().mockResolvedValue({ options: [], suggestedAction: { title: 'Book an appointment', areaId: area.id } });
+      taskAI.predictMetadata.mockReset().mockResolvedValue({ areaId: area.id, tags: ['#dentist'] });
+      const onSave = vi.fn();
+      await act(async () => {
+        tree = renderer.create(<TaskEditModal visible task={task} defaultTab="task" onClose={vi.fn()} onSave={onSave} />);
+      });
+      const root = tree!.root;
+      const form = () => root.findByType('TaskEditFormTab' as any);
+      const getSuggestion = async () => {
+        if (surface === 'clarify') {
+          await act(async () => { await form().props.handleAIClarify(); });
+          expect(taskAI.clarifyTask.mock.lastCall?.[0].areas).toEqual([{ id: area.id, name: area.name }]);
+          const action = root.findByType(AIResponseModal).props.actions.find((entry: { label: string }) => entry.label === 'taskEdit.areaLabel: Health');
+          expect(action).toBeDefined();
+          return action.onPress;
+        }
+        await act(async () => { await vi.advanceTimersByTimeAsync(900); });
+        expect(taskAI.predictMetadata.mock.lastCall?.[0].areas).toEqual([{ id: area.id, name: area.name }]);
+        const part = form().props.pendingCopilotParts.find((entry: { kind: string }) => entry.kind === 'area');
+        expect(part).toEqual({ kind: 'area', value: area.id, label: area.name });
+        const apply = form().props.applyCopilotPart;
+        return () => apply(part);
+      };
+      const earlierText = await getSuggestion();
+      act(() => {
+        if (surface === 'inline') {
+          form().props.renderField('description').props.handleDescriptionChange('Ask whether the office is accepting patients');
+        } else {
+          form().props.onTitleDraftChange('Call a different doctor');
+        }
+        earlierText();
+      });
+      expect(form().props.draft.areaId).toBe('');
+      const stale = await getSuggestion();
+      act(() => root.findByType(TaskEditOverlayStack).props.setShowProjectPicker(true));
+      const picker = root.findByType(TaskEditDestinationPicker);
+      act(() => picker.props.onSelect({ kind: 'area', id: area.id }));
+      expect(form().props.draft.areaId).toBe(area.id);
+      act(() => {
+        picker.props.onSelect({ kind: 'none' });
+        stale();
+      });
+      expect(form().props.draft.areaId).toBe('');
+      act(() => form().props.onTitleDraftChange('Call the dentist again'));
+      const beforeRemoteMove = await getSuggestion();
+      act(() => {
+        store._tasksById = new Map([[task.id, { ...task, projectId: 'project-1' }]]);
+        beforeRemoteMove();
+      });
+      expect(form().props.draft.areaId).toBe('');
+      store._tasksById = new Map([[task.id, task]]);
+      act(() => form().props.onTitleDraftChange('Call the dentist later'));
+      const removed = await getSuggestion();
+      act(() => {
+        store.areas = [{ ...area, deletedAt: timestamp }];
+        removed();
+      });
+      expect(form().props.draft.areaId).toBe('');
+      store.areas = [area];
+      act(() => form().props.onTitleDraftChange('Call the dentist tomorrow'));
+      const fresh = await getSuggestion();
+      act(() => fresh());
+      expect(form().props.draft.areaId).toBe(area.id);
+      expect(form().props.titleDraft).toBe('Call the dentist tomorrow');
+      expect(form().props.draft.tags).toBe('');
+      expect(onSave).not.toHaveBeenCalled();
+      await act(async () => { root.findByType(TaskEditHeader).props.onDone(); });
+      expect(onSave).toHaveBeenCalledWith(task.id, expect.objectContaining({ areaId: area.id }));
+    } finally {
+      if (tree) act(() => tree?.unmount());
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([{ areaId: 'current-area' }, { projectId: 'project-1' }])(
+    'withholds Area candidates after clearing a saved destination in the editor draft: %j', async (destination) => {
+      const timestamp = '2026-11-23T00:00:00.000Z';
+      const task: Task = { id: 'area-test', title: 'Reassign task', status: 'inbox', contexts: [], tags: [], createdAt: timestamp, updatedAt: timestamp, ...destination };
+      const store = taskEditStore.current!;
+      store.areas = [{ id: 'area-health', name: 'Health', color: '#16a34a', order: 0, createdAt: timestamp, updatedAt: timestamp }];
+      store.tasks = [task];
+      store._tasksById = new Map([[task.id, task]]);
+      store.settings.ai = { enabled: true };
+      taskAI.clarifyTask.mockReset().mockResolvedValue({ options: [], suggestedAction: { title: 'Book an appointment', areaId: 'area-health' } });
+      let tree!: renderer.ReactTestRenderer;
+      await act(async () => { tree = renderer.create(<TaskEditModal visible task={task} defaultTab="task" onClose={vi.fn()} onSave={vi.fn()} />); });
+      const root = tree.root;
+      act(() => root.findByType(TaskEditOverlayStack).props.setShowProjectPicker(true));
+      act(() => root.findByType(TaskEditDestinationPicker).props.onSelect({ kind: 'none' }));
+      const form = root.findByType('TaskEditFormTab' as any);
+      expect(form.props.draft).toMatchObject({ projectId: '', areaId: '' });
+      await act(async () => { await form.props.handleAIClarify(); });
+      expect(taskAI.clarifyTask.mock.lastCall?.[0]).not.toHaveProperty('areas');
+      expect(root.findByType(AIResponseModal).props.actions.map((entry: { label: string }) => entry.label)).toEqual([
+        'ai.applySuggestion', 'common.cancel',
+      ]);
+      act(() => tree.unmount());
+    },
+  );
 
   it('prevents native sheet swipe dismissal while completion is submitting or awaiting persistence Retry', async () => {
     const task: Task = { id: 'preview-sheet', title: 'Task', status: 'next', tags: [], contexts: [], createdAt: '2026-11-10T00:00:00Z', updatedAt: '2026-11-10T00:00:00Z' };

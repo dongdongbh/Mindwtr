@@ -429,6 +429,7 @@ Source: `apps/desktop/src` (Tauri + React). Labels come from `packages/core/src/
 
 ## Settings › AI assistant
 
+- Configured-provider Clarify in the task editor and Inbox, and inline editor suggestions, offer an optional Area for an unassigned task. Select the Area chip to add it to the draft.
 - Reach: Settings › AI assistant. Enable AI assistant (Provider, Model, API key, Custom OpenAI-compatible base URL, Extra request parameters, Request timeout, Copilot model, Reasoning effort), Speech to text. In the task editor: AI assistant, AI clarify, AI breakdown.
 - Code: `apps/desktop/src/components/views/settings/SettingsAiPage.tsx`, `apps/desktop/src/components/Task/TaskEditorAiPanels.tsx`, `apps/desktop/src/lib/ai-config.ts`, `apps/desktop/src/lib/speech-to-text.ts`
 - Checks: `e2e/ai-request-timeout.spec.ts`, `apps/desktop/src/components/views/settings/SettingsAiPage.test.tsx`, `apps/desktop/src/components/views/settings/useAiSettings.test.tsx`, `apps/desktop/src/components/Task/useTaskItemAi.copilot.test.tsx`

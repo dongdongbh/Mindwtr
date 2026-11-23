@@ -3,8 +3,6 @@ import { buildBreakdownPrompt, buildClarifyPrompt, buildCopilotPrompt, buildRevi
 import {
     fetchTextWithTimeout,
     isAIRequestStopError,
-    normalizeTags,
-    normalizeTimeEstimate,
     parseJson,
     rateLimit,
     throwIfAIRequestAborted,
@@ -13,7 +11,7 @@ import {
     withAIRequestStopNotifications,
 } from '../utils';
 import { resolveGeminiModel } from '../catalog';
-import { isBreakdownResponse, isClarifyResponse, isCopilotResponse, isReviewAnalysisResponse } from '../validators';
+import { isBreakdownResponse, isReviewAnalysisResponse, parseClarifyResponse, parseCopilotResponse } from '../validators';
 
 const GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/models';
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -123,7 +121,7 @@ async function buildGeminiError(response: BufferedAIResponse, usingOfficialGemin
     return new Error(parts.join(' ').trim());
 }
 
-const CLARIFY_SCHEMA: GeminiSchema = {
+const clarifySchema = (withArea: boolean): GeminiSchema => ({
     type: 'object',
     required: ['question', 'options'],
     properties: {
@@ -146,10 +144,11 @@ const CLARIFY_SCHEMA: GeminiSchema = {
                 timeEstimate: { type: 'string' },
                 context: { type: 'string' },
                 isProject: { type: 'boolean' },
+                ...(withArea ? { areaId: { type: 'string', nullable: true } } : {}),
             },
         },
     },
-};
+});
 
 const BREAKDOWN_SCHEMA: GeminiSchema = {
     type: 'object',
@@ -181,17 +180,18 @@ const REVIEW_SCHEMA: GeminiSchema = {
     },
 };
 
-const COPILOT_SCHEMA: GeminiSchema = {
+const copilotSchema = (withArea: boolean): GeminiSchema => ({
     type: 'object',
     properties: {
         context: { type: 'string' },
         timeEstimate: { type: 'string' },
+        ...(withArea ? { areaId: { type: 'string', nullable: true } } : {}),
         tags: {
             type: 'array',
             items: { type: 'string' },
         },
     },
-};
+});
 
 async function requestGemini(config: AIProviderConfig, prompt: { system: string; user: string }, schema?: GeminiSchema, options?: AIRequestOptions) {
     const endpoint = config.endpoint || GEMINI_BASE_URL;
@@ -300,16 +300,17 @@ export function createGeminiProvider(config: AIProviderConfig): AIProvider {
     return withAIRequestStopNotifications(config, {
         clarifyTask: async (input: ClarifyInput, options?: AIRequestOptions): Promise<ClarifyResponse> => {
             const prompt = buildClarifyPrompt(input, config.language);
-            const text = await requestGemini(config, prompt, CLARIFY_SCHEMA, options);
+            const schema = clarifySchema(prompt.areas.length > 0);
+            const text = await requestGemini(config, prompt, schema, options);
             try {
-                return parseJson<ClarifyResponse>(text, isClarifyResponse);
+                return parseClarifyResponse(text, prompt.areas);
             } catch (error) {
                 const retryPrompt = {
                     system: prompt.system,
                     user: `${prompt.user}\n\nReturn ONLY valid JSON. Do not include any extra text.`,
                 };
-                const retryText = await requestGemini(config, retryPrompt, CLARIFY_SCHEMA, options);
-                return parseJson<ClarifyResponse>(retryText, isClarifyResponse);
+                const retryText = await requestGemini(config, retryPrompt, schema, options);
+                return parseClarifyResponse(retryText, prompt.areas);
             }
         },
         breakDownTask: async (input: BreakdownInput, options?: AIRequestOptions): Promise<BreakdownResponse> => {
@@ -342,32 +343,17 @@ export function createGeminiProvider(config: AIProviderConfig): AIProvider {
         },
         predictMetadata: async (input: CopilotInput, options?: AIRequestOptions): Promise<CopilotResponse> => {
             const prompt = buildCopilotPrompt(input, config.language);
-            const text = await requestGemini(config, prompt, COPILOT_SCHEMA, options);
+            const schema = copilotSchema(prompt.areas.length > 0);
+            const text = await requestGemini(config, prompt, schema, options);
             try {
-                const parsed = parseJson<CopilotResponse>(text, isCopilotResponse);
-                const context = typeof parsed.context === 'string' ? parsed.context : undefined;
-                const timeEstimate = typeof parsed.timeEstimate === 'string' ? parsed.timeEstimate : undefined;
-                const tags = Array.isArray(parsed.tags) ? normalizeTags(parsed.tags) : [];
-                return {
-                    context,
-                    timeEstimate: normalizeTimeEstimate(timeEstimate) as CopilotResponse['timeEstimate'],
-                    tags,
-                };
+                return parseCopilotResponse(text, prompt.areas);
             } catch (error) {
                 const retryPrompt = {
                     system: prompt.system,
                     user: `${prompt.user}\n\nReturn ONLY valid JSON. Do not include any extra text.`,
                 };
-                const retryText = await requestGemini(config, retryPrompt, COPILOT_SCHEMA, options);
-                const parsed = parseJson<CopilotResponse>(retryText, isCopilotResponse);
-                const context = typeof parsed.context === 'string' ? parsed.context : undefined;
-                const timeEstimate = typeof parsed.timeEstimate === 'string' ? parsed.timeEstimate : undefined;
-                const tags = Array.isArray(parsed.tags) ? normalizeTags(parsed.tags) : [];
-                return {
-                    context,
-                    timeEstimate: normalizeTimeEstimate(timeEstimate) as CopilotResponse['timeEstimate'],
-                    tags,
-                };
+                const retryText = await requestGemini(config, retryPrompt, schema, options);
+                return parseCopilotResponse(retryText, prompt.areas);
             }
         },
     });

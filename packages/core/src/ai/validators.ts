@@ -1,4 +1,6 @@
-import type { BreakdownResponse, ClarifyResponse, CopilotResponse, ReviewAction, ReviewAnalysisResponse } from './types';
+import { resolveSuggestedArea } from './areas';
+import type { AIAreaCandidate, BreakdownResponse, ClarifyResponse, ClarifySuggestion, CopilotResponse, ReviewAction, ReviewAnalysisResponse } from './types';
+import { normalizeTags, normalizeTimeEstimate, parseJson } from './utils';
 
 const REVIEW_ACTIONS: ReviewAction[] = ['someday', 'archive', 'breakdown', 'keep'];
 
@@ -7,7 +9,11 @@ const isRecord = (value: unknown): value is Record<string, unknown> => typeof va
 const isStringArray = (value: unknown): value is string[] =>
     Array.isArray(value) && value.every((item) => typeof item === 'string');
 
-export const isClarifyResponse = (value: unknown): value is ClarifyResponse => {
+type RawClarifyResponse = Omit<ClarifyResponse, 'suggestedAction'> & {
+    suggestedAction?: (Omit<ClarifySuggestion, 'areaId'> & { areaId?: unknown }) | null;
+};
+
+const isClarifyResponse = (value: unknown): value is RawClarifyResponse => {
     if (!isRecord(value)) return false;
     if (typeof value.question !== 'string') return false;
     if (!Array.isArray(value.options)) return false;
@@ -43,7 +49,14 @@ export const isReviewAnalysisResponse = (value: unknown): value is ReviewAnalysi
     });
 };
 
-export const isCopilotResponse = (value: unknown): value is CopilotResponse => {
+type RawCopilotResponse = {
+    context?: string | null;
+    timeEstimate?: string | null;
+    tags?: string[] | null;
+    areaId?: unknown;
+};
+
+const isCopilotResponse = (value: unknown): value is RawCopilotResponse => {
     if (!isRecord(value)) return false;
 
     if (value.context != null && typeof value.context !== 'string') return false;
@@ -51,3 +64,23 @@ export const isCopilotResponse = (value: unknown): value is CopilotResponse => {
     if (value.tags != null && !isStringArray(value.tags)) return false;
     return true;
 };
+
+export function parseClarifyResponse(text: string, areas: readonly AIAreaCandidate[]): ClarifyResponse {
+    const { suggestedAction, ...response } = parseJson(text, isClarifyResponse);
+    if (!suggestedAction) return { ...response, ...(suggestedAction === null ? { suggestedAction } : {}) };
+
+    const { areaId, ...suggestion } = suggestedAction;
+    const area = suggestion.isProject ? undefined : resolveSuggestedArea(areaId, areas);
+    return { ...response, suggestedAction: { ...suggestion, ...(area ? { areaId: area.id } : {}) } };
+}
+
+export function parseCopilotResponse(text: string, areas: readonly AIAreaCandidate[]): CopilotResponse {
+    const parsed = parseJson(text, isCopilotResponse);
+    const area = resolveSuggestedArea(parsed.areaId, areas);
+    return {
+        context: parsed.context ?? undefined,
+        timeEstimate: normalizeTimeEstimate(parsed.timeEstimate ?? undefined),
+        tags: normalizeTags(parsed.tags),
+        ...(area ? { areaId: area.id } : {}),
+    };
+}

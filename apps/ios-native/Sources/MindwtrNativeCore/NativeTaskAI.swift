@@ -71,6 +71,12 @@ enum NativeTaskAIJSON {
         guard let value = value as? String else { return false }
         return value.utf16.count <= maximum && (!nonempty || !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
     }
+    static func areaIDs(_ value: [String: Any]) throws -> [String] {
+        guard let raw = value["areaIds"] else { return [] }
+        guard let ids = raw as? [String], ids.count <= 20, Set(ids).count == ids.count,
+              ids.allSatisfy({ text($0, maximum: 500, nonempty: true) }) else { throw invalid }
+        return ids
+    }
     static func request(_ raw: String, operation: Bool) throws -> [String: Any] {
         let input = try object(raw)
         let fields: Set<String> = !operation ? ["id", "draft"] : input["operation"] as? String == "breakdown"
@@ -96,8 +102,12 @@ enum NativeTaskAIJSON {
         return raw
     }
     private static func fields(_ value: Any?, operation: String) -> Bool {
-        guard let edit = value as? [String: Any], Set(edit.keys) == Set(["type", "patch"]), edit["type"] as? String == "fields",
+        guard let edit = value as? [String: Any], edit["type"] as? String == "fields",
               let patch = edit["patch"] as? [String: Any] else { return false }
+        if operation == "clarify", Set(edit.keys) == Set(["type", "patch", "suggestedAreaId"]) {
+            return patch.isEmpty && text(edit["suggestedAreaId"], maximum: 500, nonempty: true)
+        }
+        guard Set(edit.keys) == Set(["type", "patch"]) else { return false }
         if operation == "breakdown" {
             return Set(patch.keys) == Set(["status"]) && ["inbox", "next", "waiting", "someday", "done", "reference"].contains(patch["status"] as? String ?? "")
         }

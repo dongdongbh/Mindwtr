@@ -12,7 +12,8 @@ enum NativeInboxAIJSON {
     }
     static func witness(_ raw: String) throws -> [String: Any] {
         let value = try NativeTaskAIJSON.object(raw)
-        guard Set(value.keys) == Set(["draft", "mode", "step", "contexts", "language"]), value["draft"] is [String: Any],
+        _ = try NativeTaskAIJSON.areaIDs(value)
+        guard Set(value.keys).subtracting(["areaIds"]) == Set(["draft", "mode", "step", "contexts", "language"]), value["draft"] is [String: Any],
               ["guided", "quick"].contains(value["mode"] as? String ?? ""), NativeTaskAIJSON.text(value["step"], maximum: 100, nonempty: true),
               NativeTaskAIJSON.text(value["language"], maximum: 100, nonempty: true),
               let contexts = value["contexts"] as? [String], contexts.count <= 20_000,
@@ -21,6 +22,13 @@ enum NativeInboxAIJSON {
     }
     static func edits(_ value: Any?) -> Bool {
         guard let edits = value as? [[String: Any]], (1...2).contains(edits.count) else { return false }
+        if edits.count == 1, let area = edits.first, area["type"] as? String == "setArea" {
+            return Set(area.keys) == Set(["type", "value", "expectedSuggestionRevision"])
+                && NativeTaskAIJSON.text(area["value"], maximum: 500, nonempty: true)
+                && (area["expectedSuggestionRevision"] as? NSNumber).map {
+                    CFGetTypeID($0) != CFBooleanGetTypeID() && $0.doubleValue == Double($0.intValue) && $0.intValue >= 0
+                } == true
+        }
         return edits.enumerated().allSatisfy { index, edit in
             if index == 0 {
                 return Set(edit.keys) == Set(["type", "field", "value"]) && edit["type"] as? String == "set"

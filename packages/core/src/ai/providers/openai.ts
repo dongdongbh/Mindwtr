@@ -3,8 +3,6 @@ import { buildBreakdownPrompt, buildClarifyPrompt, buildCopilotPrompt, buildRevi
 import {
     fetchTextWithTimeout,
     isAIRequestStopError,
-    normalizeTags,
-    normalizeTimeEstimate,
     parseJson,
     rateLimit,
     throwIfAIRequestAborted,
@@ -12,7 +10,7 @@ import {
     waitForAIRequestRetry,
     withAIRequestStopNotifications,
 } from '../utils';
-import { isBreakdownResponse, isClarifyResponse, isCopilotResponse, isReviewAnalysisResponse } from '../validators';
+import { isBreakdownResponse, isReviewAnalysisResponse, parseClarifyResponse, parseCopilotResponse } from '../validators';
 
 const OPENAI_BASE_URL = 'https://api.openai.com/v1/chat/completions';
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -39,7 +37,7 @@ const nullable = (schema: Record<string, unknown>): Record<string, unknown> => (
     anyOf: [schema, { type: 'null' }],
 });
 
-const CLARIFY_JSON_SCHEMA: OpenAIResponseSchema = {
+const clarifyJsonSchema = (withArea: boolean): OpenAIResponseSchema => ({
     name: 'clarify_response',
     schema: {
         type: 'object',
@@ -64,17 +62,18 @@ const CLARIFY_JSON_SCHEMA: OpenAIResponseSchema = {
             suggestedAction: nullable({
                 type: 'object',
                 additionalProperties: false,
-                required: ['title', 'context', 'timeEstimate', 'isProject'],
+                required: ['title', 'context', 'timeEstimate', 'isProject', ...(withArea ? ['areaId'] : [])],
                 properties: {
                     title: { type: 'string' },
                     context: nullable({ type: 'string' }),
                     timeEstimate: nullable({ type: 'string' }),
                     isProject: nullable({ type: 'boolean' }),
+                    ...(withArea ? { areaId: nullable({ type: 'string' }) } : {}),
                 },
             }),
         },
     },
-};
+});
 
 const BREAKDOWN_JSON_SCHEMA: OpenAIResponseSchema = {
     name: 'breakdown_response',
@@ -112,19 +111,20 @@ const REVIEW_JSON_SCHEMA: OpenAIResponseSchema = {
     },
 };
 
-const COPILOT_JSON_SCHEMA: OpenAIResponseSchema = {
+const copilotJsonSchema = (withArea: boolean): OpenAIResponseSchema => ({
     name: 'copilot_response',
     schema: {
         type: 'object',
         additionalProperties: false,
-        required: ['context', 'timeEstimate', 'tags'],
+        required: ['context', 'timeEstimate', 'tags', ...(withArea ? ['areaId'] : [])],
         properties: {
             context: nullable({ type: 'string' }),
             timeEstimate: nullable({ type: 'string' }),
             tags: { type: 'array', items: { type: 'string' } },
+            ...(withArea ? { areaId: nullable({ type: 'string' }) } : {}),
         },
     },
-};
+});
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;
 
@@ -366,16 +366,17 @@ export function createOpenAIProvider(config: AIProviderConfig): AIProvider {
     return withAIRequestStopNotifications(config, {
         clarifyTask: async (input: ClarifyInput, options?: AIRequestOptions): Promise<ClarifyResponse> => {
             const prompt = buildClarifyPrompt(input, config.language);
-            const text = await requestOpenAI(config, prompt, CLARIFY_JSON_SCHEMA, options);
+            const schema = clarifyJsonSchema(prompt.areas.length > 0);
+            const text = await requestOpenAI(config, prompt, schema, options);
             try {
-                return parseJson<ClarifyResponse>(text, isClarifyResponse);
+                return parseClarifyResponse(text, prompt.areas);
             } catch {
                 const retryPrompt = {
                     system: prompt.system,
                     user: `${prompt.user}\n\nReturn ONLY valid JSON. Do not include any extra text.`,
                 };
-                const retryText = await requestOpenAI(config, retryPrompt, CLARIFY_JSON_SCHEMA, options);
-                return parseJson<ClarifyResponse>(retryText, isClarifyResponse);
+                const retryText = await requestOpenAI(config, retryPrompt, schema, options);
+                return parseClarifyResponse(retryText, prompt.areas);
             }
         },
         breakDownTask: async (input: BreakdownInput, options?: AIRequestOptions): Promise<BreakdownResponse> => {
@@ -408,32 +409,17 @@ export function createOpenAIProvider(config: AIProviderConfig): AIProvider {
         },
         predictMetadata: async (input: CopilotInput, options?: AIRequestOptions): Promise<CopilotResponse> => {
             const prompt = buildCopilotPrompt(input, config.language);
-            const text = await requestOpenAI(config, prompt, COPILOT_JSON_SCHEMA, options);
+            const schema = copilotJsonSchema(prompt.areas.length > 0);
+            const text = await requestOpenAI(config, prompt, schema, options);
             try {
-                const parsed = parseJson<CopilotResponse>(text, isCopilotResponse);
-                const context = typeof parsed.context === 'string' ? parsed.context : undefined;
-                const timeEstimate = typeof parsed.timeEstimate === 'string' ? parsed.timeEstimate : undefined;
-                const tags = Array.isArray(parsed.tags) ? normalizeTags(parsed.tags) : [];
-                return {
-                    context,
-                    timeEstimate: normalizeTimeEstimate(timeEstimate) as CopilotResponse['timeEstimate'],
-                    tags,
-                };
+                return parseCopilotResponse(text, prompt.areas);
             } catch {
                 const retryPrompt = {
                     system: prompt.system,
                     user: `${prompt.user}\n\nReturn ONLY valid JSON. Do not include any extra text.`,
                 };
-                const retryText = await requestOpenAI(config, retryPrompt, COPILOT_JSON_SCHEMA, options);
-                const parsed = parseJson<CopilotResponse>(retryText, isCopilotResponse);
-                const context = typeof parsed.context === 'string' ? parsed.context : undefined;
-                const timeEstimate = typeof parsed.timeEstimate === 'string' ? parsed.timeEstimate : undefined;
-                const tags = Array.isArray(parsed.tags) ? normalizeTags(parsed.tags) : [];
-                return {
-                    context,
-                    timeEstimate: normalizeTimeEstimate(timeEstimate) as CopilotResponse['timeEstimate'],
-                    tags,
-                };
+                const retryText = await requestOpenAI(config, retryPrompt, schema, options);
+                return parseCopilotResponse(retryText, prompt.areas);
             }
         },
     });

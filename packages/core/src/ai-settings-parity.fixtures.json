@@ -2105,7 +2105,7 @@
     "alerts": [
      [
       "Enable AI features?",
-      "To use AI assistant, your task text and optional notes will be sent directly to OpenAI using your API key. Mindwtr does not collect this data. Provider privacy policy: https://openai.com/policies/privacy-policy. Do you want to continue?",
+      "Area suggestions also send the names and IDs of eligible Areas. To use AI assistant, your task text and optional notes will be sent directly to OpenAI using your API key. Mindwtr does not collect this data. Provider privacy policy: https://openai.com/policies/privacy-policy. Do you want to continue?",
       [
        "Cancel",
        "Agree"
@@ -2348,7 +2348,7 @@
     "alerts": [
      [
       "Enable AI features?",
-      "To use AI assistant, your task text and optional notes will be sent directly to OpenAI using your API key. Mindwtr does not collect this data. Provider privacy policy: https://openai.com/policies/privacy-policy. Do you want to continue?",
+      "Area suggestions also send the names and IDs of eligible Areas. To use AI assistant, your task text and optional notes will be sent directly to OpenAI using your API key. Mindwtr does not collect this data. Provider privacy policy: https://openai.com/policies/privacy-policy. Do you want to continue?",
       [
        "Cancel",
        "Agree"
@@ -2591,7 +2591,7 @@
     "alerts": [
      [
       "Enable AI features?",
-      "To use AI assistant, your task text and optional notes will be sent directly to OpenAI using your API key. Mindwtr does not collect this data. Provider privacy policy: https://openai.com/policies/privacy-policy. Do you want to continue?",
+      "Area suggestions also send the names and IDs of eligible Areas. To use AI assistant, your task text and optional notes will be sent directly to OpenAI using your API key. Mindwtr does not collect this data. Provider privacy policy: https://openai.com/policies/privacy-policy. Do you want to continue?",
       [
        "Cancel",
        "Agree"
@@ -3248,7 +3248,7 @@
     "alerts": [
      [
       "Enable AI features?",
-      "To use AI assistant, your task text and optional notes will be sent directly to Gemini using your API key. Mindwtr does not collect this data. Provider privacy policy: https://policies.google.com/privacy. Do you want to continue?",
+      "Area suggestions also send the names and IDs of eligible Areas. To use AI assistant, your task text and optional notes will be sent directly to Gemini using your API key. Mindwtr does not collect this data. Provider privacy policy: https://policies.google.com/privacy. Do you want to continue?",
       [
        "Cancel",
        "Agree"
@@ -3493,7 +3493,7 @@
     "alerts": [
      [
       "Enable AI features?",
-      "To use AI assistant, your task text and optional notes will be sent directly to Anthropic (Claude) using your API key. Mindwtr does not collect this data. Provider privacy policy: https://www.anthropic.com/privacy. Do you want to continue?",
+      "Area suggestions also send the names and IDs of eligible Areas. To use AI assistant, your task text and optional notes will be sent directly to Anthropic (Claude) using your API key. Mindwtr does not collect this data. Provider privacy policy: https://www.anthropic.com/privacy. Do you want to continue?",
       [
        "Cancel",
        "Agree"
@@ -4362,7 +4362,7 @@
     "alerts": [
      [
       "Enable AI features?",
-      "To use AI assistant, your task text and optional notes will be sent directly to OpenAI using your API key. Mindwtr does not collect this data. Provider privacy policy: https://openai.com/policies/privacy-policy. Do you want to continue?",
+      "Area suggestions also send the names and IDs of eligible Areas. To use AI assistant, your task text and optional notes will be sent directly to OpenAI using your API key. Mindwtr does not collect this data. Provider privacy policy: https://openai.com/policies/privacy-policy. Do you want to continue?",
       [
        "Cancel",
        "Agree"
@@ -12230,7 +12230,7 @@
     "alerts": [
      [
       "Enable AI features?",
-      "To use AI assistant, your task text and optional notes will be sent directly to your configured OpenAI-compatible endpoint (for example, a local or self-hosted LLM server) using your API key. Mindwtr does not collect this data. Do you want to continue?",
+      "Area suggestions also send the names and IDs of eligible Areas. To use AI assistant, your task text and optional notes will be sent directly to your configured OpenAI-compatible endpoint (for example, a local or self-hosted LLM server) using your API key. Mindwtr does not collect this data. Do you want to continue?",
       [
        "Cancel",
        "Agree"

@@ -2,11 +2,13 @@
 
 
 import type {
+    AIAreaCandidate,
     BreakdownInput,
     BreakdownResponse,
     ClarifyInput,
     ClarifyResponse,
     ClarifySuggestion,
+    CopilotResponse,
     ReviewAnalysisResponse,
     ReviewSnapshotItem,
 } from './ai/types';
@@ -14,6 +16,7 @@ import {
     formatCaptureModalCopilotApplied,
     getCaptureModalCopilotParts,
     keepCaptureModalCopilotSuggestion,
+    type CaptureModalCopilotApplied,
     type CaptureModalCopilotPart,
 } from './capture-modal-model';
 import { formatAIErrorAlertBody } from './ai/utils';
@@ -25,6 +28,7 @@ import type { AppSettings, ChecklistItem, Project, Task, TimeEstimate } from './
 
 type Translate = (key: string) => string;
 
+export { getAIAreaCandidates, resolveSuggestedArea } from './ai/areas';
 
 const urlPassword = (url: string | undefined): string | null => {
     if (!url) return null;
@@ -53,7 +57,7 @@ export const getAIErrorAlert = (error: unknown, t: Translate, apiKey: string, se
 export const TASK_COPILOT_DELAY_MS = 800;
 
 
-export type TaskCopilotPart = CaptureModalCopilotPart;
+export type TaskCopilotPart = CaptureModalCopilotPart | { kind: 'area'; value: string; label: string };
 
 
 export function getTaskCopilotText(title: string, description: string): string | null {
@@ -62,9 +66,20 @@ export function getTaskCopilotText(title: string, description: string): string |
 }
 
 
-export const keepTaskCopilotSuggestion = keepCaptureModalCopilotSuggestion;
+export function keepTaskCopilotSuggestion<T extends CopilotResponse>(suggestion: T, timeEstimatesEnabled: boolean): T | null {
+    return suggestion.areaId ? suggestion : keepCaptureModalCopilotSuggestion(suggestion, timeEstimatesEnabled);
+}
 
-export const getTaskCopilotParts = getCaptureModalCopilotParts;
+export function getTaskCopilotParts(
+    suggestion: CopilotResponse | null,
+    applied: CaptureModalCopilotApplied,
+    timeEstimatesEnabled: boolean,
+    area?: AIAreaCandidate,
+): TaskCopilotPart[] {
+    const parts: TaskCopilotPart[] = getCaptureModalCopilotParts(suggestion, applied, timeEstimatesEnabled);
+    if (area && area.id === suggestion?.areaId) parts.push({ kind: 'area', value: area.id, label: area.name });
+    return parts;
+}
 
 export const formatTaskCopilotApplied = formatCaptureModalCopilotApplied;
 
@@ -119,6 +134,7 @@ export function buildTaskClarifyInput(input: {
     task: Pick<Task, 'startTime' | 'dueDate' | 'reviewAt'>;
     merged: Partial<Pick<Task, 'contexts' | 'startTime' | 'dueDate' | 'reviewAt'>>;
     projectContext: TaskAIProjectContext | null | undefined;
+    areas?: readonly AIAreaCandidate[];
 }): ClarifyInput {
     const contexts = Array.from(new Set([
         ...getUsedTaskTokens(input.tasks, (item) => item.contexts, { prefix: '@' }),
@@ -130,6 +146,7 @@ export function buildTaskClarifyInput(input: {
         startTime: input.merged.startTime ?? input.task.startTime,
         dueDate: input.merged.dueDate ?? input.task.dueDate,
         reviewAt: input.merged.reviewAt ?? input.task.reviewAt,
+        ...(input.areas?.length ? { areas: input.areas } : {}),
         ...(input.projectContext ?? {}),
     };
 }
@@ -140,10 +157,12 @@ export function buildInboxClarifyInput(input: {
     task: Pick<Task, 'title' | 'contexts'>;
     contextPool: readonly string[];
     selectedContexts: readonly string[];
+    areas?: readonly AIAreaCandidate[];
 }): ClarifyInput {
     return {
         title: input.title || input.task.title,
         contexts: Array.from(new Set([...input.contextPool, ...input.selectedContexts, ...(input.task.contexts ?? [])])),
+        ...(input.areas?.length ? { areas: input.areas } : {}),
     };
 }
 

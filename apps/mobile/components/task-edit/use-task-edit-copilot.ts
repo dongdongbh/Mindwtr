@@ -1,22 +1,28 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { createAIProvider, type AIProviderId, type AppData, type Language, type TimeEstimate } from '@mindwtr/core';
+import { createAIProvider, useTaskStore, type AIProviderId, type AppData, type Area, type Language, type TimeEstimate } from '@mindwtr/core';
 import {
     applyTaskCopilotParts,
+    getAIAreaCandidates,
     getTaskCopilotParts,
     getTaskCopilotText,
     keepTaskCopilotSuggestion,
+    resolveSuggestedArea,
     TASK_COPILOT_DELAY_MS,
     type TaskCopilotPart,
 } from '@mindwtr/core/ai-task-actions';
 import type { TaskDraft, TaskDraftSetter } from '@mindwtr/core/task-draft';
 import { buildCopilotConfig, isAIKeyRequired, loadAIKey } from '../../lib/ai-config';
-import { logError } from '../../lib/app-log';
+import { logError, logInfo } from '../../lib/app-log';
+import type { TaskAIAreaDestination } from './use-task-edit-state';
 
 type CopilotSuggestion = {
     language: Language;
     context?: string;
     timeEstimate?: TimeEstimate;
     tags?: string[];
+    areaId?: string;
+    areaRevision?: number;
+    text: string;
 };
 
 
@@ -27,6 +33,8 @@ type UseTaskEditCopilotArgs = {
     language?: Language;
     aiEnabled: boolean;
     aiProvider: AIProviderId;
+    areas?: readonly Area[];
+    getAreaDestination?: () => TaskAIAreaDestination | null;
     timeEstimatesEnabled: boolean;
     titleDraft: string;
     descriptionDraft: string;
@@ -42,6 +50,8 @@ export function useTaskEditCopilot({
     language = 'en',
     aiEnabled,
     aiProvider,
+    areas,
+    getAreaDestination,
     timeEstimatesEnabled,
     titleDraft,
     descriptionDraft,
@@ -54,6 +64,7 @@ export function useTaskEditCopilot({
     const [aiKey, setAiKey] = useState('');
     const keyRequired = isAIKeyRequired(settings);
     const [copilotSuggestion, setCopilotSuggestion] = useState<CopilotSuggestion | null>(null);
+    const copilotText = getTaskCopilotText(titleDraft, descriptionDraft);
     const visibleCopilotSuggestion = copilotSuggestion?.language === language ? copilotSuggestion : null;
     const [copilotContext, setCopilotContext] = useState<string | undefined>(undefined);
     const [copilotEstimate, setCopilotEstimate] = useState<TimeEstimate | undefined>(undefined);
@@ -90,15 +101,17 @@ export function useTaskEditCopilot({
     }, [contextOptions, tagOptions]);
 
     useEffect(() => {
-        if (!aiEnabled || (keyRequired && !aiKey)) {
+        if (!visible || !aiEnabled || (keyRequired && !aiKey)) {
             setCopilotSuggestion(null);
             return;
         }
-        const input = getTaskCopilotText(titleDraft, descriptionDraft);
+        const input = copilotText;
         if (!input) {
             setCopilotSuggestion(null);
             return;
         }
+        const destination = getAreaDestination?.();
+        const candidates = destination ? getAIAreaCandidates(useTaskStore.getState().areas, destination) : [];
         let cancelled = false;
         let localAbortController: AbortController | null = null;
         const handle = setTimeout(async () => {
@@ -114,12 +127,13 @@ export function useTaskEditCopilot({
             try {
                 const provider = createAIProvider(buildCopilotConfig(settings, aiKey, language));
                 const suggestion = await provider.predictMetadata(
-                    { title: input, contexts: contextOptionsRef.current, tags: tagOptionsRef.current },
+                    { title: input, contexts: contextOptionsRef.current, tags: tagOptionsRef.current, ...(candidates.length ? { areas: candidates } : {}) },
                     abortController ? { signal: abortController.signal } : undefined
                 );
                 if (cancelled || !copilotMountedRef.current) return;
-                const kept = keepTaskCopilotSuggestion(suggestion, timeEstimatesEnabled);
-                setCopilotSuggestion(kept ? { ...kept, language } : null);
+                const areaId = candidates.find((area) => area.id === suggestion.areaId)?.id;
+                const kept = keepTaskCopilotSuggestion({ ...suggestion, areaId }, timeEstimatesEnabled);
+                setCopilotSuggestion(kept ? { ...kept, language, text: input, areaRevision: destination?.revision } : null);
             } catch {
                 if (!cancelled && copilotMountedRef.current) setCopilotSuggestion(null);
             }
@@ -132,7 +146,7 @@ export function useTaskEditCopilot({
                 copilotAbortRef.current = null;
             }
         };
-    }, [aiEnabled, aiKey, descriptionDraft, keyRequired, language, settings, timeEstimatesEnabled, titleDraft]);
+    }, [aiEnabled, aiKey, copilotText, getAreaDestination, keyRequired, language, settings, timeEstimatesEnabled, visible]);
 
     useEffect(() => {
         if (!visible) {
@@ -161,15 +175,30 @@ export function useTaskEditCopilot({
     }, []);
 
 
+    const destination = getAreaDestination?.();
+    const area = aiEnabled && visible && destination && visibleCopilotSuggestion?.text === copilotText && visibleCopilotSuggestion.areaRevision === destination.revision
+        ? resolveSuggestedArea(visibleCopilotSuggestion.areaId, areas ?? [], destination)
+        : undefined;
     const pendingCopilotParts = useMemo<CopilotPart[]>(() => getTaskCopilotParts(
         visibleCopilotSuggestion,
         { context: copilotContext, timeEstimate: copilotEstimate, tags: copilotTags },
         timeEstimatesEnabled,
-    ), [copilotContext, copilotEstimate, copilotTags, timeEstimatesEnabled, visibleCopilotSuggestion]);
+        area,
+    ), [area, copilotContext, copilotEstimate, copilotTags, timeEstimatesEnabled, visibleCopilotSuggestion]);
 
 
     const applyCopilotParts = useCallback((parts: CopilotPart[]) => {
         if (parts.length === 0) return;
+        const areaPart = parts.find((part) => part.kind === 'area');
+        const destination = areaPart && getAreaDestination?.();
+        if (areaPart && destination && areaPart.value === area?.id && destination.revision === visibleCopilotSuggestion?.areaRevision
+            && getTaskCopilotText(destination.title, destination.description) === visibleCopilotSuggestion?.text
+            && resolveSuggestedArea(areaPart.value, useTaskStore.getState().areas, destination)) {
+            setDraftField('areaId', areaPart.value);
+            void logInfo('AI Area suggestion accepted', {
+                scope: 'ai', extra: { releaseCheck: 'v1.3.10/ai-area-suggestion', surface: 'editor-copilot' },
+            });
+        }
         const applied = applyTaskCopilotParts({ contexts: draft?.contexts, tags: draft?.tags }, parts, timeEstimatesEnabled);
         if (applied.context) {
             setDraftField('contexts', applied.patch.contexts ?? '');
@@ -183,7 +212,7 @@ export function useTaskEditCopilot({
             setDraftField('timeEstimate', applied.timeEstimate);
             setCopilotEstimate(applied.timeEstimate);
         }
-    }, [draft?.contexts, draft?.tags, setDraftField, timeEstimatesEnabled]);
+    }, [area?.id, draft?.contexts, draft?.tags, getAreaDestination, setDraftField, timeEstimatesEnabled, visibleCopilotSuggestion]);
 
     const applyCopilotPart = useCallback((part: CopilotPart) => {
         applyCopilotParts([part]);

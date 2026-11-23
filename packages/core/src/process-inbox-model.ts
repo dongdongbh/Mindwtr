@@ -1093,7 +1093,7 @@ export type ProcessInboxDraftEdit =
     | { type: 'setSomedaySection'; value: string | null }
 
     | { type: 'setSection'; value: string | null }
-    | { type: 'setArea'; value: string | null }
+    | { type: 'setArea'; value: string | null; expectedSuggestionRevision?: number }
     | { type: 'setProjectBrowseScope'; value: ProcessInboxProjectBrowseScope }
     | { type: 'selectProject'; value: string | null }
     | { type: 'toggleContext'; value: string }

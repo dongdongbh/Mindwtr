@@ -962,9 +962,10 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
     }
 
 
-    fun editFields(values: Map<String, Any?>) =
+    fun editFields(values: Map<String, Any?>) {
+        if ("projectId" in values || "areaId" in values) ai.destinationEdited()
         editDraft(JSONObject().put("type", "fields").put("patch", JSONObject().apply { values.forEach { (field, value) -> put(field, value ?: JSONObject.NULL) } }))
-
+    }
 
     internal fun applyAIEdit(edit: JSONObject) {
         val current = editor ?: return

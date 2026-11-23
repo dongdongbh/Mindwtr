@@ -487,6 +487,7 @@ The native client is a Kotlin and Jetpack Compose app in `apps/android-native`. 
 
 ## AI assistant
 
+- In Clarify or the inline task-editor suggestions, tap the suggested Area to apply it to an unassigned draft.
 - Reach: Settings › Advanced › AI assistant › Enable AI assistant. It has the provider, model suggestions, and the API key. AI also shows in Process Inbox (clarify) and Weekly Review.
 - Selectors: `ai-enabled`, `ai-picker`, `ai-consent-agree`, `ai-consent-cancel`, `ai-answer`, `ai-applied`, `ai-apply-all`, `ai-alert-ok`, `process-ai-clarify`, `review-ai-run`, `review-ai-suggestion`, `review-ai-apply`, `review-ai-error`
 - Code: `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/AISettings.kt`, `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/AIActions.kt`, `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/AIRules.kt`, `apps/android-native/bundle/host-ai.ts`

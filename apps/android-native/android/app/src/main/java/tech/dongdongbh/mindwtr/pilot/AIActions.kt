@@ -88,6 +88,17 @@ class AIActionsModel(private val shell: InboxViewModel) {
     private var asked: String? = null
 
 
+    var destinationRevision by mutableStateOf(0L); private set
+
+    fun destinationEdited() {
+        destinationRevision++
+        asked = null
+        calls.cancel("copilot", "editor")
+        if (working == "editor") working = null
+        suggestion = null
+        editorAI = null
+    }
+
     fun readEditor() {
         val editor = shell.editor ?: return
         if (editor.readOnly) { editorAI = null; return }
@@ -97,10 +108,11 @@ class AIActionsModel(private val shell: InboxViewModel) {
         }
 
         if (working == "editor" && editorAsked != snapshot()) { calls.cancel("editor"); working = null }
+        val revision = destinationRevision
         val input = JSONObject().put("id", editor.id).put("draft", JSONObject(draftJson(editor.fullDraft())))
             .put("copilot", JSONObject().put("suggestion", suggestion ?: JSONObject.NULL).put("applied", applied))
         shell.background(emptyList(), { runtime -> runtime.menuRead("taskEditorAI", input.toString()) }) { view, _ ->
-            if (shell.editor?.session != editor.session) return@background
+            if (shell.editor?.session != editor.session || revision != destinationRevision) return@background
             editorAI = view
             val request = view.getJSONObject("copilot").optJSONObject("request")
             if (request == null) { asked = null; calls.cancel("copilot"); if (suggestion != null) { suggestion = null; readEditor() }; return@background }
@@ -108,7 +120,7 @@ class AIActionsModel(private val shell: InboxViewModel) {
             if (text == asked) return@background
             asked = text
             calls.cancel("copilot")
-            main.postDelayed({ askCopilot(editor.session, text) }, request.getLong("delayMs"))
+            main.postDelayed({ if (revision == destinationRevision) askCopilot(editor.session, text) }, request.getLong("delayMs"))
         }
     }
 
@@ -133,6 +145,8 @@ class AIActionsModel(private val shell: InboxViewModel) {
 
 
     fun applyChip(chip: JSONObject) {
+        val visible = editorAI?.optJSONObject("copilot")?.optJSONObject("suggested") ?: return
+        if (visible.optJSONObject("applyAll") !== chip && visible.menuObjects("parts").none { it === chip }) return
         applied = chip.getJSONObject("applied")
         shell.applyAIEdit(chip.getJSONObject("edit"))
         readEditor()
@@ -143,8 +157,9 @@ class AIActionsModel(private val shell: InboxViewModel) {
     private fun snapshot(): String? = shell.editor?.let { "${it.session}\n${draftJson(it.fullDraft())}\n${JSONArray(it.checklistNow)}" }
     private fun editorFits(): () -> Boolean {
         val asked = snapshot()
+        val revision = destinationRevision
         editorAsked = asked
-        return { asked != null && snapshot() == asked }
+        return { asked != null && snapshot() == asked && destinationRevision == revision }
     }
 
 

@@ -1223,6 +1223,100 @@ describe('InboxProcessor', () => {
         expect(getByRole('button', { name: 'taskEdit.aiClarify' })).toBeInTheDocument();
     });
 
+    it('applies only the suggested area to the guided Inbox draft until the normal next action', async () => {
+        clarifyTask.mockResolvedValueOnce({
+            question: 'What needs to launch?',
+            options: [],
+            suggestedAction: { title: 'Launch the website', areaId: workArea.id },
+        });
+        const { findByRole, getByRole, updateTask } = renderInboxProcessor({
+            settings: {
+                ai: { enabled: true, provider: 'openai', baseUrl: 'http://localhost:11434/v1' },
+                gtd: { inboxProcessing: { projectFirst: true } },
+            },
+            areas: [workArea, { ...homeArea, deletedAt: nowIso }],
+        });
+
+        fireEvent.click(getByRole('button', { name: /process\.btn/i }));
+        fireEvent.click(getByRole('button', { name: 'taskEdit.aiClarify' }));
+        fireEvent.click(await findByRole('button', { name: 'taskEdit.areaLabel: Work' }));
+
+        expect(clarifyTask).toHaveBeenLastCalledWith(expect.objectContaining({ areas: [{ id: workArea.id, name: 'Work' }] }));
+        expect(getByRole('button', { name: 'Work' })).toBeInTheDocument();
+        expect(getByRole('button', { name: 'ai.applySuggestion' })).toBeInTheDocument();
+        expect(updateTask).not.toHaveBeenCalled();
+
+        fireEvent.click(getByRole('button', { name: 'process.refineNext' }));
+        fireEvent.click(getByRole('button', { name: 'process.doneIt' }));
+        await waitFor(() => expect(updateTask).toHaveBeenCalledWith(inboxTask.id, expect.objectContaining({
+            areaId: workArea.id,
+            title: inboxTask.title,
+        })));
+    });
+
+    it('keeps a delayed Inbox area suggestion invalid after the user chooses an area and clears it', async () => {
+        let finishClarify: (response: ClarifyResponse) => void = () => {};
+        clarifyTask.mockImplementationOnce(() => new Promise<ClarifyResponse>((resolve) => { finishClarify = resolve; }));
+        const { findByText, getByRole, queryByRole } = renderInboxProcessor({
+            settings: {
+                ai: { enabled: true, provider: 'openai', baseUrl: 'http://localhost:11434/v1' },
+                gtd: { inboxProcessing: { projectFirst: true } },
+            },
+            areas: [workArea, homeArea],
+        });
+
+        fireEvent.click(getByRole('button', { name: /process\.btn/i }));
+        fireEvent.click(getByRole('button', { name: 'taskEdit.aiClarify' }));
+        await waitFor(() => expect(clarifyTask).toHaveBeenLastCalledWith(expect.objectContaining({ areas: [
+            { id: workArea.id, name: 'Work' }, { id: homeArea.id, name: 'Home' },
+        ] })));
+
+        fireEvent.click(getByRole('button', { name: 'projects.noArea' }));
+        fireEvent.click(getByRole('option', { name: 'Home' }));
+        fireEvent.click(getByRole('button', { name: 'Home' }));
+        fireEvent.click(getByRole('option', { name: 'projects.noArea' }));
+        await act(async () => finishClarify({
+            question: 'What is launching?',
+            options: [],
+            suggestedAction: { title: 'Set the date', areaId: workArea.id },
+        }));
+
+        expect(await findByText('What is launching?')).toBeInTheDocument();
+        expect(queryByRole('button', { name: 'taskEdit.areaLabel: Work' })).not.toBeInTheDocument();
+        expect(getByRole('button', { name: 'projects.noArea' })).toBeInTheDocument();
+    });
+
+    it('hides and excludes Area suggestions in Refine while an Inbox project conversion is selected', async () => {
+        const initialSuggestion: ClarifyResponse = {
+            question: 'What needs to launch?',
+            options: [],
+            suggestedAction: { title: 'Launch the website', areaId: workArea.id },
+        };
+        clarifyTask.mockResolvedValueOnce(initialSuggestion)
+            .mockResolvedValueOnce({ ...initialSuggestion, question: 'Which project is this?' });
+        const { findByRole, findByText, getByRole, queryByRole } = renderInboxProcessor({
+            settings: { ai: { enabled: true, provider: 'openai', baseUrl: 'http://localhost:11434/v1' } },
+            areas: [workArea],
+        });
+
+        fireEvent.click(getByRole('button', { name: /process\.btn/i }));
+        fireEvent.click(getByRole('button', { name: 'taskEdit.aiClarify' }));
+        expect(await findByRole('button', { name: 'taskEdit.areaLabel: Work' })).toBeInTheDocument();
+
+        fireEvent.click(getByRole('button', { name: 'process.refineNext' }));
+        fireEvent.click(getByRole('button', { name: 'process.yesActionable' }));
+        fireEvent.click(getByRole('button', { name: 'process.moreThanOneStepYes' }));
+        fireEvent.click(getByRole('button', { name: 'common.back' }));
+        fireEvent.click(getByRole('button', { name: 'common.back' }));
+        fireEvent.click(getByRole('button', { name: 'common.back' }));
+
+        expect(queryByRole('button', { name: 'taskEdit.areaLabel: Work' })).not.toBeInTheDocument();
+        fireEvent.click(getByRole('button', { name: 'taskEdit.aiClarify' }));
+        expect(await findByText('Which project is this?')).toBeInTheDocument();
+        expect(clarifyTask.mock.lastCall?.[0]).not.toHaveProperty('areas');
+        expect(queryByRole('button', { name: 'taskEdit.areaLabel: Work' })).not.toBeInTheDocument();
+    });
+
     it('does not show a delayed AI clarify response on the next inbox task', async () => {
         let resolveClarify!: (response: ClarifyResponse) => void;
         const delayedResponse = new Promise<ClarifyResponse>((resolve) => {

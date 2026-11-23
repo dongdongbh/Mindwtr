@@ -473,17 +473,20 @@ function TaskEditFormTabComponent({
                                 <Text style={[styles.copilotText, { color: tc.text }]}>
                                     {t('copilot.suggested')}
                                 </Text>
-                                {pendingCopilotParts.map((part) => (
-                                    <TouchableOpacity
-                                        key={`${part.kind}:${part.value}`}
-                                        accessibilityRole="button"
-                                        accessibilityLabel={part.value}
-                                        style={[styles.copilotChip, { borderColor: tc.border, backgroundColor: tc.cardBg }]}
-                                        onPress={() => applyCopilotPart(part)}
-                                    >
-                                        <Text style={[styles.copilotText, { color: tc.text }]}>{part.value}</Text>
-                                    </TouchableOpacity>
-                                ))}
+                                {pendingCopilotParts.map((part) => {
+                                    const label = part.kind === 'area' ? `${t('taskEdit.areaLabel')}: ${part.label}` : part.value;
+                                    return (
+                                        <TouchableOpacity
+                                            key={`${part.kind}:${part.value}`}
+                                            accessibilityRole="button"
+                                            accessibilityLabel={label}
+                                            style={[styles.copilotChip, { borderColor: tc.border, backgroundColor: tc.cardBg }]}
+                                            onPress={() => applyCopilotPart(part)}
+                                        >
+                                            <Text style={[styles.copilotText, { color: tc.text }]}>{label}</Text>
+                                        </TouchableOpacity>
+                                    );
+                                })}
                                 {pendingCopilotParts.length > 1 && (
                                     <TouchableOpacity
                                         accessibilityRole="button"

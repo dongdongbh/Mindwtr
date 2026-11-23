@@ -15,8 +15,6 @@ import { buildBreakdownPrompt, buildClarifyPrompt, buildCopilotPrompt, buildRevi
 import {
     fetchTextWithTimeout,
     isAIRequestStopError,
-    normalizeTags,
-    normalizeTimeEstimate,
     parseJson,
     rateLimit,
     throwIfAIRequestAborted,
@@ -24,7 +22,7 @@ import {
     waitForAIRequestRetry,
     withAIRequestStopNotifications,
 } from '../utils';
-import { isBreakdownResponse, isClarifyResponse, isCopilotResponse, isReviewAnalysisResponse } from '../validators';
+import { isBreakdownResponse, isReviewAnalysisResponse, parseClarifyResponse, parseCopilotResponse } from '../validators';
 import { resolveAnthropicModel } from '../catalog';
 
 const ANTHROPIC_BASE_URL = 'https://api.anthropic.com/v1/messages';
@@ -230,14 +228,14 @@ export function createAnthropicProvider(config: AIProviderConfig): AIProvider {
             const prompt = buildClarifyPrompt(input, config.language);
             const text = await requestAnthropic(config, prompt, options);
             try {
-                return parseJson<ClarifyResponse>(text, isClarifyResponse);
+                return parseClarifyResponse(text, prompt.areas);
             } catch {
                 const retryPrompt = {
                     system: prompt.system,
                     user: `${prompt.user}\n\nReturn ONLY valid JSON. Do not include any extra text.`,
                 };
                 const retryText = await requestAnthropic(config, retryPrompt, options);
-                return parseJson<ClarifyResponse>(retryText, isClarifyResponse);
+                return parseClarifyResponse(retryText, prompt.areas);
             }
         },
         breakDownTask: async (input: BreakdownInput, options?: AIRequestOptions): Promise<BreakdownResponse> => {
@@ -272,30 +270,14 @@ export function createAnthropicProvider(config: AIProviderConfig): AIProvider {
             const prompt = buildCopilotPrompt(input, config.language);
             const text = await requestAnthropic(config, prompt, options);
             try {
-                const parsed = parseJson<CopilotResponse>(text, isCopilotResponse);
-                const context = typeof parsed.context === 'string' ? parsed.context : undefined;
-                const timeEstimate = typeof parsed.timeEstimate === 'string' ? parsed.timeEstimate : undefined;
-                const tags = Array.isArray(parsed.tags) ? normalizeTags(parsed.tags) : [];
-                return {
-                    context,
-                    timeEstimate: normalizeTimeEstimate(timeEstimate) as CopilotResponse['timeEstimate'],
-                    tags,
-                };
+                return parseCopilotResponse(text, prompt.areas);
             } catch {
                 const retryPrompt = {
                     system: prompt.system,
                     user: `${prompt.user}\n\nReturn ONLY valid JSON. Do not include any extra text.`,
                 };
                 const retryText = await requestAnthropic(config, retryPrompt, options);
-                const parsed = parseJson<CopilotResponse>(retryText, isCopilotResponse);
-                const context = typeof parsed.context === 'string' ? parsed.context : undefined;
-                const timeEstimate = typeof parsed.timeEstimate === 'string' ? parsed.timeEstimate : undefined;
-                const tags = Array.isArray(parsed.tags) ? normalizeTags(parsed.tags) : [];
-                return {
-                    context,
-                    timeEstimate: normalizeTimeEstimate(timeEstimate) as CopilotResponse['timeEstimate'],
-                    tags,
-                };
+                return parseCopilotResponse(retryText, prompt.areas);
             }
         },
     });

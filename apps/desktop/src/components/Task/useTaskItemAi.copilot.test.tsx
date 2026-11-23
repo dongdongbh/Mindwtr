@@ -1,6 +1,6 @@
-import { act, render, renderHook, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { type Task, type TaskDraftSetter, useTaskStore } from '@mindwtr/core';
+import { type Area, type ClarifyResponse, type CopilotResponse, type Task, type TaskDraftSetter, useTaskStore } from '@mindwtr/core';
 
 import { useTaskItemAi } from './useTaskItemAi';
 import { buildCopilotConfig } from '../../lib/ai-config';
@@ -10,12 +10,13 @@ import { useUiStore } from '../../store/ui-store';
 import { holdSyncSave } from '../../test/hold-sync-save';
 
 const predictMetadata = vi.hoisted(() => vi.fn());
+const clarifyTask = vi.hoisted(() => vi.fn());
 const breakDownTask = vi.hoisted(() => vi.fn());
 const logWarn = vi.hoisted(() => vi.fn());
 
 vi.mock('@mindwtr/core', async (importOriginal) => {
     const actual = await importOriginal<typeof import('@mindwtr/core')>();
-    return { ...actual, createAIProvider: () => ({ predictMetadata, breakDownTask }) };
+    return { ...actual, createAIProvider: () => ({ predictMetadata, clarifyTask, breakDownTask }) };
 });
 
 
@@ -34,6 +35,10 @@ vi.mock('../../lib/ai-config', () => ({
 vi.mock('../../lib/app-log', () => ({ logWarn, logInfo: vi.fn() }));
 
 const settings = { ai: { enabled: true, provider: 'openai' } } as never;
+const healthArea: Area = {
+    id: 'area-health', name: 'Health', color: '#94a3b8', order: 0,
+    createdAt: '2026-11-01T00:00:00Z', updatedAt: '2026-11-01T00:00:00Z',
+};
 
 const renderAi = (setField: TaskDraftSetter, overrides: Record<string, unknown> = {}) => renderHook(() => useTaskItemAi({
     taskId: 'task-1',
@@ -264,6 +269,79 @@ describe('useTaskItemAi copilot parts', () => {
         expect(setField.mock.calls.some(([field]) => field === 'timeEstimate')).toBe(false);
     });
 
+    it('resolves areas by the current list and refuses to apply a removed suggestion', async () => {
+        const setField = vi.fn();
+        const contextOptions: string[] = [];
+        const tagOptions: string[] = [];
+        predictMetadata.mockResolvedValue({ areaId: healthArea.id });
+        const { result, rerender } = renderHook(({ areas }: { areas: Area[] }) => useTaskItemAi({
+            taskId: 'task-1', settings, t: (key) => key,
+            editTitle: 'Book the dentist', editDescription: '', editContexts: '', editTags: '',
+            editStartTime: '', editDueDate: '', editReviewAt: '',
+            contextOptions, tagOptions, projectContext: null,
+            timeEstimatesEnabled: true, setField, areas,
+        }), { initialProps: { areas: [healthArea] } });
+        await settleSuggestion();
+        const chip = { kind: 'area', value: healthArea.id, label: healthArea.name } as const;
+        expect(result.current.pendingCopilotParts).toEqual([chip]);
+
+        rerender({ areas: [{ ...healthArea, name: 'Wellbeing' }] });
+        expect(result.current.pendingCopilotParts).toEqual([{ ...chip, label: 'Wellbeing' }]);
+
+        rerender({ areas: [{ ...healthArea, deletedAt: healthArea.updatedAt }] });
+        expect(result.current.pendingCopilotParts).toEqual([]);
+        act(() => result.current.applyCopilotPart(chip));
+        expect(setField).not.toHaveBeenCalled();
+    });
+
+    it.each([
+        ['title', { editTitle: 'Pay the electricity bill', editDescription: '' }],
+        ['notes', { editTitle: 'Book the dentist', editDescription: 'Call for a home energy consultation instead' }],
+    ] as const)('hides and rejects an old area while the new %s request is pending', async (_field, nextText) => {
+        const setField = vi.fn();
+        const areas = [healthArea];
+        const contextOptions: string[] = [];
+        const tagOptions: string[] = [];
+        let finishCopilot: (suggestion: CopilotResponse) => void = () => {};
+        predictMetadata.mockResolvedValueOnce({ areaId: healthArea.id, tags: ['#errand'] })
+            .mockImplementationOnce(() => new Promise<CopilotResponse>((resolve) => { finishCopilot = resolve; }));
+        const { result, rerender } = renderHook((props: { editTitle: string; editDescription: string }) => useTaskItemAi({
+            taskId: 'task-1', settings, t: (key) => key,
+            ...props, editContexts: '', editTags: '', editStartTime: '', editDueDate: '', editReviewAt: '',
+            contextOptions, tagOptions, projectContext: null,
+            timeEstimatesEnabled: true, setField, areas,
+        }), { initialProps: { editTitle: 'Book the dentist', editDescription: '' } });
+        await settleSuggestion();
+        const areaChip = { kind: 'area', value: healthArea.id, label: healthArea.name } as const;
+        expect(result.current.pendingCopilotParts).toContainEqual(areaChip);
+
+        rerender(nextText);
+        expect(result.current.pendingCopilotParts).toEqual([{ kind: 'tag', value: '#errand' }]);
+        act(() => result.current.applyCopilotPart(areaChip));
+        expect(setField).not.toHaveBeenCalled();
+        await settleSuggestion();
+
+        act(() => result.current.applyCopilotSuggestion());
+        expect(setField.mock.calls).toEqual([['tags', '#errand']]);
+        await act(async () => finishCopilot({ areaId: healthArea.id }));
+        expect(result.current.pendingCopilotParts).toEqual([areaChip]);
+    });
+
+    it.each([{ areaId: 'current-area' }, { projectId: 'current-project' }])(
+        'keeps the task destination when the copilot returns an area for %o',
+        async (destination) => {
+            const setField = vi.fn();
+            predictMetadata.mockResolvedValue({ areaId: healthArea.id, context: '@phone' });
+            const { result } = renderAi(setField, { areas: [healthArea], destination });
+            await settleSuggestion();
+
+            expect(predictMetadata.mock.lastCall?.[0]).not.toHaveProperty('areas');
+            expect(result.current.pendingCopilotParts).toEqual([{ kind: 'context', value: '@phone' }]);
+            act(() => result.current.applyCopilotSuggestion());
+            expect(setField.mock.calls).toEqual([['contexts', '@phone']]);
+        },
+    );
+
     it('makes no copilot request when copilot is switched off for the surface', async () => {
         const setField = vi.fn();
         const { result } = renderAi(setField, { copilotEnabled: false });
@@ -344,6 +422,46 @@ describe('useTaskItemAi copilot parts', () => {
         await settleSuggestion();
 
         expect(predictMetadata).toHaveBeenCalledTimes(2);
+    });
+});
+
+describe('useTaskItemAi Clarify request ownership', () => {
+    it.each([
+        { editTitle: 'Pay the electricity bill' },
+        { taskId: 'task-2' },
+        { editorSessionRevision: 2 },
+    ])('refuses a delayed Clarify response after changing %o', async (change) => {
+        const setField = vi.fn();
+        const areas = [healthArea];
+        const contextOptions: string[] = [];
+        const tagOptions: string[] = [];
+        const initialProps = { taskId: 'task-1', editTitle: 'Book the dentist', editorSessionRevision: 1 };
+        let finishClarify: (response: ClarifyResponse) => void = () => {};
+        clarifyTask.mockImplementationOnce(() => new Promise<ClarifyResponse>((resolve) => { finishClarify = resolve; }));
+        const { result, rerender } = renderHook((props) => useTaskItemAi({
+            ...props, settings, t: (key) => key,
+            editDescription: '', editContexts: '', editTags: '', editStartTime: '', editDueDate: '', editReviewAt: '',
+            contextOptions, tagOptions, projectContext: null,
+            timeEstimatesEnabled: true, setField, areas, copilotEnabled: false,
+        }), { initialProps });
+
+        await act(async () => { void result.current.handleAIClarify(); });
+        expect(clarifyTask).toHaveBeenLastCalledWith(expect.objectContaining({ title: initialProps.editTitle }));
+        rerender({ ...initialProps, ...change });
+        await act(async () => finishClarify({
+            question: 'Which dentist?',
+            options: [{ label: 'Call the dentist', action: 'Call the dentist' }],
+            suggestedAction: { title: 'Call the dentist', areaId: healthArea.id },
+        }));
+
+        expect(result.current.aiClarifyResponse).toBeNull();
+        expect(result.current.clarifyArea).toBeUndefined();
+        act(() => {
+            result.current.applyClarifyArea();
+            result.current.applyClarifySuggestion();
+            result.current.selectClarifyOption('Call the dentist');
+        });
+        expect(setField).not.toHaveBeenCalled();
     });
 });
 
@@ -443,5 +561,25 @@ describe('TaskItem copilot wiring', () => {
         const calls = vi.mocked(useTaskItemAi).mock.calls;
         const lastCall = calls[calls.length - 1]?.[0];
         expect(lastCall?.copilotEnabled).toBe(true);
+    });
+
+    it('shows an area-only copilot response as a labeled chip and updates only the editor draft', async () => {
+        useTaskStore.setState({ _allAreas: [healthArea], _allTasks: [rowTask] });
+        useUiStore.setState({ editingTaskId: rowTask.id });
+        predictMetadata.mockResolvedValue({ areaId: healthArea.id });
+        const { getByRole, queryByRole } = render(
+            <LanguageProvider>
+                <TaskItem task={rowTask} />
+            </LanguageProvider>
+        );
+
+        await settleSuggestion();
+        expect(predictMetadata).toHaveBeenLastCalledWith(expect.objectContaining({
+            areas: [{ id: healthArea.id, name: 'Health' }],
+        }), expect.anything());
+        fireEvent.click(getByRole('button', { name: 'Area: Health' }));
+        expect(queryByRole('button', { name: 'Area: Health' })).not.toBeInTheDocument();
+        expect(getByRole('button', { name: 'Destination' })).toHaveTextContent('Health');
+        expect(useTaskStore.getState()._allTasks.find((task) => task.id === rowTask.id)?.areaId).toBeUndefined();
     });
 });

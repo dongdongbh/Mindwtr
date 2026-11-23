@@ -1935,7 +1935,7 @@ assert.match(model, /error = editRefusal\s+saveQueued = false/);
 assert.match(editorUi, /LaunchedEffect\(coreValue\) \{ if \(!pending\) text = coreValue \}/);
 assert.match(editorUi, /RetryButton\(model::reloadEditor, !busy && !failed && !editsPending\)/);
 assert.match(model, /\.put\("amount", amount \?: latest\?\.get\("amount"\) \?: shown\.getInt\("amount"\)\)/);
-assert.match(model, /fun editFields\(values: Map<String, Any\?>\) =\s*editDraft\(JSONObject\(\)\.put\("type", "fields"\)/);
+assert.match(model, /fun editFields\(values: Map<String, Any\?>\) \{\s*if \("projectId" in values \|\| "areaId" in values\) ai\.destinationEdited\(\)\s*editDraft\(JSONObject\(\)\.put\("type", "fields"\)/);
 assert.match(editorUi, /if \(\(current\[field\] \?: "null"\) != \(sent\[field\] \?: "null"\)\) current\[field\] \?: "null" else reply\.draft\[field\] \?: "null"/);
 
 assert.match(editorUi, /DateButton\(part\.label, label, !locked, Modifier\.weight\(1f\)\) \{ pickDate\(id\) \}/);

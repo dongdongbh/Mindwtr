@@ -9473,7 +9473,8 @@ private final class Engine: @unchecked Sendable {
 
     private func readTaskAICanonicalWitness(_ raw: String) throws -> [String: Any] {
         let value = try NativeTaskAIJSON.object(invoke("iosTaskAIWitness", arguments: [raw]))
-        guard Set(value.keys) == Set(["language", "projectContext", "contextTaskIDs"]),
+        _ = try NativeTaskAIJSON.areaIDs(value)
+        guard Set(value.keys).subtracting(["areaIds"]) == Set(["language", "projectContext", "contextTaskIDs"]),
               NativeTaskAIJSON.text(value["language"], maximum: 100, nonempty: true),
               let ids = value["contextTaskIDs"] as? [String], ids.count <= 20, Set(ids.map { Data($0.utf8) }).count == ids.count,
               ids.allSatisfy({ NativeTaskAIJSON.text($0, maximum: 500, nonempty: true) }) else { throw NativeTaskAIJSON.invalid }
@@ -9485,7 +9486,17 @@ private final class Engine: @unchecked Sendable {
         return value
     }
 
-    private func taskAIWitness(_ request: [String: Any], contextIDs: [String]) throws -> Any {
+    private func taskAIAreas(_ ids: [String]) throws -> [[String: Any]] {
+        guard !ids.isEmpty else { return [] }
+        let slots = Array(repeating: "?", count: ids.count).joined(separator: ",")
+        let raw = try requireDatabase().execute("SELECT id,name FROM areas WHERE id IN (\(slots)) AND deletedAt IS NULL ORDER BY id", parametersJSON: Self.ownedJSON(ids))
+        guard let areas = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [[String: Any]], areas.count == ids.count else {
+            throw NativeTaskAIJSON.unavailable
+        }
+        return areas
+    }
+
+    private func taskAIWitness(_ request: [String: Any], contextIDs: [String], areaIDs: [String]) throws -> Any {
         guard let id = request["id"] as? String, let draft = request["draft"] as? [String: Any] else { throw NativeTaskAIJSON.invalid }
         let sqlite = try requireDatabase()
         let rows = try NativeJSON.jsonObject(with: Data(sqlite.execute("SELECT rowid AS _rowid,* FROM tasks WHERE id=?", parametersJSON: Self.ownedJSON([id])).utf8)) as? [[String: Any]]
@@ -9503,7 +9514,7 @@ private final class Engine: @unchecked Sendable {
             siblings.append(try NativeJSON.jsonObject(with: Data(raw.utf8)))
         }
         let features = settings["features"] as? [String: Any] ?? [:]
-        return ["task": task, "projects": projects, "siblings": siblings, "ai": settings["ai"] ?? [:],
+        return ["task": task, "areas": try taskAIAreas(areaIDs), "projects": projects, "siblings": siblings, "ai": settings["ai"] ?? [:],
                 "timeEstimates": features["timeEstimates"] ?? NSNull(), "language": settings["language"] ?? NSNull()] as [String: Any]
     }
 
@@ -9536,9 +9547,10 @@ private final class Engine: @unchecked Sendable {
         guard let provider = NativeAISettingsProjection.Provider(rawValue: configuration["provider"] as? String ?? "openai") else { throw NativeTaskAIJSON.unavailable }
         let canonical = try readTaskAICanonicalWitness(optionsRaw)
         let contextIDs = canonical["contextTaskIDs"] as! [String]
+        let areaIDs = input["operation"] as? String == "clarify" ? try NativeTaskAIJSON.areaIDs(canonical) : []
         let language = canonical["language"] as! String
         taskAIRuntimeLanguage = language
-        let witness = try taskAIWitness(input, contextIDs: contextIDs), generation = attachmentGeneration
+        let witness = try taskAIWitness(input, contextIDs: contextIDs, areaIDs: areaIDs), generation = attachmentGeneration
         let legacy = try storage.get("mindwtr-ai-key:" + provider.rawValue)
         let registry = NativeAttachmentLocalRequests()
         #if DEBUG
@@ -9559,7 +9571,7 @@ private final class Engine: @unchecked Sendable {
                       self.aiReadmittedSettingTurn == nil,
                       self.captureAITurn == nil, !self.cleanupOwed, !self.foregroundCleanupActive,
                       try Self.bindingIdentity(self.databaseURL) == library,
-                      try Self.taskAIEqual(self.taskAIWitness(input, contextIDs: contextIDs), witness) else { throw NativeTaskAIJSON.unavailable }
+                      try Self.taskAIEqual(self.taskAIWitness(input, contextIDs: contextIDs, areaIDs: areaIDs), witness) else { throw NativeTaskAIJSON.unavailable }
                 let current = try self.editorDrafts.readOwnedCheckpoint()
                 guard current?.attempt == nil, Self.taskAIEditorEqual(current?.snapshot, editor),
                       checkpoint.map({ before in current.map { before.matches($0) } ?? false }) ?? (current == nil) else { throw NativeTaskAIJSON.unavailable }
@@ -9987,7 +9999,7 @@ private final class Engine: @unchecked Sendable {
         try NativeInboxAIJSON.witness(invoke("iosInboxAIWitness", arguments: [raw]))
     }
 
-    private func inboxAIDurableWitness(_ id: String) throws -> Any {
+    private func inboxAIDurableWitness(_ id: String, areaIDs: [String]) throws -> Any {
         let sqlite = try requireDatabase()
         let raw = try sqlite.execute("SELECT rowid AS _rowid,* FROM tasks WHERE id=?", parametersJSON: Self.ownedJSON([id]))
         guard let rows = try NativeJSON.jsonObject(with: Data(raw.utf8)) as? [[String: Any]], rows.count == 1,
@@ -9999,7 +10011,7 @@ private final class Engine: @unchecked Sendable {
         }
         let settings = try taskAISettings()
         let contexts = try NativeJSON.jsonObject(with: Data(sqlite.execute("SELECT id,contexts FROM tasks WHERE deletedAt IS NULL AND purgedAt IS NULL AND status<>'archived' AND contexts IS NOT NULL AND contexts<>'[]' ORDER BY id").utf8))
-        return ["task": task, "project": project, "contexts": contexts, "ai": settings["ai"] ?? [:],
+        return ["task": task, "areas": try taskAIAreas(areaIDs), "project": project, "contexts": contexts, "ai": settings["ai"] ?? [:],
                 "features": (settings["features"] as? [String: Any])?["timeEstimates"] ?? NSNull(),
                 "language": settings["language"] ?? NSNull()] as [String: Any]
     }
@@ -10015,7 +10027,8 @@ private final class Engine: @unchecked Sendable {
         let language = canonical["language"] as! String; taskAIRuntimeLanguage = language
         let settings = try taskAISettings(), configuration = settings["ai"] as? [String: Any] ?? [:]
         guard let provider = NativeAISettingsProjection.Provider(rawValue: configuration["provider"] as? String ?? "openai") else { throw NativeTaskAIJSON.unavailable }
-        let witness = try inboxAIDurableWitness(id), generation = attachmentGeneration
+        let areaIDs = try NativeTaskAIJSON.areaIDs(canonical)
+        let witness = try inboxAIDurableWitness(id, areaIDs: areaIDs), generation = attachmentGeneration
         let legacy = try storage.get("mindwtr-ai-key:" + provider.rawValue)
         let registry = NativeAttachmentLocalRequests()
         #if DEBUG
@@ -10037,7 +10050,7 @@ private final class Engine: @unchecked Sendable {
                       self.captureAITurn == nil,
                       !self.cleanupOwed, !self.foregroundCleanupActive, try self.editorDrafts.read() == nil,
                       try Self.bindingIdentity(self.databaseURL) == library,
-                      try Self.taskAIEqual(self.inboxAIDurableWitness(id), witness) else { throw NativeTaskAIJSON.unavailable }
+                      try Self.taskAIEqual(self.inboxAIDurableWitness(id, areaIDs: areaIDs), witness) else { throw NativeTaskAIJSON.unavailable }
                 try storage.validateAIProviderDeviceMetadataRead()
             })
         return TaskAIPreload(secrets: secrets, provider: provider, legacy: legacy, http: http)

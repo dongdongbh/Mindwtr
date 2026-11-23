@@ -234,14 +234,21 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
     const selectedTimeEstimate = draft.timeEstimate || undefined;
     const selectedProjectId = draft.projectId || null;
     const selectedAreaId = draft.areaId || null;
+    const [destinationRevision, setDestinationRevision] = useState(0);
     const setProcessingTitle = (value: string) => setField('title', value);
     const setProcessingDescription = (value: string) => setField('description', value);
     const setSelectedEnergyLevel = (value: Task['energyLevel']) => setField('energyLevel', value ?? '');
     const setSelectedAssignedTo = (value: string) => setField('assignedTo', value);
     const setSelectedPriority = (value: TaskPriority | undefined) => setField('priority', value ?? '');
     const setSelectedTimeEstimate = (value: TimeEstimate | undefined) => setField('timeEstimate', value ?? '');
-    const setSelectedProjectId = (value: string | null) => setField('projectId', value ?? '');
-    const setSelectedAreaId = (value: string | null) => setField('areaId', value ?? '');
+    const setSelectedProjectId = (value: string | null) => {
+        setDestinationRevision((revision) => revision + 1);
+        setField('projectId', value ?? '');
+    };
+    const setSelectedAreaId = (value: string | null) => {
+        setDestinationRevision((revision) => revision + 1);
+        setField('areaId', value ?? '');
+    };
     const somedaySections = settings?.gtd?.viewSections?.someday ?? [];
     const somedaySectionField = (
         <div className="space-y-1">
@@ -280,6 +287,13 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
         projectContext: null,
         timeEstimatesEnabled: showTimeEstimateField,
         setField,
+        areas: showAreaField && !convertToProject ? areas : undefined,
+        destination: {
+            areaId: draft.areaId || processingTask?.areaId,
+            projectId: draft.projectId || processingTask?.projectId,
+            sectionId: draft.sectionId || processingTask?.sectionId,
+        },
+        destinationRevision,
         copilotEnabled: false,
     });
 
@@ -776,7 +790,10 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
                     </p>
                     <div className="flex flex-wrap gap-3">
                         <button
-                            onClick={handleProjectCheckYes}
+                            onClick={() => {
+                                setDestinationRevision((revision) => revision + 1);
+                                handleProjectCheckYes();
+                            }}
                             className={DECISION_CHOICE_BUTTON_CLASS}
                         >
                             {t('process.moreThanOneStepYes')}
@@ -1184,6 +1201,7 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
                                     setNextActionDraft('');
                                     setExtraActionDrafts([]);
                                 }
+                                setDestinationRevision((revision) => revision + 1);
                                 setConvertToProject(!convertToProject);
                             }}
                             className={cn(

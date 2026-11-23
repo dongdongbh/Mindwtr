@@ -48,6 +48,11 @@ export type TaskEditActivityInputRecovery = {
     field: TaskEditActivityInputField;
     selection: MarkdownSelection;
 };
+export type TaskAIAreaDestination = Pick<TaskDraft, 'areaId' | 'projectId' | 'sectionId'> & {
+    revision: number;
+    title: string;
+    description: string;
+};
 const NOOP_ATTACHMENT_DRAFT_SETTLEMENT = () => {};
 
 type PendingPreviewCompletion = {
@@ -191,6 +196,9 @@ export function useTaskEditState({
     const saveAwaitingDurabilityRef = React.useRef(false);
     const pendingSavesRef = React.useRef(0);
     const editorSessionRef = React.useRef(0);
+    const areaDestinationRevision = React.useRef(0);
+    const activeTaskId = React.useRef<string | undefined>(undefined);
+    activeTaskId.current = visible ? task?.id : undefined;
     const submissionRef = React.useRef<'save' | 'cancel' | 'complete' | null>(null);
     const [submissionPending, setSubmissionPending] = React.useState(false);
     const pendingCompletionRef = React.useRef<PendingPreviewCompletion | null>(null);
@@ -200,6 +208,7 @@ export function useTaskEditState({
     const [cancelRetryPending, setCancelRetryPending] = React.useState(false);
     const setDraftField = React.useCallback<SetTaskEditDraftField>((field, value, markDirty = true) => {
         if ((submissionRef.current !== null && submissionRef.current !== 'save') || pendingCompletionRef.current) return;
+        if (field === 'areaId' || field === 'projectId' || field === 'sectionId') areaDestinationRevision.current += 1;
         if (markDirty) isDirtyRef.current = true;
         setTaskEditDraftState((current) => {
             if (!current) return current;
@@ -238,6 +247,22 @@ export function useTaskEditState({
     const [descriptionDraft, setDescriptionDraft] = React.useState('');
     const descriptionDraftRef = React.useRef('');
     const descriptionDebounceRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+    const getAreaDestination = React.useCallback((): TaskAIAreaDestination | null => {
+        const base = baseTaskRef.current;
+        const draft = taskEditDraftRef.current?.draft;
+        if (!base || !draft || base.id !== activeTaskId.current || submissionRef.current || pendingCompletionRef.current || !canComplete()
+            || base.areaId || base.projectId || base.sectionId) return null;
+        const latest = useTaskStore.getState()._tasksById?.get(base.id);
+        if (latest?.deletedAt || latest?.areaId || latest?.projectId || latest?.sectionId) return null;
+        return {
+            revision: areaDestinationRevision.current,
+            areaId: draft.areaId,
+            projectId: draft.projectId,
+            sectionId: draft.sectionId,
+            title: titleDraftRef.current,
+            description: descriptionDraftRef.current,
+        };
+    }, [canComplete]);
 
 
     const checklistDraftRef = React.useRef('');
@@ -345,6 +370,7 @@ export function useTaskEditState({
     }, []);
     const restoreTaskEditActivitySession = React.useCallback((snapshot: TaskEditActivitySession) => {
         if (!visible || !recoverableLiveTask || snapshot.taskId !== recoverableLiveTask.id) return;
+        areaDestinationRevision.current += 1;
         taskEditDraftRef.current = snapshot.taskEditDraft;
         setTaskEditDraftState(snapshot.taskEditDraft);
 
@@ -804,6 +830,7 @@ export function useTaskEditState({
     React.useEffect(() => {
         if (!visible) {
             editorSessionRef.current += 1;
+            areaDestinationRevision.current += 1;
             activityInputRef.current = null;
             setRecoveredActivityInput(null);
             const currentTask = baseTaskRef.current ?? liveTask;
@@ -840,6 +867,7 @@ export function useTaskEditState({
             const taskChanged = baseTaskRef.current?.id !== liveTask.id;
             const updatedChanged = baseTaskRef.current?.updatedAt !== liveTask.updatedAt;
             if (taskChanged || (!isDirtyRef.current && updatedChanged)) {
+                areaDestinationRevision.current += 1;
                 if (taskChanged) {
                     editorSessionRef.current += 1;
                     activityInputRef.current = null;
@@ -965,6 +993,7 @@ export function useTaskEditState({
         descriptionDraft,
         descriptionDraftRef,
         editTab,
+        getAreaDestination,
         isAIWorking,
         isContextInputFocused,
         isDirtyRef,

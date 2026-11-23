@@ -44,6 +44,8 @@ import {
     buildTaskClarifyInput,
     formatTaskCopilotApplied,
     getAIClarifyDialog,
+    getAIAreaCandidates,
+    resolveSuggestedArea,
     getAIErrorAlert,
     getTaskAIProjectContext,
     getTaskBreakdownDialog,
@@ -238,7 +240,7 @@ export type NativeAIActionAnswer<Apply> =
     | { kind: 'dialog'; title: string; message: string | null; choices: NativeAIDialogChoice<Apply>[] };
 
 
-export type NativeAICopilotSuggestion = CopilotResponse & { language: Language };
+export type NativeAICopilotSuggestion = CopilotResponse & { language: Language; areaRequestText?: string };
 
 export type NativeAICopilotApplied = { context?: string; timeEstimate?: TimeEstimate; tags: string[] };
 
@@ -787,6 +789,10 @@ export function createAIMethods(deps: AIDeps) {
         if (!task || task.deletedAt) return fail('TASK_NOT_FOUND', 'Task not found');
         return { ok: true, value: { task, draft } };
     };
+    const eligibleAreas = (task: Task, draft: { projectId?: string | null; areaId?: string | null }) =>
+        task.projectId || task.areaId ? [] : getAIAreaCandidates(useTaskStore.getState().areas, draft);
+    const currentArea = (id: unknown, task: Task, draft: { projectId?: string | null; areaId?: string | null }) =>
+        task.projectId || task.areaId ? undefined : resolveSuggestedArea(id, useTaskStore.getState().areas, draft);
     const mergedTask = (task: Task, draft: TaskDraft) => ({ ...task, ...(taskDraftToUpdatePatch(draft, task, { attachments: task.attachments ?? [] }) ?? {}) });
     const projectContext = (task: Task, draft: TaskDraft) => (settings().ai?.enabled === true
         ? getTaskAIProjectContext({ projectId: draft.projectId, projects: useTaskStore.getState().projects, tasks: useTaskStore.getState().tasks, taskId: task.id })
@@ -816,7 +822,7 @@ export function createAIMethods(deps: AIDeps) {
     };
     const readSuggestion = (value: unknown): NativeAICopilotSuggestion | null | undefined => {
         if (value === null || value === undefined) return null;
-        if (!isObjectRecord(value) || typeof value.language !== 'string'
+        if (!isObjectRecord(value) || typeof value.language !== 'string' || (value.areaId !== undefined && !isText(value.areaId, 500))
             || (value.context !== undefined && !isText(value.context, 200)) || (value.timeEstimate !== undefined && !isText(value.timeEstimate, 50))
             || (value.tags !== undefined && (!Array.isArray(value.tags) || value.tags.length > 50 || !value.tags.every((tag) => isText(tag, 200))))) return undefined;
         return value as unknown as NativeAICopilotSuggestion;
@@ -1038,10 +1044,12 @@ export function createAIMethods(deps: AIDeps) {
             const estimates = resolveFeatureFlags(stored).timeEstimates;
             const text = enabled ? getTaskCopilotText(draft.title, draft.description) : null;
             const visible = suggestion && suggestion.language === deps.language() ? suggestion : null;
-            const parts = enabled ? getTaskCopilotParts(visible, applied, estimates) : [];
+            const area = text && visible?.areaRequestText === text ? currentArea(visible.areaId, found.value.task, draft) : undefined;
+            const parts = enabled ? getTaskCopilotParts(visible, applied, estimates, area) : [];
             const chip = (chosen: TaskCopilotPart[]) => ({
-                edit: { type: 'fields' as const, patch: applyTaskCopilotParts(draft, chosen, estimates).patch },
-                applied: applyCaptureModalCopilotParts(applied, chosen, estimates),
+                edit: { type: 'fields' as const, patch: applyTaskCopilotParts(draft, chosen, estimates).patch,
+                    ...(area && text && chosen.some(part => part.kind === 'area') ? { suggestedAreaId: area.id, areaRequestText: text } : {}) },
+                applied: applyCaptureModalCopilotParts(applied, chosen.filter(part => part.kind !== 'area'), estimates),
             });
             return {
                 ok: true,
@@ -1055,7 +1063,7 @@ export function createAIMethods(deps: AIDeps) {
                         suggested: parts.length > 0
                             ? {
                                 label: t('copilot.suggested'),
-                                parts: parts.map((part) => ({ kind: part.kind, label: part.value, ...chip([part]) })),
+                                parts: parts.map((part) => ({ kind: part.kind, label: part.kind === 'area' ? `${t('taskEdit.areaLabel')}: ${part.label}` : part.value, ...chip([part]) })),
                                 applyAll: parts.length > 1 ? { label: t('copilot.applyAll'), ...chip(parts) } : null,
                                 hint: t('copilot.applyHint'),
                             }
@@ -1080,9 +1088,10 @@ export function createAIMethods(deps: AIDeps) {
             try {
                 const ai = text ? await providerFor(bound.value, true) : null;
                 if (!text || ai?.gate !== 'ready') return { ok: true, value: { text, suggestion: null } };
-                const answer = await createAIProvider(ai.build()).predictMetadata({ title: text, contexts, tags }, options);
+                const areas = eligibleAreas(found.value.task, draft);
+                const answer = await createAIProvider(ai.build()).predictMetadata({ title: text, contexts, tags, ...(areas.length ? { areas } : {}) }, options);
                 const kept = keepTaskCopilotSuggestion(answer, resolveFeatureFlags(settings()).timeEstimates);
-                return { ok: true, value: { text, suggestion: kept ? { ...kept, language: deps.language() } : null } };
+                return { ok: true, value: { text, suggestion: kept ? { ...kept, language: deps.language(), ...(kept.areaId ? { areaRequestText: text } : {}) } : null } };
             } catch {
                 return { ok: true, value: { text, suggestion: null } };
             }
@@ -1125,27 +1134,25 @@ export function createAIMethods(deps: AIDeps) {
                 apiKey = ai.apiKey;
                 sent = ai.sent;
                 const response = await createAIProvider(ai.build()).clarifyTask(buildTaskClarifyInput({
-                    title, tasks: useTaskStore.getState().tasks, task, merged: mergedTask(task, draft), projectContext: projectContext(task, draft),
+                    title, areas: eligibleAreas(task, draft), tasks: useTaskStore.getState().tasks, task, merged: mergedTask(task, draft), projectContext: projectContext(task, draft),
                 }), options);
                 const dialog = getAIClarifyDialog(response, deps.t());
-                return {
-                    ok: true,
-                    value: {
-                        kind: 'dialog',
-                        title: dialog.title,
-                        message: null,
-                        choices: dialog.choices.map(({ label, variant, apply }) => {
-                            if (apply.type === 'cancel') return choice<NativeTaskDraftEdit>(label, variant, null);
-                            const edit = apply.type === 'title'
-                                ? { title: apply.title, patch: {} }
-                                : getTaskClarifySuggestionEdit(draft.contexts, apply.suggestion);
-                            return choice<NativeTaskDraftEdit>(label, variant, {
-                                type: 'fields',
-                                patch: { ...(edit.title ? { title: edit.title } : {}), ...edit.patch },
-                            });
-                        }),
-                    },
-                };
+                const area = currentArea(response.suggestedAction?.areaId, task, draft);
+                const choices = dialog.choices.map(({ label, variant, apply }) => {
+                    if (apply.type === 'cancel') return choice<NativeTaskDraftEdit>(label, variant, null);
+                    const edit = apply.type === 'title'
+                        ? { title: apply.title, patch: {} }
+                        : getTaskClarifySuggestionEdit(draft.contexts, apply.suggestion);
+                    return choice<NativeTaskDraftEdit>(label, variant, {
+                        type: 'fields',
+                        patch: { ...(edit.title ? { title: edit.title } : {}), ...edit.patch },
+                    });
+                });
+                if (area) {
+                    choices.splice(-1, 0, choice<NativeTaskDraftEdit>(`${deps.t()('taskEdit.areaLabel')}: ${area.name}`, undefined,
+                        { type: 'fields', patch: {}, suggestedAreaId: area.id }));
+                }
+                return { ok: true, value: { kind: 'dialog', title: dialog.title, message: null, choices } };
             } catch (error) {
                 return { ok: true, value: errorAlert(error, apiKey, host, 'AI clarify failed', sent) };
             }
@@ -1233,27 +1240,26 @@ export function createAIMethods(deps: AIDeps) {
                 const response = await createAIProvider(ai.build()).clarifyTask(buildInboxClarifyInput({
                     title: draft.title,
                     task,
+                    areas: draft.convertToProject ? [] : eligibleAreas(task, draft),
                     contextPool: getProcessInboxTokenPools(useTaskStore.getState().tasks).contexts,
                     selectedContexts: draft.contexts,
                 }), options);
                 const dialog = getAIClarifyDialog(response, t);
-                return {
-                    ok: true,
-                    value: {
-                        kind: 'dialog',
-                        title: dialog.title,
-                        message: null,
-                        choices: dialog.choices.map(({ label, variant, apply }) => {
-                            if (apply.type === 'cancel') return choice<ProcessInboxDraftEdit[]>(label, variant, null);
-                            const title = apply.type === 'title' ? apply.title : apply.suggestion.title;
-                            const context = apply.type === 'suggestion' ? apply.suggestion.context : undefined;
-                            return choice<ProcessInboxDraftEdit[]>(label, variant, [
-                                { type: 'set', field: 'title', value: title },
-                                ...(context ? [{ type: 'addContext' as const, value: context }] : []),
-                            ]);
-                        }),
-                    },
-                };
+                const area = currentArea(response.suggestedAction?.areaId, task, draft);
+                const choices = dialog.choices.map(({ label, variant, apply }) => {
+                    if (apply.type === 'cancel') return choice<ProcessInboxDraftEdit[]>(label, variant, null);
+                    const title = apply.type === 'title' ? apply.title : apply.suggestion.title;
+                    const context = apply.type === 'suggestion' ? apply.suggestion.context : undefined;
+                    return choice<ProcessInboxDraftEdit[]>(label, variant, [
+                        { type: 'set', field: 'title', value: title },
+                        ...(context ? [{ type: 'addContext' as const, value: context }] : []),
+                    ]);
+                });
+                if (area) {
+                    choices.splice(-1, 0, choice<ProcessInboxDraftEdit[]>(`${t('taskEdit.areaLabel')}: ${area.name}`, undefined,
+                        [{ type: 'setArea', value: area.id, expectedSuggestionRevision: step.value.suggestionRevision }]));
+                }
+                return { ok: true, value: { kind: 'dialog', title: dialog.title, message: null, choices } };
             } catch (error) {
                 return { ok: true, value: errorAlert(error, apiKey, host, 'Inbox processing failed', sent) };
             }

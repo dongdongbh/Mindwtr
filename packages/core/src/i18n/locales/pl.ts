@@ -1463,7 +1463,7 @@ export const plOverrides: Record<string, string> = {
         'settings.showTray': 'Pokaż ikonę w zasobniku systemowym',
         'settings.showTrayDesc': 'Wyświetl ikonę aplikacji na pasku zadań, aby uzyskać szybki dostęp.',
         'settings.aiConsentTitle': 'Włączyć funkcje AI?',
-        'settings.aiConsentDescription': 'Aby korzystać z tej funkcji, dane Twoich zadań zostaną wysłane do {provider} w celu przetworzenia. Dane te podlegają polityce prywatności tej usługi. Mindwtr nie zbiera tych danych. Czy chcesz kontynuować?',
+        'settings.aiConsentDescription': 'Sugestie obszarów wymagają również wysłania nazw i identyfikatorów dostępnych obszarów. Aby korzystać z tej funkcji, dane Twoich zadań zostaną wysłane do {provider} w celu przetworzenia. Dane te podlegają polityce prywatności tej usługi. Mindwtr nie zbiera tych danych. Czy chcesz kontynuować?',
         'settings.aiConsentCancel': 'Anuluj',
         'settings.aiConsentAgree': 'Zgadzać się',
         'settings.on': 'NA',

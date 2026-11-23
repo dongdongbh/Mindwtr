@@ -514,6 +514,8 @@ export const TaskItem = memo(function TaskItem({
     }, [draft.projectId, draft.sectionId, sectionsByProject, setDraftField, task.projectId]);
 
 
+    const [destinationRevision, setDestinationRevision] = useState(0);
+    const [editorSessionRevision, setEditorSessionRevision] = useState(0);
     const ai = useTaskItemAi({
         taskId: task.id,
         settings,
@@ -531,6 +533,14 @@ export const TaskItem = memo(function TaskItem({
         projectContext,
         timeEstimatesEnabled,
         setField: setDraftField,
+        areas,
+        destination: {
+            areaId: draft.areaId || task.areaId,
+            projectId: draft.projectId || task.projectId,
+            sectionId: draft.sectionId || task.sectionId,
+        },
+        destinationRevision,
+        editorSessionRevision,
 
 
         copilotEnabled: isEditing,
@@ -539,12 +549,14 @@ export const TaskItem = memo(function TaskItem({
 
 
     const setField = useCallback<TaskDraftSetter>((field, value) => {
+        if (field === 'areaId' || field === 'projectId') setDestinationRevision((revision) => revision + 1);
         setDraftField(field, value);
         if (field === 'description') resetCopilotDraft();
     }, [resetCopilotDraft, setDraftField]);
 
     const resetEditState = useCallback(() => {
         resetLocalEditState();
+        setEditorSessionRevision((revision) => revision + 1);
         setShowCustomRecurrence(false);
         resetAiState();
     }, [resetLocalEditState, resetAiState, setShowCustomRecurrence]);

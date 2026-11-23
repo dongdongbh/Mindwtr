@@ -3,6 +3,7 @@ import {
     readResponseText,
     SUSPENDED_REQUEST_MESSAGE,
 } from '../http-utils';
+import type { TimeEstimatePreset } from '../types';
 import type { AIProvider, AIProviderConfig, AIRequestStopReason } from './types';
 
 const MAX_JSON_REPAIR_BOUNDARIES = 50;
@@ -121,7 +122,7 @@ function logAiParseDiagnostic(stage: 'recovered-from-truncated-response' | 'unre
     console.warn(`[AI JSON parse] unrecoverable response (length=${raw.length}); tail: …${tail}`);
 }
 
-const TIME_ESTIMATE_MAP: Record<string, string> = {
+const TIME_ESTIMATE_MAP: Partial<Record<string, TimeEstimatePreset>> = {
     '5m': '5min',
     '5min': '5min',
     '10m': '10min',
@@ -142,7 +143,7 @@ const TIME_ESTIMATE_MAP: Record<string, string> = {
     '4hr+': '4hr+',
 };
 
-export function normalizeTimeEstimate(value?: string): string | undefined {
+export function normalizeTimeEstimate(value?: string): TimeEstimatePreset | undefined {
     if (!value) return undefined;
     const key = value.trim().toLowerCase();
     return TIME_ESTIMATE_MAP[key];

@@ -74,7 +74,7 @@ import {
   type TimeEstimate,
 } from '@mindwtr/core';
 
-import { buildInboxClarifyInput, getAIClarifyDialog, getAIErrorAlert, redactAIError } from '@mindwtr/core/ai-task-actions';
+import { buildInboxClarifyInput, getAIAreaCandidates, getAIClarifyDialog, getAIErrorAlert, redactAIError, resolveSuggestedArea } from '@mindwtr/core/ai-task-actions';
 import type { AIResponseAction } from '../ai-response-modal';
 import { useLanguage } from '../../contexts/language-context';
 import { useTheme } from '../../contexts/theme-context';
@@ -167,12 +167,18 @@ export function useInboxProcessingController({
   const [nextActionDraft, setNextActionDraft] = useState('');
   const [extraActionDrafts, setExtraActionDrafts] = useState<string[]>([]);
   const projectConversionInFlightRef = useRef(false);
-  const [processingTitle, setProcessingTitle] = useState('');
+  const [processingTitle, setProcessingTitleState] = useState('');
+  const processingTitleRef = useRef('');
+  const setProcessingTitle = useCallback((title: string) => {
+    processingTitleRef.current = title;
+    setProcessingTitleState(title);
+  }, []);
   const [processingDescription, setProcessingDescription] = useState('');
   const [processingTitleFocused, setProcessingTitleFocused] = useState(false);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [selectedSectionId, setSelectedSectionId] = useState<string | null>(null);
   const [selectedAreaId, setSelectedAreaId] = useState<string | null>(null);
+  const areaDestinationRevision = useRef(0);
   const [projectBrowseScope, setProjectBrowseScope] = useState<ProcessInboxProjectBrowseScope>();
   const [selectedEnergyLevel, setSelectedEnergyLevel] = useState<Task['energyLevel']>(undefined);
   const [selectedAssignedTo, setSelectedAssignedTo] = useState('');
@@ -277,6 +283,18 @@ export function useInboxProcessingController({
     () => getProcessInboxCurrentCandidate(processingSession, inboxTasks),
     [inboxTasks, processingSession],
   );
+  const areaDestinationRef = useRef<{ taskId: string; areaId: string | null; projectId: string | null; sectionId: string | null } | null>(null);
+  areaDestinationRef.current = visible && currentTask && !convertToProject
+    ? { taskId: currentTask.id, areaId: selectedAreaId, projectId: selectedProjectId, sectionId: selectedSectionId }
+    : null;
+  const getAreaDestination = useCallback(() => {
+    const destination = areaDestinationRef.current;
+    const base = processingBaseRef.current;
+    if (!destination || !base || destination.taskId !== base.id || base.areaId || base.projectId || base.sectionId) return null;
+    const latest = useTaskStore.getState()._tasksById?.get(base.id);
+    if (latest?.deletedAt || latest?.areaId || latest?.projectId || latest?.sectionId) return null;
+    return { ...destination, revision: areaDestinationRevision.current };
+  }, []);
   const taskSimilarityIndex = useMemo(
     () => visible ? createTaskSimilarityIndex(allTasks) : null,
     [allTasks, visible],
@@ -430,6 +448,7 @@ export function useInboxProcessingController({
   }, [areaById, requestedProjectBrowseScope]);
 
   const assignArea = useCallback((areaId: string | null) => {
+    areaDestinationRevision.current += 1;
     setSelectedAreaId(areaId);
     setProjectBrowseScope(areaId ? { kind: 'area', areaId } : { kind: 'none' });
   }, []);
@@ -457,6 +476,7 @@ export function useInboxProcessingController({
   }, []);
 
   const primeTaskState = useCallback((task: Task | null | undefined) => {
+    areaDestinationRevision.current += 1;
 
 
     processingBaseRef.current = task ?? null;
@@ -500,7 +520,7 @@ export function useInboxProcessingController({
     resetTitleFocus();
     setProcessingTitle(defaults.title);
     setProcessingDescription(defaults.description);
-  }, [resetTitleFocus]);
+  }, [resetTitleFocus, setProcessingTitle]);
 
 
   const setPendingStartDateFromControl = useCallback((value: Date | null) => {
@@ -747,6 +767,10 @@ export function useInboxProcessingController({
       parseTitle: parseProcessingTitle,
     });
     if (outcome.type !== 'flow') return outcome;
+    if (outcome.draft.projectId !== selectedProjectId || (outcome.draft.sectionId ?? null) !== selectedSectionId
+      || outcome.draft.convertToProject !== convertToProject) {
+      areaDestinationRevision.current += 1;
+    }
     setAnswers(outcome.answers);
     setConvertToProject(outcome.draft.convertToProject);
     setNextActionDraft(outcome.draft.nextAction);
@@ -756,7 +780,7 @@ export function useInboxProcessingController({
     setProjectSearch(outcome.draft.projectSearch);
     scrollProcessingToTop(true);
     return outcome;
-  }, [answers, buildDraft, currentTask, parseProcessingTitle, processInboxPlan, scrollProcessingToTop]);
+  }, [answers, buildDraft, convertToProject, currentTask, parseProcessingTitle, processInboxPlan, scrollProcessingToTop, selectedProjectId, selectedSectionId]);
 
 
   const runCommit = useCallback(async (kind: ProcessInboxCommitKind | 'convert'): Promise<boolean> => {
@@ -923,6 +947,7 @@ export function useInboxProcessingController({
   }, [applyTokenLists, selectedContexts, selectedTags, showContextsField, showTagsField]);
 
   const selectProjectEarly = useCallback((projectId: string | null) => {
+    areaDestinationRevision.current += 1;
     const next = selectProcessInboxProject(projectId);
     setProjectBrowseScope(effectiveProjectBrowseScope);
     setConvertToProject(next.convertToProject);
@@ -987,6 +1012,7 @@ export function useInboxProcessingController({
 
   const applyAppleClarificationSuggestion = useCallback((suggestion: AppleClarificationSuggestion) => {
     setProcessingTitle(suggestion.cleanedTitle);
+    if (suggestion.projectId || suggestion.areaId) areaDestinationRevision.current += 1;
     if (suggestion.projectId) {
       setSelectedProjectId(suggestion.projectId);
       setSelectedAreaId(null);
@@ -1027,7 +1053,7 @@ export function useInboxProcessingController({
       setShowAdvancedOptions(true);
     }
     applyAppleClarificationStatus(suggestion.status);
-  }, [applyAppleClarificationStatus]);
+  }, [applyAppleClarificationStatus, setProcessingTitle]);
 
   const formatAppleClarificationPreview = useCallback((suggestion: AppleClarificationSuggestion): string => {
     const labels = new Map<string, string>();
@@ -1197,6 +1223,8 @@ export function useInboxProcessingController({
       });
       return;
     }
+    const destination = getAreaDestination();
+    const candidates = destination ? getAIAreaCandidates(useTaskStore.getState().areas, destination) : [];
     let apiKey: string;
     try {
       apiKey = await loadAIKey(aiProvider);
@@ -1231,6 +1259,7 @@ export function useInboxProcessingController({
         task: currentTask,
         contextPool: contextSuggestionPool,
         selectedContexts,
+        areas: candidates,
       }));
       const dialog = getAIClarifyDialog(response, t);
       const actions: AIResponseAction[] = dialog.choices.map((choice) => {
@@ -1254,6 +1283,30 @@ export function useInboxProcessingController({
               : closeAIModal,
         };
       });
+      const resolveArea = () => {
+        const current = getAreaDestination();
+        const suggested = candidates.find((area) => area.id === response.suggestedAction?.areaId);
+        return current && current.revision === destination?.revision && processingTitleRef.current === processingTitle && suggested
+          ? resolveSuggestedArea(suggested.id, useTaskStore.getState().areas, current)
+          : undefined;
+      };
+      const area = resolveArea();
+      if (area) {
+        const action = {
+          label: `${t('taskEdit.areaLabel')}: ${area.name}`,
+          onPress: () => {
+            const selected = resolveArea();
+            if (selected) {
+              assignArea(selected.id);
+              void logInfo('AI Area suggestion accepted', {
+                scope: 'ai', extra: { releaseCheck: 'v1.3.10/ai-area-suggestion', surface: 'inbox-clarify' },
+              });
+            }
+            setAiModal((modal) => modal && { ...modal, actions: modal.actions.filter((entry) => entry !== action) });
+          },
+        };
+        actions.splice(-1, 0, action);
+      }
       setAiModal({
         title: dialog.title,
         actions,
@@ -1272,15 +1325,18 @@ export function useInboxProcessingController({
     aiEnabled,
     aiProvider,
     appleClarificationBackend,
+    assignArea,
     closeAIModal,
     contextSuggestionPool,
     currentTask,
+    getAreaDestination,
     handleAppleClarifyInbox,
     language,
     openSettingsLabel,
     processingTitle,
     router,
     selectedContexts,
+    setProcessingTitle,
     settings,
     showToast,
     t,

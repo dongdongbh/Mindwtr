@@ -8,7 +8,7 @@ import { NATIVE_UNJOURNALED_COMMANDS } from './native-request-receipts';
 import { openSqliteHost } from './screen-parity.replay';
 import { flushPendingSave, resetForTests, setStorageAdapter, useTaskStore } from './store';
 import { createTaskDraft, type TaskDraft } from './task-draft';
-import type { AppSettings, ChecklistItem, Project, Section, Task } from './types';
+import type { Area, AppSettings, ChecklistItem, Project, Section, Task } from './types';
 import { generateUUID } from './uuid';
 
 
@@ -105,12 +105,12 @@ function createDevice(input: Device, warnings: unknown[][] = []) {
 const writes: unknown[][] = [];
 let realActions: Record<string, (...args: any[]) => Promise<any>> | null = null;
 
-async function seed(data: { tasks?: Task[]; projects?: Project[]; sections?: Section[]; settings: AppSettings }) {
+async function seed(data: { tasks?: Task[]; projects?: Project[]; sections?: Section[]; areas?: Area[]; settings: AppSettings }) {
     await flushPendingSave();
     resetForTests();
     const state = useTaskStore.getState() as unknown as Record<string, (...args: any[]) => Promise<any>>;
     realActions ??= { updateTask: state.updateTask, batchUpdateTasks: state.batchUpdateTasks, updateSettings: state.updateSettings };
-    let stored = JSON.parse(JSON.stringify({ tasks: data.tasks ?? [], projects: data.projects ?? [], sections: data.sections ?? [], areas: [], people: [], settings: data.settings }));
+    let stored = JSON.parse(JSON.stringify({ tasks: data.tasks ?? [], projects: data.projects ?? [], sections: data.sections ?? [], areas: data.areas ?? [], people: [], settings: data.settings }));
     setStorageAdapter({ getData: async () => stored, saveData: async (next) => { stored = JSON.parse(JSON.stringify(next)); } });
     useTaskStore.setState({
         ...realActions,
@@ -1074,6 +1074,41 @@ describe('native host contract: AI keys stay out of views, errors and logs', () 
         expect(view.draft).toMatchObject({ title: 'Call Sam', contexts: ['@calls'] });
     });
 
+
+    it('offers a separate Area choice and checks the draft and live Areas on acceptance', async () => {
+        const stamp = '2026-11-23T00:00:00.000Z';
+        const task: Task = { id: 'car', title: 'Swap tires', status: 'inbox', contexts: [], tags: [], createdAt: stamp, updatedAt: stamp };
+        const area = { id: 'personal', name: 'Personal', order: 0, createdAt: stamp, updatedAt: stamp };
+        await seed({ tasks: [task], areas: [area], settings: { ai: { enabled: true, provider: 'openai', baseUrl: 'http://local/v1' } } });
+        const response = { value: { question: 'Next?', options: [], suggestedAction: { title: 'Call shop', areaId: area.id } } };
+        const dev = createDevice({ queues: { clarifyTask: [response, response], predictMetadata: [{ value: { areaId: area.id } }] } });
+        const contract = await openHost(dev.host);
+        const draft = createTaskDraft(task);
+        const input = { id: task.id, draft };
+        const clarified = value(await contract.requestTaskEditorClarify(input));
+        const choice = clarified.kind === 'dialog' && clarified.choices.find(item => item.label === 'Area: Personal')?.apply;
+        if (!choice) throw Error('expected a separate Area choice');
+        expect(value(contract.editTaskDraft({ ...input, edit: choice })).draft).toMatchObject({ title: task.title, areaId: area.id });
+        expect(value(contract.editTaskDraft({ ...input, draft: { ...draft, projectId: 'chosen' }, edit: choice })).draft.areaId).toBe('');
+
+        const { suggestion } = value(await contract.requestTaskEditorCopilot(input));
+        const copilot = value(contract.getTaskEditorAI({ ...input, copilot: { suggestion, applied: { tags: [] } } })).copilot;
+        expect(copilot.suggested?.parts[0]).toMatchObject({ kind: 'area', label: 'Area: Personal' });
+
+        const staleInline = value(contract.editTaskDraft({ ...input, draft: { ...draft, title: 'Call lawyer' }, edit: copilot.suggested!.parts[0].edit }));
+        expect(staleInline.draft.areaId).toBe('');
+
+        const start = value(contract.startInboxProcessing({})).view!;
+        const inbox = { sessionId: start.sessionId, step: start.step, taskId: start.taskId };
+        const inboxAnswer = value(await contract.requestInboxClarify(inbox));
+        const edit = inboxAnswer.kind === 'dialog' && inboxAnswer.choices.find(item => item.label === 'Area: Personal')?.apply?.[0];
+        if (!edit) throw Error('expected an Inbox Area choice');
+        value(contract.getInboxProcessingStep({ ...inbox, edit: { type: 'setArea', value: null } }));
+        expect(contract.getInboxProcessingStep({ ...inbox, edit })).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+
+        await useTaskStore.getState().deleteArea(area.id);
+        expect(value(contract.editTaskDraft({ ...input, edit: choice })).draft.areaId).toBe('');
+    });
 
     it('names Process Inbox\'s Clarify button while AI is on, and no button while it is off', async () => {
         const tasks = [{ id: 'i1', title: 'Gift', status: 'inbox', tags: [], contexts: [], createdAt: '2026-09-01T00:00:00.000Z', updatedAt: '2026-09-01T00:00:00.000Z' }] as Task[];

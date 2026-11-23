@@ -98,6 +98,7 @@ export function TaskEditorAiPanels({ ai, timeEstimatesEnabled, t }: TaskEditorAi
         aiError,
         aiBreakdownSteps,
         aiClarifyResponse,
+        clarifyArea,
         copilotContext,
         copilotEstimate,
         copilotTags,
@@ -108,6 +109,7 @@ export function TaskEditorAiPanels({ ai, timeEstimatesEnabled, t }: TaskEditorAi
         clearAiBreakdown,
         selectClarifyOption,
         applyClarifySuggestion,
+        applyClarifyArea,
         clearAiClarify,
     } = ai;
     if (!aiEnabled) return null;
@@ -125,7 +127,7 @@ export function TaskEditorAiPanels({ ai, timeEstimatesEnabled, t }: TaskEditorAi
                             onClick={() => applyCopilotPart(part)}
                             className="px-1.5 py-0.5 rounded bg-muted/50 text-foreground hover:bg-muted transition-colors"
                         >
-                            {part.value}
+                            {part.kind === 'area' ? `${t('taskEdit.areaLabel')}: ${part.label}` : part.value}
                         </button>
                     ))}
                     {pendingCopilotParts.length > 1 && (
@@ -202,6 +204,15 @@ export function TaskEditorAiPanels({ ai, timeEstimatesEnabled, t }: TaskEditorAi
                                 className="px-2 py-1 rounded bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
                             >
                                 {t('ai.applySuggestion')}
+                            </button>
+                        )}
+                        {clarifyArea && (
+                            <button
+                                type="button"
+                                onClick={applyClarifyArea}
+                                className="px-2 py-1 rounded bg-muted/50 hover:bg-muted transition-colors"
+                            >
+                                {t('taskEdit.areaLabel')}: {clarifyArea.name}
                             </button>
                         )}
                         <button

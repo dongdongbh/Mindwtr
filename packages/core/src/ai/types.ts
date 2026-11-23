@@ -1,4 +1,4 @@
-import type { TimeEstimate } from '../types';
+import type { Area, TimeEstimate } from '../types';
 
 export type AIProviderId = 'gemini' | 'openai' | 'anthropic';
 
@@ -39,16 +39,20 @@ export interface ReviewAnalysisInput {
     items: ReviewSnapshotItem[];
 }
 
+export type AIAreaCandidate = Pick<Area, 'id' | 'name'>;
+
 export interface CopilotInput {
     title: string;
     contexts?: string[];
     tags?: string[];
+    areas?: readonly AIAreaCandidate[];
 }
 
 export interface CopilotResponse {
     context?: string;
     timeEstimate?: TimeEstimate;
     tags?: string[];
+    areaId?: string;
 }
 
 export interface ClarifyOption {
@@ -61,12 +65,13 @@ export interface ClarifySuggestion {
     timeEstimate?: TimeEstimate;
     context?: string;
     isProject?: boolean;
+    areaId?: string;
 }
 
 export interface ClarifyResponse {
     question: string;
     options: ClarifyOption[];
-    suggestedAction?: ClarifySuggestion;
+    suggestedAction?: ClarifySuggestion | null;
 }
 
 export interface BreakdownResponse {
@@ -76,6 +81,7 @@ export interface BreakdownResponse {
 export interface ClarifyInput {
     title: string;
     contexts?: string[];
+    areas?: readonly AIAreaCandidate[];
     startTime?: string;
     dueDate?: string;
     reviewAt?: string;

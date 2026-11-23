@@ -1635,7 +1635,7 @@ export const itOverrides: Record<string, string> = {
         'settings.showTray': 'Mostra icona nella tray di sistema',
         'settings.showTrayDesc': 'Mostra l\'icona dell\'app nella tray di sistema per un accesso rapido.',
         'settings.aiConsentTitle': 'Abilitare le funzioni IA?',
-        'settings.aiConsentDescription': 'Per utilizzare questa funzione, i dati delle tue attività verranno inviati a {provider} per l\'elaborazione. Tali dati sono soggetti alla sua informativa sulla privacy. Mindwtr non raccoglie questi dati. Vuoi procedere?',
+        'settings.aiConsentDescription': 'Per suggerire le aree vengono inviati anche i nomi e gli ID delle aree disponibili. Per utilizzare questa funzione, i dati delle tue attività verranno inviati a {provider} per l\'elaborazione. Tali dati sono soggetti alla sua informativa sulla privacy. Mindwtr non raccoglie questi dati. Vuoi procedere?',
         'settings.aiConsentCancel': 'Annulla',
         'settings.aiConsentAgree': 'Accetto',
         'settings.on': 'Attivo',

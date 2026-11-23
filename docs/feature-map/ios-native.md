@@ -107,6 +107,7 @@ App Intents and Siri belong to the RN app. They are not in `apps/ios-native`. Th
 - Selectors: `process-inbox-sheet`, `process-inbox-title`, `process-inbox-next-action`, `process-inbox-skip`, `process-inbox-delegate-who`, `process-inbox-project-search`, `process-inbox-deferred-projects`, `process-inbox-close`, `process-inbox-toast`
 - Code: `apps/ios-native/App/ProcessInboxSheet.swift`
 - Checks: `apps/ios-native/App/UITests/FoundationUITests.swift` (testProcessInbox…), `apps/ios-native/Tests/MindwtrNativeCoreTests/NativeProcessInboxUndoHostTests.swift`
+- Configured-provider AI Clarify can suggest an existing Area for an unassigned task. Choose the Area by name in the editor or Process Inbox to apply it to the draft.
 - Notes: Filing, completion and Trash offer Undo for about 5.2 seconds. Settings › GTD › Inbox controls the two-minute prompt and the layout. Incubate and the "Back to clarify" label use a calendar-clock icon, as in RN (#1339). The project step lists Someday and Waiting projects after the active ones, under a "Someday / Waiting" heading (`process-inbox-deferred-projects`).
 
 - Notes: The processing count includes Inbox tasks and due Someday reviews. Area appears before Projects, with the selected project’s inherited Area and indented Section controls. Browse projects offers All areas, No area and named Areas without changing task assignment; search remains global.
