@@ -1780,6 +1780,9 @@ pub fn run() {
                 }
             }
 
+            #[cfg(target_os = "windows")]
+            install::configure_store_attachment_access(app.handle());
+
             let config = read_config(&app.handle());
 
 

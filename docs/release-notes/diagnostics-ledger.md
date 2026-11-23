@@ -60,6 +60,8 @@ The v1.3.6 task-editor correction is confirmed by the visible disappearance of t
 
 ## v1.3.10 (add before tagging, trim in the release after)
 
+- **`v1.3.10/store-attachment-access`** — Desktop `src-tauri/src/install.rs`. On Windows Store startup, look for `Store attachment directory registered`. Then preview an existing attachment and verify the WebDAV switch separately. The marker confirms scope registration only and contains no path or filename. (#1607)
+
 - **`v1.3.10/captured-link-title`** — `packages/core/src/link-title-enrichment.ts`. Capture one public article URL or add it to a task’s attachments. After the new title appears, Diagnostics shows `Captured link title enriched` with `outcome=capture` or `outcome=attachment`. The marker includes neither the URL nor the article title. (#1606)
 
 - **`v1.3.10/android-reminder-boot-receiver`** — React Native Android `apps/mobile/lib/notification-service-local.ts` and `apps/mobile/plugins/patch-alarm-notification-gradle.js`. Open the updated app with Diagnostics logging enabled and a future timed reminder. In Settings › Diagnostics, check `Reminder boot recovery complete` for `bootEnabled=true`, `exactAllowed=true`, `rearmed>0`, `failed=0` and `outcome=rearmed`. The boot receiver stays eligible even when the alarm inventory is empty. An older explicit disabled override is cleared during scheduling or foreground recovery. The log reflects the package manager readback and counts native scheduling calls. To verify delivery, reboot, unlock the phone, and leave Mindwtr closed until the reminder is due. The log contains counts and booleans, with no task text, identifiers, URLs or raw errors. (#1360)

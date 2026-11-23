@@ -92,6 +92,48 @@ fn local_cache_redirected_path(
     )
 }
 
+#[cfg(any(target_os = "windows", test))]
+fn allow_store_attachment_files(
+    scope: &tauri::fs::Scope,
+    local: &Path,
+    redirected_data: &Path,
+) -> tauri::Result<()> {
+    let attachments = redirected_data.join("attachments");
+    let local_root = dunce::canonicalize(local)?;
+    for ancestor in attachments.ancestors() {
+        let suffix = ancestor
+            .strip_prefix(local)
+            .map_err(std::io::Error::other)?;
+        match dunce::canonicalize(ancestor) {
+            Ok(actual) if actual == local_root.join(suffix) => break,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            _ => return Err(std::io::Error::other("Unexpected Store attachment directory").into()),
+        }
+    }
+    scope.allow_directory(attachments, false)
+}
+
+#[cfg(target_os = "windows")]
+pub(crate) fn configure_store_attachment_access(app: &tauri::AppHandle) {
+    use tauri_plugin_fs::FsExt;
+
+    let (Some(family), Some(roaming), Some(local)) = (
+        current_package_family_name(),
+        dirs::data_dir(),
+        dirs::data_local_dir(),
+    ) else {
+        return;
+    };
+    if let Some(data) = local_cache_redirected_path(&get_data_dir(app), &roaming, &local, &family) {
+        let diagnostic = match allow_store_attachment_files(&app.fs_scope(), &local, &data) {
+            Ok(()) => "Store attachment directory registered extra.releaseCheck=v1.3.10/store-attachment-access",
+            Err(_) => "Store attachment directory registration failed extra.releaseCheck=v1.3.10/store-attachment-access",
+        };
+        log::info!("{diagnostic}");
+        append_native_log_line(app, diagnostic);
+    }
+}
+
 #[cfg_attr(not(target_os = "windows"), allow(unused_variables))]
 pub(crate) fn windows_store_display_path(path: &Path) -> Option<PathBuf> {
     #[cfg(target_os = "windows")]
@@ -594,6 +636,35 @@ mod tests {
                 "/users/a/appdata/local/Packages/DongdaLi.Mindwtr_abc123/LocalCache/Roaming/mindwtr/logs/mindwtr.log"
             )
         );
+    }
+
+    #[test]
+    fn store_attachment_scope_allows_only_files_in_the_active_attachment_directory() {
+        use tauri_plugin_fs::FsExt;
+
+        let temp = tempfile::tempdir().unwrap();
+        let data = temp.path().join("LocalCache/Roaming/mindwtr/data");
+        let app = tauri::test::mock_builder()
+            .plugin(tauri_plugin_fs::init())
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        let scope = app.fs_scope();
+        let file = data.join("attachments/id.patch");
+        super::allow_store_attachment_files(&scope, temp.path(), &data).unwrap();
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(&file, b"patch").unwrap();
+        assert!(scope.is_allowed(&file));
+        assert!(!scope.is_allowed(data.join("mindwtr.db")));
+        assert!(!scope.is_allowed(data.join("workspaces/other/attachments/id.patch")));
+        assert!(!scope.is_allowed(data.join("attachments/nested/id.patch")));
+        #[cfg(unix)]
+        {
+            let other = tempfile::tempdir().unwrap();
+            let redirected = temp.path().join("redirected");
+            std::os::unix::fs::symlink(other.path(), &redirected).unwrap();
+            assert!(super::allow_store_attachment_files(&scope, temp.path(), &redirected).is_err());
+            assert!(!scope.is_allowed(other.path().join("attachments/id.patch")));
+        }
     }
 
     #[test]
