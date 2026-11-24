@@ -24,14 +24,18 @@ final class FoundationUITests: XCTestCase {
         boardEnabled(complete)
         let status = app.staticTexts["task-preview-status-value"]
         XCTAssertTrue(status.exists)
-        XCTAssertFalse(status.frame.intersects(complete.frame))
+        let statusFrame = status.frame
+        let completionFrame = complete.frame
+        let statusCenter = CGPoint(x: statusFrame.midX, y: statusFrame.midY)
+        let completionCenter = CGPoint(x: completionFrame.midX, y: completionFrame.midY)
+        XCTAssertFalse(completionFrame.contains(statusCenter))
+        XCTAssertFalse(statusFrame.contains(completionCenter))
         if !largest {
-            XCTAssertGreaterThan(complete.frame.minX, status.frame.maxX)
-            XCTAssertGreaterThan(status.frame.maxY, complete.frame.minY)
-            XCTAssertLessThan(status.frame.minY, complete.frame.maxY)
+            XCTAssertLessThan(statusCenter.x, completionFrame.minX)
+            XCTAssertTrue((completionFrame.minY...completionFrame.maxY).contains(statusCenter.y))
         }
-        XCTAssertGreaterThanOrEqual(complete.frame.width, 44)
-        XCTAssertGreaterThanOrEqual(complete.frame.height, 44)
+        XCTAssertGreaterThanOrEqual(completionFrame.width, 44)
+        XCTAssertGreaterThanOrEqual(completionFrame.height, 44)
         let picture = XCTAttachment(screenshot: app.screenshot()); picture.name = "Preview Mark Done"; picture.lifetime = .keepAlways; add(picture)
         complete.tap()
         XCTAssertTrue(complete.waitForNonExistence(timeout: 40))
