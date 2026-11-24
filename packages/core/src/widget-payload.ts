@@ -112,6 +112,8 @@ export interface WidgetTaskSection {
     items: WidgetTaskItem[];
 }
 
+type WidgetTaskSectionSource = Omit<WidgetTaskSection, 'items'> & { items: Task[] };
+
 
 export type WidgetColor = `#${string}`;
 
@@ -811,25 +813,34 @@ export function createWidgetPayloadProjection(
                     ...(list.showStatus ? { showStatus: true } : {}),
                 });
                 const groupBy = list.groupBy === 'priority' && !prioritiesEnabled ? 'none' : list.groupBy;
-                const groups = groupBy && groupBy !== 'none' ? buildFocusTaskGroups({
-                    groupBy, tasks: list.tasks, projects, areas: data.areas || [],
+                const groupSections = (tasks: Task[], parentTitle?: string): WidgetTaskSectionSource[] => groupBy && groupBy !== 'none' ? buildFocusTaskGroups({
+                    groupBy, tasks, projects, areas: data.areas || [],
                     resolveText: (key, fallback) => tr[key] || fallback,
                     theme: statusPreset ?? undefined,
-                }) : [];
+                }).map((group) => ({
+                    key: group.key,
+                    title: parentTitle ? `${parentTitle} · ${group.label}` : group.label,
+                    detail: String(group.tasks.length),
+                    items: group.tasks,
+                })) : [];
+                const listSections = list.focusSections?.flatMap(({ key, title, items }) => {
+                    const groups = key === 'next' ? groupSections(items, title) : [];
+                    return groups.length ? groups : [{ key, title, items, detail: null }];
+                }) ?? groupSections(list.tasks);
                 let budget = maxItems;
-                const groupedSections: WidgetTaskSection[] = [];
-                for (const group of groups) {
+                const visibleSections: WidgetTaskSection[] = [];
+                for (const section of listSections) {
                     if (budget <= 0) break;
-                    const visible = group.tasks.slice(0, budget);
+                    if (!section.items.length) continue;
+                    const visible = section.items.slice(0, budget);
                     budget -= visible.length;
-                    groupedSections.push({ key: group.key, title: group.label,
-                        detail: String(group.tasks.length), items: visible.map(toListItem) });
+                    visibleSections.push({ ...section, items: visible.map(toListItem) });
                 }
                 listPayloads[selection] = {
                     title: list.title,
-                    items: groups.length ? groupedSections.flatMap((section) => section.items)
+                    items: visibleSections.length ? visibleSections.flatMap((section) => section.items)
                         : list.tasks.slice(0, maxItems).map(toListItem),
-                    ...(groups.length ? { sections: groupedSections } : {}),
+                    ...(visibleSections.length ? { sections: visibleSections } : {}),
                     totalCount: list.tasks.length,
                     openUri,
                 };
