@@ -4,7 +4,7 @@ import { buildContextsFilterModel, CONTEXTS_FILTER_STATUSES, getContextsSaveCrit
 import { isGettingStartedProject } from './getting-started-seed';
 import { nativeTaskRowSwipeActions, type NativeTaskRowSwipeActionsInput } from './native-host-contract-row-swipe';
 import { createProjectTasksMoveMethods } from './native-host-contract-project-bulk-status';
-import { nativeProjectTaskSources, nativeProjectTaskModel, nativeProjectFilterVisibility } from './native-host-project-task-list';
+import { isProjectSectionIdList, nativeProjectTaskSources, nativeProjectTaskModel, nativeProjectFilterVisibility } from './native-host-project-task-list';
 import { getFocusHiddenByAreaLabel } from './focus-controls';
 import { getPomodoroTaskChoices } from './pomodoro';
 import { createReferenceProjectNextActionMethods } from './native-host-contract-project-next-action';
@@ -662,11 +662,13 @@ export type NativeProjectDetailView = Omit<NativeProjectDetail, 'items'> & {
         type: 'section'; id: string; title: string; count: number; muted: boolean;
         collapsible: boolean; collapsed: boolean;
 
+        sectionId?: string;
         flowLabel?: string;
     })[];
     controls: {
         showCompleted: boolean;
         completedCollapsed: boolean;
+        collapsedSectionIds?: string[];
         canToggleCompleted: boolean;
         groupCompletedTasksLast: boolean;
         hasReorderTargets: boolean;
@@ -1484,14 +1486,14 @@ export function createNativeHostContract(options: {
     };
 
     const projectDetail = (projectId: string, currentRevision: string, showCompleted = false, completedCollapsed = false,
-        filter?: { resolved: ResolvedListFilter; sheetOpen: boolean }): ProjectDetailCache | null => {
+        filter?: { resolved: ResolvedListFilter; sheetOpen: boolean; collapsedSectionIds?: string[] }): ProjectDetailCache | null => {
         const key = JSON.stringify([currentRevision, projectId, showCompleted, completedCollapsed, filter?.resolved.state, filter?.sheetOpen]);
         if (cachedProjectDetailKey === key && cachedProjectDetail) return cachedProjectDetail;
         const sources = projectTaskSources(projectId, showCompleted);
         if (!sources) return null;
         const { state, project, options, projectTasks } = sources;
         const projectSortBy = resolveTaskSortByForFeatures(project.taskSortBy ?? 'default', state.settings);
-        const model = nativeProjectTaskModel(sources.data, sources, completedCollapsed, filter?.resolved, translate);
+        const model = nativeProjectTaskModel(sources.data, sources, completedCollapsed, filter?.resolved, translate, filter?.collapsedSectionIds);
         const area = state.areas.find((candidate) => candidate.id === project.areaId);
         cachedProjectDetail = {
             readOnly: options.readOnly,
@@ -1502,9 +1504,9 @@ export function createNativeHostContract(options: {
                 guide: { label: translate('onboarding.readGuide'), url: getDocsGuideUrl('start/getting-started', language, 'basic-workflow') },
             } : null,
             groupCompletedTasksLast: options.groupCompletedTasksLast,
-            hasReorderTargets: model.sections.length > 1 || model.items.some((item) => item.type === 'task'
-                    && item.task.status !== 'reference'
-                    && !(options.groupCompletedTasksLast && item.task.status === 'done')),
+            hasReorderTargets: model.sections.length > 1 || model.items.some((item) => item.type === 'section'
+                ? item.collapsed && !item.synthetic && item.count > 0
+                : item.task.status !== 'reference' && !(options.groupCompletedTasksLast && item.task.status === 'done')),
             metadata: getProjectDetailsPresentation(project, {
                 isArchivedProject: project.status === 'archived',
                 areaName: area?.name || tFallback(translate, 'projects.noArea', 'No Area'),
@@ -1524,7 +1526,7 @@ export function createNativeHostContract(options: {
 
     const readProjectDetail = (
         projectId: string, offset: number, limit: number, currentRevision: string, now: Date,
-        showCompleted = false, completedCollapsed = false, filter?: { resolved: ResolvedListFilter; sheetOpen: boolean },
+        showCompleted = false, completedCollapsed = false, filter?: { resolved: ResolvedListFilter; sheetOpen: boolean; collapsedSectionIds?: string[] },
     ): NativeHostResult<{ value: NativeProjectDetail; cache: ProjectDetailCache }> => {
         const detail = projectDetail(projectId, currentRevision, showCompleted, completedCollapsed, filter);
         if (!detail) return fail('TASK_NOT_FOUND', 'Project not found');
@@ -1564,7 +1566,7 @@ export function createNativeHostContract(options: {
 
     const projectDetailView = (
         value: NativeProjectDetail, cache: ProjectDetailCache, offset: number,
-        showCompleted: boolean, completedCollapsed: boolean,
+        showCompleted: boolean, completedCollapsed: boolean, collapsedSectionIds?: string[],
     ): NativeProjectDetailView => ({
         ...value,
         items: value.items.map((item, index) => {
@@ -1572,11 +1574,13 @@ export function createNativeHostContract(options: {
             const source = cache.items[offset + index];
             return { ...item, collapsible: source.type === 'section' && source.collapsible === true,
                 collapsed: source.type === 'section' && source.collapsed === true,
+                ...(collapsedSectionIds !== undefined && source.type === 'section' && !source.synthetic ? { sectionId: source.id } : {}),
                 ...(source.type === 'section' && source.flowLabel ? { flowLabel: source.flowLabel } : {}) };
         }),
         controls: {
             showCompleted,
             completedCollapsed,
+            ...(collapsedSectionIds === undefined ? {} : { collapsedSectionIds }),
             canToggleCompleted: !cache.readOnly,
             groupCompletedTasksLast: cache.groupCompletedTasksLast,
             hasReorderTargets: cache.hasReorderTargets,
@@ -1588,7 +1592,7 @@ export function createNativeHostContract(options: {
 
     const projectFilterData = (
         projectId: string, showCompleted: boolean, completedCollapsed: boolean,
-        filters: ListFilterState, filterEdit: ListFilterEdit | undefined, sheetOpen: boolean, now: Date,
+        filters: ListFilterState, filterEdit: ListFilterEdit | undefined, sheetOpen: boolean, now: Date, collapsedSectionIds?: string[],
     ) => {
         const sources = projectTaskSources(projectId, showCompleted);
         if (!sources) return null;
@@ -1607,6 +1611,7 @@ export function createNativeHostContract(options: {
         const tokens = tokenOptions(options, resolved.state);
         const viewRevision = JSON.stringify([
             projectId, showCompleted, completedCollapsed, resolved.state, sheetOpen, revision(), displayRevision(now),
+            ...(collapsedSectionIds === undefined ? [] : [collapsedSectionIds]),
         ]);
         return { resolved, options, tokens, viewRevision };
     };
@@ -2710,19 +2715,20 @@ export function createNativeHostContract(options: {
         getProjectDetailFilterView(input: {
             projectId: string; offset: number; limit: number; revision?: string;
             showCompleted: boolean; completedCollapsed: boolean; filters: Partial<ListFilterState>;
-            filterEdit?: ListFilterEdit; filterSheetOpen?: boolean;
+            filterEdit?: ListFilterEdit; filterSheetOpen?: boolean; collapsedSectionIds?: string[];
         }): NativeHostResult<NativeProjectDetailFilterView> {
             const ready = readiness();
             if (!ready.ok) return ready;
             if (!isObjectRecord(input) || !isNativeJsonWithinBytes(input)
                 || !['projectId', 'offset', 'limit', 'showCompleted', 'completedCollapsed', 'filters'].every((key) => Object.prototype.hasOwnProperty.call(input, key))
-                || Object.keys(input).some((key) => !['projectId', 'offset', 'limit', 'revision', 'showCompleted', 'completedCollapsed', 'filters', 'filterEdit', 'filterSheetOpen'].includes(key))
+                || Object.keys(input).some((key) => !['projectId', 'offset', 'limit', 'revision', 'showCompleted', 'completedCollapsed', 'filters', 'filterEdit', 'filterSheetOpen', 'collapsedSectionIds'].includes(key))
                 || typeof input.projectId !== 'string' || !input.projectId.trim() || input.projectId.length > 500
                 || !Number.isSafeInteger(input.offset) || input.offset < 0
                 || !Number.isSafeInteger(input.limit) || input.limit < 1 || input.limit > NATIVE_HOST_MAX_WINDOW
                 || (input.offset > 0 && typeof input.revision !== 'string')
                 || (input.revision !== undefined && typeof input.revision !== 'string')
                 || typeof input.showCompleted !== 'boolean' || typeof input.completedCollapsed !== 'boolean'
+                || (input.collapsedSectionIds !== undefined && !isProjectSectionIdList(input.collapsedSectionIds))
                 || (input.filterSheetOpen !== undefined && typeof input.filterSheetOpen !== 'boolean')
                 || !isObjectRecord(input.filters)) {
                 return fail('INVALID_INPUT', 'A bounded Project filter view and revision for later pages are required');
@@ -2735,17 +2741,18 @@ export function createNativeHostContract(options: {
             }
             const now = new Date();
             const sheetOpen = input.filterSheetOpen === true;
+            const collapsedSectionIds = input.collapsedSectionIds === undefined ? undefined : [...new Set(input.collapsedSectionIds)].sort();
             const data = projectFilterData(input.projectId, input.showCompleted, input.completedCollapsed,
-                filters, input.filterEdit, sheetOpen, now);
+                filters, input.filterEdit, sheetOpen, now, collapsedSectionIds);
             if (!data) return fail('TASK_NOT_FOUND', 'Project not found');
             if (input.revision !== undefined && input.revision !== data.viewRevision) {
                 return fail('STALE_REVISION', 'Project filters changed; restart paging from offset zero');
             }
             const result = readProjectDetail(input.projectId, input.offset, input.limit, data.viewRevision, now,
-                input.showCompleted, input.completedCollapsed, { resolved: data.resolved, sheetOpen });
+                input.showCompleted, input.completedCollapsed, { resolved: data.resolved, sheetOpen, collapsedSectionIds });
             if (!result.ok) return result;
             const view = projectDetailView(result.value.value, result.value.cache, input.offset,
-                input.showCompleted, input.completedCollapsed);
+                input.showCompleted, input.completedCollapsed, collapsedSectionIds);
             const chips: NativeListChip[] = data.resolved.chips.map((chip) => ({
                 id: chip.id, label: chip.label, excluded: chip.excluded, action: { filterEdit: chip.edit },
             }));

@@ -848,6 +848,20 @@ describe('ProjectDetailModal task sorting', () => {
         }));
     });
 
+    it('passes the chosen section through the project quick-add callback', () => {
+        const onOpenQuickAdd = vi.fn();
+        const target = section('section-1', 'Planning');
+        let tree!: ReturnType<typeof create>;
+        act(() => {
+            tree = create(<ProjectDetailModal {...createProjectDetailModalProps({ onOpenQuickAdd, sections: [target] })} />);
+        });
+        act(() => {
+            taskListPropsSpy.mock.calls.at(-1)?.[0].project.onAddTaskToSection(target.id);
+        });
+        expect(onOpenQuickAdd).toHaveBeenCalledWith(expect.objectContaining({ id: 'project-1' }), target.id);
+        act(() => tree.unmount());
+    });
+
     it('passes the project-local sort to TaskList and handles sort changes', () => {
         const onTaskSortByChange = vi.fn();
         const selectedProjectTasks = [

@@ -226,6 +226,7 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
     var projectShowCompleted by mutableStateOf(prefs.getString(PROJECT_SHOW_COMPLETED_KEY, null) == "true"); private set
 
     var projectCompletedCollapsed by mutableStateOf(true); private set
+    private var collapsedProjectSectionIds by mutableStateOf(emptySet<String>())
 
     var areaFilter by mutableStateOf<AreaFilter?>(null); private set
 
@@ -1692,9 +1693,10 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
     }
 
 
-    fun openProjectCapture(projectId: String) {
+    fun openProjectCapture(projectId: String, sectionId: String? = null) {
         if (capture != null || captureModal.open != null) return
-        val params = JSONObject().put("initialProps", JSONObject().put("projectId", projectId).put("status", "next").toString())
+        val initialProps = JSONObject().put("projectId", projectId).put("status", "next").put("sectionId", sectionId)
+        val params = JSONObject().put("initialProps", initialProps.toString())
             .put("returnTo", "/projects-screen?projectId=${android.net.Uri.encode(projectId)}")
         perform { runtime ->
             val reply = runtime.menuRead("captureModalOpen", JSONObject().put("params", params).toString())
@@ -2291,7 +2293,11 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
     }
 
     fun openProject(id: String) {
-        if (id != openProjectId) { projectCompletedCollapsed = true; projectDetails.resetFilters() }
+        if (id != openProjectId) {
+            projectCompletedCollapsed = true
+            collapsedProjectSectionIds = emptySet()
+            projectDetails.resetFilters()
+        }
         val mine = ++issued
         perform { runtime ->
             val detail = readProject(runtime, id, null, PAGE)
@@ -2316,6 +2322,7 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
         keepProjectReturn(null)
         menu.endBulk("project")
         project = null
+        collapsedProjectSectionIds = emptySet()
 
         projectDetails.follow(null)
     }
@@ -2400,6 +2407,7 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
         runtime.menuRead("projectDetailFilterView", JSONObject().put("projectId", id).put("offset", offset).put("limit", PAGE)
             .apply { if (revision.isNotEmpty()) put("revision", revision) }
             .put("showCompleted", projectShowCompleted).put("completedCollapsed", projectCompletedCollapsed)
+            .put("collapsedSectionIds", JSONArray(collapsedProjectSectionIds))
             .put("filters", projectDetails.listFilterState).put("filterSheetOpen", projectDetails.listFilterSheet != null)
             .apply { filterEdit?.let { put("filterEdit", it) } }.toString())
 
@@ -2425,6 +2433,12 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
 
     fun toggleProjectCompleted() {
         projectCompletedCollapsed = !projectCompletedCollapsed
+        refreshProjects()
+    }
+
+    fun toggleProjectSection(sectionId: String) {
+        val collapsed = collapsedProjectSectionIds
+        collapsedProjectSectionIds = if (sectionId in collapsed) collapsed - sectionId else collapsed + sectionId
         refreshProjects()
     }
 

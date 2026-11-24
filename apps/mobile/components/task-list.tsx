@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useCallback, useEffect, useLayoutEffect, useRef } from 'react';
 import { View, FlatList, Text, RefreshControl, Modal, Pressable, Switch, TouchableOpacity, useWindowDimensions, type NativeScrollEvent, type NativeSyntheticEvent } from 'react-native';
 import { useNavigation } from 'expo-router';
-import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, GripVertical } from 'lucide-react-native';
+import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, GripVertical, Plus } from 'lucide-react-native';
 import DraggableFlatList, { type DragEndParams, type RenderItemParams } from 'react-native-draggable-flatlist';
 import {
   useTaskStore,
@@ -14,6 +14,7 @@ import {
   type ProjectSequenceTaskCue,
   shallow,
   normalizeFocusTaskLimit,
+  formatI18nTemplate,
   resolveFeatureFlags,
   tFallback,
   isTaskInActiveProject,
@@ -169,6 +170,7 @@ export interface TaskListProjectOptions {
   readOnly?: boolean;
   reorderMode?: boolean;
   onReorderModeChange?: (active: boolean) => void;
+  onAddTaskToSection?: (sectionId: string) => void;
 }
 
 const NO_PROJECT_OPTIONS: Partial<TaskListProjectOptions> = {};
@@ -290,6 +292,7 @@ function TaskListComponent({
     readOnly: projectReadOnly = false,
     reorderMode: projectReorderModeProp,
     onReorderModeChange: onProjectReorderModeChange,
+    onAddTaskToSection,
   } = project ?? NO_PROJECT_OPTIONS;
   const taskListRenderStartedAt = Date.now();
   const rowRenderCountAtRenderStart = readTaskRowRenderCount();
@@ -433,7 +436,9 @@ function TaskListComponent({
   const activeGroupBy: TaskListGroupBy = groupBy ?? 'none';
 
 
-  const { collapsedGroupIds, toggleGroup } = useCollapsedTaskGroups(statusFilter, activeGroupBy);
+  const { collapsedGroupIds, toggleGroup } = useCollapsedTaskGroups(
+    statusFilter, projectId ? `project:${projectId}` : activeGroupBy,
+  );
   const localDayKey = useLocalDayKey(activeGroupBy === 'completedDate');
   const handleChangeGroupBy = onChangeGroupBy;
   const effectiveBulkActions = enableBulkActions && !projectReadOnly;
@@ -662,6 +667,8 @@ function TaskListComponent({
       sortBy,
       projectOrder: enableProjectReorder,
       reorderMode: projectReorderMode,
+      collapsedSectionIds: collapsedGroupIds,
+      showEmptySections: !projectReadOnly && !hasActiveTaskFilters,
       groupCompletedTasksLast,
       completedCollapsed: completedTasksCollapsed,
       t,
@@ -669,12 +676,14 @@ function TaskListComponent({
   }, [
     allSections,
     allVisibleTasks,
+    collapsedGroupIds,
     completedTasksCollapsed,
     enableProjectReorder,
     filterCriteria,
     filterSearchQuery,
     filterableTasks,
     groupCompletedTasksLast,
+    hasActiveTaskFilters,
     projectById,
     projectId,
     projectReadOnly,
@@ -835,7 +844,11 @@ function TaskListComponent({
     return buildProjectTaskReorderGroups<Task>(reorderItems, { includeEmptySections: projectSections.length > 0 });
   }, [canUseProjectReorder, listItems, projectSections.length, shouldGroupCompletedTasks]);
   const projectSectionIds = useMemo(() => projectSections.map((section) => section.id), [projectSections]);
-  const hasProjectReorderItems = projectReorderGroups.some((group) => group.tasks.length > 0) || projectSections.length > 1;
+  const hasProjectReorderItems = projectSections.length > 1
+    || projectReorderGroups.some((group) => group.tasks.length > 0)
+    || (canUseProjectReorder && listItems.some((item) => (
+      item.type === 'section' && !item.synthetic && item.collapsed && item.count > 0
+    )));
   const projectReorderFlatItems = useMemo(
     () => flattenProjectReorderGroups(projectReorderGroups),
     [projectReorderGroups],
@@ -1451,54 +1464,55 @@ function TaskListComponent({
 
   const renderListItem = useCallback(({ item }: { item: ListItem }) => {
     if (item.type === 'section') {
-      if (item.collapsible) {
-        return (
-          <TouchableOpacity
-            accessibilityRole="button"
-            accessibilityState={{ expanded: item.collapsed !== true }}
-            onPress={() => toggleSection(item)}
-            style={styles.sectionHeader}
-          >
-            <View style={styles.sectionHeaderTitleBlock}>
-              {item.collapsed ? (
-                <ChevronRight size={15} color={themeColors.secondaryText} />
-              ) : (
-                <ChevronDown size={15} color={themeColors.secondaryText} />
-              )}
-              <Text style={[styles.sectionTitle, { color: item.muted ? themeColors.secondaryText : themeColors.text }]}>
-                {item.title}
-              </Text>
-            </View>
-            <Text style={[styles.sectionCount, { color: themeColors.secondaryText }]}>
-              {item.count}
+      const isProjectSection = Boolean(projectId && !item.synthetic);
+      const Chevron = item.collapsed ? ChevronRight : ChevronDown;
+      const heading = (
+        <>
+          <View style={styles.sectionHeaderTitleBlock}>
+            {item.collapsible && <Chevron size={15} color={themeColors.secondaryText} />}
+            <Text style={[styles.sectionTitle, { color: item.muted ? themeColors.secondaryText : themeColors.text }]}>
+              {item.title}
             </Text>
-          </TouchableOpacity>
-        );
-      }
-
-      const title = (
-        <Text style={[styles.sectionTitle, { color: item.muted ? themeColors.secondaryText : themeColors.text }]}>
-          {item.title}
-        </Text>
-      );
-      return (
-        <View style={styles.sectionHeader}>
-          {item.flowLabel ? (
-            <View style={styles.sectionHeaderTitleBlock}>
-              {title}
+            {item.flowLabel && (
               <Text testID={`project-section-flow-label-${item.id}`} style={[styles.sectionCount, { color: themeColors.secondaryText }]}>
                 {item.flowLabel}
               </Text>
-            </View>
-          ) : title}
-          <Text style={[styles.sectionCount, { color: themeColors.secondaryText }]}>
-            {item.count}
-          </Text>
+            )}
+          </View>
+          <Text style={[styles.sectionCount, { color: themeColors.secondaryText }]}>{item.count}</Text>
+        </>
+      );
+      const headerContent = item.collapsible ? (
+        <TouchableOpacity
+          accessibilityRole="button"
+          accessibilityState={{ expanded: item.collapsed !== true }}
+          onPress={() => toggleSection(item)}
+          style={isProjectSection ? styles.projectSectionHeaderControl : styles.sectionHeader}
+          testID={isProjectSection ? `project-section-toggle-${item.id}` : undefined}
+        >
+          {heading}
+        </TouchableOpacity>
+      ) : heading;
+      if (!isProjectSection && item.collapsible) return headerContent;
+      return (
+        <View style={[styles.sectionHeader, isProjectSection && styles.projectSectionHeader]}>
+          {headerContent}
+          {isProjectSection && !projectReadOnly && onAddTaskToSection && (
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel={formatI18nTemplate(tFallback(t, 'viewSections.addTask', 'Add task to {section}'), { section: item.title })}
+              onPress={() => onAddTaskToSection(item.id)}
+              style={styles.projectSectionAddButton}
+              testID={`project-section-add-task-${item.id}`}
+            >
+              <Plus size={20} color={themeColors.tint} />
+            </TouchableOpacity>
+          )}
         </View>
       );
     }
     return renderTask({ item: item.task });
-  }, [renderTask, themeColors.secondaryText, themeColors.text, toggleSection]);
+  }, [onAddTaskToSection, projectId, projectReadOnly, renderTask, t, themeColors.secondaryText, themeColors.text, themeColors.tint, toggleSection]);
 
   const renderProjectReorderHeader = useCallback((group: ProjectTaskReorderGroup<Task>) => {
     const sectionIndex = typeof group.sectionId === 'string' ? projectSectionIds.indexOf(group.sectionId) : -1;

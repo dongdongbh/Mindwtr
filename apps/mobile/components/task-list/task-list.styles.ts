@@ -582,6 +582,23 @@ export const styles = StyleSheet.create({
     paddingTop: 10,
     paddingBottom: 6,
   },
+  projectSectionHeader: {
+    paddingTop: 0,
+    paddingBottom: 0,
+  },
+  projectSectionHeaderControl: {
+    flex: 1,
+    minHeight: 48,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  projectSectionAddButton: {
+    width: 48,
+    minHeight: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   sectionHeaderTitleBlock: {
     flex: 1,
     minWidth: 0,

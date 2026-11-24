@@ -410,7 +410,7 @@ export const getCaptureModalCloseTarget = (canGoBack: boolean, returnTo: string 
 export const getProjectQuickCaptureReturnToProjectId = (returnTo: string | null | undefined): string | null => {
     if (!returnTo) return null;
     const match = returnTo.match(/^\/projects-screen\?projectId=([^&]+)$/);
-    return match ? decodeURIComponent(match[1]) : null;
+    return match ? decodeSearchParam(match[1]) : null;
 };
 
 

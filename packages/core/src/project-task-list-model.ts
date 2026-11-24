@@ -66,6 +66,8 @@ export type ProjectTaskListModelInput = {
 
     groupCompletedTasksLast: boolean;
     completedCollapsed: boolean;
+    collapsedSectionIds?: ReadonlySet<string>;
+    showEmptySections?: boolean;
     t: (key: string) => string;
 };
 
@@ -119,7 +121,7 @@ export function selectProjectTaskListTasks(
 }
 
 export function buildProjectTaskListModel(input: ProjectTaskListModelInput): ProjectTaskListModel {
-    const { project, statusFilter, criteria, searchQuery, sortBy, reorderMode, completedCollapsed, t } = input;
+    const { project, statusFilter, criteria, searchQuery, sortBy, reorderMode, completedCollapsed, collapsedSectionIds, showEmptySections, t } = input;
     const referenceSearchPredicate = createReferenceSearchPredicate(statusFilter === 'reference' ? searchQuery : '');
     const listSelections = { criteria, searchQuery: statusFilter === 'reference' ? '' : searchQuery };
     const filteredTasks = input.tasks.filter((task) => (
@@ -219,12 +221,15 @@ export function buildProjectTaskListModel(input: ProjectTaskListModelInput): Pro
     const perSection = getProjectFlowMode(project) === 'perSection';
     sections.forEach((section) => {
         const tasksForSection = tasksBySection.get(section.id) ?? [];
-        if (tasksForSection.length === 0 && !reorderMode) return;
+        if (tasksForSection.length === 0 && !reorderMode && !showEmptySections) return;
+        const collapsible = !reorderMode && collapsedSectionIds !== undefined;
+        const collapsed = collapsible && collapsedSectionIds.has(section.id);
         items.push({ type: 'section', id: section.id, title: section.title, count: tasksForSection.length,
+            ...(collapsible ? { collapsible, collapsed } : {}),
             ...(perSection ? { flowLabel: section.isSequential === true
                 ? tFallback(t, 'projects.sequential', 'Sequential')
                 : tFallback(t, 'projects.parallel', 'Parallel') } : {}) });
-        tasksForSection.forEach((task) => items.push({ type: 'task', task, reorderSectionId: section.id }));
+        if (!collapsed) tasksForSection.forEach((task) => items.push({ type: 'task', task, reorderSectionId: section.id }));
     });
     if (unsectioned.length > 0) {
         const reorderSectionId = sections.length > 0 ? null : undefined;

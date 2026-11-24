@@ -34,7 +34,7 @@ const coreSrc = resolve(app, '../../packages/core/src');
 const { en } = await import(resolve(coreSrc, 'i18n/locales/en.ts'));
 const run = '535353535353';
 const names = { area: `PDArea${run}`, project: `PD${run}`, renamed: `PDR${run}`, backTitle: `PDB${run}`, killTitle: `PDK${run}`, killNotes: `Kill notes ${run}`, task: `55${run}`, first: `S1${run}`, second: `S2${run}`,
-    edited: `S3${run}`, tag: `pd${run}`, replayTag: `pdr${run}`, notes: `Notes ${run}`, link: `https://example.com/pd/${run}` };
+    edited: `S3${run}`, sectionTask: `PDSection${run}`, tag: `pd${run}`, replayTag: `pdr${run}`, notes: `Notes ${run}`, link: `https://example.com/pd/${run}` };
 
 const device = connect({ serial, pkg: PKG, uiFile: UI_FILE, adb: adbBin });
 const { adbRaw, sh, home, front, requireAppFront, pid, screen, waitFor, tap, tapExpecting } = device;
@@ -102,6 +102,10 @@ const core = (db, mode) => JSON.parse(execFileSync('bun', ['-e', `
         if (!project) {
             project = await store().addProject(names.project, '#3b82f6');
             must(await store().addTask(names.task, { status: 'next', projectId: project.id }), 'addTask');
+        }
+        for (const task of live(store()._allTasks).filter((item) => item.projectId === project.id && item.title === names.sectionTask)) {
+            must(await store().deleteTask(task.id), 'deleteTask');
+            await flushPendingSave();
         }
         for (const section of live(store()._allSections).filter((item) => item.projectId === project.id)) {
             must(await store().deleteSection(section.id), 'deleteSection');
@@ -577,6 +581,25 @@ try {
             && after.sections[0].rev === before.sections[0].rev, '(o) reopened, the project is still Per section and nothing was stored');
         check(coreMetadata('o').typeLabel === en['projects.perSection'], '(o) core\'s type label is Per section');
     }
+    const sectionHeading = `project-section-heading-${flowSection.id}`;
+    const sectionAdd = `project-section-add-${flowSection.id}`;
+    await tap(tagged(await revealTag('project-details-toggle'), 'project-details-toggle'));
+    await tap(tagged(await revealTag(sectionAdd), sectionAdd));
+    nodes = await waitFor('the section capture form', (current) => Boolean(tagged(current, 'capture-modal-title')));
+    check(tagged(nodes, 'capture-modal-destination')?.['content-desc']?.includes(names.edited),
+        '(p) Add Task on the empty section opens capture with that section selected');
+    await typeText(tagged(nodes, 'capture-modal-title'), names.sectionTask);
+    await hideKeyboard();
+    await tap(tagged(await screen(), 'capture-modal-save') ?? fail('no Save in capture'));
+    await waitFor('the saved section task', (current) => inProject(current) && hasText(current, names.sectionTask));
+    const created = sqlite(pullDatabase('section-task'), `SELECT projectId, sectionId, status FROM tasks WHERE title = '${names.sectionTask}' AND deletedAt IS NULL`);
+    check(created.length === 1 && created[0].projectId === ids.project && created[0].sectionId === flowSection.id && created[0].status === 'next',
+        '(p) capture saves once as Next in the chosen section');
+    await tap(tagged(await revealTag(sectionHeading), sectionHeading));
+    nodes = await waitFor('the folded section', (current) => Boolean(tagged(current, sectionAdd)) && !hasText(current, names.sectionTask));
+    await tap(tagged(nodes, sectionHeading) ?? fail('no heading on the folded section'));
+    await waitFor('the expanded section task', (current) => hasText(current, names.sectionTask));
+    check(true, '(p) collapsing keeps Add Task available and expanding restores the task');
     console.log('Project details device check passed');
 } catch (error) {
     evidenced(error);

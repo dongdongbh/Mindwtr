@@ -24,6 +24,7 @@ export interface ProjectTaskListProps {
     sequenceCueLabels: Record<ProjectSequenceTaskCue, string>;
     reorderMode: boolean;
     onReorderModeChange: (active: boolean) => void;
+    onAddTaskToSection?: (sectionId: string) => void;
 
     listHeaderComponent: React.ReactElement | null;
     listRef: React.Ref<FlatList>;
@@ -42,6 +43,7 @@ export function ProjectTaskList({
     getTaskSequenceCue,
     listHeaderComponent,
     listRef,
+    onAddTaskToSection,
     onBulkBarPropsChange,
     onFilterStateChange,
     onListScroll,
@@ -70,9 +72,11 @@ export function ProjectTaskList({
             readOnly: options.readOnly,
             reorderMode,
             onReorderModeChange,
+            onAddTaskToSection,
         };
     }, [
         getTaskSequenceCue,
+        onAddTaskToSection,
         onReorderModeChange,
         project,
         reorderMode,

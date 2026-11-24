@@ -1,7 +1,7 @@
 import React from 'react';
 import { act, create } from 'react-test-renderer';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AppSettings, Area, Project, Task } from '@mindwtr/core';
+import type { AppSettings, Area, Project, Section, Task } from '@mindwtr/core';
 
 const addTaskMock = vi.hoisted(() => vi.fn());
 const updateTaskMock = vi.hoisted(() => vi.fn());
@@ -79,8 +79,8 @@ const storeState = vi.hoisted(() => ({
   _allTasks: [] as Task[],
   projects: [projectFixture as Project],
   _allProjects: [projectFixture as Project],
-  sections: [],
-  _allSections: [],
+  sections: [] as Section[],
+  _allSections: [] as Section[],
   areas: [] as Area[],
   addTask: addTaskMock,
   updateTask: updateTaskMock,
@@ -149,6 +149,7 @@ vi.mock('lucide-react-native', () => ({
   ChevronDown: () => null,
   ChevronRight: () => null,
   GripVertical: () => null,
+  Plus: () => null,
   MoveVertical: () => null,
   X: () => null,
 }));
@@ -854,7 +855,7 @@ describe('TaskList', () => {
     await act(async () => {
       tree = create(
         <TaskList
-          project={{ id: project.id, includeArchived: true, readOnly: true }}
+          project={{ id: project.id, includeArchived: true, readOnly: true, onAddTaskToSection: vi.fn() }}
           showHeader={false}
           statusFilter="all"
           taskSource={[linkedTask, formerlyLinkedTask]}
@@ -868,10 +869,64 @@ describe('TaskList', () => {
     expect(data.find((item) => item.type === 'section' && item.id === manuallyDeletedSection.id)).toBeUndefined();
     expect(data.find((item) => item.type === 'task' && item.task?.id === linkedTask.id)).toBeTruthy();
     expect(data.find((item) => item.type === 'section' && item.id === 'no-section')).toBeTruthy();
+    expect(tree.root.findAllByProps({ testID: `project-section-add-task-${archivedSection.id}` })).toHaveLength(0);
 
     act(() => {
       tree.unmount();
     });
+  });
+
+  it('collapses project tasks while keeping the section add buttons and reorder targets available', async () => {
+    const at = '2026-06-01T00:00:00.000Z';
+    const populated = { id: 'populated', projectId: project.id, title: 'Planning', order: 0, createdAt: at, updatedAt: at };
+    const empty = { ...populated, id: 'empty', title: 'Research', order: 1 };
+    storeState.sections = [populated, empty];
+    storeState._allSections = storeState.sections;
+    const task = makeTask('task-plan', 'Write the plan', { sectionId: populated.id });
+    const onAddTaskToSection = vi.fn();
+    const render = (reorderMode: boolean) => (
+      <TaskList
+        project={{ id: project.id, enableReorder: true, onAddTaskToSection, reorderMode }}
+        statusFilter="all"
+        taskSource={[task]}
+        title={project.title}
+      />
+    );
+    let tree!: ReturnType<typeof create>;
+    await act(async () => { tree = create(render(false)); });
+    const button = (testID: string) => tree.root.findAllByProps({ testID })[0];
+    const toggle = () => button('project-section-toggle-populated');
+    const listData = () => flatListPropsSpy.mock.calls.at(-1)?.[0].data;
+
+    expect(toggle().props.accessibilityState.expanded).toBe(true);
+    expect(listData()).toContainEqual(expect.objectContaining({ type: 'task', task }));
+    await act(async () => { toggle().props.onPress(); });
+    expect(toggle().props.accessibilityState.expanded).toBe(false);
+    expect(listData()).not.toContainEqual(expect.objectContaining({ type: 'task', task }));
+    const emptyAdd = button('project-section-add-task-empty');
+    expect(emptyAdd.props.accessibilityLabel).toBe('Add task to Research');
+    await act(async () => {
+      emptyAdd.props.onPress();
+      button('project-section-add-task-populated').props.onPress();
+    });
+    expect(onAddTaskToSection.mock.calls).toEqual([['empty'], ['populated']]);
+    expect(toggle().props.accessibilityState.expanded).toBe(false);
+
+    await act(async () => { tree.update(render(true)); });
+    const dragList = tree.root.find((node) => String(node.type) === 'DraggableFlatList');
+    expect(dragList.props.data.map((item: { key: string }) => item.key))
+      .toEqual(['section:populated', 'task:task-plan', 'section:empty']);
+    expect(button('project-section-add-task-empty')).toBeUndefined();
+
+    await act(async () => { tree.update(render(false)); });
+    expect(toggle().props.accessibilityState.expanded).toBe(false);
+    await act(async () => { toggle().props.onPress(); });
+    expect(listData()).toContainEqual(expect.objectContaining({ type: 'task', task }));
+
+    await act(async () => { taskFilterSheetPropsSpy.mock.calls.at(-1)?.[0].selections.setSearchQuery('no matching tasks'); });
+    expect(listData()).toHaveLength(0);
+    expect(button('project-section-add-task-empty')).toBeUndefined();
+    act(() => tree.unmount());
   });
 
   it('labels each section with its flow only in a Per section project (#1429)', async () => {

@@ -135,6 +135,48 @@ describe('native Project task filters', () => {
         expect(saveData).not.toHaveBeenCalled();
     });
 
+    it('folds real sections before paging and scopes selection to the shown tasks', async () => {
+        const host = createNativeHostContract();
+        expect(await host.activate({ writeSafetyReady: true })).toMatchObject({ ok: true });
+        const first = PROJECT_COMPLETED_SECTION_ID;
+        useTaskStore.setState({ _allProjects: [project],
+            _allSections: [section(first, 0), section('empty', 1), section('last', 2)],
+            _allTasks: [
+                ...Array.from({ length: 55 }, (_, index) => task(`hidden-${index}`, { sectionId: first })),
+                task('visible', { sectionId: 'last' }),
+                task('unfiled'),
+                task('done', { status: 'done', sectionId: first, completedAt: stamp }),
+                task('ref', { status: 'reference', sectionId: first }),
+            ] });
+        saveData.mockClear();
+        const params = { projectId: 'p', showCompleted: true, completedCollapsed: true, filters: {} };
+        const expanded = host.getProjectDetailFilterView({ ...params, offset: 0, limit: 4, collapsedSectionIds: [] });
+        if (!expanded.ok) throw new Error(expanded.error.code);
+        expect(rows(expanded.value)).toHaveLength(3);
+        const collapse = { ...params, collapsedSectionIds: [first] };
+        const folded = host.getProjectDetailFilterView({ ...collapse, offset: 0, limit: 4 });
+        if (!folded.ok) throw new Error(folded.error.code);
+        expect(folded.value.items).toMatchObject([
+            { id: first, sectionId: first, count: 55, collapsible: true, collapsed: true },
+            { id: 'empty', sectionId: 'empty', count: 0, collapsible: true, collapsed: false },
+            { id: 'last', sectionId: 'last', count: 1, collapsible: true, collapsed: false },
+            { type: 'task', row: { id: 'visible' } },
+        ]);
+        expect(host.getProjectDetailFilterView({ ...collapse, offset: 4, limit: 4, revision: expanded.value.revision }))
+            .toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+        const next = host.getProjectDetailFilterView({ ...collapse, offset: 4, limit: 5, revision: folded.value.revision });
+        if (!next.ok) throw new Error(next.error.code);
+        expect(rows(next.value)).toEqual(['unfiled', 'ref']);
+        expect(next.value.items.find(item => item.type === 'section' && item.collapsible))
+            .toMatchObject({ id: `${first}:1`, collapsible: true, collapsed: true });
+        expect(next.value.items.every(item => item.type === 'task' || item.sectionId === undefined)).toBe(true);
+        const selected = host.getBulkActions({ list: 'project', params: collapse, taskIds: ['hidden-0', 'visible'] });
+        expect(selected).toMatchObject({ ok: true, value: { selectedIds: ['visible'] } });
+        expect(host.getProjectDetailFilterView({ ...collapse, offset: 0, limit: 4, filters: { searchQuery: 'no matches' } }))
+            .toMatchObject({ ok: true, value: { total: 0, empty: { actionLabel: 'Clear' } } });
+        expect(saveData).not.toHaveBeenCalled();
+    });
+
     it('applies context and tag match modes plus metadata, including feature-off pruning', async () => {
         const host = createNativeHostContract();
         expect(await host.activate({ writeSafetyReady: true })).toMatchObject({ ok: true });

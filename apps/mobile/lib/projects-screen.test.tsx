@@ -471,7 +471,7 @@ describe('ProjectsScreen project quick add ordering', () => {
     Platform.OS = originalOS;
   });
 
-  const openProjectAndQuickAdd = async () => {
+  const openProjectAndQuickAdd = async (sectionId?: string) => {
     routeParams.current = { projectId: testProject.id, openToken: 'token-1' };
     let tree!: ReturnType<typeof create>;
     await act(async () => {
@@ -479,16 +479,16 @@ describe('ProjectsScreen project quick add ordering', () => {
       await Promise.resolve();
     });
     await act(async () => {
-      detailModal.props?.onOpenQuickAdd?.(testProject);
+      detailModal.props?.onOpenQuickAdd?.(testProject, sectionId);
       await Promise.resolve();
     });
     return tree;
   };
 
 
-  it('on iOS opens capture only after the project sheet reports dismissal', async () => {
+  it.each([undefined, 'section-prep'])('on iOS waits for project dismissal before opening capture for section %s', async (sectionId) => {
     Platform.OS = 'ios';
-    const tree = await openProjectAndQuickAdd();
+    const tree = await openProjectAndQuickAdd(sectionId);
 
     expect(detailModal.props?.project).toBeNull();
     expect(openQuickCaptureMock).not.toHaveBeenCalled();
@@ -500,7 +500,7 @@ describe('ProjectsScreen project quick add ordering', () => {
 
     expect(openQuickCaptureMock).toHaveBeenCalledTimes(1);
     expect(openQuickCaptureMock).toHaveBeenCalledWith(expect.objectContaining({
-      initialProps: { projectId: testProject.id, status: 'next' },
+      initialProps: { projectId: testProject.id, sectionId, status: 'next' },
       returnTo: expect.any(String),
     }));
 
@@ -554,13 +554,13 @@ describe('ProjectsScreen project quick add ordering', () => {
     }
   });
 
-  it('on Android keeps the same project open behind capture and on cancel', async () => {
+  it.each([undefined, 'section-prep'])('on Android keeps the project open behind capture and on cancel for section %s', async (sectionId) => {
     Platform.OS = 'android';
-    const tree = await openProjectAndQuickAdd();
+    const tree = await openProjectAndQuickAdd(sectionId);
 
     expect(openQuickCaptureMock).not.toHaveBeenCalled();
     expect(detailModal.props?.project?.id).toBe(testProject.id);
-    expect(JSON.parse(projectCapture.props?.params.initialProps)).toEqual({ projectId: testProject.id, status: 'next' });
+    expect(JSON.parse(projectCapture.props?.params.initialProps)).toEqual({ projectId: testProject.id, sectionId, status: 'next' });
     await act(async () => projectCapture.props?.projectModal.close());
     expect(detailModal.props?.project?.id).toBe(testProject.id);
 
