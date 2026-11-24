@@ -236,9 +236,11 @@ export function buildAndroidCaptureDestinationCatalog(data: AppData, language: L
     const projects = data.projects.filter(project => isSelectableProjectForTaskAssignment(project));
     const projectIds = new Set(projects.map(project => project.id));
     const areaId = resolveQuickCaptureDefaultAreaId(data.settings, areas);
+    const savedContexts = getSavedTaxonomyTokens(data.settings, 'context');
+    const savedTags = getSavedTaxonomyTokens(data.settings, 'tag');
     return {
-        savedContexts: getSavedTaxonomyTokens(data.settings, 'context'),
-        savedTags: getSavedTaxonomyTokens(data.settings, 'tag'),
+        ...(savedContexts.length ? { savedContexts } : {}),
+        ...(savedTags.length ? { savedTags } : {}),
         defaultDestination: areaId ? { kind: 'area', id: areaId } : { kind: 'none' },
         areas: areas.map(({ id, name }) => ({ id, name })),
         projects: projects.map(({ id, title, areaId }) => ({ id, title, ...(areaId ? { areaId } : {}) })),
