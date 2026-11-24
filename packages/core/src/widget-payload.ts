@@ -1,4 +1,5 @@
 import type { CaptureDestination } from './capture-destination';
+import { getSavedTaxonomyTokens } from './taxonomy-catalog';
 import { resolveQuickCaptureDefaultAreaId } from './quick-capture-model';
 import { taskMatchesAreaFilterSelection } from './area-filter';
 import { format } from 'date-fns';
@@ -220,6 +221,8 @@ export interface AndroidTaskPeekLabels {
 }
 
 export type AndroidCaptureDestinationCatalog = {
+    savedContexts?: string[];
+    savedTags?: string[];
     defaultDestination: CaptureDestination;
     areas: { id: string; name: string }[];
     projects: { id: string; title: string; areaId?: string }[];
@@ -234,6 +237,8 @@ export function buildAndroidCaptureDestinationCatalog(data: AppData, language: L
     const projectIds = new Set(projects.map(project => project.id));
     const areaId = resolveQuickCaptureDefaultAreaId(data.settings, areas);
     return {
+        savedContexts: getSavedTaxonomyTokens(data.settings, 'context'),
+        savedTags: getSavedTaxonomyTokens(data.settings, 'tag'),
         defaultDestination: areaId ? { kind: 'area', id: areaId } : { kind: 'none' },
         areas: areas.map(({ id, name }) => ({ id, name })),
         projects: projects.map(({ id, title, areaId }) => ({ id, title, ...(areaId ? { areaId } : {}) })),

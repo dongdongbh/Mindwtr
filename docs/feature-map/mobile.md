@@ -92,6 +92,7 @@ Source: `apps/mobile`. Routes live in `apps/mobile/app` (expo-router). Labels be
 ## Queued Android capture
 
 - Reach: Android Quick capture widget, Quick Settings tile, or capture shortcut.
+- Android home-screen capture: type `#` or `@` to search used and saved tokens, including while composing text. Type `!` to choose an existing Area by name.
 - Code: `apps/mobile/modules/android-widget/android/src/main/java/tech/dongdongbh/mindwtr/androidwidget/QuickCaptureActivity.kt`, `packages/core/src/pending-captures.ts`
 - Checks: `packages/core/src/pending-captures.test.ts`, `apps/mobile/lib/pending-captures.test.ts`
 - Notes: The standalone screen shows editable Status and Destination, a one-line expanding title, and local `@`, `+`, `#` suggestions. Save and Cancel stay labelled. The displayed destination is frozen into text/audio queue entries, including explicit None; later settings changes cannot redirect them. Missing destinations keep the draft or queued capture for recovery. Older queue entries without destination metadata retain legacy default-area handling. IME composition confirmation must not submit the title.

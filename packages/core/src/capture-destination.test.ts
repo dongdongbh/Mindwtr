@@ -68,9 +68,11 @@ describe('capture destination snapshot', () => {
     });
 
     it('publishes live choices and the resolved default independently of widget task lists', () => {
-        const source: AppData = { ...data, tasks: [], people: [], settings: { gtd: { defaultAreaMode: 'fixed', defaultAreaId: area.id } } };
+        const source: AppData = { ...data, tasks: [], people: [], settings: { gtd: { defaultAreaMode: 'fixed', defaultAreaId: area.id },
+            taxonomy: { tags: [{ token: '#watchlist', rev: 1, revBy: 'device', updatedAt: stamp }] } } };
         const catalog = buildAndroidCaptureDestinationCatalog({ ...source, projects: [...data.projects, { ...project, id: 'deleted', deletedAt: stamp }],
             areas: [...data.areas, { ...area, id: 'deleted', deletedAt: stamp }] }, 'en');
+        expect(catalog.savedTags).toEqual(['#watchlist']);
         expect(catalog.defaultDestination).toEqual({ kind: 'area', id: area.id });
         expect(catalog.projects.map(row => row.id)).toEqual([project.id]);
         expect(catalog.areas.map(row => row.id)).toEqual([area.id]);
