@@ -10279,8 +10279,8 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     assert.match(source('StartupPrompts.kt'), /shell\.menu\.whenIdle \{ shell\.menu\.openProjects\(projectId\) \}/);
 
 
-    assert.match(header, /\{ openProjectId\?\.let\(::openProjectCapture\) \}[\s\S]{0,200}testTag\("project-add-task-button"\)/);
-    assert.match(source('InboxViewModel.kt'), /fun openProjectCapture\(projectId: String\) \{[\s\S]{0,200}put\("initialProps", JSONObject\(\)\.put\("projectId", projectId\)\.put\("status", "next"\)\.toString\(\)\)\s+\.put\("returnTo", "\/projects-screen\?projectId=\$\{android\.net\.Uri\.encode\(projectId\)\}"\)[\s\S]{0,300}ui \{ captureModal\.opened\(params, reply\) \}/);
+    assert.match(header, /\{ openProjectId\?\.let \{ openProjectCapture\(it\) \} \}[\s\S]{0,200}testTag\("project-add-task-button"\)/);
+    assert.match(source('InboxViewModel.kt'), /fun openProjectCapture\(projectId: String, sectionId: String\? = null\) \{[\s\S]{0,200}val initialProps = JSONObject\(\)\.put\("projectId", projectId\)\.put\("status", "next"\)\.put\("sectionId", sectionId\)\s+val params = JSONObject\(\)\.put\("initialProps", initialProps\.toString\(\)\)\s+\.put\("returnTo", "\/projects-screen\?projectId=\$\{android\.net\.Uri\.encode\(projectId\)\}"\)[\s\S]{0,300}ui \{ captureModal\.opened\(params, reply\) \}/);
     assert.match(source('CaptureModalModel.kt'), /private fun end\(close: JSONObject, leave: Boolean = true\) \{\s+keep\(null\)\s+inFlight = null\s+close\.menuText\("returnToProjectId"\)\?\.let \{ id -> shell\.menu\.whenIdle \{ shell\.openProject\(id\) \} \}/);
 
     assert.doesNotMatch(source('CaptureScreen.kt') + source('InboxViewModel.kt'), /presetPatch|withPreset|val preset: JSONObject/);
@@ -10291,7 +10291,7 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     const header = source('ProjectsScreen.kt'), details = source('ProjectDetails.kt');
     assert.match(header, /\{ projectDetails\.openViewOptions\(\) \}[\s\S]{0,200}testTag\("project-task-view-options-button"\)/);
     assert.match(header, /val active = projectShowCompleted \|\| projectDetails\.customSort/);
-    assert.match(header, /if \(entry\.collapsible\) CompletedHeading\(entry, enabled = !busy && failedAction == null, toggle = model::toggleProjectCompleted\)/);
+    assert.match(header, /val enabled = !busy && failedAction == null[\s\S]{0,600}entry\.collapsible -> CompletedHeading\(entry, enabled, toggle = model::toggleProjectCompleted\)/);
     assert.match(details, /"project-view-sort-option"[\s\S]{0,600}"project-view-completed-option"/);
     assert.match(details, /edit\(projectId, "sort", answer = \{ readSort\(\) \}\) \{ put\("sortBy", sortBy\) \}/);
     assert.match(hostEntry, /projectTaskSortOptions: \(input\) => contract\.getProjectTaskSortOptions\(input\)/);
