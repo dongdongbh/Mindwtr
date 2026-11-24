@@ -29,6 +29,7 @@ apps:
       - home
       - network
       - network-bind
+      - network-status
       - desktop
       - desktop-legacy
       - wayland
