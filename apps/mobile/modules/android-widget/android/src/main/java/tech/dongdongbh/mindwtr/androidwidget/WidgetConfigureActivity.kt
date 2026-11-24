@@ -104,7 +104,9 @@ class WidgetConfigureActivity : AppCompatActivity() {
       onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
         override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
           val currentPosition = (groupingOptions.indexOf(WidgetListStore.grouping(pendingSelection)?.first) + 1).coerceAtLeast(0)
-          if (position != currentPosition) pendingSelection = WidgetListStore.withGrouping(pendingSelection, groupingOptions.getOrNull(position - 1))
+          if (position == currentPosition) return
+          pendingSelection = WidgetListStore.withGrouping(pendingSelection, groupingOptions.getOrNull(position - 1))
+          if (dropdown) save()
         }
         override fun onNothingSelected(parent: AdapterView<*>?) {}
       }
@@ -188,8 +190,10 @@ class WidgetConfigureActivity : AppCompatActivity() {
   private fun save() {
     if (kind == WidgetKind.TASKS) WidgetListStore.write(this, appWidgetId, pendingSelection)
 
-    if (kind == WidgetKind.TASKS && !dropdown) WidgetListStore.writeFocusAvailable(this, appWidgetId, pendingFocusAvailable)
-    WidgetListStore.writeBackground(this, appWidgetId, pendingBackground)
+    if (!dropdown) {
+      if (kind == WidgetKind.TASKS) WidgetListStore.writeFocusAvailable(this, appWidgetId, pendingFocusAvailable)
+      WidgetListStore.writeBackground(this, appWidgetId, pendingBackground)
+    }
     val manager = AppWidgetManager.getInstance(this)
     WidgetRenderer.render(this, manager, intArrayOf(appWidgetId), kind)
     CaptureSyncHeadlessService.startWidgetRefresh(this)
@@ -200,7 +204,7 @@ class WidgetConfigureActivity : AppCompatActivity() {
   private fun updateGroupingVisibility() {
     val focus = WidgetListStore.baseListId(pendingSelection) == WidgetListStore.DEFAULT_LIST
     findViewById<View>(R.id.mindwtr_widget_configure_grouping_row).visibility =
-      if (dropdown || focus || kind != WidgetKind.TASKS) View.GONE else View.VISIBLE
+      if (focus || kind != WidgetKind.TASKS) View.GONE else View.VISIBLE
 
     findViewById<View>(R.id.mindwtr_widget_configure_available).visibility =
       if (!dropdown && focus && kind == WidgetKind.TASKS) View.VISIBLE else View.INVISIBLE
