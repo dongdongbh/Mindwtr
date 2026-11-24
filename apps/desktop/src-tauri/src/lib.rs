@@ -548,6 +548,8 @@ async fn send_replacing_notification(
 }
 
 #[cfg(target_os = "macos")]
+const MENU_SETTINGS_ID: &str = "app_settings";
+#[cfg(target_os = "macos")]
 const MENU_HELP_DOCS_ID: &str = "help_docs";
 #[cfg(target_os = "macos")]
 const MENU_HELP_ISSUES_ID: &str = "help_report_issue";
@@ -1585,6 +1587,12 @@ pub fn run() {
     let builder = builder
         .menu(|handle| {
             let menu = Menu::default(handle)?;
+            // Tauri's default macOS menu starts with the application submenu.
+            if let Some(app_submenu) = menu.items()?.first().and_then(|item| item.as_submenu()) {
+                let settings_item =
+                    MenuItem::with_id(handle, MENU_SETTINGS_ID, "Settings…", true, Some("Cmd+,"))?;
+                app_submenu.insert(&settings_item, 2)?;
+            }
             if let Some(help_submenu) = menu
                 .get(HELP_SUBMENU_ID)
                 .and_then(|item| item.as_submenu().cloned())
@@ -1608,7 +1616,11 @@ pub fn run() {
             }
             Ok(menu)
         })
-        .on_menu_event(|_app, event| match event.id().as_ref() {
+        .on_menu_event(|app, event| match event.id().as_ref() {
+            MENU_SETTINGS_ID => {
+                show_main(app);
+                let _ = app.emit_to("main", "open-settings", ());
+            }
             MENU_HELP_DOCS_ID => {
                 let _ = open::that_detached("https://github.com/dongdongbh/Mindwtr#readme");
             }
