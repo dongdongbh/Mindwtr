@@ -142,7 +142,7 @@ App Intents and Siri belong to the RN app. They are not in `apps/ios-native`. Th
 
 - Checklist drag: Drag a checklist row by its handle (`task-checklist-drag-<index>`). The row follows the finger and the rows it passes shift to preview its slot, as in RN (#1483). Tap a handle for row actions.
 
-- Preview completion: Mark Done in the visible Status card flushes pending checklist input, changes the same draft to Done, then invokes its normal owned Save. The handler requires the same host/task/session and an accepted draft edit. Repeat taps and competing Save/Close are blocked while it runs. Failed writes keep the draft and existing Retry/Save; uncertain retries replay the retained request and close only after acknowledgement. Reference, terminal, Trash, projected and archived-project/read-only previews have no action. Checks: `apps/ios-native/Tests/MindwtrNativeCoreTests/PreviewCompletionHostTests.swift` and the two `testPreviewMarkDone...` UI cases.
+- Preview completion: Mark Done sits beside the status in the Status card when both fit. It wraps below the status when space is limited. The action flushes pending checklist input, changes the same draft to Done, then invokes its normal owned Save. The handler requires the same host/task/session and an accepted draft edit. Repeat taps and competing Save/Close are blocked while it runs. Failed writes keep the draft and existing Retry/Save; uncertain retries replay the retained request and close only after acknowledgement. Reference, terminal, Trash, projected and archived-project/read-only previews have no action. Checks: `apps/ios-native/Tests/MindwtrNativeCoreTests/PreviewCompletionHostTests.swift` and the two `testPreviewMarkDone...` UI cases.
 
 ## Markdown editor
 

@@ -131,21 +131,27 @@ fun TaskViewTab(model: InboxViewModel, editor: TaskEditor, locked: Boolean, pick
         val labels = view.getJSONObject("markdownLabels")
         for (row in view.menuObjects("rows")) when (row.getString("type")) {
             "title" -> ViewCard(row.getString("label")) { Text(row.getString("value"), style = rnText(17, 700, 23), color = c.text) }
-            "status" -> ViewCard(row.getString("label")) {
+            "status" -> ViewCard {
                 val editable = row.getBoolean("editable") && !locked
                 val status = row.menuText("status")
 
-                if (row.getBoolean("editable") && status != null) StatusPill(status, row.getString("value"), editable, pickStatus,
-                    if (status == "done") { { completedAt.openEditor() } } else null)
-                else Text(row.getString("value"), style = rnText(14, 600, 20), color = c.text)
-                row.menuText("completeLabel")?.let { label ->
-                    val enabled = !locked && writable && editor.previewCompletionSeq == null && !editor.checklistStructurePending && ai.working != "editor"
-                    val shape = RoundedCornerShape(10.dp)
-                    Box(Modifier.padding(top = 10.dp).heightIn(min = 48.dp).clip(shape).rnBorder(1.dp, c.tint, shape)
-                        .testTag("task-preview-mark-done").combinedClickable(enabled = enabled, role = Role.Button,
-                            onLongClickLabel = t("task.completeBackdateHintMobile"), onLongClick = { completedAt.openEditor(saveOnPick = true) }) { completeEditor() }
-                        .padding(horizontal = 14.dp, vertical = 10.dp), contentAlignment = Alignment.CenterStart) {
-                        Text(label, style = rnText(14, 600), color = c.tint, modifier = Modifier.fade(if (enabled) 1f else 0.5f))
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp),
+                    itemVerticalAlignment = Alignment.CenterVertically) {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        ViewLabel(row.getString("label"))
+                        if (row.getBoolean("editable") && status != null) StatusPill(status, row.getString("value"), editable, pickStatus,
+                            if (status == "done") { { completedAt.openEditor() } } else null)
+                        else Text(row.getString("value"), style = rnText(14, 600, 20), color = c.text)
+                    }
+                    row.menuText("completeLabel")?.let { label ->
+                        val enabled = !locked && writable && editor.previewCompletionSeq == null && !editor.checklistStructurePending && ai.working != "editor"
+                        val shape = RoundedCornerShape(10.dp)
+                        Box(Modifier.widthIn(min = 48.dp).heightIn(min = 48.dp).clip(shape).rnBorder(1.dp, c.tint, shape)
+                            .testTag("task-preview-mark-done").combinedClickable(enabled = enabled, role = Role.Button,
+                                onLongClickLabel = t("task.completeBackdateHintMobile"), onLongClick = { completedAt.openEditor(saveOnPick = true) }) { completeEditor() }
+                            .padding(horizontal = 14.dp, vertical = 10.dp), contentAlignment = Alignment.Center) {
+                            Text(label, style = rnText(14, 600), color = c.tint, modifier = Modifier.fade(if (enabled) 1f else 0.5f))
+                        }
                     }
                 }
             }
@@ -212,14 +218,14 @@ private fun ViewLabel(label: String) =
 
 
 @Composable
-private fun ViewCard(label: String, spoken: String? = null, onClick: (() -> Unit)? = null, content: @Composable () -> Unit) {
+private fun ViewCard(label: String? = null, spoken: String? = null, onClick: (() -> Unit)? = null, content: @Composable () -> Unit) {
     val c = LocalTheme.current.colors
     val shape = RoundedCornerShape(10.dp)
     Column(Modifier.padding(bottom = 12.dp).fillMaxWidth().clip(shape).background(c.inputBg).rnBorder(1.dp, c.border, shape)
-        .then(if (onClick != null) Modifier.clearAndSetSemantics { contentDescription = spoken ?: label; role = Role.Button; onClick { onClick(); true } }
+        .then(if (onClick != null) Modifier.clearAndSetSemantics { contentDescription = spoken ?: label.orEmpty(); role = Role.Button; onClick { onClick(); true } }
             .clickable(onClick = onClick) else Modifier)
         .padding(horizontal = 12.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        ViewLabel(label)
+        if (label != null) ViewLabel(label)
         content()
     }
 }

@@ -197,9 +197,11 @@ function TaskEditViewTabComponent({
             </Text>
           </View>
         );
-      case 'status':
-        return (
-          <View key="status" style={[styles.viewRow, { backgroundColor: tc.inputBg, borderColor: tc.border }]}>
+      case 'status': {
+        const complete = row.completeLabel || completionRetryPending ? onComplete : undefined;
+        const completionTargetSize = Platform.OS === 'android' ? 48 : 44;
+        const status = (
+          <>
             <Text style={[styles.viewLabel, { color: tc.secondaryText }]}>{row.label}</Text>
             {row.editable && onStatusUpdate && row.status ? (
               <TaskStatusBadge
@@ -208,29 +210,40 @@ function TaskEditViewTabComponent({
                 onBackdatedComplete={onBackdatedComplete}
               />
             ) : (
-              <Text style={[styles.viewValue, { color: tc.text }]}>{row.value}</Text>
+              <Text style={[styles.viewValue, { color: tc.text, ...(complete ? { width: 'auto' } : {}) }]}>{row.value}</Text>
             )}
-            {(row.completeLabel || completionRetryPending) && onComplete ? (
-              <TouchableOpacity
-                testID="task-preview-mark-done"
-                onPress={onComplete}
-                onLongPress={longPressDone}
-                disabled={completionPending}
-                accessibilityRole="button"
-                accessibilityLabel={completionRetryPending ? t('common.retry') : row.completeLabel}
-                accessibilityActions={longPressDone ? [{ name: 'longpress', label: t('task.editCompletedAt') }] : undefined}
-                onAccessibilityAction={longPressDone ? (event) => {
-                  if (event.nativeEvent.actionName === 'longpress') longPressDone();
-                } : undefined}
-                accessibilityState={{ disabled: completionPending, busy: completionPending }}
-                style={{ minHeight: Platform.OS === 'android' ? 48 : 44, alignSelf: 'flex-start', justifyContent: 'center', paddingHorizontal: 14, paddingVertical: 10, marginTop: 10, borderWidth: 1, borderRadius: 10, borderColor: tc.tint, opacity: completionPending ? 0.5 : 1, maxWidth: '100%' }}
-              >
-                <Text style={{ color: tc.tint, fontWeight: '600', flexShrink: 1 }}>{completionRetryPending ? t('common.retry') : row.completeLabel}</Text>
-              </TouchableOpacity>
-            ) : null}
+          </>
+        );
+        return (
+          <View key="status" style={[styles.viewRow, { backgroundColor: tc.inputBg, borderColor: tc.border }]}>
+            {complete ? (
+              <View style={styles.viewStatusActions}>
+                <View style={styles.viewStatusValue}>{status}</View>
+                <TouchableOpacity
+                  testID="task-preview-mark-done"
+                  onPress={complete}
+                  onLongPress={longPressDone}
+                  disabled={completionPending}
+                  accessibilityRole="button"
+                  accessibilityLabel={completionRetryPending ? t('common.retry') : row.completeLabel}
+                  accessibilityActions={longPressDone ? [{ name: 'longpress', label: t('task.editCompletedAt') }] : undefined}
+                  onAccessibilityAction={longPressDone ? (event) => {
+                    if (event.nativeEvent.actionName === 'longpress') longPressDone();
+                  } : undefined}
+                  accessibilityState={{ disabled: completionPending, busy: completionPending }}
+                  style={[styles.viewCompletionButton, {
+                    minHeight: completionTargetSize, minWidth: completionTargetSize,
+                    borderColor: tc.tint, opacity: completionPending ? 0.5 : 1,
+                  }]}
+                >
+                  <Text style={{ color: tc.tint, fontWeight: '600', textAlign: 'center' }}>{completionRetryPending ? t('common.retry') : row.completeLabel}</Text>
+                </TouchableOpacity>
+              </View>
+            ) : status}
             {completionError ? <Text accessibilityRole="alert" style={{ color: tc.danger, marginTop: 8 }}>{completionError}</Text> : null}
           </View>
         );
+      }
       case 'field': {
         const projectId = row.project?.id;
         return (

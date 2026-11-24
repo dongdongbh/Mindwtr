@@ -1394,33 +1394,55 @@ struct TaskViewSheet: View {
         NSLog("Native iOS editor requested input dismissal releaseCheck=v1.3.3/native-ios-editor-input-end")
     }
 
+    @ViewBuilder private func previewStatus(_ item: CoreObject) -> some View {
+        let status = VStack(alignment: .leading, spacing: 6) {
+            label(item.text("label"))
+            Text(item.text("value")).rnFont(14, .semibold)
+                .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("task-preview-status-value")
+        }
+        let completeLabel = item.text("completeLabel")
+        if completeLabel.isEmpty {
+            status
+        } else {
+            let complete = Button {
+                endEditingBeforeAction()
+                Task { await model.completeTaskFromPreview() }
+            } label: {
+                Text(completeLabel).rnFont(14, .semibold)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 14).frame(minWidth: 44, minHeight: 44)
+                    .overlay(RoundedRectangle(cornerRadius: 10).stroke(palette.tint, lineWidth: 1))
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain).foregroundStyle(palette.tint)
+            .disabled(frozen || modalPresented || discardConfirm || !model.taskPreviewCompletionEnabled)
+            .accessibilityIdentifier("task-preview-mark-done")
+
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 12) { status; complete }
+                VStack(alignment: .leading, spacing: 8) { status; complete }
+            }
+        }
+    }
+
     @ViewBuilder private func row(_ item: CoreObject) -> some View {
         let sourceID = value.text("id"), revision = value.text("revision")
         switch item.text("type") {
         case "title", "status", "field":
             let content = VStack(alignment: .leading, spacing: 6) {
-                label(item.text("label"))
-                if item.text("type") == "title" {
-                    Text(item.text("value")).rnFont(17, .bold)
-                        .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
-                        .accessibilityIdentifier("task-view-task-title")
+                if item.text("type") == "status" {
+                    previewStatus(item)
                 } else {
-                    Text(item.text("value")).rnFont(14, .semibold)
-                        .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
-                }
-                if item.text("type") == "status", !item.text("completeLabel").isEmpty {
-                    Button {
-                        endEditingBeforeAction()
-                        Task { await model.completeTaskFromPreview() }
-                    } label: {
-                        Text(item.text("completeLabel")).rnFont(14, .semibold)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .frame(minHeight: 44).padding(.horizontal, 14)
-                            .overlay(RoundedRectangle(cornerRadius: 10).stroke(palette.tint, lineWidth: 1))
+                    label(item.text("label"))
+                    if item.text("type") == "title" {
+                        Text(item.text("value")).rnFont(17, .bold)
+                            .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                            .accessibilityIdentifier("task-view-task-title")
+                    } else {
+                        Text(item.text("value")).rnFont(14, .semibold)
+                            .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                     }
-                    .buttonStyle(.plain).foregroundStyle(palette.tint)
-                    .disabled(frozen || modalPresented || discardConfirm || !model.taskPreviewCompletionEnabled)
-                    .accessibilityIdentifier("task-preview-mark-done")
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading).padding(12)

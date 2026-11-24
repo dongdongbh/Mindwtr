@@ -483,6 +483,27 @@ export const styles = StyleSheet.create({
         borderRadius: 10,
         marginBottom: 12,
     },
+    viewStatusActions: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        alignItems: 'center',
+        alignSelf: 'stretch',
+        columnGap: 12,
+        rowGap: 8,
+    },
+    viewStatusValue: {
+        gap: 6,
+        alignItems: 'flex-start',
+        maxWidth: '100%',
+    },
+    viewCompletionButton: {
+        maxWidth: '100%',
+        justifyContent: 'center',
+        paddingHorizontal: 14,
+        paddingVertical: 10,
+        borderWidth: 1,
+        borderRadius: 10,
+    },
     viewLabel: {
         fontSize: 12,
         fontWeight: '700',
