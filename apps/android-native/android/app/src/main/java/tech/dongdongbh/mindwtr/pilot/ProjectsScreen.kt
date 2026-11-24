@@ -232,7 +232,7 @@ private fun ProjectSectionHeading(entry: DetailSection, enabled: Boolean, toggle
             Text("(${entry.count})", style = rnText(12, 600), color = colors.secondaryText)
         }
         if (add != null) {
-            val addLabel = "${t("projects.addTask")} · ${entry.title}"
+            val addLabel = "${t("nav.addTask")} · ${entry.title}"
             IconButton(onClick = add, enabled = enabled, modifier = Modifier
                 .semantics { contentDescription = addLabel }.testTag("project-section-add-${entry.id}")) {
                 Icon(SettingsIonicons.Add, null, tint = if (enabled) colors.tint else colors.secondaryText, modifier = Modifier.size(22.dp))

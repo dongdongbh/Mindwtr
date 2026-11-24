@@ -2454,7 +2454,7 @@ assert.equal(model.match(/runtime\.projects\(projectTagFilter\)/g).length, 2, 'r
 
 
 assert.equal(model.match(/projectWindow\(runtime, /g).length, 3, 'the first window, the next, and a filter edit\'s first window');
-assert.match(model, /runtime\.menuRead\("projectDetailFilterView", JSONObject\(\)\.put\("projectId", id\)[\s\S]{0,200}\.put\("showCompleted", projectShowCompleted\)\.put\("completedCollapsed", projectCompletedCollapsed\)\s+\.put\("filters", projectDetails\.listFilterState\)\.put\("filterSheetOpen", projectDetails\.listFilterSheet != null\)/);
+assert.match(model, /runtime\.menuRead\("projectDetailFilterView", JSONObject\(\)\.put\("projectId", id\)[\s\S]{0,200}\.put\("showCompleted", projectShowCompleted\)\.put\("completedCollapsed", projectCompletedCollapsed\)\s+\.put\("collapsedSectionIds", JSONArray\(collapsedProjectSectionIds\)\)\s+\.put\("filters", projectDetails\.listFilterState\)\.put\("filterSheetOpen", projectDetails\.listFilterSheet != null\)/);
 assert.match(source('ViewState.kt'), /const val PROJECT_SHOW_COMPLETED_KEY = "mindwtr:view:project-detail:show-completed:v1"/);
 assert.match(model, /prefs\.edit\(\)\.putString\(PROJECT_SHOW_COMPLETED_KEY, on\.toString\(\)\)\.apply\(\)/);
 assert.equal([activity, owner, editorUi, focusUi, projectsUi].join('\n').match(/\.projects\(\)|projectDetail\(/g), null);
@@ -2486,7 +2486,7 @@ assert.match(model, /if \(id != openProjectId\) return\s+if \(detail == null\) k
 assert.match(model, /if \(failure\.message\?\.startsWith\("TASK_NOT_FOUND"\) != true\) throw failure\s+null/);
 
 assert.match(projectsUi, /LaunchedEffect\(owner\) \{\s*owner\.repeatOnLifecycle\(Lifecycle\.State\.RESUMED\) \{ model\.refreshProjects\(\) \}/);
-assert.equal(code([activity, model, projectsUi].join('\n')).match(/(?<!fun )refreshProjects\(\)/g).length, 7, 'the lifecycle loop, the boot\'s deferred read (first content, or the tab chosen while the boot ran), RN\'s Show completed and Completed pile (b4a), a row the clock changes (#1360), and a Tag filter choice (gap 32)');
+assert.equal(code([activity, model, projectsUi].join('\n')).match(/(?<!fun )refreshProjects\(\)/g).length, 8, 'section collapse, the lifecycle loop, the boot\'s deferred read (first content, or the tab chosen while the boot ran), RN\'s Show completed and Completed pile (b4a), a row the clock changes (#1360), and a Tag filter choice (gap 32)');
 assert.match(hostEntry, /projectList\(tagFilter = '__all__'\): string \{\s+return submit\(async \(\) => \{\s+requireSaved\(\);\s+return unwrap\(contract\.getFilteredProjects\(\{ tagFilter, moves: true \}\)\);/,
     'the Projects list asks core to match the Tag filter (RN buildProjectGroups), with the moves');
 assert.match(projectsUi, /val heading = if \(active\) "\$\{t\("projects\.tagFilter"\)\}: \$\{projectTagLabel\(projectTagFilter\)\}" else t\("projects\.tagFilter"\)\s+val action = t\(if \(projectTagFilterOpen\) "filters\.hide" else "filters\.show"\)/,
