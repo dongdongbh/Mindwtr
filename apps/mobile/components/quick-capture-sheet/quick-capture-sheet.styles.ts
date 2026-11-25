@@ -206,6 +206,10 @@ export const styles = StyleSheet.create({
     maxWidth: '100%',
     overflow: 'hidden',
   },
+  destinationChip: {
+    alignSelf: 'flex-start',
+    marginTop: 8,
+  },
   optionText: {
     fontSize: 12,
     fontWeight: '600',
