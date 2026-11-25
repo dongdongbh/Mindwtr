@@ -1,6 +1,6 @@
 import { useTaskDeepLink } from './hooks/use-task-deep-link';
 import { CalendarOpenTaskModal } from './components/views/calendar/CalendarModals';
-import { useEffect, useState, useRef, useTransition, useCallback, useMemo, Suspense, lazy } from 'react';
+import { useEffect, useLayoutEffect, useState, useRef, useTransition, useCallback, useMemo, Suspense, lazy } from 'react';
 import { StartupReadyProbe } from './components/StartupReadyProbe';
 import { RendererNavigationProbe } from './components/RendererNavigationProbe';
 import { beginRendererNavigation, type RendererNavigationTrace } from './lib/renderer-navigation-diagnostics';
@@ -23,7 +23,6 @@ import {
     APP_ANNOUNCEMENT_DISMISSED_VALUE,
     DONATION_PROMPT_ANNOUNCEMENT,
     addBreadcrumb,
-    configureDateFormatting,
     createAutoSyncController,
     flushPendingSave,
     getAnnouncementDismissalStorageKey,
@@ -35,7 +34,6 @@ import {
     recordUpdateReminderChecked,
     recordUpdateReminderDismissed,
     recordUpdateReminderShown,
-    setHostSystemLocale,
     shouldShowAppAnnouncement,
     shouldShowDonationPrompt,
     withSupportPromptShown,
@@ -77,7 +75,7 @@ import { migratePortableAttachments } from './lib/portable-migration';
 import { logDesktopStartupContext } from './lib/startup-context';
 import * as LocalDataWatcher from './lib/local-data-watcher';
 import { invokeNative } from './lib/tauri-invoke';
-import { getSystemDefaultLocale, getSystemShortDatePattern } from './lib/system-locale';
+import { syncDesktopDateFormatting } from './lib/system-locale';
 import { getInstallSourceOrFallback, isFlatpakRuntime, isLinuxRuntime, isTauriRuntime } from './lib/runtime';
 import { useDesktopShellSync } from './lib/desktop-shell-sync';
 import { useAppLockStore } from './lib/app-lock';
@@ -329,7 +327,7 @@ function App() {
 
     const showToast = useUiStore((state) => state.showToast);
     const { requestConfirmation, confirmModal } = useConfirmDialog();
-    const { t, language, setLanguage } = useLanguage();
+    const { t, language, setLanguage, refreshRegionalFormats } = useLanguage();
 
 
     usePomodoroAlerts();
@@ -709,18 +707,16 @@ function App() {
         addBreadcrumb(next);
     }, [currentView]);
 
-    useEffect(() => {
-        const systemLocale = getSystemDefaultLocale();
-        setHostSystemLocale(systemLocale || null);
-        configureDateFormatting({
+    useLayoutEffect(() => {
+        if (syncDesktopDateFormatting({
             language: settingsLanguage || language,
             dateFormat: settingsDateFormat,
             calendarSystem: settingsCalendarSystem,
             timeFormat: settingsTimeFormat,
-            systemDateFormat: getSystemShortDatePattern(),
-            systemLocale,
-        });
-    }, [language, settingsCalendarSystem, settingsDateFormat, settingsLanguage, settingsTimeFormat]);
+        })) {
+            refreshRegionalFormats?.();
+        }
+    }, [language, refreshRegionalFormats, settingsCalendarSystem, settingsDateFormat, settingsLanguage, settingsTimeFormat]);
 
     const translateOrFallback = useCallback((key: string, fallback: string) => {
         return translateWithFallback(t, key, fallback);

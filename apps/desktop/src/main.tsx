@@ -16,9 +16,9 @@ import {
     setStorageAdapter,
     type Language,
 } from '@mindwtr/core';
-import { LanguageProvider } from './contexts/language-context';
+import { getCurrentUiLanguage, LanguageProvider } from './contexts/language-context';
 import { isTauriRuntime, isWindowsRuntime } from './lib/runtime';
-import { getSystemShortDatePattern, loadWindowsRegionalDate } from './lib/system-locale';
+import { getSystemShortDatePattern, loadWindowsRegionalDate, syncDesktopDateFormatting } from './lib/system-locale';
 import { invokeNative, preloadNativeTransport } from './lib/tauri-invoke';
 import { reportError } from './lib/report-error';
 import { webStorage } from './lib/storage-adapter-web';
@@ -293,6 +293,12 @@ async function bootstrap() {
     const initialLanguage = sandboxSettings?.language && sandboxSettings.language !== 'system'
         ? sandboxSettings.language as Language
         : undefined;
+    syncDesktopDateFormatting({
+        language: initialLanguage ?? getCurrentUiLanguage(),
+        dateFormat: sandboxSettings?.dateFormat,
+        calendarSystem: sandboxSettings?.calendarSystem,
+        timeFormat: sandboxSettings?.timeFormat,
+    });
     ReactDOM.createRoot(document.getElementById('root')!).render(
         <React.StrictMode>
             <LanguageProvider initialLanguage={initialLanguage} persistLanguage={!sandboxMode}>

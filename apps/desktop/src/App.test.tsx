@@ -1,9 +1,11 @@
 import { act, fireEvent, render, waitFor } from '@testing-library/react';
 import { beforeEach, describe, it, expect, vi } from 'vitest';
-import { useTaskStore } from '@mindwtr/core';
+import { configureDateFormatting, getDateFormattingConfig, useTaskStore } from '@mindwtr/core';
 import App from './App';
 import { LanguageProvider } from './contexts/language-context';
 import { dispatchDesktopOnboardingEvent } from './lib/desktop-onboarding-events';
+import { loadWindowsRegionalDate } from './lib/system-locale';
+import * as tauriInvoke from './lib/tauri-invoke';
 import { useUiStore } from './store/ui-store';
 
 const renderWithProviders = (ui: React.ReactElement) => {
@@ -162,5 +164,72 @@ describe('App', () => {
             expect(queryByRole('dialog', { name: /welcome to mindwtr/i })).not.toBeInTheDocument();
         });
         expect(window.localStorage.getItem('mindwtr:desktop:first-run-onboarding:v1')).not.toBe('dismissed');
+    });
+
+    it('applies system regional date formatting to rendered tasks on mount and when dateFormat changes', async () => {
+        const previousFormatting = getDateFormattingConfig();
+        const previousShowDetails = useUiStore.getState().listOptions.showDetails;
+        const invokeSpy = vi.spyOn(tauriInvoke, 'invokeNative').mockResolvedValueOnce(['en-US', 'dd-MM-yyyy']);
+        await loadWindowsRegionalDate();
+        configureDateFormatting({ language: 'en', dateFormat: 'mdy', systemLocale: 'en-US' });
+        window.history.replaceState(null, '', '?view=agenda');
+        const task = {
+            id: 'regional-date-task',
+            title: 'Regional format task',
+            status: 'next' as const,
+            isFocusedToday: true,
+            tags: [],
+            contexts: [],
+            dueDate: '2027-11-23',
+            createdAt: '2026-01-01T00:00:00.000Z',
+            updatedAt: '2026-01-01T00:00:00.000Z',
+        };
+        useTaskStore.setState((state) => ({
+            ...state,
+            tasks: [task],
+            _allTasks: [task],
+            _tasksById: new Map([[task.id, task]]),
+            settings: { dateFormat: 'system' },
+        }));
+        useUiStore.setState((state) => ({
+            ...state,
+            listOptions: { ...state.listOptions, showDetails: true },
+        }));
+
+        try {
+            const { getByText } = renderWithProviders(<App />);
+            await waitFor(() => {
+                expect(getByText('23-11-2027')).toBeInTheDocument();
+            });
+
+            act(() => {
+                useTaskStore.setState((state) => ({
+                    ...state,
+                    settings: { ...state.settings, dateFormat: 'mdy' },
+                }));
+            });
+            await waitFor(() => {
+                expect(getByText('11/23/2027')).toBeInTheDocument();
+            });
+
+            act(() => {
+                useTaskStore.setState((state) => ({
+                    ...state,
+                    settings: { ...state.settings, dateFormat: 'system' },
+                }));
+            });
+            await waitFor(() => {
+                expect(getByText('23-11-2027')).toBeInTheDocument();
+            });
+        } finally {
+            invokeSpy.mockResolvedValueOnce(null);
+            await loadWindowsRegionalDate();
+            invokeSpy.mockRestore();
+            useUiStore.setState((state) => ({
+                ...state,
+                listOptions: { ...state.listOptions, showDetails: previousShowDetails },
+            }));
+            configureDateFormatting(previousFormatting);
+        }
     });
 });

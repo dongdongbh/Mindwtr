@@ -9,6 +9,7 @@ import {
     configureDateFormatting,
     createDateFormatter,
     getDateFormattingConfig,
+    getSystemDateFormatOrder,
     isActiveDateFormatDayFirst,
     isLocaleDateDayFirst,
     formatCalendarInputDate,
@@ -282,6 +283,30 @@ describe('date utils', () => {
 
     it.each([null, '', 'not a pattern', 'yyyy-MM', 'yyyy-MM-dd HH:mm', 'yyyy-MM-dd-yyyy', 'yyyy-\'unterminated-MM-dd', 'yy/MM/dd', 'yy.MM.dd'])('falls back safely for unsupported native patterns: %s', (systemDateFormat) => {
         expect(createDateFormatter({ systemLocale: 'en-US', systemDateFormat })('2026-09-22', 'P')).toBe('09/22/2026');
+    });
+
+    it.each([
+        ['en-150', '23/11/2026', true],
+        ['en-CA', '2026-11-23', false],
+        ['fr-CA', '2026-11-23', false],
+        ['nl-BE', '23/11/2026', true],
+        ['it-CH', '23.11.2026', true],
+        ['fi-FI', '23.11.2026', true],
+        ['nb-NO', '23.11.2026', true],
+    ])('derives the Intl short-date format for system locale %s without a native override', (systemLocale, expected, dayFirst) => {
+        const formatter = createDateFormatter({ language: 'en', dateFormat: 'system', systemLocale });
+        expect(formatter('2026-11-23', 'P')).toBe(expected);
+        expect(isLocaleDateDayFirst(systemLocale)).toBe(dayFirst);
+    });
+
+    it('extracts field order from normalized system date format patterns', () => {
+        expect(getSystemDateFormatOrder('dd-MM-yyyy')).toBe('dmy');
+        expect(getSystemDateFormatOrder('d.M.yy')).toBe('dmy');
+        expect(getSystemDateFormatOrder('MM/dd/yyyy')).toBe('mdy');
+        expect(getSystemDateFormatOrder('yyyy/MM/dd')).toBe('ymd');
+        expect(getSystemDateFormatOrder('yy/MM/dd')).toBeNull();
+        expect(getSystemDateFormatOrder('not a pattern')).toBeNull();
+        expect(getSystemDateFormatOrder(undefined)).toBeNull();
     });
 
     it.each([

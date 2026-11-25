@@ -127,16 +127,68 @@ let activeConfig: Readonly<DateFormattingConfig> = {};
 const normalizeLocaleTag = (value?: string | null): string => String(value || '').trim().replace(/_/g, '-');
 
 
-export function normalizeSystemDateFormat(value: unknown): string | undefined {
-    if (typeof value !== 'string' || !value || value.length > 128) return undefined;
-    const tokens = value.match(/y{1,4}|M{1,2}|d{1,2}|'(?:[^']|'')*'|[^A-Za-z']+/g);
-    if (!tokens || tokens.join('') !== value) return undefined;
-    const fields = tokens.filter((token) => /^[yMd]/.test(token));
-    if (fields.length !== 3 || !['y', 'M', 'd'].every((field) => fields.some((token) => token[0] === field))) return undefined;
+const SYSTEM_DATE_TOKEN_PATTERN = /y{1,4}|M{1,2}|d{1,2}|'(?:[^']|'')*'|[^A-Za-z']+/g;
 
-    if (fields[0] === 'yy') return undefined;
-    return value;
+const extractSystemDateFields = (value: unknown): string[] | null => {
+    if (typeof value !== 'string' || !value || value.length > 128) return null;
+    const tokens = value.match(SYSTEM_DATE_TOKEN_PATTERN);
+    if (!tokens || tokens.join('') !== value) return null;
+    const fields = tokens.filter((token) => /^[yMd]/.test(token));
+    if (fields.length !== 3 || !['y', 'M', 'd'].every((field) => fields.some((token) => token[0] === field))) return null;
+    if (fields[0] === 'yy') return null;
+    return fields;
+};
+
+export function normalizeSystemDateFormat(value: unknown): string | undefined {
+    return extractSystemDateFields(value) ? (value as string) : undefined;
 }
+
+export function getSystemDateFormatOrder(value?: string | null): 'dmy' | 'mdy' | 'ymd' | null {
+    const fields = extractSystemDateFields(value);
+    if (!fields) return null;
+    const order = fields.map((token) => token[0].toLowerCase()).join('');
+    return order === 'dmy' || order === 'mdy' || order === 'ymd' ? order : null;
+}
+
+const getLocaleRegion = (tag: string): string | undefined => (
+    tag.split('-').slice(1).find((part) => /^[A-Za-z]{2}$|^\d{3}$/.test(part))?.toUpperCase()
+);
+
+const withShortDatePattern = (locale: Locale, pattern: string): Locale => ({
+    ...locale,
+    formatLong: {
+        ...locale.formatLong,
+        date: (options) => (options?.width === 'short' ? pattern : locale.formatLong.date(options)),
+    },
+});
+
+const intlShortDateFormatCache = new Map<string, string | undefined>();
+const INTL_SHORT_DATE_PROBE = new Date(2026, 0, 2);
+
+const deriveIntlShortDateFormat = (systemLocale: string): string | undefined => {
+    if (intlShortDateFormatCache.has(systemLocale)) return intlShortDateFormatCache.get(systemLocale);
+    let derived: string | undefined;
+    try {
+        if (typeof Intl !== 'undefined' && typeof Intl.DateTimeFormat === 'function') {
+            Intl.getCanonicalLocales?.(systemLocale);
+            const parts = new Intl.DateTimeFormat(systemLocale, { year: 'numeric', month: '2-digit', day: '2-digit' })
+                .formatToParts(INTL_SHORT_DATE_PROBE);
+            let pattern = '';
+            for (const { type, value } of parts) {
+                if (type === 'year') pattern += value.length === 2 ? 'yy' : 'yyyy';
+                else if (type === 'month') pattern += value.length === 2 ? 'MM' : 'M';
+                else if (type === 'day') pattern += value.length === 2 ? 'dd' : 'd';
+                else if (type === 'literal') pattern += /[A-Za-z']/.test(value) ? `'${value.replace(/'/g, "''")}'` : value;
+                else { pattern = ''; break; }
+            }
+            derived = normalizeSystemDateFormat(pattern);
+        }
+    } catch {
+        derived = undefined;
+    }
+    intlShortDateFormatCache.set(systemLocale, derived);
+    return derived;
+};
 
 const getPrimaryLanguageSubtag = (value?: string | null): string => (
     normalizeLocaleTag(value).toLowerCase().split('-')[0] || ''
@@ -174,18 +226,30 @@ const resolveLocaleFromSystem = (systemLocale?: string | null, fallback: Languag
     const tag = normalizeLocaleTag(systemLocale);
     const lower = tag.toLowerCase();
     const primary = lower.split('-')[0];
-    const region = tag.split('-')[1]?.toUpperCase();
+    const region = getLocaleRegion(tag);
+
+    let baseLocale: Locale;
+    let needsIntlShortDate = false;
     if (primary === 'en') {
-        return region && DMY_EN_REGIONS.has(region) ? enGB : enUS;
+        const isDmyEn = Boolean(region && DMY_EN_REGIONS.has(region));
+        baseLocale = isDmyEn ? enGB : enUS;
+        needsIntlShortDate = Boolean(region && region !== 'US' && !isDmyEn);
+    } else if (primary === 'zh') {
+        const isHant = lower.includes('-hant') || /-(tw|hk|mo)\b/.test(lower);
+        baseLocale = isHant ? zhTW : zhCN;
+        needsIntlShortDate = Boolean(region && !['CN', 'TW', 'HK', 'MO'].includes(region));
+    } else if (primary in DATE_LOCALE_BY_LANGUAGE) {
+        const lang = primary as Language;
+        baseLocale = DATE_LOCALE_BY_LANGUAGE[lang];
+        const defaultRegion = getLocaleRegion(LOCALE_TAG_BY_LANGUAGE[lang]);
+        needsIntlShortDate = Boolean(region && defaultRegion && region !== defaultRegion);
+    } else {
+        baseLocale = DATE_LOCALE_BY_LANGUAGE[fallback] ?? DEFAULT_LOCALE;
+        needsIntlShortDate = Boolean(tag);
     }
-    if (primary === 'zh') {
-        if (lower.includes('-hant') || /-(tw|hk|mo)\b/.test(lower)) return zhTW;
-        return zhCN;
-    }
-    if (primary in DATE_LOCALE_BY_LANGUAGE) {
-        return DATE_LOCALE_BY_LANGUAGE[primary as Language];
-    }
-    return DATE_LOCALE_BY_LANGUAGE[fallback] ?? DEFAULT_LOCALE;
+
+    const derived = needsIntlShortDate ? deriveIntlShortDateFormat(tag) : undefined;
+    return derived ? withShortDatePattern(baseLocale, derived) : baseLocale;
 };
 
 const normalizeLocalizedFormatTokens = (formatStr: string, formatting: ResolvedDateFormatting): string => {
@@ -450,11 +514,7 @@ const resolveDateFormatting = (params: DateFormattingConfig): ResolvedDateFormat
             : resolveLocaleFromSystem(systemLocale, language);
     const systemDateFormat = normalizeSystemDateFormat(params.systemDateFormat);
     if (dateFormat === 'system' && calendarSystem === 'gregorian' && systemDateFormat) {
-        const formatLong = locale.formatLong;
-        locale = { ...locale, formatLong: {
-            ...formatLong,
-            date: (options) => options?.width === 'short' ? systemDateFormat : formatLong.date(options),
-        } };
+        locale = withShortDatePattern(locale, systemDateFormat);
     }
     return { locale, dateFormat, timeFormat, calendarSystem, language };
 };
