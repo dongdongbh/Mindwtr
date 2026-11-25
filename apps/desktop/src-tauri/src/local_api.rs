@@ -4645,17 +4645,23 @@ fn is_recurrence_rule(value: &str) -> bool {
 }
 
 fn has_individual_recurrence(value: &Value) -> bool {
-    recurrence_rule_from_value(value).is_some()
+    if recurrence_rule_from_value(value).is_some()
         || value
-            .get("rrule")
-            .and_then(Value::as_str)
-            .and_then(|rrule| {
-                rrule.rsplit(';').find_map(|field| {
-                    let (name, value) = field.split_once('=')?;
-                    (name.eq_ignore_ascii_case("FREQ") && !value.is_empty()).then_some(value)
-                })
+            .as_str()
+            .is_some_and(|rule| is_recurrence_rule(rule.trim()))
+    {
+        return true;
+    }
+    value
+        .as_str()
+        .or_else(|| value.get("rrule").and_then(Value::as_str))
+        .and_then(|rrule| {
+            rrule.trim().rsplit(';').find_map(|field| {
+                let (name, value) = field.split_once('=')?;
+                (name.eq_ignore_ascii_case("FREQ") && !value.is_empty()).then_some(value)
             })
-            .is_some_and(|rule| is_recurrence_rule(&rule.to_ascii_lowercase()))
+        })
+        .is_some_and(|rule| is_recurrence_rule(&rule.to_ascii_lowercase()))
 }
 
 fn recurrence_strategy(task: &Map<String, Value>) -> &str {
@@ -8817,6 +8823,8 @@ mod tests {
             {"id":"step-task","title":"Project step","status":"next","projectId":"repeating"},
             {"id":"legacy","title":"Legacy step","status":"next","projectId":"repeating","recurrence":"daily"},
             {"id":"legacy-section","title":"Legacy section step","status":"next","sectionId":"step"},
+            {"id":"legacy-raw","title":"Legacy raw recurrence","status":"next","recurrence":" FREQ=WEEKLY;BYDAY=MO "},
+            {"id":"legacy-rule","title":"Legacy rule","status":"next","recurrence":" weekly "},
             {"id":"legacy-rrule","title":"Legacy recurring task","status":"next","recurrence":{"rrule":"FREQ=MONTHLY;BYDAY=MO;BYSETPOS=-1"}}
         ]);
         crate::storage::local_operation_test_seed(&mut conn, &data).unwrap();
@@ -8899,6 +8907,8 @@ mod tests {
             ("/tasks/standalone", json!({"sectionId":"step"})),
             ("/tasks/legacy-section", json!({"recurrence":"daily"})),
             ("/tasks/legacy-rrule", json!({"sectionId":"step"})),
+            ("/tasks/legacy-raw", json!({"sectionId":"step"})),
+            ("/tasks/legacy-rule", json!({"projectId":"repeating"})),
         ] {
             let response = write_task_over_local_api(&conn, "PATCH", path, patch);
             assert_eq!(response.status, 400, "{}", response.body);
