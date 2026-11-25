@@ -48,6 +48,7 @@ Source: `apps/desktop/src` (Tauri + React). Labels come from `packages/core/src/
 - Selectors: `virtualized-task-list`, `inbox-session-recap`
 - Code: `apps/desktop/src/components/views/ListView.tsx`, `apps/desktop/src/components/views/list/ListQuickAdd.tsx`, `apps/desktop/src/components/views/list/ListHeader.tsx`, `apps/desktop/src/components/views/list/GroupedTaskSections.tsx`, `apps/desktop/src/components/views/inbox/InboxSessionRecap.tsx`, `apps/desktop/src/contexts/inbox-session-context.ts`
 - Checks: `e2e/app.spec.ts`, `e2e/unified-inbox.spec.ts`, `apps/desktop/src/components/views/ListView.test.tsx`, `apps/desktop/src/components/views/inbox/InboxSessionRecap.test.tsx`
+- Search below the Inbox header filters visible tasks by title alongside date and context filters. Process Inbox always starts with the full eligible queue.
 - Notes: The list, counts, and processing queue ignore the global area filter. `virtualized-task-list` exists only when a long list switches to windowed rendering. The session recap contains read-only titles of items successfully completed through Inbox rows, editors, shortcuts, bulk actions, or Process Inbox. They remain Done and do not affect the Inbox count, queue, or empty state. Reopening, undoing, deleting, or archiving removes an item from the recap. Navigation keeps the recap; switching workspaces or reloading clears it. Recurring successors and completions from other views are excluded.
 
 ## Quick Add

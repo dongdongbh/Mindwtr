@@ -271,9 +271,31 @@ describe('ListView', () => {
     expectScrolledEndGap(container);
   });
 
-  it('does not render local search input in inbox view', () => {
-    const html = renderStaticListView('inbox', 'Inbox');
-    expect(html).not.toContain('data-view-filter-input');
+  it('filters Inbox titles within the current date and context without narrowing Process Inbox', () => {
+    useTaskStore.setState({
+      _allTasks: [
+        makeTask('milk', { title: 'Buy milk', status: 'inbox', contexts: ['@shop'], dueDate: now }),
+        makeTask('bread', { title: 'Buy bread', status: 'inbox', contexts: ['@shop'], dueDate: now }),
+        makeTask('home', { title: 'List milk brands', status: 'inbox', contexts: ['@home'], dueDate: now }),
+        makeTask('undated', { title: 'Compare milk prices', status: 'inbox', contexts: ['@shop'] }),
+      ],
+      lastDataChangeAt: 1,
+    });
+    const view = renderListView('inbox', 'Inbox');
+    const search = view.getByRole('textbox', { name: 'Search...' });
+    act(() => useUiStore.getState().setListFilters({ criteria: { contexts: ['@shop'], anyDateRange: { preset: 'today' } } }));
+    fireEvent.change(search, { target: { value: 'MILK' } });
+    const titles = within(view.getByRole('list', { name: 'Task list' }));
+    expect(titles.getByText('Buy milk')).toBeInTheDocument();
+    for (const hidden of ['Buy bread', 'List milk brands', 'Compare milk prices']) {
+      expect(titles.queryByText(hidden)).not.toBeInTheDocument();
+    }
+    fireEvent.change(search, { target: { value: '' } });
+    expect(titles.getByText('Buy bread')).toBeInTheDocument();
+    expect(titles.queryByText('Compare milk prices')).not.toBeInTheDocument();
+    fireEvent.change(search, { target: { value: 'no matches' } });
+    fireEvent.click(view.getByRole('button', { name: 'Process Inbox (4)' }));
+    expect(view.queryByRole('textbox', { name: 'Search...' })).not.toBeInTheDocument();
   });
 
   it('uses a compact one-line quick-add hint in the inbox list footer', () => {

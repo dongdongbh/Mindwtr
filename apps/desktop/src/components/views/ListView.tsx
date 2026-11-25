@@ -302,7 +302,6 @@ const ListViewContent = memo(function ListViewContent({ title, statusFilter }: L
     const undoNotificationsEnabled = settings?.undoNotificationsEnabled !== false;
     const showQuickDone = statusFilter !== 'done' && statusFilter !== 'archived';
     const readOnly = statusFilter === 'done';
-    const showViewFilterInput = statusFilter !== 'inbox';
     const normalizedSearchQuery = searchQuery.trim().toLowerCase();
     const referenceSearchPredicate = useMemo(
         () => createReferenceSearchPredicate(searchQuery),
@@ -614,7 +613,7 @@ const ListViewContent = memo(function ListViewContent({ title, statusFilter }: L
                     const person = getWaitingPerson(t);
                     if (!person || person.toLowerCase() !== deferredFilterInputs.selectedWaitingPerson.toLowerCase()) return false;
                 }
-                if (showViewFilterInput && normalizedSearchQuery) {
+                if (normalizedSearchQuery) {
                     if (deferredFilterInputs.statusFilter === 'reference') {
                         if (!referenceSearchPredicate(t)) return false;
                     } else if (!t.title.toLowerCase().includes(normalizedSearchQuery)) {
@@ -641,7 +640,7 @@ const ListViewContent = memo(function ListViewContent({ title, statusFilter }: L
 
             return sortTasksBy(filtered, deferredFilterInputs.sortBy);
         });
-    }, [deferredFilterInputs, nextVisibilityDayKey, nextVisibilityTick, normalizedSearchQuery, referenceSearchPredicate, showViewFilterInput]);
+    }, [deferredFilterInputs, nextVisibilityDayKey, nextVisibilityTick, normalizedSearchQuery, referenceSearchPredicate]);
     const activeNextGroupBy: NextGroupBy = statusFilter !== 'reference' && statusFilter !== 'done' && statusFilter !== 'someday'
         ? nextGroupBy as NextGroupBy
         : 'none';
@@ -1372,7 +1371,7 @@ const ListViewContent = memo(function ListViewContent({ title, statusFilter }: L
                         onOpenMindSweep={openMindSweep}
                     />
 
-                    {showViewFilterInput && !isProcessing && (
+                    {!isProcessing && (
                         <input
                             type="text"
                             data-view-filter-input
