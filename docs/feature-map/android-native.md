@@ -55,6 +55,7 @@ The native client is a Kotlin and Jetpack Compose app in `apps/android-native`. 
 
 ## Selection mode and Bulk organize
 
+- Bulk organize can set or clear a person or priority independently while keeping each task’s status. Priority requires priorities to be enabled.
 - With Time Estimates enabled, open Contexts › Filters › Time estimate › No estimate. Select tasks › Bulk organize › Time estimate to keep, set or clear their estimates. Setting an estimate removes the task from this filter.
 - Bulk organize status includes Inbox for returning tasks to processing; existing project, notes, tags and dates stay unchanged unless explicitly edited.
 
@@ -66,6 +67,7 @@ The native client is a Kotlin and Jetpack Compose app in `apps/android-native`. 
 
 ## Process Inbox
 
+- In task editing and Inbox processing, open Browse beside Contexts or Tags to search or toggle multiple saved and in-use values. An empty search shows the full list.
 - Reach: Inbox › Process Inbox (N). The header switches between Guided and Quick and has Skip and Close.
 - Selectors: `process-inbox`, `process-title`
 - Code: `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/ProcessInbox.kt`

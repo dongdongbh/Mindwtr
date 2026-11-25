@@ -94,6 +94,7 @@ App Intents and Siri belong to the RN app. They are not in `apps/ios-native`. Th
 
 ## Inbox bulk selection
 
+- Bulk organize can set or clear a person or priority independently while keeping each task’s status. Priority requires priorities to be enabled.
 - Reach: Inbox › long-press a task card. A bar shows the count and Next, Waiting, Someday, Done, Reference, Add tag, Remove tag, Organize and Delete.
 - Shortcuts: Long-press a card to start selecting. Use the range control to select a range.
 - Selectors: `inbox-bulk-count`, `inbox-bulk-range`, `inbox-bulk-exit`, `inbox-bulk-delete`, `inbox-bulk-confirm`, `inbox-bulk-tag-open`, `inbox-bulk-remove-tag-open`, `inbox-bulk-organize-open`
@@ -103,6 +104,7 @@ App Intents and Siri belong to the RN app. They are not in `apps/ios-native`. Th
 
 ## Process Inbox
 
+- In task editing and Inbox processing, open Browse beside Contexts or Tags to search or toggle multiple saved and in-use values. An empty search shows the full list.
 - Reach: Inbox › Process Inbox (N). The sheet walks one item at a time.
 - Selectors: `process-inbox-sheet`, `process-inbox-title`, `process-inbox-next-action`, `process-inbox-skip`, `process-inbox-delegate-who`, `process-inbox-project-search`, `process-inbox-deferred-projects`, `process-inbox-close`, `process-inbox-toast`
 - Code: `apps/ios-native/App/ProcessInboxSheet.swift`
