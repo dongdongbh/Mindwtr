@@ -596,13 +596,13 @@ class MenuModel(internal val shell: InboxViewModel, private val saved: SavedStat
     private fun show(list: String, next: MenuPage) {
         if (list != this.list) return
         shell.readSucceeded()
+        if (list == "widgetList") widgetContextsFilterId(next.view)?.let { return openWidgetContextsFilter(it) }
+        if (list == "widgetList") widgetFocusFilterId(next.view)?.let { return openWidgetFocusFilter(it) }
         if (list == "widgetList") next.view.menuText("contextToken")?.let { token ->
             keepOwn("contexts", JSONObject().put("tokens", JSONArray().put(token)))
             open(MenuScreen.Contexts)
             return
         }
-        if (list == "widgetList") widgetContextsFilterId(next.view)?.let { return openWidgetContextsFilter(it) }
-        if (list == "widgetList") widgetFocusFilterId(next.view)?.let { return openWidgetFocusFilter(it) }
 
         loaded = if (list in BULK_LISTS && own(list).optJSONObject("bulk") == null) next.withBulk(null) else next
         editOwn(list) {
