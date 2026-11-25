@@ -90,6 +90,8 @@ The v1.3.6 task-editor correction is confirmed by the visible disappearance of t
 
 - **`v1.3.10/repeat-project`** — `packages/core/src/store-projects/project-actions.ts`. Completing a repeating project saves its next run. Look for `Next project run saved` after completion.
 
+- **`v1.3.10/desktop-shared-attachment`** — `apps/desktop/src/components/Task/useTaskItemAttachments.ts`. On desktop with sync off, complete a repeating project that has a task file attachment. Reactivate the original project, remove that attachment from its task and save. The next run's attachment should still open, and Diagnostics should show `Shared task attachment file retained`. The marker contains no paths, filenames or IDs.
+
 - **`v1.3.10/native-project-repeat`** — `packages/core/src/store-projects/project-actions.ts` (`logNativeProjectRunCreated`, called once the prepared Complete's save lands). On native Android, set a project to repeat every 2 weeks in Project details, then select Complete. The log must show `Next project run saved` with `releaseCheck=v1.3.10/native-project-repeat` and `outcome=created`. No titles or IDs are logged.
 
 - **`v1.3.10/ios-siri-reminder-action`** — React Native iOS `apps/mobile/lib/siri-reminders.ts` reports `Siri Reminder request acknowledged` after the App Group transport stores the response. With App Lock off and Mindwtr in the foreground, ask Siri to create an Inbox reminder and then change its due date. Export Diagnostics and check for `operation=create` and `operation=update`, each with `outcome=persisted`. Rejected requests report a bounded reason. No task content or identifiers are logged. (#915)

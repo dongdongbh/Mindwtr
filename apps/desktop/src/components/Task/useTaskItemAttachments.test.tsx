@@ -563,6 +563,43 @@ describe('useTaskItemAttachments resetAttachmentState orphan cleanup', () => {
         expect(removeMock).toHaveBeenCalledWith(existingAttachment.uri);
     });
 
+    it.each([
+        ['a live task', undefined],
+        ['a task in Trash', task.updatedAt],
+    ])('keeps a managed file after a saved removal when %s still references it', async (_owner, deletedAt) => {
+        const attachment: Attachment = {
+            id: 'source-file',
+            kind: 'file',
+            title: 'notes.txt',
+            uri: '/data/mindwtr/attachments/source-file.txt',
+            createdAt: task.createdAt,
+            updatedAt: task.updatedAt,
+        };
+        const source = { ...task, attachments: [attachment] };
+        const nextRun = { ...task, id: 'next-run-task', deletedAt, attachments: [{ ...attachment, id: 'next-run-file' }] };
+        const previousTasks = useTaskStore.getState()._allTasks;
+        const { result } = renderHook(() => useTaskItemAttachments({ task: source, t }));
+
+        act(() => result.current.removeAttachment(attachment.id));
+        const committedAttachments = result.current.editAttachments;
+        act(() => result.current.beginAttachmentSave());
+        try {
+            await act(async () => {
+                useTaskStore.setState({ _allTasks: [{ ...source, attachments: committedAttachments }, nextRun] });
+                result.current.settlePersistedAttachmentSave(committedAttachments);
+            });
+
+            expect(removeMock).not.toHaveBeenCalled();
+            expect(logInfoMock).toHaveBeenCalledWith('Shared task attachment file retained', {
+                scope: 'attachment',
+                extra: { releaseCheck: 'v1.3.10/desktop-shared-attachment' },
+                force: true,
+            });
+        } finally {
+            act(() => useTaskStore.setState({ _allTasks: previousTasks }));
+        }
+    });
+
     it('preserves draft and baseline files when a submitted save never becomes durable', async () => {
         const existingAttachment = {
             id: 'existing-1',

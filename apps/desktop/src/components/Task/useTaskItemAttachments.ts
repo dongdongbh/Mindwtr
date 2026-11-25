@@ -1,6 +1,6 @@
 import { isUpNoteHref, showExternalLinkFailure } from '../../lib/external-link';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Attachment, DEFAULT_PROJECT_COLOR, areDraftAttachmentsDirty, buildTaskUpdatesFromSpeechResult, enrichAttachmentLinkTitle, findSelectableProjectByTitleAndArea, generateUUID, getBareHttpUrl, isSandboxMode, normalizeLinkAttachmentInput, parseAttachmentLinkBatch, planAttachmentDraftSettlement, translateWithFallback, updateTaskFromLatest, useTaskStore, type Task } from '@mindwtr/core';
+import { Attachment, DEFAULT_PROJECT_COLOR, areDraftAttachmentsDirty, buildTaskUpdatesFromSpeechResult, enrichAttachmentLinkTitle, findLiveAttachmentResourceReferences, findSelectableProjectByTitleAndArea, generateUUID, getBareHttpUrl, isAttachmentLocalResourceReferenced, isSandboxMode, normalizeLinkAttachmentInput, parseAttachmentLinkBatch, planAttachmentDraftSettlement, translateWithFallback, updateTaskFromLatest, useTaskStore, type Task } from '@mindwtr/core';
 import { dataDir } from '@tauri-apps/api/path';
 import { BaseDirectory, readFile, readTextFile } from '@tauri-apps/plugin-fs';
 import { importDroppedFileAttachment, importPickedFileAttachment, pickFolderLinkAttachment } from '../../lib/attachment-import';
@@ -51,6 +51,15 @@ const deleteOrphanedAttachmentFiles = async (orphaned: Attachment[]): Promise<vo
             const fileName = normalizedUri.slice(managedDirPrefix.length).split(/[?#]/, 1)[0];
             if (!fileName || fileName.includes('/')) continue;
             if (fileName !== attachment.id && !fileName.startsWith(`${attachment.id}.`)) continue;
+            const { _allTasks: tasks, _allProjects: projects } = useTaskStore.getState();
+            if (isAttachmentLocalResourceReferenced(attachment, findLiveAttachmentResourceReferences({ tasks, projects }))) {
+                void logInfo('Shared task attachment file retained', {
+                    scope: 'attachment',
+                    extra: { releaseCheck: 'v1.3.10/desktop-shared-attachment' },
+                    force: true,
+                });
+                continue;
+            }
             try {
                 await remove(attachment.uri);
             } catch (error) {
