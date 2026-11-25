@@ -1239,6 +1239,8 @@ private fun CalendarPicker(model: InboxViewModel, options: JSONObject?, enabled:
             Text(t("projects.calendarLimit"), style = rnText(12, 400), color = c.secondaryText)
         when {
             calendarLoading -> t("common.loading")
+            options != null && !options.getBoolean("available") && candidates.isNotEmpty() ->
+                t("settings.deviceCalendars") + " · " + t("settings.calendarMobile.failedToLoadEvents")
             options == null || !options.getBoolean("available") -> t("projects.calendarLoadFailed")
             candidates.isEmpty() -> t(if (calendarQuery.isNotBlank()) "common.noMatches" else "projects.calendarEmpty")
             else -> null

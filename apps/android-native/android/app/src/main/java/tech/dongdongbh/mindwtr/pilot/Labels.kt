@@ -92,6 +92,7 @@ val LABEL_KEYS = listOf(
 
     "projects.calendarTitle", "projects.calendarLink", "projects.calendarReplace", "projects.calendarUnlink", "projects.calendarScheduled",
     "projects.calendarElapsed", "projects.calendarUnavailable", "projects.calendarLastKnown", "projects.calendarHelp", "projects.calendarWindow",
+    "settings.deviceCalendars", "settings.calendarMobile.failedToLoadEvents",
     "projects.calendarEmpty", "projects.calendarLoadFailed", "projects.calendarSaveFailed", "projects.calendarLimit",
     "projects.statusLabel", "projects.projectTypeLabel", "projects.projectTypeHelpLabel", "projects.projectTypeHelpText", "projects.sequentialScope",
     "projects.sequentialAcrossSections", "projects.sequentialWithinSections", "projects.sequentialScopeHelpLabel", "projects.sequentialScopeHelpText",

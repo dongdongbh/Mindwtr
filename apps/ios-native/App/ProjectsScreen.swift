@@ -3214,7 +3214,9 @@ private struct ProjectCalendarReferenceCard: View {
                         .accessibilityIdentifier("project-calendar-picker-status")
                 }
             } else if !options.flag("available") {
-                Text(model.label("projects.calendarLoadFailed")).rnFont(14).foregroundStyle(palette.secondary)
+                let message = candidates.isEmpty ? model.label("projects.calendarLoadFailed")
+                    : model.label("settings.deviceCalendars") + " · " + model.label("settings.calendarMobile.failedToLoadEvents")
+                Text(message).rnFont(14).foregroundStyle(palette.secondary)
                     .accessibilityIdentifier("project-calendar-picker-status")
             } else if candidates.isEmpty {
                 Text(model.label(query.isEmpty ? "projects.calendarEmpty" : "common.noMatches")).rnFont(14).foregroundStyle(palette.secondary)
