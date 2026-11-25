@@ -95,7 +95,7 @@ fn rehomed_managed_path(candidate: &Path, managed_attachments_dir: &Path) -> Opt
     (has_tail && rehomed != candidate).then_some(rehomed)
 }
 
-fn normalize_open_path(
+pub(crate) fn normalize_open_path(
     raw: &str,
     managed_attachments_dir: Option<&Path>,
     attachment_id: Option<&str>,

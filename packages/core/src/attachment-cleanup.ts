@@ -172,7 +172,7 @@ export type AttachmentCleanupRemoteDelete = (
 
 export type AttachmentCleanupLifecycleOptions = {
     appData: AppData;
-    deleteLocalAttachment: (attachment: Attachment) => Promise<void>;
+    deleteLocalAttachment: (attachment: Attachment) => Promise<void | boolean>;
     deleteRemoteAttachment?: AttachmentCleanupRemoteDelete;
     resolveRemoteDeleteAttachment?: () => Promise<AttachmentCleanupRemoteDelete | undefined>;
 
@@ -486,17 +486,14 @@ export async function runAttachmentCleanupLifecycle(
     for (const attachment of orderedTargets) {
         if (processedCount >= maxAttachmentTargets) break;
         processedCount += 1;
-        if (orphanedIds.has(attachment.id)) {
-            processedOrphanedIds.add(attachment.id);
-        }
         await options.beforeEachAttachment?.();
-        if (shouldDeleteAttachmentLocalResource(attachment, liveResourceReferences)) {
-            await options.deleteLocalAttachment(attachment);
-        }
-
-
-        if (attachment.kind === 'file' && !purgedParentAttachmentIds.has(attachment.id)) {
-            processedFileTombstoneIds.add(attachment.id);
+        const deferredLocalCleanup = shouldDeleteAttachmentLocalResource(attachment, liveResourceReferences)
+            && await options.deleteLocalAttachment(attachment) === false;
+        if (!deferredLocalCleanup) {
+            if (orphanedIds.has(attachment.id)) processedOrphanedIds.add(attachment.id);
+            if (attachment.kind === 'file' && !purgedParentAttachmentIds.has(attachment.id)) {
+                processedFileTombstoneIds.add(attachment.id);
+            }
         }
         const cloudKey = sanitizeAttachmentCloudKeyForSyncMerge(attachment.cloudKey);
         if (!cloudKey) continue;

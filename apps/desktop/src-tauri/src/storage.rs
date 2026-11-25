@@ -626,10 +626,10 @@ fn resolved_sqlite_path(db_path: &Path) -> PathBuf {
 }
 
 #[cfg(unix)]
-fn sqlite_file_identity(db_path: &Path) -> Option<SqliteFileIdentity> {
+fn storage_file_identity(path: &Path) -> Option<SqliteFileIdentity> {
     use std::os::unix::fs::MetadataExt;
 
-    let metadata = fs::metadata(db_path).ok()?;
+    let metadata = fs::metadata(path).ok()?;
     Some(SqliteFileIdentity {
         volume: metadata.dev(),
         file: metadata.ino(),
@@ -637,13 +637,13 @@ fn sqlite_file_identity(db_path: &Path) -> Option<SqliteFileIdentity> {
 }
 
 #[cfg(windows)]
-fn sqlite_file_identity(db_path: &Path) -> Option<SqliteFileIdentity> {
+fn storage_file_identity(path: &Path) -> Option<SqliteFileIdentity> {
     use std::os::windows::io::AsRawHandle;
     use windows_sys::Win32::Storage::FileSystem::{
         GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION,
     };
 
-    let file = File::open(db_path).ok()?;
+    let file = File::open(path).ok()?;
     let mut metadata = BY_HANDLE_FILE_INFORMATION::default();
 
     if unsafe { GetFileInformationByHandle(file.as_raw_handle(), &mut metadata) } == 0 {
@@ -656,7 +656,7 @@ fn sqlite_file_identity(db_path: &Path) -> Option<SqliteFileIdentity> {
 }
 
 #[cfg(not(any(unix, windows)))]
-fn sqlite_file_identity(_db_path: &Path) -> Option<SqliteFileIdentity> {
+fn storage_file_identity(_path: &Path) -> Option<SqliteFileIdentity> {
     None
 }
 
@@ -708,9 +708,9 @@ fn open_sqlite_path(db_path: &Path) -> Result<Connection, String> {
     if let Some(parent) = db_path.parent() {
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
-    let identity_before_open = sqlite_file_identity(db_path);
+    let identity_before_open = storage_file_identity(db_path);
     let mut conn = Connection::open(db_path).map_err(|e| e.to_string())?;
-    let identity_after_open = sqlite_file_identity(db_path);
+    let identity_after_open = storage_file_identity(db_path);
     let stable_file_identity = if identity_before_open == identity_after_open {
         identity_after_open
     } else {
@@ -1116,6 +1116,175 @@ where
 
 fn read_sqlite_snapshot(conn: &Connection) -> Result<Value, String> {
     with_sqlite_read_transaction(conn, false, read_sqlite_data)
+}
+
+fn attachment_ownership_rows(conn: &Connection) -> Result<Vec<(String, Option<String>)>, String> {
+    let mut statement = conn.prepare(
+        "SELECT attachments, purgedAt FROM (
+            SELECT 0 AS table_order, id, attachments, purgedAt FROM tasks WHERE attachments IS NOT NULL
+            UNION ALL
+            SELECT 1 AS table_order, id, attachments, purgedAt FROM projects WHERE attachments IS NOT NULL
+        ) ORDER BY table_order, id",
+    ).map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+        .map_err(|error| error.to_string())?;
+    rows.collect::<rusqlite::Result<_>>()
+        .map_err(|error| error.to_string())
+}
+
+fn remove_unreferenced_attachment_in_database(
+    database_path: &Path,
+    managed_dir: &Path,
+    path: &Path,
+    attachment_id: &str,
+) -> Result<bool, String> {
+    let relative = path.strip_prefix(managed_dir).map_err(|_| {
+        "Managed attachment cleanup requires a path in the active attachment directory"
+    })?;
+    if relative.as_os_str().is_empty()
+        || relative
+            .components()
+            .any(|component| !matches!(component, std::path::Component::Normal(_)))
+    {
+        return Err("Invalid managed attachment cleanup path".into());
+    }
+    let database_identity = storage_file_identity(database_path)
+        .ok_or("Canonical attachment cleanup database is unavailable")?;
+    let conn =
+        Connection::open_with_flags(database_path, rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE)
+            .map_err(|error| error.to_string())?;
+    configure_sqlite_connection(&conn)?;
+    let resolved = match fs::canonicalize(path) {
+        Ok(resolved) => resolved,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            return with_sqlite_read_transaction(&conn, true, |_| {
+                match fs::symlink_metadata(path) {
+                    Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(true),
+                    Err(error) => Err(error.to_string()),
+                    Ok(_) => Ok(false),
+                }
+            });
+        }
+        Err(error) => return Err(error.to_string()),
+    };
+    let resolved_dir = fs::canonicalize(managed_dir).map_err(|error| error.to_string())?;
+    if resolved == resolved_dir || !resolved.starts_with(resolved_dir) || !resolved.is_file() {
+        return Err("Managed attachment cleanup target is outside the active attachment directory or is not a file".into());
+    }
+    let identity = storage_file_identity(&resolved)
+        .ok_or("Could not identify managed attachment cleanup target")?;
+    let ownership_rows = attachment_ownership_rows(&conn)?;
+    let mut confirmed_tombstone = false;
+    for (encoded, purged_at) in &ownership_rows {
+        let attachments: Option<Vec<Value>> = serde_json::from_str(encoded)
+            .map_err(|_| "Could not verify stored attachment ownership")?;
+        for attachment in attachments.into_iter().flatten() {
+            let id = attachment.get("id").and_then(Value::as_str);
+            let uri = match attachment.get("uri") {
+                Some(Value::String(uri)) if !uri.trim().is_empty() => uri.trim(),
+                None | Some(Value::Null | Value::String(_)) => continue,
+                _ => return Err("Could not verify stored attachment location".into()),
+            };
+            let normalized = uri.replace('\\', "/");
+            let relative = normalized.strip_prefix("./").unwrap_or(&normalized);
+            let managed_relative = relative.strip_prefix("attachments/");
+            let managed_reference = managed_relative.map(|tail| managed_dir.join(tail));
+            let reference = managed_reference
+                .as_deref()
+                .and_then(Path::to_str)
+                .unwrap_or(uri);
+            let Ok(reference) =
+                crate::platform::normalize_open_path(reference, Some(managed_dir), id)
+            else {
+                let basename = normalized.rsplit('/').next().unwrap_or_default();
+                let managed_spelling = normalized.to_ascii_lowercase();
+                if (managed_relative.is_some()
+                    || managed_spelling.contains("/attachments/")
+                    || managed_spelling.starts_with("attachment:"))
+                    && (Some(attachment_id) == id
+                        || path
+                            .file_name()
+                            .and_then(|name| name.to_str())
+                            .is_some_and(|name| name.eq_ignore_ascii_case(basename)))
+                {
+                    return Ok(false);
+                }
+                continue;
+            };
+            if reference != resolved && storage_file_identity(&reference) != Some(identity) {
+                continue;
+            }
+            let deleted_at = attachment.get("deletedAt").and_then(Value::as_str);
+            if !purged_at.as_deref().is_some_and(|date| !date.is_empty())
+                && !deleted_at.is_some_and(|date| !date.is_empty())
+            {
+                return Ok(false);
+            }
+            confirmed_tombstone |= id == Some(attachment_id);
+        }
+    }
+    if !confirmed_tombstone {
+        return Ok(false);
+    }
+    unlink_if_attachment_ownership_unchanged(
+        &conn,
+        database_path,
+        path,
+        database_identity,
+        identity,
+        &ownership_rows,
+    )
+}
+
+fn unlink_if_attachment_ownership_unchanged(
+    conn: &Connection,
+    database_path: &Path,
+    path: &Path,
+    database_identity: SqliteFileIdentity,
+    identity: SqliteFileIdentity,
+    ownership_rows: &[(String, Option<String>)],
+) -> Result<bool, String> {
+    with_sqlite_read_transaction(conn, true, |conn| {
+        if storage_file_identity(database_path) != Some(database_identity)
+            || attachment_ownership_rows(conn)?.as_slice() != ownership_rows
+            || storage_file_identity(path) != Some(identity)
+        {
+            return Ok(false);
+        }
+        match fs::remove_file(path) {
+            Ok(()) => Ok(true),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(true),
+            Err(error) => Err(error.to_string()),
+        }
+    })
+}
+
+#[tauri::command]
+pub(crate) async fn remove_unreferenced_managed_attachment(
+    app: tauri::AppHandle,
+    path: String,
+    attachment_id: String,
+) -> Result<bool, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        if crate::sync_encryption::read_local_state(&app)?
+            .is_some_and(|state| state.incomplete_transition.is_some())
+        {
+            return Ok(false);
+        }
+        let data_dir = get_data_dir(&app);
+        let removed = remove_unreferenced_attachment_in_database(
+            &data_dir.join(DB_FILE_NAME),
+            &data_dir.join("attachments"),
+            Path::new(&path),
+            &attachment_id,
+        )?;
+        let outcome = if removed { "absent" } else { "retained" };
+        log::info!("Desktop attachment ownership checked before local cleanup extra.releaseCheck=v1.3.10/desktop-attachment-cleanup-owner outcome={outcome}");
+        Ok(removed)
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 pub(crate) fn persist_data_snapshot_with_retries(
@@ -6192,6 +6361,114 @@ fn parse_json_relaxed(raw: &str) -> Result<Value, serde_json::Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn managed_attachment_cleanup_rechecks_a_competing_writer_and_uri_alias() {
+        let temporary = tempfile::tempdir().unwrap();
+        let database = temporary.path().join(DB_FILE_NAME);
+        let managed = temporary.path().join("attachments");
+        fs::create_dir(&managed).unwrap();
+        let path = managed.join("shared file.txt");
+        fs::write(&path, "kept bytes").unwrap();
+        let reader = open_sqlite_path(&database).unwrap();
+        let tombstone = serde_json::json!([
+            {"id": "deleted", "kind": "file", "uri": path, "deletedAt": "2026-11-25T00:00:00Z"},
+            {"kind": "link", "title": "Old link without a URI"},
+        ]);
+        reader.execute(
+            "INSERT INTO tasks (id, title, status, createdAt, updatedAt, attachments) VALUES ('task', 'Task', 'next', 'now', 'now', ?1)",
+            params![tombstone.to_string()],
+        ).unwrap();
+        let count_projects = || {
+            reader
+                .query_row("SELECT COUNT(*) FROM projects", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .unwrap()
+        };
+        assert_eq!(count_projects(), 0);
+        let stale_ownership_rows = attachment_ownership_rows(&reader).unwrap();
+        let database_identity = storage_file_identity(&database).unwrap();
+        let file_identity = storage_file_identity(&path).unwrap();
+
+        let mut competing_writer = Connection::open(&database).unwrap();
+        let transaction = competing_writer
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .unwrap();
+        let owner = serde_json::json!([{
+            "id": "new-owner", "kind": "file", "uri": reqwest::Url::from_file_path(&path).unwrap().as_str()
+        }]);
+        transaction.execute(
+            "INSERT INTO projects (id, title, status, color, createdAt, updatedAt, attachments) VALUES ('project', 'Project', 'active', '#000000', 'now', 'now', ?1)",
+            params![owner.to_string()],
+        ).unwrap();
+        transaction.commit().unwrap();
+
+        assert!(!unlink_if_attachment_ownership_unchanged(
+            &reader,
+            &database,
+            &path,
+            database_identity,
+            file_identity,
+            &stale_ownership_rows,
+        )
+        .unwrap());
+        assert!(
+            !remove_unreferenced_attachment_in_database(&database, &managed, &path, "deleted")
+                .unwrap()
+        );
+        assert_eq!(fs::read_to_string(&path).unwrap(), "kept bytes");
+        assert_eq!(count_projects(), 1);
+        let relative_owner =
+            serde_json::json!([{"kind": "file", "uri": "attachments/shared file.txt"}]);
+        competing_writer
+            .execute(
+                "UPDATE projects SET attachments = ?1 WHERE id = 'project'",
+                params![relative_owner.to_string()],
+            )
+            .unwrap();
+        assert!(
+            !remove_unreferenced_attachment_in_database(&database, &managed, &path, "deleted")
+                .unwrap()
+        );
+        competing_writer
+            .execute("DELETE FROM projects WHERE id = 'project'", [])
+            .unwrap();
+        assert!(!remove_unreferenced_attachment_in_database(
+            &database,
+            &managed,
+            &path,
+            "other-generation"
+        )
+        .unwrap());
+
+        reader
+            .execute(
+                "UPDATE tasks SET attachments = 'malformed' WHERE id = 'task'",
+                [],
+            )
+            .unwrap();
+        assert!(
+            remove_unreferenced_attachment_in_database(&database, &managed, &path, "deleted")
+                .is_err()
+        );
+        assert!(path.is_file());
+        reader
+            .execute(
+                "UPDATE tasks SET attachments = ?1 WHERE id = 'task'",
+                params![tombstone.to_string()],
+            )
+            .unwrap();
+        assert!(
+            remove_unreferenced_attachment_in_database(&database, &managed, &path, "deleted")
+                .unwrap()
+        );
+        assert!(!path.exists());
+        assert!(
+            remove_unreferenced_attachment_in_database(&database, &managed, &path, "deleted")
+                .unwrap()
+        );
+    }
     use rusqlite::Connection;
     use std::sync::{Arc, Barrier};
 

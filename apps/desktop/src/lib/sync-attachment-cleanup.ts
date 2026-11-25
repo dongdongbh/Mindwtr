@@ -33,6 +33,7 @@ import {
     type SyncBackend,
 } from './sync-service-utils';
 import { getManagedPath } from './managed-paths';
+import { invokeNative } from './tauri-invoke';
 
 const ATTACHMENT_CLEANUP_BATCH_LIMIT = 25;
 
@@ -76,19 +77,6 @@ const describeAttachmentCleanupErrorForLog = (error: unknown): Error => {
     const detail = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
     const sanitizedDetail = sanitizeAttachmentCleanupErrorDetail(detail);
     return new Error(sanitizedDetail ? `${prefix}: ${sanitizedDetail}` : prefix);
-};
-
-
-const readCleanupErrorText = (error: unknown): string | null => {
-    if (typeof error === 'string') return error;
-    if (error instanceof Error) return error.message;
-    return null;
-};
-
-const isMissingLocalFileError = (error: unknown): boolean => {
-    if (error instanceof Error && (error as Error & { code?: string }).code === 'ENOENT') return true;
-    const text = readCleanupErrorText(error);
-    return text !== null && /no such file or directory|os error 2\b/i.test(text);
 };
 
 
@@ -138,14 +126,14 @@ export const deleteAttachmentFile = async (
     attachment: Attachment,
     deps: Pick<AttachmentCleanupDeps, 'logSyncWarning'>,
     guards: AttachmentCleanupGuards,
-): Promise<void> => {
+): Promise<boolean> => {
+    if (attachment.uri == null || (typeof attachment.uri === 'string' && !attachment.uri.trim())) return true;
     const safeUri = sanitizeAttachmentUriForSyncMerge(attachment.uri);
-    if (!safeUri) return;
+    if (!safeUri) return false;
     const rawUri = stripFileScheme(safeUri);
-    if (/^https?:\/\//i.test(rawUri) || rawUri.startsWith('content://')) return;
+    if (/^https?:\/\//i.test(rawUri) || rawUri.startsWith('content://')) return true;
     let normalizedRawUri: string | undefined;
     try {
-        const { remove } = await import('@tauri-apps/plugin-fs');
         const normalizePath = (value: string) => value.replace(/\\/g, '/').replace(/\/+$/, '');
 
 
@@ -156,17 +144,19 @@ export const deleteAttachmentFile = async (
         if (
             normalizedRawUri === normalizedAttachmentsDir
             || !normalizedRawUri.startsWith(`${normalizedAttachmentsDir}/`)
-        ) return;
+        ) return attachment.kind !== 'file';
         guards.ensureLocalSnapshotFresh();
-        await remove(normalizedRawUri);
+        return (await invokeNative<boolean>('remove_unreferenced_managed_attachment', {
+            path: normalizedRawUri, attachmentId: attachment.id,
+        })) === true;
     } catch (error) {
         if (error instanceof Error && error.name === 'LocalSyncAbort') throw error;
-        if (isMissingLocalFileError(error)) return;
         logAttachmentCleanupWarning(
             deps,
             `Failed to delete attachment file ${attachment.id}`,
             redactKnownPathFromError(error, normalizedRawUri),
         );
+        return false;
     }
 };
 
