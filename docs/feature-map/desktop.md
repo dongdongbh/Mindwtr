@@ -252,6 +252,7 @@ Source: `apps/desktop/src` (Tauri + React). Labels come from `packages/core/src/
 - Notes: Edits live in the Task draft until Save. The default presentation is In-row. Sending a draft back to Inbox drops its Focus star. Attachment links reject network and device paths and unsupported protocols, including browser script, data, and blob URLs. Common local documents and folders open normally; executable files, scripts, shortcuts, app bundles, and unknown file types open their containing folder instead. This also applies to project attachments and Open externally from attachment previews. In the browser, cloud attachments with an inert PDF, raster-image, audio, video, or plain-text MIME can open a preview. HTML, SVG, XHTML, XML, and unknown types download instead; in-app image, audio, and text previews remain available.
 - Attachments › Add link accepts a copied Mindwtr task link. Opening it shows the task in the current workspace even when another Area is selected. A missing or deleted target shows the task-link message.
 - Adding a bare web URL through Attachments › Add link keeps the URL and may replace its generated label after Save. Labels typed with `Title | URL` or Markdown are preserved.
+- The task editor can discard abandoned draft file copies. Previously saved files stay on disk when removed or replaced in the editor. Attachment cleanup can reclaim unreferenced files whose removal is still recorded. A superseded file without a removal record may continue to use disk space.
 
 ## Task menu
 
