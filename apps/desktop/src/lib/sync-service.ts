@@ -731,12 +731,12 @@ async function resolveWebdavPassword(config: WebDavConfig): Promise<string> {
     if (typeof config.password === 'string') return config.password;
     if (config.hasPassword === false) return '';
     if (!isTauriRuntimeEnv()) return '';
-    try {
-        return await invokeSyncNative<string>('get_webdav_password');
-    } catch (error) {
-        logSyncWarning('Failed to load WebDAV password', error);
-        return '';
-    }
+    const stored = await invokeSyncNative<string>('get_webdav_password').catch(() => null);
+    if (stored !== null && (stored || !config.hasPassword)) return stored;
+    void logWarn('Saved WebDAV password unavailable', {
+        scope: 'sync', extra: { releaseCheck: 'v1.3.10/webdav-password-read', outcome: 'unavailable' },
+    });
+    throw new Error('Could not read the saved WebDAV password. Re-enter it in Sync settings.');
 }
 
 const attachmentBackendDeps: AttachmentBackendDeps = {
