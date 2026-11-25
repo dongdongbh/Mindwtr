@@ -12,7 +12,7 @@ import { validFrozenFocusDate } from './native-host-contract-task-focus';
 import { historyRowLoadProjection } from './native-host-contract-task-checklist';
 import { hasValidBulkOrganizeDates, readBulkOrganizeDraftShape } from './native-host-contract-bulk-actions';
 import { BULK_ORGANIZE_KEEP, BULK_ORGANIZE_NONE, buildBulkOrganizeInput,
-    getBulkOrganizeAreaOptions, getBulkOrganizeProjectOptions, isBulkOrganizeEstimateValid, planBulkOrganize, type BulkOrganizeDraft } from './task-list-bulk-actions';
+    getBulkOrganizeAreaOptions, getBulkOrganizeProjectOptions, isBulkOrganizeEstimateValid, isBulkOrganizePersonValid, planBulkOrganize, type BulkOrganizeDraft } from './task-list-bulk-actions';
 import { resolveFeatureFlags } from './resolve-feature-flags';
 import { createAreaSaveGuard, readAreaDurableData } from './native-host-contract-area-durable';
 import { createNativeRequestReceipts, isNativeRequestReceiptDurable, NativeReceiptSqliteAdapter } from './native-request-receipts';
@@ -70,7 +70,7 @@ const readRequest = (input: unknown, source: OrganizeSource): OrganizeRequest | 
     const request = detachReferenceBatchJson<OrganizeRequest>(input);
     return request && exact(request, ['requestId', 'source', 'taskIds', 'taskRevisions', 'draft', 'params'])
         && readBulkOrganizeDraftShape(request.draft, true) && hasValidBulkOrganizeDates(request.draft)
-        && (request.draft.status !== 'waiting' || Boolean(request.draft.delegateWho.trim()))
+        && isBulkOrganizePersonValid(request.draft)
         && readStatusBatchSelectionRequest(selectionRequest(request), organizeListSource(request, source)) ? request : null;
 };
 const offersChoices = (request: OrganizeRequest, scope: NativeReferenceTasksMoveScope): boolean => {
@@ -93,7 +93,8 @@ export const tasksOrganizeScope = (request: OrganizeRequest,
     settings: statusBatchSettings(data.settings, request.source) };
 };
 const updates = (request: OrganizeRequest, tasks: Task[], settings: AppData['settings']) => {
-    const write = planBulkOrganize(request.taskIds, buildEntityMap(tasks), buildBulkOrganizeInput(request.draft, resolveFeatureFlags(settings).timeEstimates));
+    const { timeEstimates, priorities } = resolveFeatureFlags(settings);
+    const write = planBulkOrganize(request.taskIds, buildEntityMap(tasks), buildBulkOrganizeInput(request.draft, timeEstimates, priorities));
     return write?.kind === 'update' ? write.updates : [];
 };
 const requiredDates = (request: OrganizeRequest, scope: NativeReferenceTasksMoveScope) =>

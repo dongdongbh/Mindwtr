@@ -42,6 +42,7 @@ import {
 import { isSelectableProjectForTaskAssignment } from './project-utils';
 import { resolveFeatureFlags } from './resolve-feature-flags';
 import { getProjectAccentColor } from './task-accent-color';
+import { TASK_EDITOR_PRIORITY_OPTIONS } from './task-editor-model';
 import { getTrashUndoLabel } from './trash-view-model';
 import {
     buildReviewSteps,
@@ -404,6 +405,7 @@ const isDateValue = (value: unknown) => value === null || (isText(value, 64) && 
 const isOrganizeInput = (value: unknown): value is BulkOrganizeTaskUpdateInput => {
     if (!isObjectRecord(value)) return false;
     const state = useTaskStore.getState();
+    const flags = resolveFeatureFlags(state.settings);
     const optionalId = (key: string, exists: (id: string) => boolean) => (
         !(key in value) || value[key] === null || (isText(value[key]) && exists(value[key] as string))
     );
@@ -419,11 +421,13 @@ const isOrganizeInput = (value: unknown): value is BulkOrganizeTaskUpdateInput =
         && (value.contexts === undefined || isTextList(value.contexts))
         && (value.tags === undefined || isTextList(value.tags))
         && ['startTime', 'dueDate', 'reviewAt'].every((key) => !(key in value) || isDateValue(value[key]))
-        && (value.timeEstimate === undefined || (resolveFeatureFlags(state.settings).timeEstimates
+        && (value.timeEstimate === undefined || (flags.timeEstimates
             && (value.timeEstimate === null || isTimeEstimate(value.timeEstimate))))
+        && (value.priority === undefined || (flags.priorities
+            && (value.priority === null || TASK_EDITOR_PRIORITY_OPTIONS.some((priority) => priority === value.priority))))
         && (!('assignedTo' in value) || value.assignedTo === null || isText(value.assignedTo))
         && Object.keys(value).every((key) => [
-            'status', 'projectId', 'sectionId', 'sectionProjectId', 'areaId', 'contexts', 'tags', 'startTime', 'dueDate', 'reviewAt', 'assignedTo', 'timeEstimate',
+            'status', 'projectId', 'sectionId', 'sectionProjectId', 'areaId', 'contexts', 'tags', 'startTime', 'dueDate', 'reviewAt', 'assignedTo', 'timeEstimate', 'priority',
         ].includes(key));
 };
 const isPicker = (value: unknown) => (

@@ -9,10 +9,11 @@ import { tFallback } from './i18n';
 import { formatListItemCount } from './list-count';
 import { isSelectableProjectForTaskAssignment } from './project-utils';
 import type { StoreActionResult, TaskStore } from './store-types';
+import { TASK_EDITOR_PRIORITY_OPTIONS } from './task-editor-model';
 import { getQuickDateLabel, parseTaskEditorTimeEstimate } from './task-editor-schedule';
 import { compareAreasByOrder } from './task-utils';
 import { getTrashUndoLabel } from './trash-view-model';
-import type { Area, Project, Task, TaskStatus } from './types';
+import type { Area, Project, Task, TaskPriority, TaskStatus } from './types';
 
 type Translate = (key: string) => string;
 
@@ -139,6 +140,14 @@ export const BULK_ORGANIZE_KEEP = '__KEEP__';
 export const BULK_ORGANIZE_NONE = '__NONE__';
 const BULK_ORGANIZE_CUSTOM_ESTIMATE = '__CUSTOM__';
 
+type BulkPriorityChoice = TaskPriority | typeof BULK_ORGANIZE_KEEP | typeof BULK_ORGANIZE_NONE;
+type BulkPersonChoice = typeof BULK_ORGANIZE_KEEP | typeof BULK_ORGANIZE_NONE;
+
+export function isBulkOrganizePriorityChoice(value: unknown): value is BulkPriorityChoice {
+    return value === BULK_ORGANIZE_KEEP || value === BULK_ORGANIZE_NONE
+        || TASK_EDITOR_PRIORITY_OPTIONS.some((priority) => priority === value);
+}
+
 export type BulkOrganizeTextField = 'contexts' | 'tags' | 'startDate' | 'dueDate' | 'reviewDate' | 'delegateWho' | 'estimateText';
 export type BulkOrganizeDateField = Extract<BulkOrganizeTextField, 'startDate' | 'dueDate' | 'reviewDate'>;
 export const BULK_ORGANIZE_DATE_FIELDS: BulkOrganizeDateField[] = ['startDate', 'dueDate', 'reviewDate'];
@@ -160,6 +169,8 @@ export type BulkOrganizeDraft = {
 
     estimateChoice?: string;
     estimateText?: string;
+    priorityChoice?: BulkPriorityChoice;
+    personChoice?: BulkPersonChoice | 'set';
     delegateWho: string;
 };
 
@@ -181,6 +192,8 @@ export type BulkOrganizeDraftEdit =
     | { type: 'setProject'; value: string }
     | { type: 'setArea'; value: string }
     | { type: 'setEstimate'; value: string }
+    | { type: 'setPriority'; value: BulkPriorityChoice }
+    | { type: 'setPerson'; value: BulkPersonChoice }
     | { type: 'setText'; field: BulkOrganizeTextField; value: string };
 
 export function applyBulkOrganizeDraftEdit(draft: BulkOrganizeDraft, edit: BulkOrganizeDraftEdit): BulkOrganizeDraft {
@@ -193,9 +206,75 @@ export function applyBulkOrganizeDraftEdit(draft: BulkOrganizeDraft, edit: BulkO
             return { ...draft, areaChoice: edit.value };
         case 'setEstimate':
             return { ...draft, estimateChoice: edit.value, estimateText: draft.estimateText ?? '' };
+        case 'setPriority':
+            return { ...draft, priorityChoice: edit.value };
+        case 'setPerson':
+            return { ...draft, personChoice: edit.value, delegateWho: '' };
         case 'setText':
+            if (edit.field === 'delegateWho') return { ...draft, delegateWho: edit.value, personChoice: 'set' };
             return { ...draft, [edit.field]: edit.value };
     }
+}
+
+export function buildBulkOrganizePriorityModel(draft: Pick<BulkOrganizeDraft, 'priorityChoice'>, t: Translate) {
+    const selected = draft.priorityChoice ?? BULK_ORGANIZE_KEEP;
+    const option = (value: BulkPriorityChoice, label: string) => ({
+        value, label, selected: value === selected, edit: { type: 'setPriority' as const, value },
+    });
+    return {
+        label: tFallback(t, 'taskEdit.priorityLabel', 'Priority'),
+        selected,
+        priority: readBulkOrganizePriority(draft),
+        options: [
+            option(BULK_ORGANIZE_KEEP, tFallback(t, 'bulk.keepEstimate', 'Keep existing')),
+            option(BULK_ORGANIZE_NONE, tFallback(t, 'focus.group.noPriority', 'No priority')),
+            ...TASK_EDITOR_PRIORITY_OPTIONS.map((value) => option(value, tFallback(t, `priority.${value}`, value))),
+        ],
+    };
+}
+
+function readBulkOrganizePriority(draft: Pick<BulkOrganizeDraft, 'priorityChoice'>) {
+    const priority = draft.priorityChoice;
+    if (priority === BULK_ORGANIZE_NONE) return null;
+    return priority === BULK_ORGANIZE_KEEP ? undefined : priority;
+}
+
+const readBulkOrganizePerson = (draft: Pick<BulkOrganizeDraft, 'status' | 'personChoice' | 'delegateWho'>) => {
+    if (draft.personChoice === BULK_ORGANIZE_NONE) return null;
+    if (draft.personChoice === 'set' || (draft.personChoice === undefined && draft.status === 'waiting')) {
+        return draft.delegateWho.trim() || undefined;
+    }
+    return undefined;
+};
+
+export function isBulkOrganizePersonValid(draft: Pick<BulkOrganizeDraft, 'status' | 'personChoice' | 'delegateWho'>): boolean {
+    return draft.status !== 'waiting' || Boolean(readBulkOrganizePerson(draft));
+}
+
+export function buildBulkOrganizePersonModel(
+    draft: Pick<BulkOrganizeDraft, 'status' | 'personChoice' | 'delegateWho'>,
+    names: readonly string[],
+    t: Translate,
+) {
+    const assignedTo = readBulkOrganizePerson(draft);
+    const option = (value: BulkPersonChoice, label: string, selected: boolean) => ({
+        value, label, selected, edit: { type: 'setPerson' as const, value },
+    });
+    const query = draft.delegateWho.trim().toLocaleLowerCase();
+    return {
+        label: tFallback(t, 'taskEdit.assignedTo', 'Assigned To'),
+        placeholder: tFallback(t, 'process.delegateWhoPlaceholder', 'Person or team'),
+        value: draft.delegateWho,
+        assignedTo,
+        options: [
+            option(BULK_ORGANIZE_KEEP, tFallback(t, 'bulk.keepEstimate', 'Keep existing'), assignedTo === undefined),
+            option(BULK_ORGANIZE_NONE, tFallback(t, 'people.unassigned', 'Unassigned'), assignedTo === null),
+        ],
+        suggestions: names.filter((name) => {
+            const normalized = name.toLocaleLowerCase();
+            return name.length <= 500 && normalized !== query && normalized.includes(query);
+        }).slice(0, 6).map((name) => ({ name, edit: { type: 'setText' as const, field: 'delegateWho' as const, value: name } })),
+    };
 }
 
 const readBulkOrganizeEstimate = (draft: Pick<BulkOrganizeDraft, 'estimateChoice' | 'estimateText'>) => {
@@ -264,10 +343,11 @@ export type BulkOrganizeDialogModel = {
 
     area: { label: string; value: string; accessibilityLabel: string; keepLabel: string; selectedId: string | undefined; disabled: boolean };
 
-    waitingFor: { label: string; placeholder: string } | null;
+    person: ReturnType<typeof buildBulkOrganizePersonModel>;
 
     dates: { field: BulkOrganizeDateField; label: string }[];
     estimate: ReturnType<typeof buildBulkOrganizeEstimateModel> | null;
+    priority: ReturnType<typeof buildBulkOrganizePriorityModel> | null;
     contexts: { label: string; placeholder: string };
     tags: { label: string; placeholder: string };
 
@@ -284,6 +364,8 @@ export function buildBulkOrganizeDialogModel(input: {
     areas: readonly Area[];
     selectedCount: number;
     timeEstimatesEnabled?: boolean;
+    prioritiesEnabled?: boolean;
+    personNames?: readonly string[];
     t: Translate;
 }): BulkOrganizeDialogModel {
     const { draft, t } = input;
@@ -333,9 +415,7 @@ export function buildBulkOrganizeDialogModel(input: {
             selectedId: selectedAreaId,
             disabled: Boolean(selectedProjectId),
         },
-        waitingFor: isWaiting
-            ? { label: tFallback(t, 'process.delegateWhoLabel', 'Waiting for'), placeholder: tFallback(t, 'process.delegateWhoPlaceholder', 'Person or team') }
-            : null,
+        person: buildBulkOrganizePersonModel(draft, input.personNames ?? [], t),
         dates: [
             { field: 'startDate', label: tFallback(t, 'taskEdit.startDateLabel', 'Start') },
             { field: 'dueDate', label: tFallback(t, 'taskEdit.dueDateLabel', 'Due') },
@@ -345,9 +425,10 @@ export function buildBulkOrganizeDialogModel(input: {
             },
         ],
         estimate,
+        priority: input.prioritiesEnabled === false ? null : buildBulkOrganizePriorityModel(draft, t),
         contexts: { label: tFallback(t, 'taskEdit.contextsLabel', 'Contexts'), placeholder: '@computer, @office' },
         tags: { label: tFallback(t, 'taskEdit.tagsLabel', 'Tags'), placeholder: '#project, #admin' },
-        canApply: input.selectedCount > 0 && (!isWaiting || draft.delegateWho.trim().length > 0) && !estimate?.validationMessage,
+        canApply: input.selectedCount > 0 && isBulkOrganizePersonValid(draft) && !estimate?.validationMessage,
         validationMessage: estimate?.validationMessage ?? tFallback(t, 'bulk.waitingPersonRequired', 'Choose who these items are waiting for.'),
         createFailed: {
             project: tFallback(t, 'projects.createFailed', 'Failed to create project.'),
@@ -357,7 +438,11 @@ export function buildBulkOrganizeDialogModel(input: {
 }
 
 
-export function buildBulkOrganizeInput(draft: BulkOrganizeDraft, timeEstimatesEnabled = false): BulkOrganizeTaskUpdateInput {
+export function buildBulkOrganizeInput(
+    draft: BulkOrganizeDraft,
+    timeEstimatesEnabled = false,
+    prioritiesEnabled = true,
+): BulkOrganizeTaskUpdateInput {
     const input: BulkOrganizeTaskUpdateInput = {
         contexts: parseBulkOrganizeTokenInput(draft.contexts, '@'),
         tags: parseBulkOrganizeTokenInput(draft.tags, '#'),
@@ -374,7 +459,10 @@ export function buildBulkOrganizeInput(draft: BulkOrganizeDraft, timeEstimatesEn
     if (draft.reviewDate.trim()) input.reviewAt = draft.reviewDate.trim();
     const timeEstimate = timeEstimatesEnabled ? readBulkOrganizeEstimate(draft) : undefined;
     if (timeEstimate !== undefined) input.timeEstimate = timeEstimate;
-    if (draft.status === 'waiting') input.assignedTo = draft.delegateWho.trim();
+    const priority = prioritiesEnabled ? readBulkOrganizePriority(draft) : undefined;
+    if (priority !== undefined) input.priority = priority;
+    const assignedTo = readBulkOrganizePerson(draft);
+    if (assignedTo !== undefined) input.assignedTo = assignedTo;
     return input;
 }
 

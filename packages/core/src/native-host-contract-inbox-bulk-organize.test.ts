@@ -72,6 +72,53 @@ afterEach(async () => { await flushPendingSave(); resetForTests(); vi.restoreAll
 
 describe('Inbox Organize RN/store parity', () => {
     it.each([
+        { draft: { priorityChoice: 'urgent', personChoice: 'set', delegateWho: '  New Person  ' }, enabled: true,
+            priorities: ['urgent', 'urgent'], people: ['New Person', 'New Person'] },
+        { draft: { priorityChoice: BULK_ORGANIZE_NONE, personChoice: BULK_ORGANIZE_NONE }, enabled: true,
+            priorities: [null, null], people: [null, null] },
+        { draft: { priorityChoice: BULK_ORGANIZE_NONE, personChoice: BULK_ORGANIZE_NONE }, enabled: false,
+            priorities: ['low', 'high'], people: [null, null] },
+        { draft: { tags: 'changed' }, enabled: true, priorities: ['low', 'high'], people: ['First', 'Second'] },
+    ] satisfies { draft: Partial<BulkOrganizeDraft>; enabled: boolean; priorities: (string | null)[]; people: (string | null)[] }[])(
+        'persists selected priority and person edits in RN and prepared Native Organize ($draft, enabled=$enabled)',
+        async ({ draft, enabled, priorities, people }) => {
+            clock();
+            const initial = seed();
+            initial.settings = { ...initial.settings, features: { priorities: enabled } };
+            initial.tasks = [task('a', { priority: 'low', assignedTo: 'First' }), task('b', { priority: 'high', assignedTo: 'Second' }),
+                task('unselected', { priority: 'medium', assignedTo: 'Unselected' })];
+            const expected = ['a', 'b', 'unselected'].map((id, index) => ({
+                id, status: 'inbox', priority: index === 2 ? 'medium' : priorities[index],
+                assignedTo: index === 2 ? 'Unselected' : people[index],
+            }));
+            for (const native of [false, true]) {
+                const sqlite = await openSqliteHost(initial);
+                try {
+                    if (native) {
+                        const command = await prepare(sqlite, request(draft));
+                        expect(value(await sqlite.host.commitPreparedInboxTasksOrganize(command))).toEqual({ count: 2, changed: true });
+                    } else {
+                        const store = useTaskStore.getState();
+                        const input = buildBulkOrganizeInput({ ...EMPTY_BULK_ORGANIZE_DRAFT, ...draft }, true, enabled);
+                        const write = planBulkOrganize(['a', 'b'], store._tasksById, input);
+                        if (write?.kind !== 'update') throw new Error('Expected selected task updates');
+                        expect(await store.batchUpdateTasks(write.updates)).toEqual({ success: true });
+                        await flushPendingSave();
+                    }
+                    expect(await sqlite.sql('SELECT id, status, priority, assignedTo FROM tasks ORDER BY id')).toEqual(expected);
+                    await sqlite.restart();
+                    for (const row of expected) {
+                        const task = useTaskStore.getState()._tasksById.get(row.id);
+                        expect([task?.status, task?.priority, task?.assignedTo]).toEqual([
+                            row.status, row.priority ?? undefined, row.assignedTo ?? undefined,
+                        ]);
+                    }
+                } finally { await sqlite.close(); }
+            }
+        },
+    );
+
+    it.each([
         { draft: { estimateChoice: '30min' }, enabled: true, expected: '30min' },
         { draft: { estimateChoice: '__CUSTOM__', estimateText: '1h 15m' }, enabled: true, expected: 'custom:75' },
         { draft: { estimateChoice: BULK_ORGANIZE_NONE }, enabled: true, expected: null },

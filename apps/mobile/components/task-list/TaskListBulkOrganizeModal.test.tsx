@@ -2,7 +2,7 @@ import React from 'react';
 import { Platform, Pressable, StyleSheet, Text, TextInput, TouchableOpacity } from 'react-native';
 import { act, create } from 'react-test-renderer';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { configureDateFormatting, type Area, type Project } from '@mindwtr/core';
+import { configureDateFormatting, type Area, type Project, type Task } from '@mindwtr/core';
 import { resetForTests, setStorageAdapter, useTaskStore } from '../../../../packages/core/src/store';
 
 import { TaskListBulkOrganizeModal } from './TaskListBulkOrganizeModal';
@@ -104,9 +104,9 @@ const t = (key: string) => ({
 }[key] ?? key);
 
 const localizedT = (key: string) => ({
-  'process.delegateWhoLabel': 'En attente de',
   'process.followUpLabel': 'Relance',
   'status.waiting': 'En attente',
+  'taskEdit.assignedTo': 'Attribué à',
   'taskEdit.contextsLabel': 'Contextes',
   'taskEdit.dueDateLabel': 'Échéance',
   'taskEdit.reviewDateLabel': 'Révision',
@@ -200,7 +200,8 @@ describe('TaskListBulkOrganizeModal', () => {
     const onApply = vi.fn();
     const tree = renderModal({ onApply });
     const apply = () => act(() => { buttonWithText(tree, 'Apply to selected').props.onPress(); });
-    expect(buttonWithText(tree, 'Keep existing').props.accessibilityState.selected).toBe(true);
+    const keepOptions = tree.root.findAllByType(TouchableOpacity).filter((option) => directButtonText(option) === 'Keep existing');
+    expect(keepOptions.map((option) => option.props.accessibilityState.selected)).toEqual([true, true, true]);
     apply();
     expect(onApply.mock.lastCall?.[0]).not.toHaveProperty('timeEstimate');
 
@@ -312,9 +313,37 @@ describe('TaskListBulkOrganizeModal', () => {
     const captionedInputs = () => tree.root.findAllByType(TextInput)
       .filter((node) => ['Person or team', '@computer, @office', '#project, #admin'].includes(node.props.placeholder));
     expect(captionedInputs().map((node) => node.props.accessibilityLabel))
-      .toEqual(['En attente de', 'Contextes', 'Étiquettes']);
+      .toEqual(['Attribué à', 'Contextes', 'Étiquettes']);
     act(() => { captionedInputs()[0].props.onChangeText('Camille'); });
-    expect(captionedInputs()[0].props).toMatchObject({ value: 'Camille', accessibilityLabel: 'En attente de' });
+    expect(captionedInputs()[0].props).toMatchObject({ value: 'Camille', accessibilityLabel: 'Attribué à' });
+  });
+
+  it('applies priority and person suggestions independently with status kept', () => {
+    const known: Task = {
+      id: 'known', title: 'Known', status: 'next', assignedTo: 'Alex Rivera',
+      tags: [], contexts: [],
+      createdAt: '2026-06-16T00:00:00.000Z', updatedAt: '2026-06-16T00:00:00.000Z',
+    };
+    useTaskStore.setState({ _allTasks: [known] });
+    const onApply = vi.fn();
+    const tree = renderModal({ onApply });
+    const press = (label: string) => { act(() => { buttonWithText(tree, label).props.onPress(); }); };
+    press('high');
+    press('Alex Rivera');
+    press('Apply to selected');
+    expect(onApply).toHaveBeenLastCalledWith({ contexts: [], tags: [], priority: 'high', assignedTo: 'Alex Rivera' });
+
+    press('No priority');
+    press('Unassigned');
+    press('Apply to selected');
+    expect(onApply).toHaveBeenLastCalledWith({ contexts: [], tags: [], priority: null, assignedTo: null });
+
+    act(() => useTaskStore.setState({ settings: { features: { priorities: false } } }));
+    expect(tree.root.findAllByType(Text).some((node) => node.props.children === 'Priority')).toBe(false);
+    const person = tree.root.findAllByType(TextInput).find((node) => node.props.accessibilityLabel === 'Assigned To');
+    act(() => { person?.props.onChangeText('  New Name  '); });
+    press('Apply to selected');
+    expect(onApply).toHaveBeenLastCalledWith({ contexts: [], tags: [], assignedTo: 'New Name' });
   });
 
   it.each(['project', 'area'] as const)('retries storage before selecting a %s left visible by failed creation', async (kind) => {

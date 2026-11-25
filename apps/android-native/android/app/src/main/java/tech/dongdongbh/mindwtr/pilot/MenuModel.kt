@@ -1348,13 +1348,20 @@ class MenuModel(internal val shell: InboxViewModel, private val saved: SavedStat
 
     fun organizeEdit(edit: JSONObject) {
 
-        if (edit.optString("type") in listOf("setStatus", "setEstimate") || edit.optString("field") in listOf("delegateWho", "estimateText")) {
+        if (edit.optString("type") in listOf("setStatus", "setEstimate", "setPerson") || edit.optString("field") in listOf("delegateWho", "estimateText")) {
             dialog?.let { keepDialog(JSONObject(it.toString()).apply { remove("validation") }) }
         }
         bulkReload(JSONObject().put("organizeEdit", edit))
     }
 
     private var organizeTyped = 0
+
+    fun organizePerson(edit: JSONObject) {
+        val open = dialog?.takeIf { it.optString("kind") == "organize" } ?: return
+        ++organizeTyped
+        keepDialog(JSONObject(open.toString()).put("typed:delegateWho", if (edit.optString("type") == "setText") edit.getString("value") else ""))
+        organizeEdit(edit)
+    }
 
 
     fun organizeType(field: String, text: String) {

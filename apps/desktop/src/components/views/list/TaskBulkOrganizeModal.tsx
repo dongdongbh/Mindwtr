@@ -3,14 +3,19 @@ import { ClipboardCheck, X } from 'lucide-react';
 import {
     BULK_ORGANIZE_STATUS_OPTIONS,
     buildBulkOrganizeEstimateModel,
+    buildBulkOrganizePersonModel,
+    buildBulkOrganizePriorityModel,
     compareAreasByOrder,
     createBulkOrganizeArea,
     createBulkOrganizeProject,
     ensureBulkOrganizeDestinationSaved,
     getRetainedTaskContexts,
+    getPersonOptionNames,
     getSavedTaxonomyTokens,
     getUsedTaskTokens,
     isSelectableProjectForTaskAssignment,
+    isBulkOrganizePersonValid,
+    isBulkOrganizePriorityChoice,
     parseBulkOrganizeTokenInput,
     resolveFeatureFlags,
     safeParseDate,
@@ -18,6 +23,7 @@ import {
     tFallback,
     useTaskStore,
     type Area,
+    type BulkOrganizeDraft,
     type BulkOrganizeStatus,
     type BulkOrganizeTaskUpdateInput,
     type Project,
@@ -86,6 +92,8 @@ export function TaskBulkOrganizeModal({
     const [reviewDate, setReviewDate] = useState('');
     const [estimateChoice, setEstimateChoice] = useState(KEEP_VALUE);
     const [estimateText, setEstimateText] = useState('');
+    const [priorityChoice, setPriorityChoice] = useState<BulkOrganizeDraft['priorityChoice']>(KEEP_VALUE);
+    const [personChoice, setPersonChoice] = useState<BulkOrganizeDraft['personChoice']>(KEEP_VALUE);
     const [delegateWho, setDelegateWho] = useState('');
     const [showValidation, setShowValidation] = useState(false);
     const [createPending, setCreatePending] = useState(false);
@@ -98,6 +106,8 @@ export function TaskBulkOrganizeModal({
     const settings = useTaskStore((state) => state.settings);
     const allContexts = useMemo(() => retainedTasks ? Array.from(new Set([...getRetainedTaskContexts(retainedTasks), ...getSavedTaxonomyTokens(settings, 'context')])) : [], [retainedTasks, settings]);
     const tasks = useTaskStore((state) => isOpen ? state.tasks : null);
+    const people = useTaskStore((state) => isOpen ? state.people : null);
+    const personNames = useMemo(() => tasks && people ? getPersonOptionNames(people, tasks) : [], [people, tasks]);
     const allTags = useMemo(() => tasks ? Array.from(new Set([...getUsedTaskTokens(tasks, (task) => task.tags), ...getSavedTaxonomyTokens(settings, 'tag')])) : [], [tasks, settings]);
 
     useEffect(() => {
@@ -117,6 +127,8 @@ export function TaskBulkOrganizeModal({
         setReviewDate('');
         setEstimateChoice(KEEP_VALUE);
         setEstimateText('');
+        setPriorityChoice(KEEP_VALUE);
+        setPersonChoice(KEEP_VALUE);
         setDelegateWho('');
         setShowValidation(false);
     }, [isOpen]);
@@ -141,9 +153,13 @@ export function TaskBulkOrganizeModal({
     if (!isOpen || typeof document === 'undefined') return null;
 
     const isWaiting = status === 'waiting';
-    const estimate = resolveFeatureFlags(settings).timeEstimates
+    const flags = resolveFeatureFlags(settings);
+    const estimate = flags.timeEstimates
         ? buildBulkOrganizeEstimateModel({ estimateChoice, estimateText }, t) : null;
-    const canApply = selectedCount > 0 && (!isWaiting || delegateWho.trim().length > 0) && !estimate?.validationMessage;
+    const priority = flags.priorities ? buildBulkOrganizePriorityModel({ priorityChoice }, t) : null;
+    const personDraft = { status, delegateWho, personChoice };
+    const person = buildBulkOrganizePersonModel(personDraft, personNames, t);
+    const canApply = selectedCount > 0 && isBulkOrganizePersonValid(personDraft) && !estimate?.validationMessage;
     const isBusy = isApplying || createPending;
     const selectedProjectId = projectChoice !== KEEP_VALUE && projectChoice !== NONE_VALUE ? projectChoice : undefined;
 
@@ -294,7 +310,8 @@ export function TaskBulkOrganizeModal({
         if (dueDate.trim()) input.dueDate = dueDate.trim();
         if (reviewDate.trim()) input.reviewAt = reviewDate.trim();
         if (estimate?.timeEstimate !== undefined) input.timeEstimate = estimate.timeEstimate;
-        if (isWaiting) input.assignedTo = delegateWho.trim();
+        if (priority?.priority !== undefined) input.priority = priority.priority;
+        if (person.assignedTo !== undefined) input.assignedTo = person.assignedTo;
 
         void onApply(input);
     };
@@ -421,20 +438,61 @@ export function TaskBulkOrganizeModal({
                         </label>
                     )}
 
-                    {isWaiting && (
+                    {priority && (
                         <label className="space-y-1 text-xs font-medium text-muted-foreground">
-                            <span>{tFallback(t, 'process.delegateWhoLabel', 'Waiting for')}</span>
-                            <input
-                                value={delegateWho}
+                            <span>{priority.label}</span>
+                            <select
+                                value={priority.selected}
+                                disabled={isBusy}
                                 onChange={(event) => {
+                                    const value = event.currentTarget.value;
+                                    if (isBulkOrganizePriorityChoice(value)) setPriorityChoice(value);
+                                }}
+                                className="h-9 w-full rounded-md border border-border bg-card px-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                            >
+                                {priority.options.map(({ value, label }) => <option key={value} value={value}>{label}</option>)}
+                            </select>
+                        </label>
+                    )}
+                    <div className="space-y-2">
+                        <label className="block space-y-1 text-xs font-medium text-muted-foreground">
+                            <span>{person.label}</span>
+                            <input
+                                value={person.value}
+                                list={`${tokenInputId}-people`}
+                                disabled={isBusy}
+                                maxLength={500}
+                                onChange={(event) => {
+                                    setPersonChoice('set');
                                     setDelegateWho(event.currentTarget.value);
                                     setShowValidation(false);
                                 }}
                                 className="h-9 w-full rounded-md border border-border bg-card px-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-                                placeholder={tFallback(t, 'process.delegateWhoPlaceholder', 'Person or team')}
+                                placeholder={person.placeholder}
                             />
                         </label>
-                    )}
+                        <datalist id={`${tokenInputId}-people`}>
+                            {person.suggestions.map(({ name }) => <option key={name} value={name} />)}
+                        </datalist>
+                        <div className="flex flex-wrap gap-2" role="group" aria-label={person.label}>
+                            {person.options.map(({ value, label, selected }) => (
+                                <Button
+                                    key={value}
+                                    variant={selected ? 'primary' : 'outline'}
+                                    size="sm"
+                                    aria-pressed={selected}
+                                    disabled={isBusy}
+                                    onClick={() => {
+                                        setPersonChoice(value);
+                                        setDelegateWho('');
+                                        setShowValidation(false);
+                                    }}
+                                >
+                                    {label}
+                                </Button>
+                            ))}
+                        </div>
+                    </div>
                 </div>
 
                 {
