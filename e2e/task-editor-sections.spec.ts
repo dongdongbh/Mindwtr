@@ -126,3 +126,32 @@ for (const presentation of ['inline', 'modal']) {
         await editor.getByRole('button', { name: 'Cancel', exact: true }).click();
     });
 }
+
+for (const presentation of ['inline', 'modal']) {
+    test(`a saved Mindwtr attachment opens a task outside the selected Area from the ${presentation} editor`, async ({ page }) => {
+        await dismissOnboarding(page);
+        await seedAppData(page, {
+            areas: [{ id: 'work', name: 'Work' }, { id: 'home', name: 'Home' }],
+            tasks: [
+                { id: 'source', title: 'Plan a visit', status: 'next', areaId: 'work' },
+                { id: 'target /?', title: 'Buy train tickets', status: 'next', areaId: 'home' },
+            ],
+            settings: { filters: { areaIds: ['work'] }, gtd: { taskEditor: { presentation } } },
+        });
+        await page.goto('/?view=next');
+        const source = page.getByText('Plan a visit', { exact: true });
+        await expect(page.getByText('Buy train tickets', { exact: true })).toHaveCount(0);
+        await source.dblclick();
+        const editor = page.locator('form').filter({ has: page.getByRole('combobox', { name: 'Title', exact: true }) });
+        await editor.getByRole('button', { name: /^Details/ }).click();
+        await editor.getByRole('button', { name: 'Add link', exact: true }).click();
+        const prompt = page.getByRole('dialog', { name: 'Add link' });
+        await prompt.getByRole('textbox').fill('mindwtr://open?task=target%20%2F%3F');
+        await prompt.getByRole('button', { name: 'Save', exact: true }).click();
+        await editor.getByRole('button', { name: 'Save', exact: true }).click();
+        await page.reload();
+        await source.dblclick();
+        await editor.getByTitle('mindwtr://open?task=target%20%2F%3F', { exact: true }).click();
+        await expect(page.getByRole('dialog').getByText('Buy train tickets', { exact: true })).toBeVisible();
+    });
+}

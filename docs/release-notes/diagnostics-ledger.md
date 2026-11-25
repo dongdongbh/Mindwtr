@@ -60,6 +60,8 @@ The v1.3.6 task-editor correction is confirmed by the visible disappearance of t
 
 ## v1.3.10 (add before tagging, trim in the release after)
 
+- **`v1.3.10/attachment-task-link`** — Desktop `use-task-deep-link.ts`. Open a copied task link from an attachment. Look for `Task link route requested` with `outcome=opened` or `missing`. No task ID or URL is logged.
+
 - **`v1.3.10/widget-shortcut-filter`** — RN mobile `focus.tsx`. Opening a separate saved Focus list records `Saved list kept Today widget filter` with `outcome=preserved`. The marker confirms the filter was preserved. Check widget rendering on the Home Screen.
 
 - **`v1.3.10/ai-area-suggestion`** — #1608. In the desktop or mobile task editor or Inbox, accept a configured-provider Area suggestion. The marker records acceptance into the draft, without task text, names or IDs.

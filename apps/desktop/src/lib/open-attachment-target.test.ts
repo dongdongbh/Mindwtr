@@ -129,7 +129,7 @@ describe('openAttachmentTarget', () => {
         expect(openShellMock).not.toHaveBeenCalled();
     });
 
-    it.each(['javascript:document.body.dataset.proof="ran"', 'data:text/html,<p>active</p>', 'blob:https://example.com/active', 'vbscript:active', 'about:blank'])('rejects active or unsupported attachment scheme %s before any opener', async (uri) => {
+    it.each(['javascript:document.body.dataset.proof="ran"', 'data:text/html,<p>active</p>', 'blob:https://example.com/active', 'vbscript:active', 'about:blank', 'mindwtr://capture?title=test', 'mindwtr://open?task=', 'mindwtr://open?project=p1'])('rejects active or unsupported attachment scheme %s before any opener', async (uri) => {
         const openSpy = vi.spyOn(window, 'open');
 
         await expect(openAttachmentTarget(uri, 'unsafe-link')).rejects.toThrow('Attachment link protocol is not supported.');

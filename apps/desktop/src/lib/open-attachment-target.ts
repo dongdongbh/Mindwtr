@@ -2,8 +2,9 @@ import { open as openShell } from '@tauri-apps/plugin-shell';
 import { isLocalAttachmentPath, resolveAttachmentOpenTarget, toAttachmentBrowserUrl } from './attachment-paths';
 import { isTauriRuntime } from './runtime';
 import { invokeNative } from './tauri-invoke';
-import { isSandboxMode } from '@mindwtr/core';
+import { isSandboxMode, parseEntityOpenUrl } from '@mindwtr/core';
 import { isUpNoteHref, openExternalLink } from './external-link';
+import { OpenAttachmentTaskEvent } from './navigation-events';
 import { logInfo, logWarn } from './app-log';
 
 const EXTERNAL_ATTACHMENT_LINK = /^(?:(?:https?|upnote|joplin|obsidian|ms-windows-store):\/\/|(?:mailto|tel|mid):)\S+$/i;
@@ -12,6 +13,11 @@ export async function openAttachmentTarget(uri: string, attachmentId?: string): 
     if (isSandboxMode()) throw new Error('Unavailable in sandbox.');
     const trimmed = uri.trim();
     if (!trimmed) return;
+    const target = parseEntityOpenUrl(trimmed);
+    if (target?.kind === 'task') {
+        window.dispatchEvent(new OpenAttachmentTaskEvent(target.id));
+        return;
+    }
     if (!isLocalAttachmentPath(trimmed) && !EXTERNAL_ATTACHMENT_LINK.test(trimmed)) {
         void logWarn('Attachment link protocol refused', {
             scope: 'attachment', force: true,
