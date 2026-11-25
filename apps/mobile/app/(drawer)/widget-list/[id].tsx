@@ -82,7 +82,8 @@ export default function WidgetListScreen() {
     <View style={{ flex: 1, backgroundColor: tc.bg }}>
       <WidgetLaunchDestination path={`/widget-list/${typeof id === 'string' ? id : ''}`} />
       <Stack.Screen options={{ title }} />
-      {savedFilter?.view === 'contexts' ? <ContextsView key={savedFilter.id} initialSavedFilterId={savedFilter.id} />
+      {destinationId?.startsWith('context:') ? <ContextsView key={destinationId} initialContext={destinationId.slice('context:'.length)} />
+        : savedFilter?.view === 'contexts' ? <ContextsView key={savedFilter.id} initialSavedFilterId={savedFilter.id} />
         : savedFilter?.view === 'focus' ? <FocusScreen key={savedFilter.id} initialSavedFilterId={savedFilter.id} /> : <>
       {
                                                                                     }

@@ -423,6 +423,8 @@ Source: `apps/mobile`. Routes live in `apps/mobile/app` (expo-router). Labels be
 
 ## Android widgets
 
+- Android Tasks widget: select a context directly, then tap the header to open Contexts with that context selected.
+
 - Background sync: After a background save, Tasks and Compact refresh from local data. If publication fails, Mindwtr retries once. If both attempts fail, a later successful background sync can republish the saved data. Export Diagnostics to see the retry outcome. Android controls when background sync runs.
 
 - List scope: The compact built-in list is named Today (stored list ID `focus`) and contains Today’s Focus plus today’s schedule. Saved Focus filters use the app’s shared Focus task sections, including Next Actions, Review Due and Upcoming; unrelated Inbox/Someday tasks and blocked sequential successors remain excluded. This shared projection also serves iOS widgets. Check: `packages/core/src/widget-focus-filter.test.ts`.

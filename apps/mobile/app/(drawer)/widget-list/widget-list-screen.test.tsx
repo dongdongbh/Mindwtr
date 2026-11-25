@@ -58,6 +58,14 @@ describe('WidgetListScreen', () => {
     vi.clearAllMocks();
   });
   afterEach(() => vi.useRealTimers());
+  it('opens Contexts with the directly selected widget context', async () => {
+    state.id = 'context:@person/Teddy';
+    let tree!: ReactTestRenderer;
+    await act(async () => { tree = create(<WidgetListScreen />); });
+    expect(tree.root.findByType('ContextsView' as never).props.initialContext).toBe('@person/Teddy');
+    expect(tree.root.findAllByType('TaskRows' as never)).toHaveLength(0);
+    await act(async () => { tree.unmount(); });
+  });
   it('opens full Focus controls only for a live saved Focus filter after cold settings load', async () => {
     state.id = 'filter:desk';
     let tree!: ReactTestRenderer;

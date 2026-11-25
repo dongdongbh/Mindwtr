@@ -366,6 +366,8 @@ The native client is a Kotlin and Jetpack Compose app in `apps/android-native`. 
 
 ## Home-screen widgets and Quick Settings tile
 
+- Android Tasks widget: select a context directly, then tap the header to open Contexts with that context selected.
+
 - Notes: Queued text/audio captures use the configured default area at ingestion; explicit area/project choices take precedence.
 - Reach: Home screen › Widgets › Mindwtr (Tasks, Compact, Quick capture). Quick Settings › the Mindwtr capture tile (RN's tile class).
 - Shortcuts: Tap a widget row's ring to complete it. The widget header opens the app or a widget list. Tap the Tasks widget's arrow to switch lists or change **Group by** for the current list. Today keeps its built-in sections.
