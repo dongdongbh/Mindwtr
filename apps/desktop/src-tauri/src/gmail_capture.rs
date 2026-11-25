@@ -838,8 +838,7 @@ struct MimePart {
 #[derive(Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct MimeBody {
-    #[serde(default)]
-    size: u64,
+    size: Option<u64>,
     data: Option<String>,
     attachment_id: Option<String>,
 }
@@ -847,6 +846,24 @@ struct MimeBody {
 struct Header {
     name: String,
     value: String,
+}
+fn decode_text_body(body: &MimeBody) -> Result<String> {
+    let size = body.size.ok_or_else(|| error("other"))?;
+    if body.attachment_id.is_some() {
+        return Err(error("other"));
+    }
+    let bytes = URL_SAFE_NO_PAD
+        .decode(
+            body.data
+                .as_deref()
+                .unwrap_or_default()
+                .trim_end_matches('='),
+        )
+        .map_err(|_| error("other"))?;
+    if size != bytes.len() as u64 {
+        return Err(error("other"));
+    }
+    String::from_utf8(bytes).map_err(|_| error("other"))
 }
 fn body_text(part: &MimePart, depth: usize) -> Result<Option<String>> {
     if depth > 32 || part.mime_type.is_empty() {
@@ -864,24 +881,7 @@ fn body_text(part: &MimePart, depth: usize) -> Result<Option<String>> {
         return Ok(None);
     }
     if part.mime_type.eq_ignore_ascii_case("text/plain") {
-        if part.body.attachment_id.is_some() || (part.body.size > 0 && part.body.data.is_none()) {
-            return Err(error("other"));
-        }
-        let bytes = URL_SAFE_NO_PAD
-            .decode(
-                part.body
-                    .data
-                    .as_deref()
-                    .unwrap_or_default()
-                    .trim_end_matches('='),
-            )
-            .map_err(|_| error("other"))?;
-        if part.body.size != bytes.len() as u64 {
-            return Err(error("other"));
-        }
-        return String::from_utf8(bytes)
-            .map(Some)
-            .map_err(|_| error("other"));
+        return decode_text_body(&part.body).map(Some);
     }
     if part.parts.is_empty()
         && part
@@ -907,22 +907,7 @@ fn body_text(part: &MimePart, depth: usize) -> Result<Option<String>> {
     }
 
     if part.mime_type.eq_ignore_ascii_case("text/html") {
-        if part.body.attachment_id.is_some() || (part.body.size > 0 && part.body.data.is_none()) {
-            return Err(error("other"));
-        }
-        let bytes = URL_SAFE_NO_PAD
-            .decode(
-                part.body
-                    .data
-                    .as_deref()
-                    .unwrap_or_default()
-                    .trim_end_matches('='),
-            )
-            .map_err(|_| error("other"))?;
-        if part.body.size != bytes.len() as u64 {
-            return Err(error("other"));
-        }
-        let html = String::from_utf8(bytes).map_err(|_| error("other"))?;
+        let html = decode_text_body(&part.body)?;
         let raw =
             format!("MIME-Version: 1.0\r\nContent-Type: text/html; charset=utf-8\r\n\r\n{html}");
         let parsed = mail_parser::MessageParser::default()
@@ -1707,6 +1692,26 @@ mod tests {
         release_tx.send(()).unwrap();
         assert_eq!(join.join().unwrap().err().unwrap().kind, "cancelled");
         assert!(context.lock().unwrap().batch.is_none());
+    }
+
+    #[test]
+    fn missing_text_body_size_cannot_be_acknowledged_as_empty() {
+        for mime in ["text/plain", "text/html"] {
+            for payload in [
+                serde_json::json!({"mimeType":mime}),
+                serde_json::json!({"mimeType":mime,"body":{}}),
+            ] {
+                let message =
+                    serde_json::from_value(serde_json::json!({"id":"missing","payload":payload}))
+                        .unwrap();
+                assert!(parse_message(message).is_err());
+            }
+            let message = serde_json::from_value(
+                serde_json::json!({"id":"empty","payload":{"mimeType":mime,"body":{"size":0}}}),
+            )
+            .unwrap();
+            assert_eq!(parse_message(message).unwrap().unwrap().body_text, "");
+        }
     }
 
     #[test]
