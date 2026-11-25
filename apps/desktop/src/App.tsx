@@ -1041,8 +1041,8 @@ function App() {
         const controller = createGmailCaptureController({
             addTasks: (items) => useTaskStore.getState().addTasks(items),
             flushPendingSave,
-            logInfo: (message, extra) => {
-                void logInfo(message, { scope: 'gmail-capture', extra });
+            logInfo: (message, extra, force) => {
+                void logInfo(message, { scope: 'gmail-capture', extra, force });
             },
         });
         registerGmailCaptureController(controller);

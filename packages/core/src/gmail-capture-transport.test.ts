@@ -73,6 +73,39 @@ describe('RN Gmail transport', () => {
         native.get = vi.fn(async (path) => path.startsWith('messages?') ? { messages: [{ id: 'm1' }] } : { ...message(), labelIds: [] });
         expect((await transport.poll()).messages).toEqual([]);
     });
+    it('advances past attachment-only mail without acknowledging it', async () => {
+        const { transport, native } = setup();
+        let provideText = false;
+        native.get = vi.fn(async (path) => {
+            if (path.includes('pageToken=last')) return { messages: [{ id: 'later' }] };
+            if (path.includes('pageToken=middle')) return { messages: [{ id: 'image' }], nextPageToken: 'last' };
+            if (path.startsWith('messages?')) return { messages: [{ id: 'attachment' }, { id: 'm1' }], nextPageToken: 'middle' };
+            const id = path.slice('messages/'.length, path.indexOf('?'));
+            if (id === 'attachment' && !provideText) return { id, labelIds: ['label'], payload: {
+                mimeType: 'multipart/mixed', parts: [{ mimeType: 'application/pdf', filename: 'test.pdf', body: { size: 20, attachmentId: 'file' } }],
+            } };
+            if (id === 'image') return { id, labelIds: ['label'], payload: { mimeType: 'image/png', body: { size: 20, attachmentId: 'file' } } };
+            return message(id);
+        });
+        const first = await transport.poll();
+        expect(first.messages.map(({ id }) => id)).toEqual(['m1']);
+        expect(first.skippedUnsupported).toBe(1);
+        expect(await transport.poll()).toEqual(first);
+        await transport.commit(first.batchId);
+
+        const middle = await transport.poll();
+        expect(middle.messages).toEqual([]);
+        expect(middle.hasMore).toBe(true);
+        expect(middle.skippedUnsupported).toBe(1);
+        await transport.commit(middle.batchId);
+
+        const last = await transport.poll();
+        expect(last.messages.map(({ id }) => id)).toEqual(['later']);
+        await transport.commit(last.batchId);
+
+        provideText = true;
+        expect((await transport.poll()).messages.map(({ id }) => id)).toEqual(['attachment']);
+    });
     it('does not let a stale auth failure disable a reconnected account', async () => {
         const { transport, native, store } = setup();
         let reject!: (error: unknown) => void;
@@ -114,12 +147,12 @@ describe('bounded Gmail MIME parsing', () => {
             { mimeType: 'multipart/alternative', parts: [{ ...plain, mimeType: 'text/html' }, plain] },
             { filename: 'private.txt', mimeType: 'text/plain', body: { attachmentId: 'x' } },
             { filename: '', headers: [{ name: 'Content-Disposition', value: 'attachment' }], mimeType: 'text/plain', body: { attachmentId: 'y' } },
-        ] } }).bodyText).toBe('Hello 🌊');
+        ] } })?.bodyText).toBe('Hello 🌊');
     });
     it('extracts HTML text without script/style content', () => {
         const value = message('m1', '<p>Hello &amp; world</p><script>private()</script><p>Next</p>');
         value.payload.mimeType = 'text/html';
-        expect(parseGmailMessage(value).bodyText).toBe('Hello & world\nNext');
+        expect(parseGmailMessage(value)?.bodyText).toBe('Hello & world\nNext');
     });
     it('rejects absent external body and malformed encoding instead of acknowledging empty mail', () => {
         expect(() => parseGmailMessage({ ...message(), payload: { mimeType: 'text/plain', body: { attachmentId: 'x', size: 20 } } })).toThrow();

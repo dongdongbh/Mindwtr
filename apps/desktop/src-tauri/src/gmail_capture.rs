@@ -71,6 +71,7 @@ pub(crate) struct GmailBatch {
     account_id: String,
     messages: Vec<GmailMessage>,
     has_more: bool,
+    skipped_unsupported: usize,
 }
 #[derive(Serialize)]
 pub(crate) struct GmailDisconnect {
@@ -584,6 +585,7 @@ impl Context {
             }
             let connection = receipts(&self.receipts)?;
             let mut messages = Vec::new();
+            let mut skipped_unsupported = 0;
             let mut ids = HashSet::new();
             for item in page.messages {
                 self.check(generation)?;
@@ -608,13 +610,18 @@ impl Context {
                 if !message.label_ids.contains(&label) {
                     continue;
                 }
-                messages.push(parse_message(message)?);
+                if let Some(message) = parse_message(message)? {
+                    messages.push(message);
+                } else {
+                    skipped_unsupported += 1;
+                }
             }
             let response = GmailBatch {
                 batch_id: random_secret(),
                 account_id: account,
                 messages,
                 has_more: page.next_page_token.is_some(),
+                skipped_unsupported,
             };
             let mut state = self.lock()?;
             let state = self.current(&mut state, generation)?;
@@ -842,7 +849,7 @@ struct Header {
     value: String,
 }
 fn body_text(part: &MimePart, depth: usize) -> Result<Option<String>> {
-    if depth > 32 {
+    if depth > 32 || part.mime_type.is_empty() {
         return Err(error("other"));
     }
     if !part.filename.is_empty()
@@ -875,6 +882,14 @@ fn body_text(part: &MimePart, depth: usize) -> Result<Option<String>> {
         return String::from_utf8(bytes)
             .map(Some)
             .map_err(|_| error("other"));
+    }
+    if part.parts.is_empty()
+        && part
+            .mime_type
+            .split_once('/')
+            .is_some_and(|(kind, _)| kind.eq_ignore_ascii_case("multipart"))
+    {
+        return Err(error("other"));
     }
     let mut text = Vec::new();
     for child in &part.parts {
@@ -920,7 +935,7 @@ fn body_text(part: &MimePart, depth: usize) -> Result<Option<String>> {
     }
     Ok(None)
 }
-fn parse_message(message: ApiMessage) -> Result<GmailMessage> {
+fn parse_message(message: ApiMessage) -> Result<Option<GmailMessage>> {
     let header = |name: &str, limit: usize| {
         message
             .payload
@@ -930,13 +945,15 @@ fn parse_message(message: ApiMessage) -> Result<GmailMessage> {
             .map(|h| h.value.chars().filter(|c| *c != '\0').take(limit).collect())
             .unwrap_or_default()
     };
-    let body = body_text(&message.payload, 0)?.ok_or_else(|| error("other"))?;
-    Ok(GmailMessage {
+    let Some(body) = body_text(&message.payload, 0)? else {
+        return Ok(None);
+    };
+    Ok(Some(GmailMessage {
         subject: header("subject", 1024),
         from: header("from", 2048),
         body_text: body.chars().take(16_000).collect(),
         id: message.id,
-    })
+    }))
 }
 
 enum Callback {
@@ -1342,6 +1359,61 @@ mod tests {
     }
 
     #[test]
+    fn pages_advance_past_attachment_only_mail_without_acknowledging_it() {
+        let provide_text = Arc::new(AtomicBool::new(false));
+        let provide_text_in_response = provide_text.clone();
+        let (_directory, context, _) = setup(move |request| {
+            check_read_only(&request);
+            if request.url.path().ends_with("/messages") {
+                let query: HashMap<_, _> = request.url.query_pairs().into_owned().collect();
+                return match query.get("pageToken").map(String::as_str) {
+                    Some("middle") => json(
+                        serde_json::json!({"messages":[{"id":"image"}],"nextPageToken":"last"}),
+                    ),
+                    Some("last") => json(serde_json::json!({"messages":[{"id":"later"}]})),
+                    None => json(
+                        serde_json::json!({"messages":[{"id":"attachment"},{"id":"first"}],"nextPageToken":"middle"}),
+                    ),
+                    Some(token) => panic!("unexpected page token {token}"),
+                };
+            }
+            let id = request.url.path_segments().unwrap().next_back().unwrap();
+            match id {
+                "attachment" if !provide_text_in_response.load(Ordering::SeqCst) => json(
+                    serde_json::json!({"id":id,"labelIds":["Label_1"],"payload":{"mimeType":"multipart/mixed","parts":[{"mimeType":"application/pdf","filename":"test.pdf","body":{"size":20,"attachmentId":"file"}}]}}),
+                ),
+                "image" => json(
+                    serde_json::json!({"id":id,"labelIds":["Label_1"],"payload":{"mimeType":"image/png","body":{"size":20,"attachmentId":"file"}}}),
+                ),
+                _ => json(mail(id, "Label_1", "Body")),
+            }
+        });
+
+        let first = context.poll().unwrap();
+        assert_eq!(first.messages.len(), 1);
+        assert_eq!(first.messages[0].id, "first");
+        assert_eq!(first.skipped_unsupported, 1);
+        assert_eq!(context.poll().unwrap().batch_id, first.batch_id);
+        context.commit(&first.batch_id).unwrap();
+
+        let middle = context.poll().unwrap();
+        assert!(middle.messages.is_empty());
+        assert!(middle.has_more);
+        assert_eq!(middle.skipped_unsupported, 1);
+        context.commit(&middle.batch_id).unwrap();
+
+        let last = context.poll().unwrap();
+        assert_eq!(last.messages.len(), 1);
+        assert_eq!(last.messages[0].id, "later");
+        context.commit(&last.batch_id).unwrap();
+
+        provide_text.store(true, Ordering::SeqCst);
+        let retry = context.poll().unwrap();
+        assert_eq!(retry.messages.len(), 1);
+        assert_eq!(retry.messages[0].id, "attachment");
+    }
+
+    #[test]
     fn failed_atomic_ack_keeps_batch_page_and_all_receipts_uncommitted() {
         let (_directory, context, _) = setup(|request| {
             if request.url.path().ends_with("/messages") {
@@ -1642,7 +1714,12 @@ mod tests {
         let text = "界".repeat(16_010);
         let message: ApiMessage = serde_json::from_value(mail("body", "Label_1", &text)).unwrap();
         assert_eq!(
-            parse_message(message).unwrap().body_text.chars().count(),
+            parse_message(message)
+                .unwrap()
+                .unwrap()
+                .body_text
+                .chars()
+                .count(),
             16_000
         );
         let body = serde_json::json!({"id":"nested","payload":{"mimeType":"multipart/mixed","parts":[
@@ -1652,10 +1729,13 @@ mod tests {
             ]},
             {"mimeType":"text/plain","filename":"private.txt","body":{"size":100,"attachmentId":"file"}}
         ]}});
-        let parsed = parse_message(serde_json::from_value(body).unwrap()).unwrap();
+        let parsed = parse_message(serde_json::from_value(body).unwrap())
+            .unwrap()
+            .unwrap();
         assert_eq!(parsed.body_text, "plain");
         let html = serde_json::json!({"id":"html","payload":{"mimeType":"text/html","body":{"size":12,"data":URL_SAFE_NO_PAD.encode("<b>Hello</b>")}}});
         assert!(parse_message(serde_json::from_value(html).unwrap())
+            .unwrap()
             .unwrap()
             .body_text
             .contains("Hello"));
