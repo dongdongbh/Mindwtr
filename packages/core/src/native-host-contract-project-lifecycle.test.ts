@@ -394,6 +394,26 @@ const runs = () => useTaskStore.getState()._allProjects.filter((row) => row.id !
 const android = (start: AppData) => open(start, () => false, false, true);
 
 describe('prepared Project Complete of a repeating Project', () => {
+    it.each([false, true])('projects completion availability to Project Details and Weekly Review with repeating support %s', async (supported) => {
+        const { host } = await open(repeating(), () => false, false, supported);
+        for (const projectId of [ID, 'foreign-project']) {
+            const detail = value(host.getProjectDetailFilterView({ projectId, offset: 0, limit: 20,
+                showCompleted: false, completedCollapsed: true, filters: {} }));
+            const review = value(host.getWeeklyReview({ checkpoint: JSON.stringify({ step: 'projects', startedAt: CLOCK }),
+                expandedProjectId: projectId, offset: 0, limit: 20 }));
+            const card = review.items.find((item) => item.type === 'project' && item.id === projectId);
+            expect(review.content.step).toBe('projects');
+            expect(card).toMatchObject({ type: 'project', expanded: true });
+            if (!supported && projectId === ID) {
+                expect(detail).toHaveProperty('completionBlocked', true);
+                expect(card).toHaveProperty('completionBlocked', true);
+            } else {
+                expect(detail).not.toHaveProperty('completionBlocked');
+                expect(card).not.toHaveProperty('completionBlocked');
+            }
+        }
+    });
+
     it('keeps the desktop refusal for a host without repeatingProjectCompletion (native iOS)', async () => {
         const env = await open(repeating());
         const request = env.request('complete');
@@ -401,6 +421,7 @@ describe('prepared Project Complete of a repeating Project', () => {
         expect(env.host.prepareProjectLifecycle(request)).toEqual(refusal);
         const options = value(env.host.getReviewProjectCompletionOptions({ projectId: ID }));
         expect(env.host.prepareReviewProjectCompletion({ request, scopeRevision: options.scopeRevision })).toEqual(refusal);
+        expect(env.host.prepareProjectLifecycle(env.request('cancel'))).toMatchObject({ ok: true });
         expect(env.state()._projectsById.get(ID)?.status).toBe('active');
         expect(runs()).toHaveLength(0);
         expect(env.saves()).toBe(0);

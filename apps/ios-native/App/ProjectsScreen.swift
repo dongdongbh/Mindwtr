@@ -2053,18 +2053,20 @@ private struct ProjectDetailTopBar: View {
                     }
             }
             Menu {
-                Button {
-                    let id = model.projectHeader.text("id")
-                    let revision = model.projectDetail.text("projectRevision")
-                    let action = model.projectLifecycleAction
-                    Task { await model.changeProjectLifecycle(expectedID: id, expectedRevision: revision, action: action) }
-                } label: {
-                    Label(model.label(model.projectLifecycleAction == "complete" ? "projects.complete" : "projects.reactivate"),
-                          systemImage: model.projectLifecycleAction == "complete" ? "archivebox" : "arrow.uturn.backward")
+                if model.projectLifecycleActionVisible {
+                    Button {
+                        let id = model.projectHeader.text("id")
+                        let revision = model.projectDetail.text("projectRevision")
+                        let action = model.projectLifecycleAction
+                        Task { await model.changeProjectLifecycle(expectedID: id, expectedRevision: revision, action: action) }
+                    } label: {
+                        Label(model.label(model.projectLifecycleAction == "complete" ? "projects.complete" : "projects.reactivate"),
+                              systemImage: model.projectLifecycleAction == "complete" ? "archivebox" : "arrow.uturn.backward")
+                    }
+                    .disabled(!model.projectLifecycleOpenEnabled)
+                    .accessibilityHint(model.projectLifecycleAction == "complete" ? model.label("projects.archiveHelp") : "")
+                    .accessibilityIdentifier(model.projectLifecycleAction == "complete" ? "project-archive-button" : "project-reactivate-button")
                 }
-                .disabled(!model.projectLifecycleOpenEnabled)
-                .accessibilityHint(model.projectLifecycleAction == "complete" ? model.label("projects.archiveHelp") : "")
-                .accessibilityIdentifier(model.projectLifecycleAction == "complete" ? "project-archive-button" : "project-reactivate-button")
                 if model.projectLifecycleAction == "complete" {
                     Button(role: .destructive) {
                         guard model.projectLifecycleOpenEnabled else { return }

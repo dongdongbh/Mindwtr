@@ -105,7 +105,7 @@ import { useTaskStore } from './store';
 import { themeDescriptor } from './theme-scheme';
 import { EMPTY_BULK_ORGANIZE_DRAFT, type BulkOrganizeDraft, type BulkOrganizeDraftEdit } from './task-list-bulk-actions';
 import { getBulkTrashConfirmation, type ListConfirmation } from './trash-view-model';
-import type { Task, TaskStatus } from './types';
+import type { Project, Task, TaskStatus } from './types';
 
 type NativeHostErrorCode = Extract<NativeHostResult<never>, { ok: false }>['error']['code'];
 type Translate = (key: string) => string;
@@ -113,6 +113,7 @@ type Translate = (key: string) => string;
 export type ReviewViewDeps = {
     readiness: () => NativeHostResult<null>;
     save: () => Promise<NativeHostResult<null>>;
+    canCompleteProject: (project: Project) => boolean;
 
     revision: (now: Date) => string;
     t: () => Translate;
@@ -268,6 +269,7 @@ export type NativeWeeklyReviewItem =
 
         countLabel: string;
         expanded: boolean;
+        completionBlocked?: true;
 
         openLabel: string;
     };
@@ -727,6 +729,7 @@ export function createReviewViewMethods(deps: ReviewViewDeps) {
                 entries.push({ kind: 'item', item: {
                     type: 'project', id: entry.project.id, title: entry.project.title, areaColor: entry.areaColor,
                     badge: entry.badge, countLabel, expanded,
+                    ...(step === 'projects' && !deps.canCompleteProject(entry.project) ? { completionBlocked: true } : {}),
                     openLabel: formatI18nTemplate(t('task.aria.openProject'), { name: entry.project.title }),
                 } });
                 if (expanded) {

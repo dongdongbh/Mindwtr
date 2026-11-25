@@ -187,6 +187,7 @@ App Intents and Siri belong to the RN app. They are not in `apps/ios-native`. Th
 
 ## Projects
 
+- Repeat after completion: Project Details, Weekly Review and the next-action prompt omit Complete for synced repeating projects in the SwiftUI client. Complete those projects on desktop, in the React Native app, or on native Android.
 - Reach: Menu › Projects (or the Quick Access tab when it is set to Projects) › a project. Each list row has a … menu (Move up, Move down, Area), a long press that offers Move up and Move down, a right swipe to Duplicate and a left swipe to Delete, as in RN (#1489). Project Details holds the actions menu (Complete, Duplicate, Delete, Cancel project), Sections, Notes, Tags, Area, attachments and task view options (Show completed, Sort, Filters, Order).
 - Selectors: `projects-scroll`, `projects-create-title`, `projects-create-add`, `projects-tag-filter-toggle`, `project-row-menu-`, `project-row-menu-area-`, `task-swipe-`, `project-row-delete-confirm`, `project-row-error`, `project-detail-title`, `project-back`, `project-actions-menu`, `project-sections-open`, `project-notes-input`, `project-tags-open`, `project-area-open`, `project-task-view-options-button`, `project-attachment-add-link`, `project-bulk-reorder`
 - Code: `apps/ios-native/App/ProjectsScreen.swift`

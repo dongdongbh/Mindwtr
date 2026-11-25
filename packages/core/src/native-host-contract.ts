@@ -645,6 +645,7 @@ export type NativeProjectDetail = {
 
     projectRevision: string;
     readOnly: boolean;
+    completionBlocked?: true;
     metadata: ProjectDetailsMetadata;
 
     gettingStarted?: NativeGettingStartedActions;
@@ -1477,6 +1478,9 @@ export function createNativeHostContract(options: {
     };
 
 
+    const canCompleteProject = (project: Pick<Project, 'repeatAfterCount'>) =>
+        !project.repeatAfterCount || options.repeatingProjectCompletion === true;
+
     const projectTaskSources = (projectId: string, showCompleted: boolean) => {
         const state = useTaskStore.getState();
         const data = { tasks: state._allTasks, projects: state._allProjects, sections: state._allSections,
@@ -1541,6 +1545,7 @@ export function createNativeHostContract(options: {
                 projectId,
                 projectRevision: revisionOf(savedProject),
                 readOnly: detail.readOnly,
+                ...(!detail.readOnly && !canCompleteProject(savedProject) ? { completionBlocked: true } : {}),
                 metadata: detail.metadata,
 
                 ...(detail.gettingStarted ? { gettingStarted: detail.gettingStarted } : {}),
@@ -1829,8 +1834,7 @@ export function createNativeHostContract(options: {
         ...taskChecklistMethods,
         ...createNativeWidgetCompletionMethods({ readiness, save, receipts, language: () => language,
             validateField: (field, value) => DRAFT_VALUE_CHECKS[field](value), isReadOnly: isInArchivedProject }),
-        ...createReferenceProjectNextActionMethods({ readiness, save, t: () => translate, originMethods: taskChecklistMethods,
-            repeatingProjectCompletion: options.repeatingProjectCompletion === true }),
+        ...createReferenceProjectNextActionMethods({ readiness, save, t: () => translate, originMethods: taskChecklistMethods, canCompleteProject }),
         ...createTaskPromotionMethods({ readiness, save, isReadOnly: isInArchivedProject, t: () => translate }),
 
         ...createTaskToSectionMethods({ readiness, receipts, isReadOnly: isInArchivedProject }),
@@ -1862,6 +1866,7 @@ export function createNativeHostContract(options: {
         ...createReviewViewMethods({
             readiness,
             save,
+            canCompleteProject,
             t: () => translate,
             formatDate: () => createDateFormatter(dateFormatting()),
             revision: (now) => `${revision()}:${displayRevision(now)}`,
@@ -2094,7 +2099,7 @@ export function createNativeHostContract(options: {
         ...createProjectDeleteMethods({ readiness, save, t: () => translate }),
         ...createProjectDuplicateMethods({ readiness, save, t: () => translate }),
         ...createProjectToSectionMethods({ readiness, save, t: () => translate }),
-        ...createProjectLifecycleMethods({ readiness, save, repeatingProjectCompletion: options.repeatingProjectCompletion === true }),
+        ...createProjectLifecycleMethods({ readiness, save, canCompleteProject }),
         ...createArchivedTaskRestoreMethods({ readiness, save }),
         ...createArchivedTasksRestoreMethods({ readiness, save }),
         ...createReferenceTasksMoveMethods({ readiness, save }),

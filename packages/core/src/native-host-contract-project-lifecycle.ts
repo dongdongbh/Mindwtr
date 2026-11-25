@@ -120,7 +120,7 @@ const scopeRevision = (scope: PreparedProjectLifecycle['scope']): string => revi
 export function createProjectLifecycleMethods(deps: {
     readiness: () => NativeHostResult<null>;
     save: () => Promise<NativeHostResult<null>>;
-    repeatingProjectCompletion: boolean;
+    canCompleteProject: (project: Project) => boolean;
 }) {
     const receipts = createNativeRequestReceipts({ save: async () => {
         if (useTaskStore.getState().persistenceFailure) {
@@ -168,7 +168,7 @@ export function createProjectLifecycleMethods(deps: {
                 || request.action !== 'reactivate' && target.status === 'archived'
                 || request.action === 'reactivate' && target.status !== 'archived')
                 return fail('STALE_REVISION', 'Project changed since the detail was read');
-            if (request.action === 'complete' && target.repeatAfterCount && !deps.repeatingProjectCompletion)
+            if (request.action === 'complete' && !deps.canCompleteProject(target))
                 return fail('INVALID_INPUT', 'Complete repeating projects in Mindwtr for desktop');
             const scope = projectScope(target);
             const device = ensureDeviceId(state.settings);

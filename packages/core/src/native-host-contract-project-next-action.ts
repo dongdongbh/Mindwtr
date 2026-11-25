@@ -331,7 +331,7 @@ export const prepareNativeProjectTaskAddOperation = (data: AppData, intent: Nati
 
 export function createReferenceProjectNextActionMethods(deps: { readiness: () => NativeHostResult<null>;
     save: () => Promise<NativeHostResult<null>>; t: () => (key: string) => string; originMethods: OriginMethods;
-    repeatingProjectCompletion: boolean }) {
+    canCompleteProject: (project: Project) => boolean }) {
     const readOrigin = (v: unknown): NativeReferenceProjectNextActionOrigin | null => {
         if (!record(v) || !exact(v, ['kind', 'envelope']) || !record(v.envelope)) return null;
         const o = v as unknown as NativeReferenceProjectNextActionOrigin;
@@ -541,7 +541,8 @@ export function createReferenceProjectNextActionMethods(deps: { readiness: () =>
                     items: policy.candidates.slice(v.params.offset, v.params.offset + 100).map((r) => ({ id: r.id, title: r.title,
                         taskRevision: taskRevisionOf(r), status: r.status, statusLabel: t(`status.${r.status}`) })) },
                 input: { placeholder: t('projects.nextActionPromptPlaceholder'), addLabel: t('projects.nextActionPromptAddButton'), saveAndEditLabel: t('quickAdd.saveAndEdit') },
-                completeProject: c.scope === 'project' ? { label: t('projects.nextActionPromptComplete') } : null, skip: { label: t('common.skip') } };
+                completeProject: c.scope === 'project' && deps.canCompleteProject(c.project)
+                    ? { label: t('projects.nextActionPromptComplete') } : null, skip: { label: t('common.skip') } };
             return isNativeJsonWithinBytes(out, 2_100_000) ? { ok: true, value: out } : fail('INVALID_INPUT', 'Project next action page is too large; reduce its contents');
         },
         async prepareReferenceProjectNextAction(input: { request: NativeReferenceProjectNextActionRequest; origin: NativeReferenceProjectNextActionOrigin }): Promise<NativeHostResult<NativeReferenceProjectNextActionPreparation>> {
@@ -586,7 +587,7 @@ export function createReferenceProjectNextActionMethods(deps: { readiness: () =>
                     op.task = addTask(op, getTaskReminderDefault(data.settings)); operation = op; result = { action: 'add', id, openAfterSave: request.openAfterSave };
                     rawBefore = { tasks: [{ id, before: null }], projects: [], sections: [] };
                 } else {
-                    if (context.project.repeatAfterCount && !deps.repeatingProjectCompletion)
+                    if (!deps.canCompleteProject(context.project))
                         return fail('INVALID_INPUT', 'Complete repeating projects in Mindwtr for desktop');
                     if (context.scope !== 'project') return fail('INVALID_INPUT', 'This section prompt cannot complete its project');
                     const sections = lists.sections.filter((r) => r.projectId === context.project.id); const ids = new Set(sections.map((r) => r.id));

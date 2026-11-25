@@ -3858,6 +3858,7 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     var projectConvertOpenEnabled: Bool { projectDuplicateOpenEnabled && projectConvertRequest == nil && !projectConvertPresented }
     var projectLifecycleOpenEnabled: Bool { projectDeleteOpenEnabled && projectLifecycleRequest == nil }
     var projectLifecycleAction: String { projectDetail.flag("readOnly") ? "reactivate" : "complete" }
+    var projectLifecycleActionVisible: Bool { projectLifecycleAction != "complete" || !projectDetail.flag("completionBlocked") }
     var projectAttachmentScopeCurrent: Bool {
         selectedSurface == .project && projectCurrent
             && projectAttachmentProjectID == projectHeader.text("id")
@@ -27268,7 +27269,9 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     private func weeklyReviewCompletionCurrent(_ id: String) -> Bool {
         ready && selectedSurface == .review && reviewGuidePresented && reviewKind == "weekly"
             && reviewGuide.object("content").text("step") == "projects" && reviewExpandedProject == id
-            && reviewGuide.objects("items").contains(where: { $0.text("type") == "project" && $0.text("id") == id && $0.flag("expanded") })
+            && reviewGuide.objects("items").contains(where: {
+                $0.text("type") == "project" && $0.text("id") == id && $0.flag("expanded") && !$0.flag("completionBlocked")
+            })
     }
 
     func requestWeeklyReviewProjectCompletion(_ id: String) async {
@@ -36815,7 +36818,8 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
     }
 
     func changeProjectLifecycle(expectedID: String, expectedRevision: String, action: String) async {
-        guard projectLifecycleOpenEnabled, ["complete", "cancel", "reactivate"].contains(action) else { return }
+        guard projectLifecycleOpenEnabled, ["complete", "cancel", "reactivate"].contains(action),
+              action != "complete" || projectLifecycleActionVisible else { return }
         let id = projectHeader.text("id")
         let revision = projectDetail.text("projectRevision")
         guard !id.isEmpty, !revision.isEmpty, projectDetail.text("projectId") == id,
