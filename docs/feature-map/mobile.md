@@ -71,6 +71,8 @@ Source: `apps/mobile`. Routes live in `apps/mobile/app` (expo-router). Labels be
 
 ## Quick capture sheet
 
+- If the destination section disappears during project capture, **Clear** removes the stale destination and keeps the draft available to save or assign elsewhere.
+
 - Reach: Center Add Task tab button. Also an empty-list action on Inbox.
 - Shortcuts: Long press Add Task to switch text and voice. Deep link `mindwtr:///capture-quick?mode=text&entry=details` opens this sheet over Inbox.
 - Selectors: `quick-capture-adaptive-surface`, `quick-capture-scroll`, `quick-capture-close`, `quick-capture-syntax-help-toggle`, `quick-add-preview`, `quick-date-chips-row`
