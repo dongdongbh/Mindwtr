@@ -102,6 +102,8 @@ The v1.3.6 task-editor correction is confirmed by the visible disappearance of t
 
 - **`v1.3.10/desktop-attachment-cleanup-owner`** — `apps/desktop/src-tauri/src/storage.rs`. Run desktop Attachment cleanup on a removed managed file. `Desktop attachment ownership checked before local cleanup` records `outcome=absent` when the file was removed or already missing, and `outcome=retained` when the durable library could not confirm removal. No paths, filenames or IDs are logged.
 
+- **`v1.3.10/attachment-remote-owner-deferred`** — `packages/core/src/attachment-cleanup.ts`. When attachment cleanup cannot finish a local ownership check, `Remote attachment cleanup deferred pending local ownership check` counts associated remote objects held for retry. No remote identifiers, paths or filenames are logged.
+
 - **`v1.3.10/native-project-repeat`** — `packages/core/src/store-projects/project-actions.ts` (`logNativeProjectRunCreated`, called once the prepared Complete's save lands). On native Android, set a project to repeat every 2 weeks in Project details, then select Complete. The log must show `Next project run saved` with `releaseCheck=v1.3.10/native-project-repeat` and `outcome=created`. No titles or IDs are logged.
 
 - **`v1.3.10/ios-siri-reminder-action`** — React Native iOS `apps/mobile/lib/siri-reminders.ts` reports `Siri Reminder request acknowledged` after the App Group transport stores the response. With App Lock off and Mindwtr in the foreground, ask Siri to create an Inbox reminder and then change its due date. Export Diagnostics and check for `operation=create` and `operation=update`, each with `outcome=persisted`. Rejected requests report a bounded reason. No task content or identifiers are logged. (#915)

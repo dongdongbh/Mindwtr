@@ -481,21 +481,24 @@ export async function runAttachmentCleanupLifecycle(
     const processedOrphanedIds = new Set<string>();
     const processedFileTombstoneIds = new Set<string>();
     const clearedCloudKeys = new Set<string>();
+    const deferredRemoteCloudKeys = new Set<string>();
     let processedCount = 0;
 
     for (const attachment of orderedTargets) {
         if (processedCount >= maxAttachmentTargets) break;
         processedCount += 1;
         await options.beforeEachAttachment?.();
+        const cloudKey = sanitizeAttachmentCloudKeyForSyncMerge(attachment.cloudKey);
         const deferredLocalCleanup = shouldDeleteAttachmentLocalResource(attachment, liveResourceReferences)
             && await options.deleteLocalAttachment(attachment) === false;
-        if (!deferredLocalCleanup) {
-            if (orphanedIds.has(attachment.id)) processedOrphanedIds.add(attachment.id);
-            if (attachment.kind === 'file' && !purgedParentAttachmentIds.has(attachment.id)) {
-                processedFileTombstoneIds.add(attachment.id);
-            }
+        if (deferredLocalCleanup) {
+            if (cloudKey) deferredRemoteCloudKeys.add(cloudKey);
+            continue;
         }
-        const cloudKey = sanitizeAttachmentCloudKeyForSyncMerge(attachment.cloudKey);
+        if (orphanedIds.has(attachment.id)) processedOrphanedIds.add(attachment.id);
+        if (attachment.kind === 'file' && !purgedParentAttachmentIds.has(attachment.id)) {
+            processedFileTombstoneIds.add(attachment.id);
+        }
         if (!cloudKey) continue;
         if (isAttachmentCloudResourceReferenced({ cloudKey }, liveResourceReferences)) {
 
@@ -513,6 +516,27 @@ export async function runAttachmentCleanupLifecycle(
     const nextPendingRemoteDeletesByCloudKey = new Map<string, PendingRemoteAttachmentDelete>(
         heldPendingRemoteDeletes.map((pending) => [pending.cloudKey, pending]),
     );
+    for (const attachment of orderedTargets.slice(processedCount)) {
+        const cloudKey = sanitizeAttachmentCloudKeyForSyncMerge(attachment.cloudKey);
+        if (cloudKey && remoteCleanupTargets.has(cloudKey) && attachment.kind === 'file'
+            && normalizeAttachmentCleanupUri(attachment.uri) && shouldDeleteAttachmentLocalResource(attachment, liveResourceReferences)) {
+            deferredRemoteCloudKeys.add(cloudKey);
+        }
+    }
+    for (const cloudKey of deferredRemoteCloudKeys) {
+        remoteCleanupTargets.delete(cloudKey);
+        clearedCloudKeys.delete(cloudKey);
+        const previous = previousPendingByCloudKey.get(cloudKey);
+        if (previous) nextPendingRemoteDeletesByCloudKey.set(cloudKey, previous);
+    }
+    if (deferredRemoteCloudKeys.size > 0) {
+        try {
+            logInfo('Remote attachment cleanup deferred pending local ownership check', {
+                scope: 'attachments', force: true,
+                context: { releaseCheck: 'v1.3.10/attachment-remote-owner-deferred', count: deferredRemoteCloudKeys.size },
+            });
+        } catch { }
+    }
     const remoteTargetsInBatch = Array.from(remoteCleanupTargets.values()).slice(0, maxAttachmentTargets);
     const remoteDeleteTargetCount = remoteTargetsInBatch
         .filter((target) => !options.shouldRetainRemoteAttachment?.(target))
