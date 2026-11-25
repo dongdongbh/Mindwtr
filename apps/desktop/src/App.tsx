@@ -132,6 +132,8 @@ import { hideMainWindowToTray } from './lib/hide-to-tray';
 import { useConfirmDialog } from './hooks/useConfirmDialog';
 import { useArchiveRetentionRunner } from './hooks/useArchiveRetentionRunner';
 import { subscribeNavigateEvent } from './lib/navigation-events';
+import { DesktopNavigationHistory, readDestination, type NavigationDirection, type NavigationInput } from './lib/navigation-history';
+import { dispatchContextsViewSelection, type ContextsViewSelection } from './lib/contexts-view-state';
 import { shouldOpenDesktopFirstRunOnboarding, subscribeDesktopOnboardingEvent } from './lib/desktop-onboarding-events';
 import { QUICK_ADD_SAVED_EVENT, type QuickAddSavedEvent } from './lib/quick-add-saved-event';
 import { enrichDesktopCapturedLinkTitle } from './lib/link-title';
@@ -282,6 +284,13 @@ function App() {
     const [viewFromUrl] = useState(() => readViewFromUrl());
     const [currentView, setCurrentView] = useState(viewFromUrl ?? restoredLastView?.view ?? DEFAULT_DESKTOP_VIEW);
     const [activeView, setActiveView] = useState(viewFromUrl ?? restoredLastView?.view ?? DEFAULT_DESKTOP_VIEW);
+    const [navigationHistory] = useState(() => {
+        const destination = readDestination(currentView);
+        if (destination.kind === 'project' && restoredLastView?.view === 'projects' && restoredLastView.projectId) {
+            destination.projectId = restoredLastView.projectId;
+        }
+        return new DesktopNavigationHistory(destination);
+    });
     const [navigationTrace, setNavigationTrace] = useState<RendererNavigationTrace | null>(null);
 
 
@@ -1297,7 +1306,7 @@ function App() {
             case 'projects':
                 return <ProjectsView />;
             case 'contexts':
-                return <ContextsView />;
+                return <ContextsView onSelectionChange={recordContextSelection} />;
             case 'review':
                 return <ReviewView />;
             case 'settings':
@@ -1315,32 +1324,66 @@ function App() {
         }
     };
 
+    const applyViewChange = useCallback((nextView: string) => {
+        const trace = beginRendererNavigation(nextView);
+        if (nextView !== 'settings') {
+            setSettingsInitialPage(undefined);
+            setSettingsOnboardingHintPage(undefined);
+        }
+        if (!sandboxMode) {
+            persistLastView(nextView, useUiStore.getState().projectView.selectedProjectId);
+        }
+        writeViewToUrl(nextView);
+        setCurrentView(nextView);
+        if (nextView === 'settings') {
+            beginSettingsOpenTrace('handleViewChange');
+        }
+
+        startTransition(() => {
+            setActiveView(nextView);
+            setNavigationTrace(trace);
+        });
+    }, [sandboxMode, startTransition]);
+
     const handleViewChange = useCallback((view: string) => {
         const nextView = view === 'obsidian' && !useObsidianStore.getState().config.enabled ? 'settings' : view;
         const changeView = () => {
-            const trace = beginRendererNavigation(nextView);
-            if (nextView !== 'settings') {
-                setSettingsInitialPage(undefined);
-                setSettingsOnboardingHintPage(undefined);
+            if (nextView !== 'contexts' || navigationHistory.current.view !== 'contexts') {
+                navigationHistory.record(readDestination(nextView));
             }
-            if (!sandboxMode) {
-                persistLastView(nextView, useUiStore.getState().projectView.selectedProjectId);
-            }
-            writeViewToUrl(nextView);
-            setCurrentView(nextView);
-            if (nextView === 'settings') {
-                beginSettingsOpenTrace('handleViewChange');
-            }
-
-
-            startTransition(() => {
-                setActiveView(nextView);
-                setNavigationTrace(trace);
-            });
+            applyViewChange(nextView);
         };
-        if (nextView === currentView) changeView();
+        if (nextView === navigationHistory.current.view) changeView();
         else runAfterTaskEditExit(changeView);
-    }, [currentView, sandboxMode, startTransition]);
+    }, [applyViewChange, navigationHistory]);
+
+    const recordContextSelection = useCallback((selection: ContextsViewSelection) => {
+        if (navigationHistory.current.view === 'contexts') {
+            navigationHistory.record({ kind: 'contexts', view: 'contexts', selection });
+        }
+    }, [navigationHistory]);
+
+    const handleNavigateHistory = useCallback((direction: NavigationDirection, input: NavigationInput) => {
+        runAfterTaskEditExit(() => {
+            const destination = navigationHistory.move(direction);
+            if (!destination) return;
+            if (destination.kind === 'project') {
+                useUiStore.getState().setProjectView({ selectedProjectId: destination.projectId });
+            } else if (destination.kind === 'contexts') {
+                dispatchContextsViewSelection(destination.selection);
+            }
+            applyViewChange(destination.view);
+            void logInfo('Desktop navigation history replayed', {
+                scope: 'navigation',
+                force: true,
+                extra: {
+                    releaseCheck: 'v1.3.10/desktop-navigation-history',
+                    direction: direction === -1 ? 'back' : 'forward',
+                    source: input,
+                },
+            });
+        });
+    }, [applyViewChange, navigationHistory]);
 
 
     const pendingSearchHighlightRef = useRef<{ view: string; taskId: string } | null>(null);
@@ -1380,6 +1423,13 @@ function App() {
         useUiStore.getState().setProjectView({ selectedProjectId: restoredLastView.projectId });
     }, []);
 
+    useEffect(() => useUiStore.subscribe((state, previous) => {
+        if (navigationHistory.current.view !== 'projects') return;
+        const { selectedProjectId } = state.projectView;
+        if (selectedProjectId !== previous.projectView.selectedProjectId) {
+            navigationHistory.record({ kind: 'project', view: 'projects', projectId: selectedProjectId });
+        }
+    }), [navigationHistory]);
 
     useEffect(() => {
         if (sandboxMode) return;
@@ -1744,7 +1794,7 @@ function App() {
 
     return (
         <ErrorBoundary>
-            <KeybindingProvider currentView={currentView} onNavigate={handleViewChange}>
+            <KeybindingProvider currentView={currentView} onNavigate={handleViewChange} onNavigateHistory={handleNavigateHistory}>
                 <Layout
                     currentView={currentView}
                     contentView={renderedView}

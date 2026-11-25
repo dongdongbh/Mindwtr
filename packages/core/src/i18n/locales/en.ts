@@ -358,6 +358,7 @@ export const en: Record<string, string> = {
         'keybindings.focusSidebar': 'Move focus one panel left',
         'keybindings.focusContent': 'Move focus one panel right',
         'keybindings.goInbox': 'Go to Inbox',
+        'keybindings.goForward': 'Forward',
         'keybindings.goNext': 'Go to Next Actions',
         'keybindings.goAgenda': 'Go to Focus',
         'keybindings.goProjects': 'Go to Projects',
