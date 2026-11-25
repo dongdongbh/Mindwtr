@@ -766,6 +766,12 @@ export default function FocusScreen({ initialSavedFilterId }: { initialSavedFilt
 
 
   useEffect(() => {
+    if (initialSavedFilterId) {
+      void logAppInfo('Saved list kept Today widget filter', {
+        scope: 'navigation', extra: { releaseCheck: 'v1.3.10/widget-shortcut-filter', outcome: 'preserved' },
+      });
+      return;
+    }
     if (!setFocusWidgetFilter({
       criteria: selections.criteria,
       sortBy: effectiveFocusSortBy,
@@ -774,7 +780,7 @@ export default function FocusScreen({ initialSavedFilterId }: { initialSavedFilt
 
 
     void import('@/lib/widget-service').then((widgets) => widgets.updateMobileWidgetFromStore()).catch(() => {});
-  }, [activeSavedFilter?.sortOrder, effectiveFocusSortBy, selections.criteria]);
+  }, [initialSavedFilterId, activeSavedFilter?.sortOrder, effectiveFocusSortBy, selections.criteria]);
 
   const focusHiddenByAreaLabel = getFocusHiddenByAreaLabel(focusPools.selection, t);
   useEffect(() => {

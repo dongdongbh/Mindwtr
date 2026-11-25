@@ -428,6 +428,7 @@ Source: `apps/mobile`. Routes live in `apps/mobile/app` (expo-router). Labels be
 - Background sync: After a background save, Tasks and Compact refresh from local data. If publication fails, Mindwtr retries once. If both attempts fail, a later successful background sync can republish the saved data. Export Diagnostics to see the retry outcome. Android controls when background sync runs.
 
 - List scope: The compact built-in list is named Today (stored list ID `focus`) and contains Today’s Focus plus today’s schedule. Saved Focus filters use the app’s shared Focus task sections, including Next Actions, Review Due and Upcoming; unrelated Inbox/Someday tasks and blocked sequential successors remain excluded. This shared projection also serves iOS widgets. Check: `packages/core/src/widget-focus-filter.test.ts`.
+- Opening a saved Focus list through a Shortcut or widget keeps its filter local to that screen. The built-in Today widget continues using the main Focus screen’s filter.
 - Saved Focus widget grouping applies only to Next Actions. Group headings show both the section and group name, such as “Next Actions · @desk”. Today’s Focus, Today, Review Due, and Upcoming keep their own headings when they have visible tasks.
 
 - Reach: Home screen › add widget: Tasks (list chooser), Compact, Quick Capture. Tap the title to open the shown list. Tap the chevron to choose a list. Tap a ring to check off a task. Tap plus to capture.
