@@ -6,7 +6,7 @@ import { INCUBATE_ICON as IncubateIcon, START_LATER_ICON as StartLaterIcon, TASK
 const SomedayIcon = TASK_STATUS_ICONS.someday;
 const ReferenceIcon = TASK_STATUS_ICONS.reference;
 const NextIcon = TASK_STATUS_ICONS.next;
-import { getProjectAccentColor, DEFAULT_PROJECT_COLOR, filterProjectsBySelectedArea, formatTimeEstimateLabel, safeFormatDate, safeParseDate, setTaskViewSectionId, tFallback, type AppData, type Area, type Project, type Task, type TaskDraft, type TaskDraftSetter, type TaskPriority, type TimeEstimate,
+import { getProjectAccentColor, DEFAULT_PROJECT_COLOR, filterProjectsBySelectedArea, formatTaskTokenInput, formatTimeEstimateLabel, safeFormatDate, safeParseDate, setTaskViewSectionId, tFallback, type AppData, type Area, type Project, type Task, type TaskDraft, type TaskDraftSetter, type TaskPriority, type TimeEstimate,
     numericTextCollator,
 } from '@mindwtr/core';
 
@@ -30,6 +30,7 @@ import { TaskEditorAiPanels } from './Task/TaskEditorAiPanels';
 import { useTaskItemAi } from './Task/useTaskItemAi';
 import { useLanguage } from '../contexts/language-context';
 import { TokenAutocompleteInput } from './Task/TokenAutocompleteInput';
+import { TokenPicker } from './Task/TokenPicker';
 import { AutocompleteTextInput } from './ui/AutocompleteTextInput';
 import { AreaSelector } from './ui/AreaSelector';
 import { ProjectSelector } from './ui/ProjectSelector';
@@ -969,7 +970,8 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
                                     onChange={setCustomContext}
                                     suggestions={[...suggestedContexts, ...allContexts]}
                                     prefix="@"
-                                    onAcceptToken={(token) => addCustomContext(token)}
+                                    quotedTokens
+                                    onAcceptToken={(token) => addCustomContext(formatTaskTokenInput([token]))}
                                     className="flex-1 bg-muted border border-border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary"
                                     onKeyDown={(e) => {
                                         if (e.key === 'Enter') {
@@ -985,6 +987,7 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
                                     +
                                 </button>
                             </div>
+                            <TokenPicker t={t} label={t('taskEdit.contextsLabel')} tokens={allContexts} selected={selectedContexts} onToggle={toggleContext} />
 
                             {suggestedContexts.length > 0 && (
                                 <div className="space-y-2">
@@ -1021,7 +1024,8 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
                                     onChange={setCustomTag}
                                     suggestions={[...suggestedTags, ...allTags]}
                                     prefix="#"
-                                    onAcceptToken={(token) => addCustomTag(token)}
+                                    quotedTokens
+                                    onAcceptToken={(token) => addCustomTag(formatTaskTokenInput([token]))}
                                     className="flex-1 bg-muted border border-border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary"
                                     onKeyDown={(e) => {
                                         if (e.key === 'Enter') {
@@ -1037,6 +1041,7 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
                                     +
                                 </button>
                             </div>
+                            <TokenPicker t={t} label={t('taskEdit.tagsLabel')} tokens={allTags} selected={selectedTags} onToggle={toggleTag} />
                             {suggestedTags.length > 0 && (
                                 <div className="flex flex-wrap gap-2 justify-center">
                                     {suggestedTags.map(tag => (

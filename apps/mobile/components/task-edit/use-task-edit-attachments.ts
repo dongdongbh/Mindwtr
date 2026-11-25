@@ -6,6 +6,7 @@ import {
     buildTaskUpdatesFromSpeechResult,
     findSelectableProjectByTitleAndArea,
     findTaskDraftAttachmentForIdentity,
+    formatTaskTokenInput,
     generateUUID,
     getAttachmentOpenLinkFailedMessage,
     getAttachmentLinkEditText,
@@ -77,8 +78,8 @@ const applySpeechUpdatesToDraft = (updates: Partial<Task>, setDraftField: SetTas
     if ('description' in updates) setDraftField('description', updates.description ?? '', false);
     if ('dueDate' in updates) setDraftField('dueDate', toTaskDraftDateTimeLocalValue(updates.dueDate), false);
     if ('startTime' in updates) setDraftField('startTime', toTaskDraftDateTimeLocalValue(updates.startTime), false);
-    if ('tags' in updates) setDraftField('tags', (updates.tags ?? []).join(', '), false);
-    if ('contexts' in updates) setDraftField('contexts', (updates.contexts ?? []).join(', '), false);
+    if ('tags' in updates) setDraftField('tags', formatTaskTokenInput(updates.tags ?? []), false);
+    if ('contexts' in updates) setDraftField('contexts', formatTaskTokenInput(updates.contexts ?? []), false);
     if ('projectId' in updates) setDraftField('projectId', updates.projectId ?? '', false);
     if ('areaId' in updates) setDraftField('areaId', updates.areaId ?? '', false);
 };

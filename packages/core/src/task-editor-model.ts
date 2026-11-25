@@ -54,7 +54,8 @@ import {
     type TaskEditorTimeEstimate,
 } from './task-editor-schedule';
 import { normalizeTimeSpentMinutes } from './time-spent';
-import { getFrequentTaskTokensFromUsage, getTaskContextMatches, type TaskTokenUsage } from './task-token-usage';
+import { getFrequentTaskTokensFromUsage, getTaskContextMatches, getTaskTokenPickerOptions, type TaskTokenUsage } from './task-token-usage';
+import { formatTaskTokenInput, getTaskTokenInputSegments, splitTaskTokenInput } from './task-token-input';
 import { compareAreasByOrder } from './task-utils';
 import { resolveTaskViewSection, setTaskViewSectionId, sortViewSectionDefinitions } from './view-sections';
 import type {
@@ -307,8 +308,8 @@ const applyDraftOverrides = (
     let draft = state.draft;
     if (overrides.title !== undefined) draft = setTaskDraftField(draft, 'title', overrides.title);
     if (overrides.description !== undefined) draft = setTaskDraftField(draft, 'description', overrides.description);
-    if (overrides.contexts !== undefined) draft = setTaskDraftField(draft, 'contexts', overrides.contexts.join(', '));
-    if (overrides.tags !== undefined) draft = setTaskDraftField(draft, 'tags', overrides.tags.join(', '));
+    if (overrides.contexts !== undefined) draft = setTaskDraftField(draft, 'contexts', formatTaskTokenInput(overrides.contexts));
+    if (overrides.tags !== undefined) draft = setTaskDraftField(draft, 'tags', formatTaskTokenInput(overrides.tags));
     return draft === state.draft ? state : { ...state, draft };
 };
 
@@ -399,10 +400,7 @@ type TokenPrefix = '@' | '#';
 
 export const parseTaskEditorTokenList = (value: string | undefined, tokenPrefix: TokenPrefix): string[] => {
     if (!value) return [];
-    const tokens = value
-        .split(',')
-        .map((item) => item.trim())
-        .filter(Boolean)
+    const tokens = splitTaskTokenInput(value)
         .map((item) => {
             if (item.startsWith(tokenPrefix)) return item;
             const stripped = item.replace(/^[@#]+/, '').trim();
@@ -417,7 +415,8 @@ export const parseTaskEditorTokenList = (value: string | undefined, tokenPrefix:
 
 export const getTaskEditorActiveTokenQuery = (value: string | undefined, _tokenPrefix?: TokenPrefix): string => {
     if (!value) return '';
-    const draft = value.split(',').pop()?.trim() ?? '';
+    const segments = getTaskTokenInputSegments(value);
+    const draft = segments[segments.length - 1]?.token ?? '';
     const stripped = draft.replace(/^[@#]+/, '').trim();
     if (!stripped) return '';
     return stripped.toLowerCase();
@@ -426,12 +425,13 @@ export const getTaskEditorActiveTokenQuery = (value: string | undefined, _tokenP
 
 export const replaceTaskEditorTrailingToken = (value: string | undefined, token: string): string => {
     const source = value ?? '';
-    const lastCommaIndex = source.lastIndexOf(',');
-    if (lastCommaIndex === -1) {
-        return `${token}, `;
+    const segments = getTaskTokenInputSegments(source);
+    const start = segments[segments.length - 1]?.start ?? 0;
+    const replacement = formatTaskTokenInput([token]);
+    if (start === 0) {
+        return `${replacement}, `;
     }
-    const head = source.slice(0, lastCommaIndex + 1).trimEnd();
-    return `${head} ${token}, `;
+    return `${source.slice(0, start).trimEnd()} ${replacement}, `;
 };
 
 
@@ -442,7 +442,7 @@ export function toggleTaskEditorToken(value: string, token: string, tokenPrefix:
     } else {
         next.add(token);
     }
-    return Array.from(next).join(', ');
+    return formatTaskTokenInput([...next]);
 }
 
 
@@ -482,6 +482,8 @@ export type TaskEditorSuggestions = {
 
     quick: Array<{ value: string; selected: boolean; text: string }>;
 
+    browse?: { token: string; selected: boolean; text: string }[];
+    draftTokens?: string[];
     canCreatePerson?: boolean;
 };
 
@@ -510,9 +512,10 @@ export function getTaskEditorSuggestions(input: {
     }
     const prefix: TokenPrefix = input.field === 'contexts' ? '@' : '#';
 
-    const draftValue = parseTaskEditorTokenList(text, prefix).join(', ');
-    const pool = getTaskEditorTokenPool(parseTaskEditorTokenList(draftValue, prefix), input.knownTokens, prefix);
-    const selected = new Set(parseTaskEditorTokenList(text, prefix));
+    const tokens = parseTaskEditorTokenList(text, prefix);
+    const draftValue = formatTaskTokenInput(tokens);
+    const pool = getTaskEditorTokenPool(tokens, input.knownTokens, prefix);
+    const selected = new Set(tokens);
     return {
         draftValue,
         matches: getTaskEditorTokenMatches(pool, text, prefix, limit)
@@ -522,6 +525,10 @@ export function getTaskEditorSuggestions(input: {
             selected: selected.has(token),
             text: toggleTaskEditorToken(text, token, prefix),
         })),
+        ...(limit > 0 && {
+            browse: getTaskTokenPickerOptions(pool, selected).map((option) => ({ ...option, text: formatTaskTokenInput([option.token]) })),
+            draftTokens: tokens.map((token) => formatTaskTokenInput([token])),
+        }),
     };
 }
 

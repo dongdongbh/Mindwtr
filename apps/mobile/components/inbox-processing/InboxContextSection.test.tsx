@@ -15,7 +15,7 @@ const renderTitle = (translations: Record<string, string>, showContextsField: bo
       show showContextsField={showContextsField} showTagsField={showTagsField}
       selectedContexts={[]} selectedTags={[]} toggleContext={vi.fn()} toggleTag={vi.fn()}
       newContext="" setNewContext={vi.fn()} addCustomContextMobile={vi.fn()}
-      tokenSuggestions={[]} applyTokenSuggestion={vi.fn()}
+      tokenCatalog={{ contexts: [], tags: [] }} tokenSuggestions={[]} applyTokenSuggestion={vi.fn()}
       contextCopilotSuggestions={[]} tagCopilotSuggestions={[]}
     />);
   });

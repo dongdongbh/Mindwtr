@@ -30,8 +30,8 @@ import { isCustomTimeEstimate, TIME_ESTIMATE_OPTIONS } from './calendar-scheduli
 import { isRecurrenceRule, parseRRuleString } from './recurrence';
 import { createTaskDraft, isTaskDraftDateInputBaseline, resolveTaskDraftTitle, serializeTaskDraftTokens, TASK_DRAFT_FIELD_KEYS, type TaskDraft, type TaskDraftField } from './task-draft';
 import { getTaskReminderPolicy, normalizeTaskReminderPolicy } from './task-reminder-policy';
-import { getRetainedTaskContexts, getUsedTaskTokens } from './task-token-usage';
-import { getSavedTaxonomyTokens } from './taxonomy-catalog';
+import { getTaskTokenCatalog, getUsedTaskTokens } from './task-token-usage';
+import { formatTaskTokenInput } from './task-token-input';
 import type { AppSettings, FilterCriteria } from './types';
 import {
     applyTaskDraftPatch,
@@ -1153,13 +1153,12 @@ export function createNativeHostContract(options: {
     let cachedFilteredProjects: NativeFilteredProjectsView | null = null;
     let cachedProjectDetailKey = '';
     let cachedProjectDetail: ProjectDetailCache | null = null;
-    let cachedContextHistory: { tasks: Task[]; taxonomy: AppSettings['taxonomy']; tokens: string[] } | null = null;
+    let cachedTokenCatalog: { tasks: Task[]; taxonomy: AppSettings['taxonomy']; tokens: ReturnType<typeof getTaskTokenCatalog> } | null = null;
     let cachedMarkdownLookup: { tasks: Task[]; projects: Project[]; lookup: ReturnType<typeof createMarkdownLinkLookup> } | null = null;
-    const retainedContexts = (tasks: Task[]): string[] => {
-        const { taxonomy } = useTaskStore.getState().settings;
-        if (cachedContextHistory?.tasks === tasks && cachedContextHistory.taxonomy === taxonomy) return cachedContextHistory.tokens;
-        const tokens = [...new Set([...getRetainedTaskContexts(tasks), ...getSavedTaxonomyTokens({ taxonomy }, 'context')])];
-        cachedContextHistory = { tasks, taxonomy, tokens };
+    const retainedTokenCatalog = (tasks: Task[], taxonomy: AppSettings['taxonomy']) => {
+        if (cachedTokenCatalog?.tasks === tasks && cachedTokenCatalog.taxonomy === taxonomy) return cachedTokenCatalog.tokens;
+        const tokens = getTaskTokenCatalog(tasks, taxonomy);
+        cachedTokenCatalog = { tasks, taxonomy, tokens };
         return tokens;
     };
     let cachedProjectNotesKey = '';
@@ -1809,6 +1808,7 @@ export function createNativeHostContract(options: {
     const inboxProcessingMethods = createInboxProcessingMethods({
         readiness, save, receipts, t: () => translate, formatDate: () => createDateFormatter(dateFormatting()),
         revision: (now) => `${revision()}:${displayRevision(now)}`, groupDeferredProjects: options.projectPickerGroups === true,
+        retainedTokenCatalog,
     });
 
     const taskChecklistMethods = createTaskChecklistSaveMethods({ readiness, save, receipts, language: () => language,
@@ -3247,13 +3247,14 @@ export function createNativeHostContract(options: {
             const task = state._tasksById.get(input.id);
             if (!task || task.deletedAt) return fail('TASK_NOT_FOUND', 'Task not found');
             const derived = state.getDerivedState();
+            const tokenCatalog = retainedTokenCatalog(state._allTasks, state.settings.taxonomy);
             return {
                 ok: true,
                 value: getTaskEditorSuggestions({
                     field: input.field,
                     text: input.query,
                     limit: input.limit,
-                    knownTokens: input.field === 'tags' ? derived.allTags : retainedContexts(state._allTasks),
+                    knownTokens: input.field === 'tags' ? tokenCatalog.tags : tokenCatalog.contexts,
                     usage: input.field === 'tags' ? derived.tagTokenUsage : derived.contextTokenUsage,
                     people: state.people,
                     tasks: state.tasks,
@@ -3366,7 +3367,7 @@ export function createNativeHostContract(options: {
 
                     const isTokenField = field === 'contexts' || field === 'tags';
                     const nextValue = field === 'title' ? nextTitle
-                        : isTokenField ? serializeTaskDraftTokens(patch[field] as string, field).join(', ')
+                        : isTokenField ? formatTaskTokenInput(serializeTaskDraftTokens(patch[field] as string, field))
                             : patch[field];
                     const matches = isSameDraftValue(current[field], nextValue);
                     if (isTokenField && matches && !isSameDraftValue(patch[field], nextValue)) {
@@ -3719,6 +3720,7 @@ type InboxProcessingDeps = {
     t: () => (key: string) => string;
     formatDate: () => DateFormatter;
     groupDeferredProjects: boolean;
+    retainedTokenCatalog: typeof getTaskTokenCatalog;
 };
 
 type InboxProcessingEntry = {
@@ -3898,6 +3900,7 @@ function createInboxProcessingMethods(deps: InboxProcessingDeps) {
                 plan,
                 settings: state.settings,
                 tasks: state.tasks,
+                tokenCatalog: deps.retainedTokenCatalog(state._allTasks, state.settings.taxonomy),
                 projects: state.projects,
                 sections: state.sections,
                 areas: state.areas,

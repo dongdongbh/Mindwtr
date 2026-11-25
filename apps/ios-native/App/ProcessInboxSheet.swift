@@ -725,6 +725,14 @@ private struct ProcessInboxTokenSection: ProcessInboxPart {
                 }
             }
             options(tokens.objects("suggestions"), prefix: "process-inbox-" + kind + "-suggestion")
+            let browse = tokens.object("browse")
+            if !browse.isEmpty {
+                TokenBrowsePicker(palette: palette, id: "process-inbox-" + kind, fieldLabel: tokens.text("title"),
+                                  browseLabel: browse.text("label"), searchLabel: browse.text("searchLabel"),
+                                  noMatchesLabel: browse.text("noMatchesLabel"), options: browse.objects("options"), enabled: enabled) { token in
+                    Task { await model.editProcessInbox(["type": kind == "context" ? "toggleContext" : "toggleTag", "value": token]) }
+                }
+            }
             if !tokens.text("contextSuggestionsLabel").isEmpty {
                 Text(tokens.text("contextSuggestionsLabel")).rnFont(12).foregroundStyle(palette.secondary)
                 options(tokens.objects("contextSuggestions"), prefix: "process-inbox-context-suggestion")

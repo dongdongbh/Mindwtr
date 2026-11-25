@@ -3,6 +3,7 @@ import { Keyboard, Text, TextInput, TouchableOpacity, View } from 'react-native'
 import { AtSign, Tag } from 'lucide-react-native';
 
 import { FieldHeading } from './FieldHeading';
+import { TokenPicker } from '../TokenPicker';
 import type { TaskEditFieldRendererProps } from './TaskEditFieldRenderer.types';
 
 type TokenFieldId = 'contexts' | 'tags';
@@ -17,6 +18,7 @@ export function TaskEditTokenField({
     commitContextDraft,
     commitTagDraft,
     contextInputDraft,
+    contextSuggestionPool,
     contextTokenSuggestions,
     fieldId,
     frequentContextSuggestions,
@@ -30,6 +32,7 @@ export function TaskEditTokenField({
     t,
     tc,
     tagInputDraft,
+    tagSuggestionPool,
     tagTokenSuggestions,
     toggleQuickContextToken,
     toggleQuickTagToken,
@@ -76,6 +79,7 @@ export function TaskEditTokenField({
                     accessibilityLabel={t('taskEdit.contextsLabel')}
                     accessibilityHint={t('taskEdit.contextsPlaceholder')}
                 />
+                <TokenPicker t={t} tc={tc} label={t('taskEdit.contextsLabel')} tokens={contextSuggestionPool} selected={selectedContextTokens} onToggle={toggleQuickContextToken} />
                 {contextTokenSuggestions.length > 0 && (
                     <View style={[styles.tokenSuggestionsMenu, { backgroundColor: tc.cardBg, borderColor: tc.border }]}>
                         {contextTokenSuggestions.map((token, index) => (
@@ -141,6 +145,7 @@ export function TaskEditTokenField({
                 accessibilityLabel={t('taskEdit.tagsLabel')}
                 accessibilityHint={t('taskEdit.tagsPlaceholder')}
             />
+            <TokenPicker t={t} tc={tc} label={t('taskEdit.tagsLabel')} tokens={tagSuggestionPool} selected={selectedTagTokens} onToggle={toggleQuickTagToken} />
             {tagTokenSuggestions.length > 0 && (
                 <View style={[styles.tokenSuggestionsMenu, { backgroundColor: tc.cardBg, borderColor: tc.border }]}>
                     {tagTokenSuggestions.map((token, index) => (

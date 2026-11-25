@@ -34,7 +34,7 @@ val LABEL_KEYS = listOf(
 
     "taskEdit.scheduling", "taskEdit.organization", "taskEdit.details", "taskEdit.editorLayoutHelpLabel", "taskEdit.editorLayoutHelpText",
     "task.destination", "taskEdit.areaLabel", "taskEdit.noAreaOption", "taskEdit.sectionLabel", "taskEdit.noSectionOption",
-    "taskEdit.contextsLabel", "taskEdit.contextsPlaceholder", "taskEdit.tagsLabel", "taskEdit.tagsPlaceholder",
+    "taskEdit.contextsLabel", "taskEdit.contextsPlaceholder", "taskEdit.tagsLabel", "taskEdit.tagsPlaceholder", "settings.browse",
     "taskEdit.energyLevel", "energyLevel.low", "energyLevel.medium", "energyLevel.high",
     "taskEdit.assignedTo", "taskEdit.assignedToPlaceholder", "taskEdit.timeEstimateLabel", "taskEdit.locationLabel",
     "taskEdit.locationPlaceholder", "taskEdit.descriptionPlaceholder", "taskEdit.reviewDateLabel", "calendar.changeTime",

@@ -133,6 +133,7 @@ export * from './completion-grouping';
 export * from './filter-criteria';
 export * from './task-filter-selections';
 export * from './task-draft';
+export { formatTaskTokenInput, getTaskTokenInputSegments, splitTaskTokenInput } from './task-token-input';
 export * from './task-share';
 export {
     type TaskTokenUsage,
@@ -141,6 +142,8 @@ export {
     getUsedTaskTokens,
     getUsedTaskTokensFromUsage,
     getTaskContextMatches,
+    getTaskTokenCatalog,
+    getTaskTokenPickerOptions,
     getRetainedTaskContexts,
     getFrequentTaskTokens,
     getFrequentTaskTokensFromUsage,

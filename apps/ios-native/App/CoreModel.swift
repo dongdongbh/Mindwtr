@@ -42256,6 +42256,15 @@ final class CoreModel: NativeQuickCaptureIntentTarget {
         setTaskTokenInput(field, text: text)
     }
 
+    func toggleTaskBrowseToken(_ field: String, token: String) {
+        guard taskTokenChoicesCurrent(field), let suggestions = taskTokenSuggestions[field],
+              let tokens = suggestions["draftTokens"] as? [String],
+              let option = suggestions.objects("browse").first(where: { $0.text("token") == token }),
+              let text = option["text"] as? String else { return }
+        let next = option.flag("selected") ? tokens.filter { $0 != text } : tokens + [text]
+        setTaskTokenInput(field, text: next.joined(separator: ", "))
+    }
+
     private func resetTaskTokens() {
         for field in taskTokenFields { invalidateTaskTokenRead(field) }
         taskTokenInputs = [:]

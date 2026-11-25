@@ -37,7 +37,7 @@ import {
 import { filterProjectsBySelectedArea, getProjectChoiceState, getProjectSectionsForView, groupProjectsForPicker, isSelectableProjectForTaskAssignment } from './project-utils';
 import type { StoreActionResult } from './store-types';
 import { findSimilarTasks, type TaskSimilarityIndex } from './task-similarity';
-import { collectTaskTokenUsage } from './task-token-usage';
+import { collectTaskTokenUsage, getTaskTokenCatalog, getTaskTokenPickerOptions } from './task-token-usage';
 import { formatTaskMarkedDoneMessage, formatTaskMovedMessage } from './undo-task-completion';
 import { getSomedaySectionChoices } from './task-editor-model';
 import { setTaskViewSectionId, sortViewSectionDefinitions } from './view-sections';
@@ -1438,6 +1438,12 @@ export type ProcessInboxViewDateRow = {
 export type ProcessInboxViewTokens = {
     title: string;
     placeholder: string;
+    browse: {
+        label: string;
+        searchLabel: string;
+        noMatchesLabel: string;
+        options: ReturnType<typeof getTaskTokenPickerOptions>;
+    };
     selectedContexts: ProcessInboxViewOption[];
     selectedContextsLabel: string | null;
     selectedTags: ProcessInboxViewOption[];
@@ -1633,6 +1639,7 @@ export type ProcessInboxViewInput = {
     plan: ProcessInboxPlan;
     settings: AppSettings | undefined;
     tasks: Task[];
+    tokenCatalog?: ReturnType<typeof getTaskTokenCatalog>;
     projects: Project[];
 
     sections?: readonly Section[];
@@ -1693,6 +1700,7 @@ export function buildProcessInboxStepView(input: ProcessInboxViewInput): Process
     };
 
     const pools = getProcessInboxTokenPools(input.tasks);
+    const tokenCatalog = input.tokenCatalog ?? getTaskTokenCatalog(input.tasks, input.settings?.taxonomy);
     const terms = getProcessInboxSuggestionTerms(draft.title, draft.description, draft.tokenInput);
     const tokenSuggestions = getProcessInboxTokenSuggestions({
         tokenInput: draft.tokenInput,
@@ -1721,6 +1729,14 @@ export function buildProcessInboxStepView(input: ProcessInboxViewInput): Process
         return {
             title: showContexts ? t('taskEdit.contextsLabel') : t('taskEdit.tagsLabel'),
             placeholder: section.placeholder ?? t('inbox.addContextPlaceholder'),
+            browse: {
+                label: t('settings.browse'),
+                searchLabel: t('common.search'),
+                noMatchesLabel: t('common.noMatches'),
+                options: showContexts
+                    ? getTaskTokenPickerOptions(tokenCatalog.contexts, draft.contexts)
+                    : getTaskTokenPickerOptions(tokenCatalog.tags, draft.tags),
+            },
             selectedContextsLabel: showContexts && draft.contexts.length > 0 ? t('inbox.selectedLabel') : null,
             selectedContexts: showContexts
                 ? draft.contexts.map((token) => ({ label: `${token} x`, selected: true, edit: { type: 'toggleContext', value: token } }))

@@ -35,6 +35,7 @@ import {
 import { resolveProcessInboxPlan } from './process-inbox-plan';
 import { buildQuickAddParseOptions, parseProcessInboxTitleInput } from './quick-add';
 import { resetForTests } from './store';
+import { getTaskTokenCatalog } from './task-token-usage';
 import type { Project, Area, Task } from './types';
 
 const fixture = loadProcessInboxFixture();
@@ -504,6 +505,31 @@ describe('project section in Inbox processing', () => {
     });
 });
 
+
+it('offers saved and retained tokens in the native Inbox catalog and toggles them independently of the typed input', () => {
+    const task: Task = { id: 'inbox', title: 'Draft', status: 'inbox', contexts: ['@home'], tags: ['#current'], createdAt: '', updatedAt: '' };
+    const retained: Task = { ...task, id: 'retained', status: 'archived', contexts: ['@retained'], tags: ['#retained'] };
+    const saved = (token: string) => ({ token, rev: 1, revBy: 'test', updatedAt: '2026-11-24T00:00:00.000Z' });
+    const settings = { gtd: { taskEditor: { hidden: [] } }, taxonomy: { contexts: [saved('@saved')], tags: [saved('#unused')] } };
+    const plan = resolveProcessInboxPlan(settings);
+    const view = (draft: ReturnType<typeof createProcessInboxDraft>) => buildProcessInboxStepView({
+        task, draft, answers: { actionability: 'actionable', twoMinute: 'no', execution: 'defer', oneActionAnswered: true },
+        mode: 'guided', plan, settings, tasks: [task], tokenCatalog: getTaskTokenCatalog([task, retained], settings.taxonomy),
+        projects: [], areas: [], people: [],
+        similarityIndex: null, t: (key) => key, formatDate: (value) => String(value), now: new Date('2026-11-24'),
+    });
+    const draft = { ...createProcessInboxDraft(task), tokenInput: '@typing', showAdvancedOptions: true };
+    expect(view(draft).contexts?.browse.options).toEqual([
+        { token: '@home', selected: true }, { token: '@retained', selected: false }, { token: '@saved', selected: false },
+    ]);
+    expect(view(draft).moreOptions?.tags?.browse.options).toEqual([
+        { token: '#current', selected: true }, { token: '#retained', selected: false }, { token: '#unused', selected: false },
+    ]);
+    const withContext = applyProcessInboxDraftEdit(draft, { type: 'toggleContext', value: '@saved' }, plan);
+    const withTag = applyProcessInboxDraftEdit(withContext, { type: 'toggleTag', value: '#unused' }, plan);
+    expect(withTag).toMatchObject({ contexts: ['@home', '@saved'], tags: ['#current', '#unused'], tokenInput: '@typing' });
+    expect(view(withTag).moreOptions?.tags?.browse.options).toContainEqual({ token: '#unused', selected: true });
+});
 
 describe('processing project browsing and assignment (#1566)', () => {
     const task: Task = { id: 'inbox', title: 'Draft', status: 'inbox', contexts: [], tags: [], createdAt: '', updatedAt: '' };

@@ -36,6 +36,7 @@ import {
   resolveDefaultNewTaskAreaId,
   getProcessInboxTokenPools,
   getProcessInboxTokenSuggestions,
+  getTaskTokenCatalog,
   INITIAL_PROCESS_INBOX_ANSWERS,
   isProcessInboxReturningTask,
   isSelectableProjectForTaskAssignment,
@@ -336,6 +337,8 @@ export function useInboxProcessingController({
   );
 
   const tokenPools = useMemo(() => getProcessInboxTokenPools(tasks), [tasks]);
+  const taxonomy = settings.taxonomy;
+  const tokenCatalog = useMemo(() => getTaskTokenCatalog(allTasks, taxonomy), [allTasks, taxonomy]);
   const contextSuggestionPool = tokenPools.contexts;
   const tagSuggestionPool = tokenPools.tags;
   const suggestionTerms = useMemo(
@@ -1475,6 +1478,7 @@ export function useInboxProcessingController({
     timeEstimateOptions,
     titleDirectionStyle,
     titleInputRef,
+    tokenCatalog,
     tokenSuggestions,
     totalCount,
     selectProjectEarly,

@@ -21,6 +21,7 @@ import { getLocalizedWeekdayButtons, getLocalizedWeekdayLabels, WEEKDAY_ORDER } 
 import { resolveFeatureFlags } from './resolve-feature-flags';
 import { normalizeDueReminderLeadMinutes, normalizeStartReminderLeadMinutes, resolveTaskReminderDate, REPEAT_REMINDER_INTERVAL_OPTIONS } from './schedule-utils';
 import type { TaskDraft } from './task-draft';
+import { splitTaskTokenInput } from './task-token-input';
 import { computeRelativeStartTime } from './task-relative-start';
 import { getTaskReminderPolicy, isSingleTaskReminder, shouldSendTaskReminderKind, shouldSendTaskReminders } from './task-reminder-policy';
 import type {
@@ -418,14 +419,13 @@ export function getTaskEditorRecurrenceCalendarPreviewHint(input: {
         rrule: editRRuleString(draft.recurrenceRRule, draft.recurrence, {}),
     };
     const nowIso = (input.now ?? new Date()).toISOString();
-    const splitTokens = (value: string) => value.split(',').map((token) => token.trim()).filter(Boolean);
     const previewTask: Task = {
         ...(task ?? {}),
         id: task?.id ?? 'draft-recurrence-preview',
         title: draft.title,
         status: draft.status,
-        tags: splitTokens(draft.tags),
-        contexts: splitTokens(draft.contexts),
+        tags: splitTaskTokenInput(draft.tags),
+        contexts: splitTaskTokenInput(draft.contexts),
         createdAt: task?.createdAt ?? nowIso,
         updatedAt: task?.updatedAt ?? nowIso,
         startTime: draft.startTime || undefined,

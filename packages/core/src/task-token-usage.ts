@@ -1,6 +1,7 @@
 import { baseTextCollator } from './task-utils';
 import { safeParseDate } from './date';
-import type { Task } from './types';
+import { getSavedTaxonomyTokens, normalizeTaxonomyToken } from './taxonomy-catalog';
+import type { AppSettings, Task } from './types';
 
 type TaskTokenSelector = (task: Task) => readonly (string | null | undefined)[] | null | undefined;
 
@@ -107,6 +108,28 @@ export const getRetainedTaskContexts = (tasks: Task[]): string[] => Array.from(n
         .filter(Boolean)
         .map((label) => `@${label}`),
 )).sort((a, b) => baseTextCollator.compare(a, b));
+
+export function getTaskTokenCatalog(tasks: Task[], taxonomy: AppSettings['taxonomy']) {
+    const usedTags = getUsedTaskTokens(tasks, (task) => task.tags).map((token) => normalizeTaxonomyToken('tag', token)).filter(Boolean);
+    return {
+        contexts: [...getRetainedTaskContexts(tasks), ...getSavedTaxonomyTokens({ taxonomy }, 'context')],
+        tags: [...usedTags, ...getSavedTaxonomyTokens({ taxonomy }, 'tag')],
+    };
+}
+
+export function getTaskTokenPickerOptions(known: readonly string[], selected: Iterable<string>) {
+    const options = new Map<string, { token: string; selected: boolean }>();
+    const keyFor = (token: string) => token.trim().replace(/^[@#]/, '');
+    for (const token of known) {
+        const key = keyFor(token);
+        if (key && !options.has(key)) options.set(key, { token, selected: false });
+    }
+    for (const token of selected) {
+        const key = keyFor(token);
+        if (key) options.set(key, { token, selected: true });
+    }
+    return [...options.values()].sort((a, b) => baseTextCollator.compare(keyFor(a.token), keyFor(b.token)));
+}
 
 
 export const getTaskContextMatches = (tokens: readonly string[], query: string, limit: number): string[] => {

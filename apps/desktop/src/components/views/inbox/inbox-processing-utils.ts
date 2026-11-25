@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { normalizeClockTimeInput, type Area, type Person, type Project, type Section, type TimeEstimate } from '@mindwtr/core';
+import { formatTaskTokenInput, normalizeClockTimeInput, splitTaskTokenInput, type Area, type Person, type Project, type Section, type TimeEstimate } from '@mindwtr/core';
 import { joinDateTime, splitDateTime } from '@mindwtr/core/date-draft';
 
 
@@ -27,16 +27,14 @@ export const resolveDelegateEmail = (people: readonly Person[], who: string): st
 
 export const parseTokenListInput = (value: string, prefix: '@' | '#'): string[] => Array.from(
     new Set(
-        value
-            .split(/[,\n]+/)
-            .map((part) => part.trim())
+        splitTaskTokenInput(value, true)
             .map((part) => part.replace(/^[@#]+/, '').trim())
             .filter(Boolean)
             .map((part) => `${prefix}${part}`)
     )
 );
 
-export const formatTokenListInput = (tokens: string[]): string => tokens.join(', ');
+export const formatTokenListInput = formatTaskTokenInput;
 
 
 export const parseContextsInput = (value: string): string[] => parseTokenListInput(value, '@');
