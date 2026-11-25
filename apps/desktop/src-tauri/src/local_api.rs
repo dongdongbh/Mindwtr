@@ -1609,22 +1609,7 @@ pub(crate) fn execute_operation(
                 _ => unreachable!(),
             };
             let _guard = access.lock_write(write_lock)?;
-            let props = body.get("props").and_then(Value::as_object);
-            let scope = TaskMutationReadScope::create(
-                props
-                    .and_then(|props| props.get("projectId"))
-                    .and_then(Value::as_str),
-                props
-                    .and_then(|props| props.get("sectionId"))
-                    .and_then(Value::as_str),
-                props
-                    .and_then(|props| props.get("areaId"))
-                    .and_then(Value::as_str),
-                props
-                    .and_then(|props| props.get("isFocusedToday"))
-                    .and_then(Value::as_bool)
-                    == Some(true),
-            );
+            let scope = task_create_read_scope(&body);
             let operation = LocalOperation::CreateTask(body);
             let (response, persisted) =
                 mutate_task_rows_with_receipt_retries(app, scope, receipt.as_ref(), |data| {
@@ -3601,6 +3586,7 @@ where
 struct LiveContainers {
     project_ids: std::collections::HashSet<String>,
     archived_project_ids: std::collections::HashSet<String>,
+    repeating_project_ids: std::collections::HashSet<String>,
     section_project_ids: std::collections::HashMap<String, String>,
     archived_section_project_ids: std::collections::HashMap<String, String>,
     section_owner_project_ids: std::collections::HashMap<String, String>,
@@ -3631,6 +3617,17 @@ impl LiveContainers {
                     .and_then(Value::as_str)
                     .map(str::to_string)
             })
+            .collect();
+        let repeating_project_ids = data["projects"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|project| {
+                project["repeatAfterCount"]
+                    .as_u64()
+                    .is_some_and(|count| count > 0)
+            })
+            .filter_map(|project| project["id"].as_str().map(str::to_string))
             .collect();
         let section_owner_project_ids = array_items(data, "sections")
             .into_iter()
@@ -3727,12 +3724,40 @@ impl LiveContainers {
         Self {
             project_ids,
             archived_project_ids,
+            repeating_project_ids,
             section_project_ids,
             archived_section_project_ids,
             section_owner_project_ids,
             area_ids,
             next_project_orders,
         }
+    }
+
+    fn task_project_id<'a>(
+        &'a self,
+        project: Option<&'a Value>,
+        section: Option<&Value>,
+    ) -> Option<&'a str> {
+        project.and_then(Value::as_str).or_else(|| {
+            section
+                .and_then(Value::as_str)
+                .and_then(|id| self.section_project_ids.get(id))
+                .map(String::as_str)
+        })
+    }
+
+    fn validate_task_recurrence(
+        &self,
+        project_id: Option<&str>,
+        recurrence: Option<&Value>,
+    ) -> Result<(), String> {
+        if project_id.is_some_and(|id| self.repeating_project_ids.contains(id))
+            && recurrence.is_some_and(has_individual_recurrence)
+        {
+            log::info!("Desktop Local API rejected individual recurrence in a repeating project extra.releaseCheck=v1.3.10/local-api-repeating-project-step outcome=rejected");
+            return Err("Invalid task recurrence: this project repeats as a whole. Turn off individual task recurrence first.".into());
+        }
+        Ok(())
     }
 }
 
@@ -3991,6 +4016,17 @@ fn reject_actionable_task_in_archived_project(
         );
     }
     Ok(())
+}
+
+fn task_create_read_scope(body: &Map<String, Value>) -> TaskMutationReadScope {
+    let props = body.get("props").and_then(Value::as_object);
+    let field = |name| props.and_then(|props| props.get(name));
+    TaskMutationReadScope::create(
+        field("projectId").and_then(Value::as_str),
+        field("sectionId").and_then(Value::as_str),
+        field("areaId").and_then(Value::as_str),
+        field("isFocusedToday").and_then(Value::as_bool) == Some(true),
+    )
 }
 
 fn task_patch_read_scope(task_id: &str, patch: &Map<String, Value>) -> TaskMutationReadScope {
@@ -4589,8 +4625,8 @@ fn recurrence_value(task: &Map<String, Value>) -> Option<&Value> {
     task.get("recurrence")
 }
 
-fn recurrence_rule(task: &Map<String, Value>) -> Option<&str> {
-    match recurrence_value(task)? {
+fn recurrence_rule_from_value(value: &Value) -> Option<&str> {
+    match value {
         Value::String(value) if is_recurrence_rule(value) => Some(value.as_str()),
         Value::Object(value) => value
             .get("rule")
@@ -4600,8 +4636,26 @@ fn recurrence_rule(task: &Map<String, Value>) -> Option<&str> {
     }
 }
 
+fn recurrence_rule(task: &Map<String, Value>) -> Option<&str> {
+    recurrence_value(task).and_then(recurrence_rule_from_value)
+}
+
 fn is_recurrence_rule(value: &str) -> bool {
     matches!(value, "daily" | "weekly" | "monthly" | "yearly")
+}
+
+fn has_individual_recurrence(value: &Value) -> bool {
+    recurrence_rule_from_value(value).is_some()
+        || value
+            .get("rrule")
+            .and_then(Value::as_str)
+            .and_then(|rrule| {
+                rrule.rsplit(';').find_map(|field| {
+                    let (name, value) = field.split_once('=')?;
+                    (name.eq_ignore_ascii_case("FREQ") && !value.is_empty()).then_some(value)
+                })
+            })
+            .is_some_and(|rule| is_recurrence_rule(&rule.to_ascii_lowercase()))
 }
 
 fn recurrence_strategy(task: &Map<String, Value>) -> &str {
@@ -5378,7 +5432,12 @@ fn create_task_from_body(
             .and_then(Value::as_str)
             == Some("skip"),
     );
-    normalize_created_task_containers(&mut task, &LiveContainers::from_data(data))?;
+    let live = LiveContainers::from_data(data);
+    normalize_created_task_containers(&mut task, &live)?;
+    live.validate_task_recurrence(
+        task.get("projectId").and_then(Value::as_str),
+        task.get("recurrence"),
+    )?;
     let had_explicit_status = task.contains_key("status");
     let now = now_iso();
     task.insert("id".to_string(), Value::String(generate_uuid_v4()));
@@ -5499,6 +5558,14 @@ fn apply_task_patch_internal(
     }
     if let Some(live_containers) = live_containers {
         normalize_task_container_patch(task, &mut sanitized, live_containers)?;
+        let current_project_id =
+            live_containers.task_project_id(task.get("projectId"), task.get("sectionId"));
+        let updated_field = |name| sanitized.get(name).or_else(|| task.get(name));
+        let project_id =
+            live_containers.task_project_id(updated_field("projectId"), updated_field("sectionId"));
+        if sanitized.contains_key("recurrence") || project_id != current_project_id {
+            live_containers.validate_task_recurrence(project_id, updated_field("recurrence"))?;
+        }
         if requested_status
             .as_deref()
             .is_some_and(|status| status != "reference")
@@ -8735,6 +8802,130 @@ mod tests {
             "people": [],
             "settings": { "deviceId": "device-a" }
         })
+    }
+
+    fn repeating_project_task_store() -> rusqlite::Connection {
+        let mut conn = rusqlite::Connection::open_in_memory().unwrap();
+        let mut data = empty_local_api_data();
+        data["projects"] = json!([
+            {"id":"repeating","title":"Repeating","status":"active","repeatAfterCount":2,"repeatAfterUnit":"week"},
+            {"id":"ordinary","title":"Ordinary","status":"active"}
+        ]);
+        data["sections"] = json!([{"id":"step","projectId":"repeating","title":"Steps"}]);
+        data["tasks"] = json!([
+            {"id":"standalone","title":"Standalone","status":"next","recurrence":{"rule":"daily"}},
+            {"id":"step-task","title":"Project step","status":"next","projectId":"repeating"},
+            {"id":"legacy","title":"Legacy step","status":"next","projectId":"repeating","recurrence":"daily"},
+            {"id":"legacy-section","title":"Legacy section step","status":"next","sectionId":"step"},
+            {"id":"legacy-rrule","title":"Legacy recurring task","status":"next","recurrence":{"rrule":"FREQ=MONTHLY;BYDAY=MO;BYSETPOS=-1"}}
+        ]);
+        crate::storage::local_operation_test_seed(&mut conn, &data).unwrap();
+        conn
+    }
+
+    fn write_task_over_local_api(
+        conn: &rusqlite::Connection,
+        method: &str,
+        path: &str,
+        payload: Value,
+    ) -> ApiResponse {
+        let request = ApiRequest {
+            method: method.into(),
+            path: path.into(),
+            query: HashMap::new(),
+            headers: HashMap::new(),
+            body: serde_json::to_vec(&payload).unwrap(),
+        };
+        route_api_operation(request, |operation| {
+            let scope = match &operation {
+                LocalOperation::CreateTask(body) => task_create_read_scope(body),
+                LocalOperation::PatchTask { id, body } => task_patch_read_scope(id, body),
+                _ => unreachable!(),
+            };
+            let mut task_id = String::new();
+            let persisted = crate::storage::local_operation_test_commit(conn, scope, |data| {
+                let (id, rows) = mutate_task_operation(data, &operation)?;
+                task_id.clone_from(&id);
+                Ok((id, rows))
+            })?;
+            Ok(task_response(persisted_task(&persisted, &task_id)?))
+        })
+        .unwrap_or_else(api_error_response)
+    }
+
+    #[test]
+    fn local_api_create_rejects_individual_recurrence_in_a_repeating_project() {
+        let conn = repeating_project_task_store();
+        let before = crate::storage::read_sqlite_data(&conn).unwrap();
+        for props in [
+            json!({"projectId":"repeating","recurrence":"daily"}),
+            json!({"sectionId":"step","recurrence":{"rule":"weekly","rrule":"FREQ=WEEKLY;BYDAY=MO"}}),
+        ] {
+            let response = write_task_over_local_api(
+                &conn,
+                "POST",
+                "/tasks",
+                json!({"title":"Repeating step","props":props}),
+            );
+            assert_eq!(response.status, 400, "{}", response.body);
+            assert!(response.body["error"]
+                .as_str()
+                .unwrap()
+                .contains("project repeats as a whole"));
+            assert_eq!(crate::storage::read_sqlite_data(&conn).unwrap(), before);
+        }
+        for props in [
+            json!({"sectionId":"step"}),
+            json!({"projectId":"ordinary","recurrence":"daily"}),
+            json!({"projectId":"ordinary","recurrence":{"rule":"weekly","rrule":"FREQ=WEEKLY;BYDAY=MO"}}),
+        ] {
+            let response = write_task_over_local_api(
+                &conn,
+                "POST",
+                "/tasks",
+                json!({"title":"Allowed step","props":props}),
+            );
+            assert_eq!(response.status, 201, "{}", response.body);
+        }
+    }
+
+    #[test]
+    fn local_api_patch_rejects_individual_recurrence_added_or_moved_into_a_repeating_project() {
+        let conn = repeating_project_task_store();
+        let before = crate::storage::read_sqlite_data(&conn).unwrap();
+        for (path, patch) in [
+            ("/tasks/step-task", json!({"recurrence":{"rule":"daily"}})),
+            ("/tasks/standalone", json!({"projectId":"repeating"})),
+            ("/tasks/standalone", json!({"sectionId":"step"})),
+            ("/tasks/legacy-section", json!({"recurrence":"daily"})),
+            ("/tasks/legacy-rrule", json!({"sectionId":"step"})),
+        ] {
+            let response = write_task_over_local_api(&conn, "PATCH", path, patch);
+            assert_eq!(response.status, 400, "{}", response.body);
+            assert!(response.body["error"]
+                .as_str()
+                .unwrap()
+                .contains("project repeats as a whole"));
+            assert_eq!(crate::storage::read_sqlite_data(&conn).unwrap(), before);
+        }
+        let legacy_edit = write_task_over_local_api(
+            &conn,
+            "PATCH",
+            "/tasks/legacy",
+            json!({"title":"Renamed legacy step"}),
+        );
+        assert_eq!(legacy_edit.status, 200, "{}", legacy_edit.body);
+        assert!(!legacy_edit.body["task"]["recurrence"].is_null());
+        let cleared_move = write_task_over_local_api(
+            &conn,
+            "PATCH",
+            "/tasks/standalone",
+            json!({"sectionId":"step","recurrence":null}),
+        );
+        assert_eq!(cleared_move.status, 200, "{}", cleared_move.body);
+        assert_eq!(cleared_move.body["task"]["projectId"], "repeating");
+        assert_eq!(cleared_move.body["task"]["sectionId"], "step");
+        assert!(cleared_move.body["task"].get("recurrence").is_none());
     }
 
     fn project_lifecycle_fixture() -> Value {
