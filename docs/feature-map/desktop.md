@@ -16,7 +16,7 @@ Source: `apps/desktop/src` (Tauri + React). Labels come from `packages/core/src/
 
 ## Sidebar navigation
 
-- Reach: Sidebar sections Focus (Focus, Inbox), Lists (Projects, Someday/Maybe, Waiting For), Organize (Calendar, Review, Contexts), More (Reference, Obsidian, Board View, Timeline, History, Trash). Settings sits at the bottom.
+- Reach: Sidebar sections Focus (Focus, Inbox), Lists (Projects, Someday/Maybe, Waiting For), Organize (Calendar, Review, Contexts), More (Reference, Obsidian, Board View, Timeline, History, Trash). Settings sits at the bottom. In the native macOS app, choose Mindwtr › Settings… or press `⌘,` to open Settings.
 - Shortcuts: Vim and Standard: `g` then `f` Focus, `i` Inbox, `n` Next Actions, `p` Projects, `c` Contexts, `r` Review, `w` Waiting For, `s` Someday/Maybe, `e` Reference, `l` Calendar, `b` Board View, `t` Timeline, `d` Done, `a` Archived, `T` Trash. Emacs: `Alt+I`, `Alt+N`, `Alt+A` (Focus), `Alt+P`, `Alt+C`, `Alt+R`, `Alt+W`, `Alt+S`, `Alt+E`, `Alt+L`, `Alt+B`, `Alt+T`, `Alt+D`, `Alt+Shift+A`, `Alt+Shift+T`. All styles: `Ctrl+B` or `Ctrl+\` toggles the sidebar (`Cmd` on macOS). `Ctrl+Shift+\` toggles focus mode. `F11` toggles full screen (native app only).
 - Code: `apps/desktop/src/components/Layout.tsx`, `apps/desktop/src/App.tsx`, `apps/desktop/src/contexts/keybinding-context.tsx`
 - Checks: `e2e/app.spec.ts`, `e2e/navigation-submenus.spec.ts`, `e2e/keyboard-ui-compat.spec.ts`, `apps/desktop/src/components/Layout.test.tsx`, `apps/desktop/src/App.navigation-layout.test.tsx`

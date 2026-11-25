@@ -1587,7 +1587,6 @@ pub fn run() {
     let builder = builder
         .menu(|handle| {
             let menu = Menu::default(handle)?;
-            // Tauri's default macOS menu starts with the application submenu.
             if let Some(app_submenu) = menu.items()?.first().and_then(|item| item.as_submenu()) {
                 let settings_item =
                     MenuItem::with_id(handle, MENU_SETTINGS_ID, "Settings…", true, Some("Cmd+,"))?;
