@@ -928,7 +928,7 @@ export function createCalendarSettingsMethods(deps: CalendarSettingsDeps) {
                 ? fail('STALE_REVISION', 'A newer load for this screen replaced it')
                 : { ok: true, value: {
                     status: 'ready', calendars: data.calendars, events: data.events,
-                    ...(deviceError !== null ? { warning: deviceError }
+                    ...(deviceError !== null ? { warning: deviceError, ...(failedFeeds === 0 ? { warningScope: 'device' as const } : {}) }
                         : failedFeeds > 0 ? { warning: translators().tr('settings.calendarMobile.failedToLoadEvents') } : {}),
                 } }))
             .catch((error: unknown): NativeHostResult<NativeCalendarFeed> => (signal.aborted

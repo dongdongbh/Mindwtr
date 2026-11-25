@@ -1754,6 +1754,7 @@ describe('native host contract: Settings › Calendar', () => {
             expect(partial.status).toBe('ready');
             if (partial.status !== 'ready') throw new Error('not ready');
             expect(partial.warning).toBe(strings[language]['settings.calendarMobile.failedToLoadEvents']);
+            expect(partial).not.toHaveProperty('warningScope');
             expect(partial.events.map((event) => event.title)).toEqual(['Planning', 'Stand-up', 'Review', 'Offsite']);
             for (const sourceId of ['feed-a', 'system:g-primary']) {
                 const event = partial.events.find((entry) => entry.sourceId === sourceId)!;
@@ -2269,13 +2270,24 @@ describe('native host contract: Settings › Calendar', () => {
             const info = vi.spyOn(handset.host.log, 'info');
             const contract = await openHost(handset.host);
             const feed = value(await contract.loadExternalCalendarFeed({ slot: 'weeklyReview', ...range }));
-            expect(feed).toMatchObject({ status: 'ready', warning: 'Calendar provider unavailable' });
+            expect(feed).toMatchObject({ status: 'ready', warning: 'Calendar provider unavailable', warningScope: 'device' });
             if (feed.status !== 'ready') throw new Error('not ready');
             expect(feed.events.map((event) => event.title)).toEqual(['Planning', 'Review']);
             expect(feed.events.every((event) => event.sourceId === 'feed-a')).toBe(true);
             expect(info.mock.calls.some(([, context]) => JSON.stringify(context).includes('v1.3.10/calendar-subscriptions-after-device-error'))).toBe(true);
             expect(await contract.loadExternalCalendarFeed({ slot: 'calendar', start: range.end, end: range.start })).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
             expect(await contract.loadExternalCalendarFeed({ slot: 'other' as never, ...range })).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+        });
+
+        it('does not label a warning device-only when a subscription also failed', async () => {
+            await seed({ externalCalendars: [...fixture.settings.synced.externalCalendars!, {
+                id: 'broken-local', name: 'Broken local feed', url: 'file:///private/unavailable.ics', enabled: true,
+            }] });
+            const handset = phone({ calendars: ['primary'], failEvents: true, storage: { [KEYS.system]: JSON.stringify({ enabled: true }) } });
+            const contract = await openHost(handset.host);
+            const feed = value(await contract.loadExternalCalendarFeed({ slot: 'projectCalendar', ...range }));
+            expect(feed).toMatchObject({ status: 'ready', warning: 'Calendar provider unavailable', events: [{ uid: expect.any(String) }, { uid: expect.any(String) }] });
+            expect(feed).not.toHaveProperty('warningScope');
         });
 
         it('keeps an oversized provider error inside the existing feed message bound without truncating it', async () => {

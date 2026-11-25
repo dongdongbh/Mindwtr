@@ -70,6 +70,8 @@ The v1.3.6 task-editor correction is confirmed by the visible disappearance of t
 
 - **`v1.3.10/apple-project-event`** — `packages/core/src/external-calendar-feeds.ts`. On iPhone, open a project’s event picker with an enabled Apple calendar. Look for `Apple calendar event identities loaded` and a positive count. Verify the selected occurrence separately after reopening and syncing. No calendar, account, or event details are logged.
 
+- **`v1.3.10/native-project-calendar-partial`** — `packages/core/src/native-host-contract-project-calendar-reference.ts`. With a working calendar subscription and a failing device calendar read, open the native project event picker. Look for `Native project calendar kept subscription events` when it offers a subscribed event or resolves an existing subscription link. Verify that the offered event can be linked and reopened. No event or calendar details are logged.
+
 - **`v1.3.10/store-attachment-access`** — Desktop `src-tauri/src/install.rs`. On Windows Store startup, look for `Store attachment directory registration` with `outcome=registered`. Then preview an existing attachment and verify the WebDAV switch separately. The marker confirms scope registration only and contains no path or filename. (#1607)
 
 - **`v1.3.10/captured-link-title`** — `packages/core/src/link-title-enrichment.ts`. Capture one public article URL or add it to a task’s attachments. After the new title appears, Diagnostics shows `Captured link title enriched` with `outcome=capture` or `outcome=attachment`. The marker includes neither the URL nor the article title. (#1606)

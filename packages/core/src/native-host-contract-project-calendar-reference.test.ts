@@ -147,6 +147,25 @@ describe('native Project calendar reference command', () => {
         expect(await fixture.options()).toMatchObject({ available: false, candidates: [] });
     });
 
+    it('offers and resolves identifiable subscribed events when only the device calendar read failed', async () => {
+        const selected = event();
+        const fixture = await open();
+        const partial = { status: 'ready', calendars, warning: 'Calendar provider unavailable', warningScope: 'device' } as const;
+        fixture.feed({ ...partial, events: [selected, { ...event(1), uid: undefined }] });
+        expect(await fixture.options()).toMatchObject({ available: false, total: 1, candidates: [{ uid: selected.uid }] });
+
+        const request = await fixture.request();
+        const plan = fixture.methods.prepareProjectCalendarReference(request);
+        if (!plan.ok || plan.value.kind !== 'prepared') throw new Error('prepare failed');
+        expect(await fixture.methods.commitPreparedProjectCalendarReference({ request, prepared: plan.value.prepared })).toMatchObject({ ok: true });
+
+        const updated = { ...selected, title: 'Updated meeting' };
+        fixture.feed({ ...partial, events: [updated] });
+        expect(await fixture.options()).toMatchObject({ status: 'scheduled', current: { title: updated.title } });
+        fixture.feed({ ...partial, events: [updated, { ...updated, id: 'duplicate' }] });
+        expect(await fixture.options()).toMatchObject({ status: 'unavailable', current: request.value, candidates: [] });
+    });
+
     it('searches all candidates before the response cap and blocks archived Projects', async () => {
         const fixture = await open({}, Array.from({ length: 205 }, (_, index) => event(index)));
         const first = await fixture.options();
