@@ -425,6 +425,7 @@ export const zhHans: Record<string, string> = {
         'keybindings.focusSidebar': '将焦点左移一个面板',
         'keybindings.focusContent': '将焦点右移一个面板',
         'keybindings.goInbox': '前往收集箱',
+        'keybindings.goForward': '前进',
         'keybindings.goNext': '前往下一步行动',
         'keybindings.goAgenda': '前往日程',
         'keybindings.goProjects': '前往项目',

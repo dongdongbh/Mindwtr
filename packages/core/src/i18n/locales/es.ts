@@ -354,6 +354,7 @@ export const esOverrides: Record<string, string> = {
 'keybindings.focusSidebar': "Mover el foco un panel a la izquierda",
 'keybindings.focusContent': "Mover el foco un panel a la derecha",
 'keybindings.goInbox': "Ir a Bandeja de entrada",
+'keybindings.goForward': 'Avanzar',
 'keybindings.goNext': "Ir a Siguientes acciones",
 'keybindings.goAgenda': "Ir a Enfoque",
 'keybindings.goProjects': "Ir a Proyectos",

@@ -356,6 +356,7 @@ export const daOverrides: Record<string, string> = {
     'keybindings.focusSidebar': 'Flyt fokus ét panel til venstre',
     'keybindings.focusContent': 'Flyt fokus ét panel til højre',
     'keybindings.goInbox': 'Gå til Indbakke',
+    'keybindings.goForward': 'Frem',
     'keybindings.goNext': 'Gå til Næste handlinger',
     'keybindings.goAgenda': 'Gå til Fokus',
     'keybindings.goProjects': 'Gå til Projekter',

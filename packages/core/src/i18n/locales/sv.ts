@@ -359,6 +359,7 @@ export const svOverrides: Record<string, string> = {
         'keybindings.focusSidebar': 'Flytta fokus en panel åt vänster',
         'keybindings.focusContent': 'Flytta fokus en panel åt höger',
         'keybindings.goInbox': 'Gå till Inkorg',
+        'keybindings.goForward': 'Framåt',
         'keybindings.goNext': 'Gå till Nästa steg',
         'keybindings.goAgenda': 'Gå till Fokus',
         'keybindings.goProjects': 'Gå till Projekt',

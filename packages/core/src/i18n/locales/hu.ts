@@ -354,6 +354,7 @@ export const huOverrides: Record<string, string> = {
     'keybindings.focusSidebar': 'Fókusz mozgatása egy panellel balra',
     'keybindings.focusContent': 'Fókusz mozgatása egy panellel jobbra',
     'keybindings.goInbox': 'Ugrás a Beérkezett elemekhez',
+    'keybindings.goForward': 'Előre',
     'keybindings.goNext': 'Ugrás a Következő teendőkhöz',
     'keybindings.goAgenda': 'Ugrás a Fókuszhoz',
     'keybindings.goProjects': 'Ugrás a Projektekhez',

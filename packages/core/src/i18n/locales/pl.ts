@@ -283,6 +283,7 @@ export const plOverrides: Record<string, string> = {
         'keybindings.focusSidebar': 'Przenieś fokus o jeden panel w lewo',
         'keybindings.focusContent': 'Przenieś fokus o jeden panel w prawo',
         'keybindings.goInbox': 'Przejdź do skrzynki odbiorczej',
+        'keybindings.goForward': 'Dalej',
         'keybindings.goNext': 'Przejdź do Następnych działań',
         'keybindings.goAgenda': 'Przejdź do Skupienia',
         'keybindings.goProjects': 'Przejdź do Projektów',

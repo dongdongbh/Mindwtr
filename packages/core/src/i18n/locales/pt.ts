@@ -263,6 +263,7 @@ export const ptOverrides: Record<string, string> = {
         'keybindings.focusSidebar': 'Mover o foco um painel para a esquerda',
         'keybindings.focusContent': 'Mover o foco um painel para a direita',
         'keybindings.goInbox': 'Ir para Caixa de entrada',
+        'keybindings.goForward': 'Avançar',
         'keybindings.goNext': 'Ir para Próximas ações',
         'keybindings.goAgenda': 'Ir para Foco',
         'keybindings.goProjects': 'Ir para Projetos',

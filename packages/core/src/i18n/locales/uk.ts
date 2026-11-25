@@ -380,6 +380,7 @@ export const ukOverrides: Record<string, string> = {
     "keybindings.focusSidebar": "Перемістити фокус на одну панель ліворуч",
     "keybindings.focusContent": "Перемістити фокус на одну панель праворуч",
     "keybindings.goInbox": "Перейдіть до папки \"Вхідні\".",
+    'keybindings.goForward': 'Вперед',
     "keybindings.goNext": "Перейдіть до наступних дій",
     "keybindings.goAgenda": "Перейти до фокусу",
     "keybindings.goProjects": "Перейдіть до Проекти",

@@ -269,6 +269,7 @@ export const arOverrides: Record<string, string> = {
         'keybindings.focusSidebar': 'نقل التركيز لوحة واحدة إلى اليسار',
         'keybindings.focusContent': 'نقل التركيز لوحة واحدة إلى اليمين',
         'keybindings.goInbox': 'انتقل إلى البريد الوارد',
+        'keybindings.goForward': 'إلى الأمام',
         'keybindings.goNext': 'انتقل إلى الإجراءات التالية',
         'keybindings.goAgenda': 'اذهب إلى التركيز',
         'keybindings.goProjects': 'اذهب إلى المشاريع',
