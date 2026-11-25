@@ -1,3 +1,4 @@
+import { buildEntityOpenUrl } from './capture-deeplink';
 import type { CaptureDestination } from './capture-destination';
 import { getSavedTaxonomyTokens } from './taxonomy-catalog';
 import { resolveQuickCaptureDefaultAreaId } from './quick-capture-model';
@@ -614,7 +615,7 @@ export function createWidgetPayloadProjection(
             title: task.title,
             statusLabel: tr[`status.${task.status}`] || task.status,
             ...computeDueLabel(task.dueDate, tr, language, dayFirst, startOfToday, endOfToday),
-            openUri: `mindwtr://open?task=${encodeURIComponent(task.id)}`,
+            openUri: buildEntityOpenUrl('task', task.id),
             priorityColor: prioritiesEnabled && task.priority ? getTaskPriorityColors(statusPreset)[task.priority] ?? null : null,
             contextLabel: project?.title ?? area?.name ?? null,
             identityColor: getTaskAccentColor(task, projectById, areaById, statusPreset) ?? null,
@@ -1013,7 +1014,7 @@ const buildSnapshotItem = (
         ...(task.startTime ? { startDate: task.startTime } : {}),
         ...(task.projectId ? { projectId: task.projectId } : {}),
         ...(project?.title ? { projectName: project.title } : {}),
-        deepLink: `mindwtr://open?task=${encodeURIComponent(task.id)}`,
+        deepLink: buildEntityOpenUrl('task', task.id),
     };
 };
 
