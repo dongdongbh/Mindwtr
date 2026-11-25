@@ -1361,6 +1361,69 @@ describe('Quick capture modal composition', () => {
     expect(collapsed.root.findAllByType(ScrollView)).toHaveLength(1);
   });
 
+  it('separates the destination chip from the notes field above it', () => {
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(
+        <QuickCaptureSheetBody
+          addAnother={false}
+          selectedPriority={null}
+          areaLabel="No Area"
+          contextLabel="Contexts"
+          destinationLabel="Personal"
+          dueDate={null}
+          dueLabel="Due Date"
+          dueTimeLabel="Change time"
+          handleClose={vi.fn()}
+          handleSave={vi.fn()}
+          insetsBottom={0}
+          inputRef={{ current: null }}
+          noteValue=""
+          onNoteChange={vi.fn()}
+          onOpenAreaPicker={vi.fn()}
+          onOpenContextPicker={vi.fn()}
+          onOpenDestinationPicker={vi.fn()}
+          onOpenDueDatePicker={vi.fn()}
+          onOpenDueTimePicker={vi.fn()}
+          onOpenPriorityPicker={vi.fn()}
+          onOpenProjectPicker={vi.fn()}
+          onQuickDueDateSelect={vi.fn()}
+          onResetArea={vi.fn()}
+          onResetContexts={vi.fn()}
+          onResetDueDate={vi.fn()}
+          onResetDueTime={vi.fn()}
+          onResetPriority={vi.fn()}
+          onResetProject={vi.fn()}
+          onToggleOptions={vi.fn()}
+          onToggleAddAnother={vi.fn()}
+          onToggleRecording={vi.fn()}
+          onValueChange={vi.fn()}
+          optionsExpanded={false}
+          prioritiesEnabled
+          timeEstimatesEnabled
+          priorityLabel="Priority"
+          projectLabel="Project"
+          recording={false}
+          recordingBusy={false}
+          recordingReady={false}
+          sheetMaxHeight={500}
+          showDueTime={false}
+          t={(key) => key}
+          tc={tc}
+          value=""
+          visible
+        />
+      );
+    });
+
+    const destination = tree.root
+      .findAllByType(TouchableOpacity)
+      .find((node) => node.props.accessibilityLabel === 'task.destination: Personal');
+    const style = flattenStyle(destination?.props.style);
+    expect(style.marginTop).toBe(8);
+    expect(style.alignSelf).toBe('flex-start');
+  });
+
   it('carries the canonical priority flag on overlay rows and tints the trigger flag when set', () => {
 
     let pickerTree!: ReactTestRenderer;
