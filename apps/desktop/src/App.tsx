@@ -81,6 +81,7 @@ import { useDesktopShellSync } from './lib/desktop-shell-sync';
 import { useAppLockStore } from './lib/app-lock';
 import { reportError as reportAppError } from './lib/report-error';
 import { syncNativeProxyUrl } from './lib/tauri-http';
+import { resolveDesktopStartupView } from './lib/sidebar-views';
 import { persistLastView, readRestorableLastView } from './lib/session-restore';
 import { readViewFromUrl, writeViewToUrl } from './lib/view-url-params';
 import { logError, logInfo } from './lib/app-log';
@@ -167,7 +168,7 @@ const SettingsView = lazy(wrapSettingsOpenImport(
     () => import('./components/views/SettingsView').then((m) => ({ default: m.SettingsView }))
 ));
 
-const DEFAULT_DESKTOP_VIEW = 'agenda';
+
 const DESKTOP_ONBOARDING_STORAGE_KEY = 'mindwtr:desktop:first-run-onboarding:v1';
 const DONATION_PROMPT_ENABLED = (
     import.meta.env.VITE_DONATION_PROMPT_ENABLED === '1'
@@ -279,9 +280,12 @@ function App() {
     });
 
 
-    const [viewFromUrl] = useState(() => readViewFromUrl());
-    const [currentView, setCurrentView] = useState(viewFromUrl ?? restoredLastView?.view ?? DEFAULT_DESKTOP_VIEW);
-    const [activeView, setActiveView] = useState(viewFromUrl ?? restoredLastView?.view ?? DEFAULT_DESKTOP_VIEW);
+    const hiddenSidebarViews = useUiStore((state) => state.hiddenSidebarViews);
+    const [startupView] = useState(() => resolveDesktopStartupView(
+        readViewFromUrl(), restoredLastView?.view, hiddenSidebarViews,
+    ));
+    const [currentView, setCurrentView] = useState(startupView);
+    const [activeView, setActiveView] = useState(startupView);
     const [navigationHistory] = useState(() => {
         const destination = readDestination(currentView);
         if (destination.kind === 'project' && restoredLastView?.view === 'projects' && restoredLastView.projectId) {
@@ -1260,7 +1264,8 @@ function App() {
     }, [sandboxMode]);
 
 
-    const renderedView = activeView === 'timeline' && !timelineEnabled ? DEFAULT_DESKTOP_VIEW : activeView;
+    const fallbackView = resolveDesktopStartupView(null, undefined, hiddenSidebarViews);
+    const renderedView = activeView === 'timeline' && !timelineEnabled ? fallbackView : activeView;
 
     const renderView = () => {
         if (renderedView.startsWith('savedSearch:')) {
@@ -1405,8 +1410,8 @@ function App() {
         if (currentView !== 'timeline' && activeView !== 'timeline') return;
 
 
-        handleViewChange(DEFAULT_DESKTOP_VIEW);
-    }, [activeView, currentView, handleViewChange, isLoading, timelineEnabled, viewSettingsHydrated]);
+        handleViewChange(fallbackView);
+    }, [activeView, currentView, fallbackView, handleViewChange, isLoading, timelineEnabled, viewSettingsHydrated]);
 
     useEffect(() => {
         if (isObsidianEnabled || currentView !== 'obsidian') return;

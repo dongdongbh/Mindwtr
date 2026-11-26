@@ -1,11 +1,22 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { SESSION_RESTORE_WINDOW_MS } from '@mindwtr/core';
 
+import { resolveDesktopStartupView } from './sidebar-views';
 import { persistLastView, readRestorableLastView } from './session-restore';
 
 describe('desktop session restore', () => {
     beforeEach(() => {
         window.localStorage.clear();
+    });
+
+    it('respects hidden views on ordinary launches and preserves explicit destinations', () => {
+        expect(resolveDesktopStartupView(null, undefined, [])).toBe('agenda');
+        expect(resolveDesktopStartupView(null, undefined, ['agenda'])).toBe('inbox');
+        expect(resolveDesktopStartupView(null, 'board', ['board'])).toBe('inbox');
+        expect(resolveDesktopStartupView(null, 'projects', ['agenda'])).toBe('projects');
+        expect(resolveDesktopStartupView('agenda', 'projects', ['agenda'])).toBe('agenda');
+        expect(resolveDesktopStartupView(null, 'history', ['done', 'archived'])).toBe('inbox');
+        expect(resolveDesktopStartupView(null, 'history', ['done'])).toBe('history');
     });
 
     it('round-trips a restorable view within the window', () => {

@@ -1,3 +1,4 @@
+import { isSidebarViewHidden } from '../lib/sidebar-views';
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from 'react';
 import {
     Calendar,
@@ -384,12 +385,7 @@ export function Layout({
     ] satisfies NavSection[])
         .map((section) => ({
             ...section,
-            items: section.items.filter((item) => {
-                if (item.id === 'history') {
-                    return !(hiddenSidebarViews.includes('done') && hiddenSidebarViews.includes('archived'));
-                }
-                return !hiddenSidebarViews.includes(item.id as (typeof hiddenSidebarViews)[number]);
-            }),
+            items: section.items.filter((item) => !isSidebarViewHidden(item.id, hiddenSidebarViews)),
         }))
         .filter((section) => section.items.length > 0), [hiddenSidebarViews, inboxCount, isObsidianEnabled, isTimelineEnabled, t]);
 

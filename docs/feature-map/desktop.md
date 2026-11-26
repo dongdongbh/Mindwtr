@@ -25,7 +25,7 @@ Source: `apps/desktop/src` (Tauri + React). Labels come from `packages/core/src/
 
 ## Focus
 
-- Reach: Sidebar › Focus. This is the default view at launch. Sections: Today's Focus, Today (schedule), Review Due, Next Actions, Upcoming, then Projects to review. Select › choose tasks › Bulk organize opens the shared organizer.
+- Reach: Sidebar › Focus. On ordinary launch the app restores a recent visible view or defaults to Focus. If the startup choice is hidden, it opens Inbox. Sections: Today's Focus, Today (schedule), Review Due, Next Actions, Upcoming, then Projects to review. Select › choose tasks › Bulk organize opens the shared organizer.
 - Shortcuts: `gf` (Vim, Standard), `Alt+A` (Emacs). Standard style: `S` adds the selected task to Today's Focus.
 - Selectors: `todays-focus-section`, `focus-hidden-by-area`
 - Code: `apps/desktop/src/components/views/AgendaView.tsx`, `apps/desktop/src/components/views/agenda/AgendaHeader.tsx`, `apps/desktop/src/components/views/agenda/AgendaSections.tsx`, `apps/desktop/src/components/views/agenda/AgendaFiltersPanel.tsx`, `apps/desktop/src/components/views/agenda/SortableFocusRow.tsx`, `apps/desktop/src/components/FocusStarIcon.tsx`

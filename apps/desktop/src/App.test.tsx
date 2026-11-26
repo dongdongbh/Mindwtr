@@ -50,6 +50,7 @@ describe('App', () => {
         useUiStore.setState((state) => ({
             ...state,
             projectView: { selectedProjectId: null },
+            hiddenSidebarViews: [],
             toasts: [],
         }));
     });
@@ -57,6 +58,13 @@ describe('App', () => {
     it('renders Focus by default', () => {
         const { getByRole } = renderWithProviders(<App />);
         expect(getByRole('heading', { name: 'Focus' })).toBeInTheDocument();
+    });
+
+    it('opens Inbox on the first render when Focus is hidden', () => {
+        useUiStore.setState({ hiddenSidebarViews: ['agenda'] });
+        const { queryByRole } = renderWithProviders(<App />);
+        expect(queryByRole('heading', { name: 'Focus' })).toBeNull();
+        expect(window.location.search).toBe('?view=inbox');
     });
 
     it('renders Sidebar navigation', () => {
