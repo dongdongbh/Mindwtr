@@ -1665,7 +1665,7 @@ export class SyncService {
         });
     }
 
-    static async getWebDavConfig(options?: { silent?: boolean }): Promise<WebDavConfig> {
+    static async getWebDavConfig(options?: { silent?: boolean; required?: boolean }): Promise<WebDavConfig> {
         return readWebDavConfig(getSyncConfigDeps(), options);
     }
 
@@ -1910,10 +1910,9 @@ export class SyncService {
         config: { url: string; username?: string; password?: string; hasPassword?: boolean; allowInsecureHttp?: boolean },
         allowLegacyPlaintext: boolean,
     ): Promise<'strong-etag' | 'legacy-plaintext'> {
-        const normalizedUrl = normalizeWebdavUrl(config.url.trim());
-        if (!normalizedUrl) {
-            throw new Error('WebDAV URL not configured');
-        }
+        const url = config.url.trim();
+        if (!url) throw new Error('WebDAV URL not configured');
+        const normalizedUrl = normalizeWebdavUrl(url);
         const fetcher = await getTauriFetch();
 
 
@@ -2449,7 +2448,7 @@ export class SyncService {
         }
 
         context.webdavConfig = context.backend === 'webdav'
-            ? configOverride?.webdav ?? await SyncService.getWebDavConfig()
+            ? configOverride?.webdav ?? await SyncService.getWebDavConfig({ required: true })
             : null;
         if (context.webdavConfig) {
             setStep('webdav_probe');

@@ -68,6 +68,8 @@ The v1.3.6 task-editor correction is confirmed by the visible disappearance of t
 
 - **`v1.3.10/gmail-unsupported-mime`** — `packages/core/src/gmail-capture.ts`. On a Gmail test build, label an attachment-only message and an email with inline text, then check Gmail capture. The text email is imported and Diagnostics shows `Gmail capture advanced past unsupported messages` with the `count` of messages bypassed on the committed page. Bypassed messages keep their Gmail label and receive no local receipt. The line includes no account, label, message ID, or content.
 
+- **`v1.3.10/webdav-config-read`** — Desktop `apps/desktop/src/lib/sync-service-config.ts`, #1618. If automatic WebDAV sync cannot read the saved native configuration, Diagnostics shows `WebDAV sync stopped before probing unreadable settings` with `outcome=unavailable`. The sync error directs the tester to Sync settings. No URL or credentials are logged.
+
 - **`v1.3.10/webdav-password-read`** — Desktop `sync-service.ts`. When a stored WebDAV password cannot be read, look for `Saved WebDAV password unavailable` and `outcome=unavailable` before the request. No endpoint or credential is included.
 
 - **`v1.3.10/attachment-task-link`** — Desktop `use-task-deep-link.ts`. Open a copied task link from an attachment. Look for `Task link route requested` with `outcome=opened` or `missing`. No task ID or URL is logged.
