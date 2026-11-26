@@ -2,6 +2,7 @@ package tech.dongdongbh.mindwtr.pilot
 
 import android.app.Application
 import android.content.Context
+import android.content.SharedPreferences
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
@@ -96,6 +97,14 @@ private val REFUSABLE = setOf("complete", "completeUndo", "inboxDecisionUndo", "
 internal fun refusedUnwritten(kind: String?, message: String) =
     message.startsWith("STALE_REVISION") || (kind in REFUSABLE && UPDATE_REFUSALS.any { message.startsWith(it) })
         || (kind in setOf("completeUndo", "inboxDecisionUndo") && message.startsWith("ACTION_FAILED"))
+
+internal fun projectSectionFolds(prefs: SharedPreferences, projectId: String): JSONArray =
+    GroupCollapse.axis(prefs, "all", "project:$projectId", 200).let { ids ->
+        JSONArray().apply { for (index in 0 until ids.length()) ids.getString(index).takeIf { it.isNotBlank() && it.length <= 500 }?.let(::put) }
+    }
+
+internal fun toggleProjectSectionFold(prefs: SharedPreferences, projectId: String, sectionId: String) =
+    GroupCollapse.toggle(prefs, "all", "project:$projectId", sectionId)
 
 private fun JSONObject.metaPart(): MetaPart = MetaPart(
     getString("kind"), getString("text"), getBoolean("detail"), text("dotColor"), text("tone"),
@@ -226,7 +235,6 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
     var projectShowCompleted by mutableStateOf(prefs.getString(PROJECT_SHOW_COMPLETED_KEY, null) == "true"); private set
 
     var projectCompletedCollapsed by mutableStateOf(true); private set
-    private var collapsedProjectSectionIds by mutableStateOf(emptySet<String>())
 
     var areaFilter by mutableStateOf<AreaFilter?>(null); private set
 
@@ -2295,7 +2303,6 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
     fun openProject(id: String) {
         if (id != openProjectId) {
             projectCompletedCollapsed = true
-            collapsedProjectSectionIds = emptySet()
             projectDetails.resetFilters()
         }
         val mine = ++issued
@@ -2322,8 +2329,6 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
         keepProjectReturn(null)
         menu.endBulk("project")
         project = null
-        collapsedProjectSectionIds = emptySet()
-
         projectDetails.follow(null)
     }
 
@@ -2407,7 +2412,7 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
         runtime.menuRead("projectDetailFilterView", JSONObject().put("projectId", id).put("offset", offset).put("limit", PAGE)
             .apply { if (revision.isNotEmpty()) put("revision", revision) }
             .put("showCompleted", projectShowCompleted).put("completedCollapsed", projectCompletedCollapsed)
-            .put("collapsedSectionIds", JSONArray(collapsedProjectSectionIds))
+            .put("collapsedSectionIds", projectSectionFolds(prefs, id))
             .put("filters", projectDetails.listFilterState).put("filterSheetOpen", projectDetails.listFilterSheet != null)
             .apply { filterEdit?.let { put("filterEdit", it) } }.toString())
 
@@ -2437,8 +2442,7 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
     }
 
     fun toggleProjectSection(sectionId: String) {
-        val collapsed = collapsedProjectSectionIds
-        collapsedProjectSectionIds = if (sectionId in collapsed) collapsed - sectionId else collapsed + sectionId
+        toggleProjectSectionFold(prefs, openProjectId ?: return, sectionId)
         refreshProjects()
     }
 

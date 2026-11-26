@@ -2454,7 +2454,11 @@ assert.equal(model.match(/runtime\.projects\(projectTagFilter\)/g).length, 2, 'r
 
 
 assert.equal(model.match(/projectWindow\(runtime, /g).length, 3, 'the first window, the next, and a filter edit\'s first window');
-assert.match(model, /runtime\.menuRead\("projectDetailFilterView", JSONObject\(\)\.put\("projectId", id\)[\s\S]{0,200}\.put\("showCompleted", projectShowCompleted\)\.put\("completedCollapsed", projectCompletedCollapsed\)\s+\.put\("collapsedSectionIds", JSONArray\(collapsedProjectSectionIds\)\)\s+\.put\("filters", projectDetails\.listFilterState\)\.put\("filterSheetOpen", projectDetails\.listFilterSheet != null\)/);
+assert.match(model, /runtime\.menuRead\("projectDetailFilterView", JSONObject\(\)\.put\("projectId", id\)[\s\S]{0,200}\.put\("showCompleted", projectShowCompleted\)\.put\("completedCollapsed", projectCompletedCollapsed\)\s+\.put\("collapsedSectionIds", projectSectionFolds\(prefs, id\)\)\s+\.put\("filters", projectDetails\.listFilterState\)\.put\("filterSheetOpen", projectDetails\.listFilterSheet != null\)/);
+assert.match(model, /GroupCollapse\.axis\(prefs, "all", "project:\$projectId", 200\)/);
+assert.match(model, /fun toggleProjectSection\(sectionId: String\) \{\s+toggleProjectSectionFold\(prefs, openProjectId \?: return, sectionId\)\s+refreshProjects\(\)/);
+assert.match(model, /GroupCollapse\.toggle\(prefs, "all", "project:\$projectId", sectionId\)/);
+assert.doesNotMatch(model, /collapsedProjectSectionIds/);
 assert.match(source('ViewState.kt'), /const val PROJECT_SHOW_COMPLETED_KEY = "mindwtr:view:project-detail:show-completed:v1"/);
 assert.match(model, /prefs\.edit\(\)\.putString\(PROJECT_SHOW_COMPLETED_KEY, on\.toString\(\)\)\.apply\(\)/);
 assert.equal([activity, owner, editorUi, focusUi, projectsUi].join('\n').match(/\.projects\(\)|projectDetail\(/g), null);

@@ -317,7 +317,7 @@ The native client is a Kotlin and Jetpack Compose app in `apps/android-native`. 
 
 ## Project details
 
-- Add Task keeps the current project open while the capture form is visible. Each project section heading collapses or expands its tasks while the project is open. The section's Add Task button opens capture with that section selected, including when the section is folded or empty. Archived projects allow folding and hide Add Task.
+- Add Task keeps the current project open while the capture form is visible. Each project section heading collapses or expands its tasks. The folds stay per project after the project closes or the app restarts, in RN's store (`mindwtr:view:group-collapse:all:v1`, axis `project:<id>`). The section's Add Task button opens capture with that section selected, including when the section is folded or empty. Archived projects allow folding and hide Add Task.
 
 - Reach: Projects › a project › Details. It holds status, area, dates (Review date), a repeat interval (Repeat every N days, weeks, months or years after completion, with Save), scope (Sequential, Parallel), notes with Preview, tags, sections, and attachments. The ⋯ sheet has Duplicate, Archive, Convert to section, and Delete.
 - Shortcuts: Link `mindwtr-native-dev:///open?project=<id>`.
