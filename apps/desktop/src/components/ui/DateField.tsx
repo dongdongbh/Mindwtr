@@ -5,8 +5,10 @@ import {
     formatCalendarInputDate,
     getCalendarDayOfMonth,
     getCalendarMonthIndex,
+    getDateFormattingConfig,
     getQuickDate,
     getShortWeekdayLabels,
+    getSystemDateFormatOrder,
     isJalaliCalendarLocale,
     isQuickDatePresetSelected,
     QUICK_DATE_PRESETS_EXTENDED,
@@ -92,6 +94,9 @@ function getDateInputOrder(dateFormatSetting: string | null | undefined, locale:
     if (dateFormat === 'dmy') return 'dmy';
     if (dateFormat === 'mdy') return 'mdy';
     if (dateFormat === 'ymd') return 'ymd';
+
+    const systemPatternOrder = getSystemDateFormatOrder(getDateFormattingConfig().systemDateFormat);
+    if (systemPatternOrder) return systemPatternOrder;
 
     const formatter = new Intl.DateTimeFormat(getCalendarLocale(locale), {
         year: 'numeric',

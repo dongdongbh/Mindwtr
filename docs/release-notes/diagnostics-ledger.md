@@ -60,6 +60,8 @@ The v1.3.6 task-editor correction is confirmed by the visible disappearance of t
 
 ## v1.3.10 (add before tagging, trim in the release after)
 
+- **`v1.3.10/desktop-regional-date`** — `apps/desktop/src/main.tsx`, #1499. Launch the desktop app with an English UI and Portuguese regional settings. Diagnostics records `Desktop regional date formatting initialized` with `outcome=configured` after startup applies the regional format. With System default selected, check that a task due 23 November displays day before month in both the row and its editor.
+
 - **`v1.3.10/native-editor-legacy-tokens`** — `packages/core/src/native-task-editor-save-checkpoint.ts`. Resume a native editor save checkpoint written by the older picker with a single context or tag containing two space-separated prefixed words. Diagnostics records `Native editor checkpoint accepted legacy token format` with `outcome=validated` when the checkpoint matches its save request.
 
 - **`v1.3.10/desktop-navigation-history`** — `apps/desktop/src/App.tsx`. Move between two desktop views, then use the mouse Back and Forward buttons or Alt+Left and Alt+Right. Verify that each command restores the expected view and records `Desktop navigation history replayed`, `direction=back` or `direction=forward`, and `source=keyboard`, `source=mouse`, or `source=gtk-mouse`. The latter confirms the Linux GTK button reached the app. The marker contains no view, filter, or task data. (#1623)

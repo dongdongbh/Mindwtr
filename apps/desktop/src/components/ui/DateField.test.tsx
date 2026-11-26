@@ -3,7 +3,7 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { JALALI_LOCALE_TAG, useTaskStore } from '@mindwtr/core';
+import { JALALI_LOCALE_TAG, configureDateFormatting, getDateFormattingConfig, useTaskStore } from '@mindwtr/core';
 
 import { LanguageProvider } from '../../contexts/language-context';
 import { useNativeDateInputLocale } from '../../hooks/use-native-date-input-locale';
@@ -386,5 +386,38 @@ describe('DateField', () => {
 
         fireEvent.change(input, { target: { value: '1405-02-01' } });
         expect(onDateChange).toHaveBeenCalledWith('2026-04-21');
+    });
+
+    it('follows the active system short-date pattern order when dateFormatSetting is system', () => {
+        const previousFormatting = getDateFormattingConfig();
+        const onDateChange = vi.fn();
+        configureDateFormatting({
+            language: 'en',
+            dateFormat: 'system',
+            systemLocale: 'en-US',
+            systemDateFormat: 'dd-MM-yyyy',
+        });
+        try {
+            render(
+                <DateField
+                    t={t}
+                    dateAriaLabel="Due"
+                    dateValue="2026-11-23"
+                    selectedDate={new Date(2026, 10, 23)}
+                    dateFormatSetting="system"
+                    nativeDateInputLocale="en-US"
+                    dateInputClassName="border"
+                    onDateChange={onDateChange}
+                />
+            );
+
+            const input = screen.getByLabelText('Due') as HTMLInputElement;
+            expect(input.value).toBe('23/11/2026');
+
+            fireEvent.change(input, { target: { value: '24/11/2026' } });
+            expect(onDateChange).toHaveBeenCalledWith('2026-11-24');
+        } finally {
+            configureDateFormatting(previousFormatting);
+        }
     });
 });
