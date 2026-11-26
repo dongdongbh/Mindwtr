@@ -16,6 +16,7 @@ Source: `apps/desktop/src` (Tauri + React). Labels come from `packages/core/src/
 
 ## Sidebar navigation
 
+- In the active desktop window, `Alt+Left` and `Alt+Right` revisit destinations, including the selected project. Mouse Back and Forward use the same history.
 - Reach: Sidebar sections Focus (Focus, Inbox), Lists (Projects, Someday/Maybe, Waiting For), Organize (Calendar, Review, Contexts), More (Reference, Obsidian, Board View, Timeline, History, Trash). Settings sits at the bottom.
 - Shortcuts: Vim and Standard: `g` then `f` Focus, `i` Inbox, `n` Next Actions, `p` Projects, `c` Contexts, `r` Review, `w` Waiting For, `s` Someday/Maybe, `e` Reference, `l` Calendar, `b` Board View, `t` Timeline, `d` Done, `a` Archived, `T` Trash. Emacs: `Alt+I`, `Alt+N`, `Alt+A` (Focus), `Alt+P`, `Alt+C`, `Alt+R`, `Alt+W`, `Alt+S`, `Alt+E`, `Alt+L`, `Alt+B`, `Alt+T`, `Alt+D`, `Alt+Shift+A`, `Alt+Shift+T`. All styles: `Ctrl+B` or `Ctrl+\` toggles the sidebar (`Cmd` on macOS). `Ctrl+Shift+\` toggles focus mode. `F11` toggles full screen (native app only).
 - Code: `apps/desktop/src/components/Layout.tsx`, `apps/desktop/src/App.tsx`, `apps/desktop/src/contexts/keybinding-context.tsx`
@@ -43,6 +44,7 @@ Source: `apps/desktop/src` (Tauri + React). Labels come from `packages/core/src/
 
 ## Inbox
 
+- In task editing and Inbox processing, open Browse beside Contexts or Tags to search or toggle multiple saved and in-use values. An empty search shows the full list.
 - Reach: Sidebar › Inbox. The badge shows the Inbox count. The list has an "Add Task..." input at the top. Completing an Inbox item reveals a collapsed "Completed in this session" group below the active list.
 - Shortcuts: `gi` (Vim, Standard), `Alt+I` (Emacs). `a` or `Insert` focuses the add-task input.
 - Selectors: `virtualized-task-list`, `inbox-session-recap`
@@ -252,6 +254,7 @@ Source: `apps/desktop/src` (Tauri + React). Labels come from `packages/core/src/
 - Notes: Edits live in the Task draft until Save. The default presentation is In-row. Sending a draft back to Inbox drops its Focus star. Attachment links reject network and device paths and unsupported protocols, including browser script, data, and blob URLs. Common local documents and folders open normally; executable files, scripts, shortcuts, app bundles, and unknown file types open their containing folder instead. This also applies to project attachments and Open externally from attachment previews. In the browser, cloud attachments with an inert PDF, raster-image, audio, video, or plain-text MIME can open a preview. HTML, SVG, XHTML, XML, and unknown types download instead; in-app image, audio, and text previews remain available.
 - Attachments › Add link accepts a copied Mindwtr task link. Opening it shows the task in the current workspace even when another Area is selected. A missing or deleted target shows the task-link message.
 - Adding a bare web URL through Attachments › Add link keeps the URL and may replace its generated label after Save. Labels typed with `Title | URL` or Markdown are preserved.
+- The task editor can discard abandoned draft file copies. Previously saved files stay on disk when removed or replaced in the editor. Attachment cleanup can reclaim unreferenced files whose removal is still recorded. A superseded file without a removal record may continue to use disk space.
 
 ## Task menu
 
@@ -266,6 +269,7 @@ Source: `apps/desktop/src` (Tauri + React). Labels come from `packages/core/src/
 ## Bulk selection
 
 - With Time Estimates enabled, open Contexts › Filters › Time estimate › No estimate. Select tasks › Bulk organize › Time estimate to keep, set or clear their estimates. Setting an estimate removes the task from this filter.
+- In Bulk organize, set or clear the person or priority independently. Keep existing preserves each selected task’s value. The priority field requires priorities to be enabled.
 - Bulk organize status includes Inbox for returning tasks to processing; existing project, notes, tags and dates stay unchanged unless explicitly edited.
 
 - Reach: Any task list, including Focus, › Select. Available toolbar actions include Select All, Add context, Remove context, Add tag, Remove tag, Bulk organize, Export selected tasks as CSV, and Delete. Focus uses the Review bulk actions; the organizer includes contexts. Done leaves the mode.

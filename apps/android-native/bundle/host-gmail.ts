@@ -133,7 +133,7 @@ export function createNativeGmail(bindings: NativeGmailBindings) {
                 bindings.requireSaved();
             },
             initialDelayMs: 1_000,
-            logInfo: (message, extra) => bindings.logInfo(message, { scope: 'gmail-capture', context: extra ?? {} }),
+            logInfo: (message, extra, force) => bindings.logInfo(message, { scope: 'gmail-capture', context: extra ?? {}, force }),
             ...(bindings.setTimer ? { setTimer: bindings.setTimer } : {}),
             ...(bindings.clearTimer ? { clearTimer: bindings.clearTimer } : {}),
             ...(bindings.maxRoundsPerCycle ? { maxRoundsPerCycle: bindings.maxRoundsPerCycle } : {}),

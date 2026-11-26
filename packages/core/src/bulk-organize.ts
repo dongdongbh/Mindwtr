@@ -1,5 +1,5 @@
 import { taskEditValuesEqual } from './json-value-equality';
-import type { AppData, Task, TaskStatus, TimeEstimate } from './types';
+import type { AppData, Task, TaskPriority, TaskStatus, TimeEstimate } from './types';
 
 export type BulkOrganizeStatus = Exclude<TaskStatus, 'archived'>;
 
@@ -38,6 +38,7 @@ export type BulkOrganizeTaskUpdateInput = {
     dueDate?: string | null;
     reviewAt?: string | null;
     timeEstimate?: TimeEstimate | null;
+    priority?: TaskPriority | null;
     assignedTo?: string | null;
 };
 
@@ -73,7 +74,7 @@ const isTaskMap = (
 );
 
 export function buildBulkOrganizeTaskUpdate(
-    task: Pick<Task, 'contexts' | 'tags' | 'projectId' | 'timeEstimate'>,
+    task: Pick<Task, 'contexts' | 'tags' | 'projectId' | 'timeEstimate' | 'priority' | 'assignedTo'>,
     input: BulkOrganizeTaskUpdateInput,
 ): Partial<Task> {
     const updates: Partial<Task> = {};
@@ -127,7 +128,13 @@ export function buildBulkOrganizeTaskUpdate(
     if (input.timeEstimate !== undefined && (task.timeEstimate ?? null) !== input.timeEstimate) {
         updates.timeEstimate = input.timeEstimate ?? undefined;
     }
-    if (hasOwn(input, 'assignedTo')) updates.assignedTo = normalizedOptionalString(input.assignedTo);
+    if (input.priority !== undefined && (task.priority ?? null) !== input.priority) {
+        updates.priority = input.priority ?? undefined;
+    }
+    if (hasOwn(input, 'assignedTo')) {
+        const assignedTo = normalizedOptionalString(input.assignedTo);
+        if ((task.assignedTo ?? undefined) !== assignedTo) updates.assignedTo = assignedTo;
+    }
 
     return updates;
 }

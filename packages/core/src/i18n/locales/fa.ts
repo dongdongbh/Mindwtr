@@ -362,6 +362,7 @@ export const faOverrides: Record<string, string> = {
         'keybindings.focusSidebar': 'انتقال تمرکز یک پنل به چپ',
         'keybindings.focusContent': 'انتقال تمرکز یک پنل به راست',
         'keybindings.goInbox': 'رفتن به صندوق ورودی',
+        'keybindings.goForward': 'جلو',
         'keybindings.goNext': 'رفتن به اقدامات بعدی',
         'keybindings.goAgenda': 'رفتن به تمرکز',
         'keybindings.goProjects': 'رفتن به پروژه‌ها',

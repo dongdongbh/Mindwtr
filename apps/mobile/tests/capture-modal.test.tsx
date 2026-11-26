@@ -1765,6 +1765,11 @@ describe('CaptureScreen', () => {
       expect(tree.root.findAllByType(Text).some((node) => (
         node.props.children === 'Destination unavailable. Choose another destination.'
       ))).toBe(true);
+      if (action === 'Move destination') {
+        await act(async () => { findTouchableByText(tree, 'Clear').props.onPress(); });
+        await act(async () => { findTouchableByText(tree, 'Save').props.onPress(); });
+        expect(storeState.addTask).toHaveBeenCalledWith(draft, { status: 'next' });
+      }
     } else {
       expect(storeState.addTask).toHaveBeenCalledWith('Section task', { status: 'next', projectId: section.projectId, sectionId: section.id });
       if (action === 'Save') expect(projectModal.close).toHaveBeenCalledOnce();

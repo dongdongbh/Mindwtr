@@ -114,12 +114,15 @@ export function CaptureForm({ params, projectModal }: {
     () => sanitizeCaptureReturnToParam(params.returnTo),
     [params.returnTo]
   );
+  const [clearedSectionRoute, setClearedSectionRoute] = useState<typeof params.initialProps>();
+  const sectionCleared = clearedSectionRoute !== undefined && clearedSectionRoute === params.initialProps;
   const sectionDestination = React.useMemo(() => {
+    if (sectionCleared) return undefined;
     const destination = readCaptureModalInitialDestination(params.initialProps);
     if (destination?.kind !== 'project' || !destination.sectionId) return undefined;
     return projectModal || getProjectQuickCaptureReturnToProjectId(returnTo) === destination.id
       ? destination : undefined;
-  }, [params.initialProps, projectModal, returnTo]);
+  }, [params.initialProps, projectModal, returnTo, sectionCleared]);
   const destinationSection = sectionDestination && sections.find((section) => (
     section.id === sectionDestination.sectionId && section.projectId === sectionDestination.id && !section.deletedAt
   ));
@@ -397,6 +400,10 @@ export function CaptureForm({ params, projectModal }: {
     const parsed = parseQuickAdd(inputValue, currentProjects as Project[], new Date(), areas, quickAddParseOptions);
 
     const surfaceProps = { ...initialProps };
+    if (sectionCleared) {
+      delete surfaceProps.sectionId;
+      delete surfaceProps.projectId;
+    }
     if (surfaceProps.attachments?.length) {
       const managed = await filterManagedAttachments(surfaceProps.attachments);
       if (managed.length > 0) {
@@ -410,7 +417,7 @@ export function CaptureForm({ params, projectModal }: {
       text: inputValue,
       projects: currentProjects,
       initialProps: surfaceProps,
-      projectParam: initialProjectTitle,
+      projectParam: sectionCleared ? '' : initialProjectTitle,
       defaultAreaId: defaultNewTaskAreaId,
       description: descriptionValue,
       copilot: appliedCopilot,
@@ -720,6 +727,14 @@ export function CaptureForm({ params, projectModal }: {
               {captureErrorMessage}
             </Text>
           ) : null}
+          {sectionDestination && captureErrorMessage === destinationUnavailableMessage && (
+            <TouchableOpacity accessibilityRole="button" onPress={() => {
+              setClearedSectionRoute(params.initialProps);
+              setCaptureError(null);
+            }}>
+              <Text style={{ color: tc.tint }}>{tFallback(t, 'common.clear', 'Clear')}</Text>
+            </TouchableOpacity>
+          )}
           <View style={styles.actions}>
             <TouchableOpacity
               disabled={isSubmitting}

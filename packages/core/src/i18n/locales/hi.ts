@@ -284,6 +284,7 @@ export const hiOverrides: Record<string, string> = {
         'keybindings.focusSidebar': 'फ़ोकस को एक पैनल बाईं ओर ले जाएँ',
         'keybindings.focusContent': 'फ़ोकस को एक पैनल दाईं ओर ले जाएँ',
         'keybindings.goInbox': 'इनबॉक्स पर जाएँ',
+        'keybindings.goForward': 'आगे जाएँ',
         'keybindings.goNext': 'अगली कार्रवाइयों पर जाएँ',
         'keybindings.goAgenda': 'फोकस पर जाएं',
         'keybindings.goProjects': 'प्रोजेक्ट्स पर जाएं',

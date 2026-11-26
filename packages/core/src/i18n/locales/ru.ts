@@ -281,6 +281,7 @@ export const ruOverrides: Record<string, string> = {
         'keybindings.focusSidebar': 'Переместить фокус на одну панель влево',
         'keybindings.focusContent': 'Переместить фокус на одну панель вправо',
         'keybindings.goInbox': 'Перейти в папку «Входящие»',
+        'keybindings.goForward': 'Вперёд',
         'keybindings.goNext': 'Перейти к следующим действиям',
         'keybindings.goAgenda': 'Перейти в фокус',
         'keybindings.goProjects': 'Перейти в Проекты',

@@ -540,7 +540,14 @@ const observeOrganize = (root: ReactTestInstance) => {
     const input = hostOf(card, 'TextInput').find((node) => node.props.accessibilityLabel === label);
     return input ? [input.props.value, input.props.placeholder ?? null] : null;
   };
-  const labels = hostOf(card, 'Text').filter((node) => hasStyle(node, taskListStyles.bulkOrganizeLabel)).map(textOf);
+  const status = hostOf(statusRow, 'TouchableOpacity');
+  const waitingSelected = status.some((option) => textOf(option) === t('status.waiting') && option.props.accessibilityState?.selected);
+  const labels = hostOf(card, 'Text').filter((node) => hasStyle(node, taskListStyles.bulkOrganizeLabel)).flatMap((node) => {
+    const label = textOf(node);
+    if (label === t('taskEdit.priorityLabel')) return [];
+    if (label === t('taskEdit.assignedTo')) return waitingSelected ? [t('process.delegateWhoLabel')] : [];
+    return [label];
+  });
   const dates = byName(card, 'TaskListBulkDateField').map((field) => {
     const input = hostOf(field, 'TextInput')[0];
     const calendar = hostOf(field, 'TouchableOpacity').find((node) => node.props.accessibilityState?.expanded !== undefined)!;
@@ -564,10 +571,10 @@ const observeOrganize = (root: ReactTestInstance) => {
     subtitle,
     close: [close.props.accessibilityLabel, close.props.disabled === true],
     labels,
-    status: hostOf(statusRow, 'TouchableOpacity').map(chipOf),
+    status: status.map(chipOf),
     project: pickerRow('bulk-organize-project-picker-row'),
     area: pickerRow('bulk-organize-area-picker-row'),
-    waitingFor: inputByLabel(t('process.delegateWhoLabel')),
+    waitingFor: waitingSelected ? inputByLabel(t('taskEdit.assignedTo')) : null,
     contexts: inputByLabel(t('taskEdit.contextsLabel')),
     tags: inputByLabel(t('taskEdit.tagsLabel')),
     dates,
@@ -679,7 +686,7 @@ async function runOrganizeAction(root: ReactTestInstance, action: Extract<BulkSc
       return;
     }
     case 'person':
-      await act(async () => { input(t('process.delegateWhoLabel')).props.onChangeText(action[2]); });
+      await act(async () => { input(t('taskEdit.assignedTo')).props.onChangeText(action[2]); });
       return;
     case 'contexts':
       await act(async () => { input(t('taskEdit.contextsLabel')).props.onChangeText(action[2]); });

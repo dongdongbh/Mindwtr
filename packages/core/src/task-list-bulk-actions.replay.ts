@@ -441,14 +441,14 @@ export async function replayBulkScenario(
                 close: [dialog.closeLabel, false],
                 labels: [
                     dialog.statusLabel, ...(dialog.estimate ? [dialog.estimate.label] : []), dialog.project.label, dialog.area.label,
-                    ...(dialog.waitingFor ? [dialog.waitingFor.label] : []),
+                    ...(draft.status === 'waiting' ? [t('process.delegateWhoLabel')] : []),
                     ...dialog.dates.map((date) => date.label),
                     dialog.contexts.label, dialog.tags.label,
                 ],
                 status: dialog.statuses.map((status) => [null, status.label, status.selected, false]),
                 project: [`${dialog.project.label}: ${dialog.project.value}`, dialog.project.value, false],
                 area: [`${dialog.area.label}: ${dialog.area.value}`, dialog.area.value, dialog.area.disabled],
-                waitingFor: dialog.waitingFor ? [draft.delegateWho, dialog.waitingFor.placeholder] : null,
+                waitingFor: draft.status === 'waiting' ? [dialog.person.value, dialog.person.placeholder] : null,
                 contexts: [draft.contexts, dialog.contexts.placeholder],
                 tags: [draft.tags, dialog.tags.placeholder],
                 dates: dates.map(({ field, model }) => ({

@@ -246,10 +246,27 @@ fun OrganizeDialog(model: InboxViewModel, open: JSONObject) = with(model.menu) {
                         PickerRow(picker.getString("accessibilityLabel"), picker.getString("value"), !locked && !picker.optBoolean("disabled")) { organizePicker(name) }
                     }
                 }
-                organize.optJSONObject("waitingFor")?.let { person ->
+                organize.optJSONObject("priority")?.let { priority ->
+                    Section(priority.getString("label")) {
+                        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            for (option in priority.menuObjects("options")) OrganizeChip(option.getString("label"), option.getBoolean("selected"), !locked) {
+                                organizeEdit(option.getJSONObject("edit"))
+                            }
+                        }
+                    }
+                }
+                organize.optJSONObject("person")?.let { person ->
                     Section(person.getString("label")) {
-                        ModalInput(open.optString("typed:delegateWho", person.getString("value")), person.getString("placeholder"), person.getString("label")) {
-                            organizeType("delegateWho", it)
+                        ModalInput(open.optString("typed:delegateWho", person.getString("value")), person.getString("placeholder"), person.getString("label"), enabled = !locked) {
+                            organizeType("delegateWho", it.take(500))
+                        }
+                        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            for (option in person.menuObjects("options")) OrganizeChip(option.getString("label"), option.getBoolean("selected"), !locked) {
+                                organizePerson(option.getJSONObject("edit"))
+                            }
+                            for (suggestion in person.menuObjects("suggestions")) OrganizeChip(suggestion.getString("name"), false, !locked) {
+                                organizePerson(suggestion.getJSONObject("edit"))
+                            }
                         }
                     }
                 }

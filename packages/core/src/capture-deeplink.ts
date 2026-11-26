@@ -124,6 +124,10 @@ export function parseOpenFeatureUrl(rawUrl: string): OpenFeaturePayload | null {
 export type EntityOpenKind = 'task' | 'project' | 'area';
 export type EntityOpenPayload = { kind: EntityOpenKind; id: string };
 
+export function buildEntityOpenUrl(kind: EntityOpenKind, id: string, scheme = 'mindwtr'): string {
+    return `${scheme}://open?${kind}=${encodeURIComponent(id)}`;
+}
+
 const ENTITY_OPEN_PARAM_KINDS: EntityOpenKind[] = ['task', 'project', 'area'];
 
 

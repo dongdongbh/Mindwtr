@@ -308,6 +308,7 @@ export const frOverrides: Record<string, string> = {
         'keybindings.focusSidebar': 'Déplacer le focus d\'un panneau vers la gauche',
         'keybindings.focusContent': 'Déplacer le focus d\'un panneau vers la droite',
         'keybindings.goInbox': 'Accédez à la boîte de réception',
+        'keybindings.goForward': 'Suivant',
         'keybindings.goNext': 'Aller aux prochaines actions',
         'keybindings.goAgenda': 'Aller aux priorités du jour',
         'keybindings.goProjects': 'Aller aux Projets',

@@ -276,13 +276,13 @@ describe('native host contract: selection mode', () => {
                 timeEstimatesEnabled: true,
                 t,
             });
-            const { draft, statuses, dates, waitingFor, contexts, tags, ...rest } = view.organize!;
-            const { statuses: _statuses, dates: _dates, waitingFor: _waitingFor, contexts: _contexts, tags: _tags, ...dialogRest } = dialog;
+            const { draft, statuses, dates, person, contexts, tags, ...rest } = view.organize!;
+            const { statuses: _statuses, dates: _dates, person: corePerson, contexts: _contexts, tags: _tags, ...dialogRest } = dialog;
             expect(draft).toEqual({ ...EMPTY_BULK_ORGANIZE_DRAFT, ...ORGANIZE });
             expect(rest).toEqual(dialogRest);
             expect(statuses.map(({ edit: _edit, ...status }) => status)).toEqual(dialog.statuses);
             expect(dates.map((date) => [date.field, date.label])).toEqual(dialog.dates.map((date) => [date.field, date.label]));
-            expect(waitingFor).toEqual({ ...dialog.waitingFor, value: 'Alice' });
+            expect(person).toEqual(corePerson);
             expect([contexts, tags]).toEqual([{ ...dialog.contexts, value: '@desk' }, { ...dialog.tags, value: 'q4' }]);
 
             expect(dates[0]).toMatchObject({
@@ -313,6 +313,38 @@ describe('native host contract: selection mode', () => {
             expect(valid.estimate?.timeEstimate).toBe('custom:75');
             useTaskStore.setState(({ settings }) => ({ settings: { ...settings, features: { ...settings.features, timeEstimates: false } } }));
             expect(read({ draft: valid.draft }).estimate).toBeNull();
+        });
+
+        it('offers priority and person edits independently of the selected tasks\' status', async () => {
+            freezeClock();
+            const { host } = await open();
+            const taskIds = ['i-milk', 'i-read'];
+            const read = (organize: { draft?: Partial<BulkOrganizeDraft>; edit?: unknown } = {}) => value(host.getBulkActions({
+                list: 'inbox', taskIds, organize,
+            })).organize!;
+            const initial = read();
+            expect(initial.priority?.options.find((option) => option.selected)?.value).toBe(BULK_ORGANIZE_KEEP);
+            expect(initial.person.options.find((option) => option.selected)?.value).toBe(BULK_ORGANIZE_KEEP);
+            const partial = read({ draft: initial.draft, edit: { type: 'setText', field: 'delegateWho', value: 'Ali' } });
+            const alice = partial.person.suggestions.find(({ name }) => name === 'Alice');
+            expect(alice).toBeDefined();
+            const person = read({ draft: partial.draft, edit: alice?.edit });
+            const priority = read({ draft: person.draft, edit: { type: 'setPriority', value: 'high' } });
+            expect(value(await host.runBulkAction({ requestId: requestId(), list: 'inbox',
+                action: withRevisions(host, 'inbox', { type: 'organize', taskIds, draft: priority.draft }) })).changed).toBe(true);
+            const selected = () => taskIds.map((id) => {
+                const task = useTaskStore.getState()._tasksById.get(id);
+                return [task?.status, task?.priority, task?.assignedTo];
+            });
+            expect(selected()).toEqual([['inbox', 'high', 'Alice'], ['inbox', 'high', 'Alice']]);
+
+            const noPerson = read({ draft: priority.draft, edit: { type: 'setPerson', value: BULK_ORGANIZE_NONE } });
+            const clear = read({ draft: noPerson.draft, edit: { type: 'setPriority', value: BULK_ORGANIZE_NONE } });
+            useTaskStore.setState(({ settings }) => ({ settings: { ...settings, features: { ...settings.features, priorities: false } } }));
+            expect(read({ draft: clear.draft }).priority).toBeNull();
+            expect(value(await host.runBulkAction({ requestId: requestId(), list: 'inbox',
+                action: withRevisions(host, 'inbox', { type: 'organize', taskIds, draft: clear.draft }) })).changed).toBe(true);
+            expect(selected()).toEqual([['inbox', 'high', undefined], ['inbox', 'high', undefined]]);
         });
 
         it('keeps a date the user is still typing in the organize dialog and only blocks Apply', async () => {

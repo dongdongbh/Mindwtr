@@ -2073,6 +2073,19 @@ describe('native host contract', () => {
                 .toMatchObject({ ok: true, value: { matches: [{ value: '@saved unused', text: '@saved unused, ' }] } });
             expect(host.getTaskEditorSuggestions({ id: 'edit', field: 'tags', query: 'saved', limit: 4 }))
                 .toMatchObject({ ok: true, value: { matches: [{ value: '#saved unused', text: '#saved unused, ' }] } });
+            expect(host.getTaskEditorSuggestions({ id: 'edit', field: 'contexts', query: '@OFFICE', limit: 1 }))
+                .toMatchObject({ ok: true, value: { browse: expect.arrayContaining([
+                    expect.objectContaining({ token: '@OFFICE', selected: true }),
+                    expect.objectContaining({ token: '@office', selected: false }),
+                    expect.objectContaining({ token: '@home', selected: false }),
+                    expect.objectContaining({ token: '@offsite', selected: false }),
+                    expect.objectContaining({ token: '@saved unused', selected: false }),
+                    expect.objectContaining({ token: '@Seasonal Planning', selected: false }),
+                ]) } });
+            expect(host.getTaskEditorSuggestions({ id: 'edit', field: 'tags', query: '', limit: 1 }))
+                .toMatchObject({ ok: true, value: { browse: [
+                    { token: '#launch', selected: false }, { token: '#saved unused', selected: false },
+                ] } });
             expect(contexts.ok && contexts.value.draftValue).toBe('@o');
             expect(host.getTaskEditorSuggestions({ id: 'edit', field: 'tags', query: '', limit: 4 }))
                 .toMatchObject({ ok: true, value: { matches: [], quick: [{ value: '#launch', selected: false, text: '#launch' }] } });
@@ -2088,6 +2101,28 @@ describe('native host contract', () => {
             ]) {
                 expect(host.getTaskEditorSuggestions(input as never)).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
             }
+        });
+
+        it('saves a browsed tag with punctuation and reopens the exact tag as selected', async () => {
+            const host = createNativeHostContract();
+            getData.mockResolvedValue(editorData([editTask({ tags: ['#Client', '#client'] })]));
+            expect(await host.activate({ writeSafetyReady: true })).toEqual({ ok: true, value: null });
+            const token = '#Research, "Planning" \\ backlog';
+            await useTaskStore.getState().addTag(token);
+
+            const base = '#Client, #client';
+            const suggestions = host.getTaskEditorSuggestions({ id: 'edit', field: 'tags', query: base, limit: 1 });
+            if (!suggestions.ok) throw new Error(suggestions.error.message);
+            const choice = suggestions.value.browse?.find((item) => item.token === token);
+            expect(choice).toMatchObject({ selected: false });
+            if (!choice || !suggestions.value.draftTokens) throw new Error('Expected browsable token text');
+            const tags = [...suggestions.value.draftTokens, choice.text].join(', ');
+            expect(await host.saveTaskDraft({ id: 'edit', base: { tags: base }, patch: { tags }, requestId: newRequestId() })).toMatchObject({ ok: true });
+            expect(useTaskStore.getState()._tasksById.get('edit')?.tags).toEqual(['#Client', '#client', token]);
+            expect(host.getTaskEditorModel({ id: 'edit' })).toMatchObject({ ok: true, value: { draft: { tags } } });
+            expect(host.getTaskEditorSuggestions({ id: 'edit', field: 'tags', query: tags, limit: 1 })).toMatchObject({
+                ok: true, value: { draftValue: tags, browse: expect.arrayContaining([expect.objectContaining({ token, selected: true })]) },
+            });
         });
 
         it('rejects read-only tasks and invalid drafts without writing', async () => {

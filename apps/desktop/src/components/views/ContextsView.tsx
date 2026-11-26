@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback, useRef, type DragEvent, type KeyboardEvent } from 'react';
+import { useState, useEffect, useLayoutEffect, useMemo, useCallback, useRef, type DragEvent, type KeyboardEvent } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import {
     useTaskStore,
@@ -69,6 +69,7 @@ import {
     sanitizeContextsViewState,
     subscribeContextsTokenSelection,
     type ContextsViewGroupBy,
+    type ContextsViewSelection,
 } from '../../lib/contexts-view-state';
 import { CONTEXTS_AXES, groupTasks, type TaskGroup } from './list/next-grouping';
 import { GroupedTaskList } from './list/GroupedTaskSections';
@@ -91,7 +92,7 @@ const hasContext = (task: Task) => (task.contexts?.length || 0) > 0 || (task.tag
 const CONTEXTS_GROUP_COLLAPSE_STORAGE_KEY = 'mindwtr:view:contexts:groups:v1';
 const CLEAR_SELECTION_OPTION = '__clear__';
 
-export function ContextsView() {
+export function ContextsView({ onSelectionChange }: { onSelectionChange?: (selection: ContextsViewSelection) => void } = {}) {
     const [sidebarCollapsed, setSidebarCollapsed] = usePersistedViewState(
         'mindwtr:view:contexts:sidebar-collapsed:v1', false,
         (value) => value === true,
@@ -156,6 +157,9 @@ export function ContextsView() {
     const selectedContexts = persistedViewState.selectedContexts;
     const noContextSelected = selectedContexts.includes(NO_CONTEXT_TOKEN);
     const matchMode = persistedViewState.matchMode;
+    useLayoutEffect(() => {
+        onSelectionChange?.({ selectedContexts, matchMode });
+    }, [matchMode, onSelectionChange, selectedContexts]);
     const statusFilters = persistedViewState.statusFilters;
     const selectedStatusSet = useMemo(() => new Set(statusFilters), [statusFilters]);
     const sortBy = resolveNonDoneTaskSortBy(settings?.taskSortBy, settings);
@@ -215,10 +219,10 @@ export function ContextsView() {
     const clearStatusFilters = useCallback(() => {
         setStatusFilters(() => []);
     }, [setStatusFilters]);
-    useEffect(() => subscribeContextsTokenSelection(({ selectedContext: nextSelectedContext }) => {
-        setSelectedContext(nextSelectedContext);
+    useLayoutEffect(() => subscribeContextsTokenSelection((selection) => {
+        setPersistedViewState((current) => ({ ...current, ...selection }));
         setSearchQuery('');
-    }), [setSelectedContext]);
+    }), [setPersistedViewState]);
 
 
     const { projectById: projectMap, visibleTasks: activeTasks } = useVisibleTaskContext();

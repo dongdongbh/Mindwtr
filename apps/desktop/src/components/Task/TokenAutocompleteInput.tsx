@@ -1,5 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { FocusEventHandler, KeyboardEventHandler, RefObject } from 'react';
+import { formatTaskTokenInput, getTaskTokenInputSegments } from '@mindwtr/core';
 
 import { cn } from '../../lib/utils';
 import { isImeComposing } from '../../lib/ime';
@@ -29,21 +30,25 @@ type TokenAutocompleteInputProps = {
     onBlur?: FocusEventHandler<HTMLInputElement>;
     onKeyDown?: KeyboardEventHandler<HTMLInputElement>;
     onAcceptToken?: (token: string) => void;
+    quotedTokens?: boolean;
 };
 
 const NO_ACTIVE_OPTION = -1;
 
-const getTokenSegment = (text: string, caret: number): TokenSegment | null => {
+const getTokenSegment = (text: string, caret: number, quotedTokens: boolean): TokenSegment | null => {
     const safeCaret = Math.max(0, Math.min(caret, text.length));
     const before = text.slice(0, safeCaret);
-    const separatorIndex = Math.max(before.lastIndexOf(','), before.lastIndexOf('\n'));
-    const segmentStart = separatorIndex + 1;
+    const segment = quotedTokens
+        ? getTaskTokenInputSegments(text, true).find(({ start, end }) => safeCaret >= start && safeCaret <= end)
+        : undefined;
+    if (segment?.quoted) return null;
+    const segmentStart = segment?.start ?? Math.max(before.lastIndexOf(','), before.lastIndexOf('\n')) + 1;
     const segmentText = before.slice(segmentStart);
     if (!segmentText.trim()) return null;
 
     const leadingWhitespaceLength = segmentText.match(/^\s*/)?.[0].length ?? 0;
     const tokenStart = segmentStart + leadingWhitespaceLength;
-    const tokenText = before.slice(tokenStart);
+    const tokenText = text.slice(tokenStart, safeCaret);
     return {
         start: tokenStart,
         end: safeCaret,
@@ -80,6 +85,7 @@ export function TokenAutocompleteInput({
     onBlur,
     onKeyDown,
     onAcceptToken,
+    quotedTokens = false,
 }: TokenAutocompleteInputProps) {
     const localRef = useRef<HTMLInputElement>(null);
     const mergedRef = inputRef ?? localRef;
@@ -118,14 +124,14 @@ export function TokenAutocompleteInput({
     };
 
     const updateSegment = (input: HTMLInputElement) => {
-        setSegment(getTokenSegment(input.value, input.selectionStart ?? input.value.length));
+        setSegment(getTokenSegment(input.value, input.selectionStart ?? input.value.length, quotedTokens));
         setSelectedIndex(NO_ACTIVE_OPTION);
     };
 
     const resolveSegment = (): { text: string; segment: TokenSegment } | null => {
         const input = mergedRef.current;
         const text = input?.value ?? valueRef.current;
-        const nextSegment = getTokenSegment(text, input?.selectionStart ?? text.length) ?? segment;
+        const nextSegment = getTokenSegment(text, input?.selectionStart ?? text.length, quotedTokens) ?? segment;
         return nextSegment ? { text, segment: nextSegment } : null;
     };
 
@@ -150,7 +156,7 @@ export function TokenAutocompleteInput({
             return;
         }
 
-        const next = replaceTokenSegment(active.text, active.segment, token);
+        const next = replaceTokenSegment(active.text, active.segment, quotedTokens ? formatTaskTokenInput([token]) : token);
         valueRef.current = next.value;
         onChange(next.value);
         closeOptions();

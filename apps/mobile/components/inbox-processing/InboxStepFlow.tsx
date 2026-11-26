@@ -275,6 +275,7 @@ export function InboxStepFlow({ controller, mode }: { controller: Controller; mo
           {                                                                 }
           {step === 'file' && (
             <InboxContextSection
+              key={controller.currentTask?.id}
               t={t}
               tc={tc}
               show={controller.showTagsField}
@@ -288,6 +289,7 @@ export function InboxStepFlow({ controller, mode }: { controller: Controller; mo
               setNewContext={controller.setNewContext}
               addCustomContextMobile={controller.addCustomContextMobile}
               tokenSuggestions={controller.tokenSuggestions}
+              tokenCatalog={controller.tokenCatalog}
               applyTokenSuggestion={controller.applyTokenSuggestion}
               contextCopilotSuggestions={controller.contextCopilotSuggestions}
               tagCopilotSuggestions={controller.tagCopilotSuggestions}
@@ -300,6 +302,7 @@ export function InboxStepFlow({ controller, mode }: { controller: Controller; mo
 
   const renderContextRow = () => (
     <InboxContextSection
+      key={controller.currentTask?.id}
       t={t}
       tc={tc}
       show={controller.showContextsField}
@@ -313,6 +316,7 @@ export function InboxStepFlow({ controller, mode }: { controller: Controller; mo
       setNewContext={controller.setNewContext}
       addCustomContextMobile={controller.addCustomContextMobile}
       tokenSuggestions={controller.tokenSuggestions}
+      tokenCatalog={controller.tokenCatalog}
       applyTokenSuggestion={controller.applyTokenSuggestion}
       contextCopilotSuggestions={controller.contextCopilotSuggestions}
       tagCopilotSuggestions={controller.tagCopilotSuggestions}

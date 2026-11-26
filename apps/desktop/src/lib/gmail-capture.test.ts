@@ -183,11 +183,16 @@ describe('Gmail capture controller', () => {
     });
 
     it('acknowledges an empty page and bounds backlog work to ten pages', async () => {
-        const { controller, options } = create({ poll: vi.fn(async () => batch({ messages: [], hasMore: true })) });
+        const emptyPage = batch({ messages: [], hasMore: true });
+        const poll = vi.fn(async () => emptyPage).mockResolvedValueOnce({ ...emptyPage, skippedUnsupported: 2 });
+        const { controller, options } = create({ poll });
         await controller.pollNow();
         expect(options.addTasks).not.toHaveBeenCalled();
         expect(options.poll).toHaveBeenCalledTimes(10);
         expect(options.commit).toHaveBeenCalledTimes(10);
+        expect(options.logInfo).toHaveBeenCalledExactlyOnceWith('Gmail capture advanced past unsupported messages', {
+            releaseCheck: 'v1.3.10/gmail-unsupported-mime', count: '2',
+        }, true);
     });
 
     it('stops revoked access until reconnect and retries network errors next interval', async () => {

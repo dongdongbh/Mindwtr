@@ -4,6 +4,7 @@ import {
     applyTaskDraftPatch,
     clearInvalidTaskDraftSection,
     flushPendingSave,
+    formatTaskTokenInput,
     collectFocusEligibilityTasks,
     getFocusStarBlockedText,
     generateUUID,
@@ -752,14 +753,14 @@ export function useTaskEditState({
             pendingDraft = setTaskDraftField(
                 pendingDraft,
                 'contexts',
-                parseTokenList(contextInputDraft, '@').join(', '),
+                formatTaskTokenInput(parseTokenList(contextInputDraft, '@')),
             );
         }
         if (isTagInputFocused) {
             pendingDraft = setTaskDraftField(
                 pendingDraft,
                 'tags',
-                parseTokenList(tagInputDraft, '#').join(', '),
+                formatTaskTokenInput(parseTokenList(tagInputDraft, '#')),
             );
         }
         return isTaskEditDraftDirty({ ...taskEditDraft, draft: pendingDraft }, currentTask);
@@ -896,8 +897,8 @@ export function useTaskEditState({
                 descriptionDraftRef.current = nextDescription;
                 setDescriptionDraft(nextDescription);
                 checklistDraftRef.current = '';
-                setContextInputDraft((liveTask.contexts ?? []).join(', '));
-                setTagInputDraft((liveTask.tags ?? []).join(', '));
+                setContextInputDraft(formatTaskTokenInput(liveTask.contexts ?? []));
+                setTagInputDraft(formatTaskTokenInput(liveTask.tags ?? []));
                 setIsContextInputFocused(false);
                 setIsTagInputFocused(false);
                 setEditTab(resolveInitialTaskEditTab(defaultTab, liveTask));

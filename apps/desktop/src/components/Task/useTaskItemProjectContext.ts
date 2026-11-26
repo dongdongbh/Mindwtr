@@ -1,7 +1,7 @@
 import { getProjectAccentColor } from '@mindwtr/core';
 import { useEffect, useMemo, useState } from 'react';
 import type { Project, Section, Task, TaskDraftSetter, Area } from '@mindwtr/core';
-import { getFrequentTaskTokens, getPersonOptionNames, getRetainedTaskContexts, getSavedTaxonomyTokens, getUsedTaskTokens, useTaskStore,
+import { getFrequentTaskTokens, getPersonOptionNames, getTaskTokenCatalog, useTaskStore,
     baseTextCollator,
 } from '@mindwtr/core';
 
@@ -22,12 +22,12 @@ const normalizeTokenOption = (token: string, prefix: '@' | '#'): string => {
     return bareToken ? `${prefix}${bareToken}` : '';
 };
 
-const uniquePrefixedTokenOptions = (tokens: string[], prefix: '@' | '#'): string[] => {
+const uniquePrefixedTokenOptions = (tokens: string[], prefix: '@' | '#', ignoreCase = false): string[] => {
     const seen = new Set<string>();
     const result: string[] = [];
     tokens.forEach((token) => {
         const normalized = normalizeTokenOption(token, prefix);
-        const key = normalized.toLowerCase();
+        const key = ignoreCase ? normalized.toLowerCase() : normalized;
         if (!normalized || seen.has(key)) return;
         seen.add(key);
         result.push(normalized);
@@ -103,21 +103,18 @@ export function useTaskItemProjectContext({
         }
         if (!loadTokenOptions) return;
 
-        const allTagOptions = uniquePrefixedTokenOptions(
-            [...getUsedTaskTokens(storeTasks, (candidate) => candidate.tags), ...getSavedTaxonomyTokens(settings, 'tag')],
-            '#'
-        );
+        const tokenCatalog = getTaskTokenCatalog(retainedTasks, settings.taxonomy);
+        const allTagOptions = uniquePrefixedTokenOptions(tokenCatalog.tags, '#');
         const frequentTagOptions = uniquePrefixedTokenOptions(
             getFrequentTaskTokens(storeTasks, (candidate) => candidate.tags, 8),
-            '#'
+            '#',
+            true,
         );
-        const allContextOptions = uniquePrefixedTokenOptions(
-            [...getRetainedTaskContexts(retainedTasks), ...getSavedTaxonomyTokens(settings, 'context')],
-            '@'
-        );
+        const allContextOptions = uniquePrefixedTokenOptions(tokenCatalog.contexts, '@');
         const frequentContextOptions = uniquePrefixedTokenOptions(
             getFrequentTaskTokens(storeTasks, (candidate) => candidate.contexts, 5),
-            '@'
+            '@',
+            true,
         );
         setTagOptions(sortTokenOptions(allTagOptions));
         setPopularTagOptions(frequentTagOptions);

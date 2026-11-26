@@ -362,6 +362,7 @@ export const jaOverrides: Record<string, string> = {
         'keybindings.focusSidebar': 'フォーカスを1つ左のパネルへ移す',
         'keybindings.focusContent': 'フォーカスを1つ右のパネルへ移す',
         'keybindings.goInbox': 'インボックスへ移動',
+        'keybindings.goForward': '進む',
         'keybindings.goNext': '次のアクションへ移動',
         'keybindings.goAgenda': 'フォーカスへ移動',
         'keybindings.goProjects': 'プロジェクトへ移動',

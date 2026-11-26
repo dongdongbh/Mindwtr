@@ -17,8 +17,10 @@ import {
 import { TASK_STATUS_ICONS } from '../../../lib/task-status-icons';
 import {
     createCustomTimeEstimate,
+    formatTaskTokenInput,
     formatTimeEstimateLabel,
     getTaskContextMatches,
+    getTaskTokenInputSegments,
     isCustomTimeEstimate,
     parseTimeEstimateInput,
     tFallback,
@@ -34,6 +36,7 @@ import { cn } from '../../../lib/utils';
 import { isImeComposing } from '../../../lib/ime';
 import { STATUS_PILL_ACTIVE_CLASSES } from '../../../lib/status-colors';
 import { PriorityFlag } from '../PriorityFlag';
+import { TokenPicker } from '../TokenPicker';
 import {
     QUICK_ADD_FIELD_TOKENS,
     QuickAddTokenBadge,
@@ -68,24 +71,21 @@ const ENERGY_OPTION_ICONS: Record<TaskEnergyLevel, LucideIcon> = {
 const simplePrefixedTokenPattern = /^[@#][^\s,]+$/u;
 const customTimeEstimateOptionValue = '__custom';
 
-const canonicalToken = (value: string): string =>
-    value.trim().replace(/^[@#]/, '').toLowerCase();
+const unprefixedToken = (value: string): string => value.trim().replace(/^[@#]/, '');
+const canonicalToken = (value: string): string => unprefixedToken(value).toLowerCase();
 
 const isSimplePrefixedToken = (value: string): boolean =>
     simplePrefixedTokenPattern.test(value.trim());
 
 const splitTokens = (value: string): string[] =>
-    value
-        .split(',')
-        .flatMap((item) => {
-            const trimmed = item.trim();
-            if (!trimmed) return [];
-            const whitespaceTokens = trimmed.split(/\s+/).filter(Boolean);
-            if (whitespaceTokens.length > 1 && whitespaceTokens.every(isSimplePrefixedToken)) {
-                return whitespaceTokens;
-            }
-            return [trimmed];
-        });
+    getTaskTokenInputSegments(value).flatMap(({ token, quoted }) => {
+        if (!token) return [];
+        const whitespaceTokens = token.split(/\s+/).filter(Boolean);
+        if (!quoted && whitespaceTokens.length > 1 && whitespaceTokens.every(isSimplePrefixedToken)) {
+            return whitespaceTokens;
+        }
+        return [token];
+    });
 
 const uniqueOptions = (options: string[]): string[] => {
     const seen = new Set<string>();
@@ -111,10 +111,11 @@ const matchesOption = (option: string, query: string): boolean => {
 
 const getCurrentTokenBounds = (value: string, cursor: number | null): { start: number; end: number } => {
     const index = typeof cursor === 'number' ? cursor : value.length;
-    const beforeCursor = value.slice(0, index);
-    const afterCursor = value.slice(index);
-    let tokenStart = beforeCursor.lastIndexOf(',') + 1;
-    const segmentBeforeCursor = beforeCursor.slice(tokenStart);
+    const segment = getTaskTokenInputSegments(value).find(({ start, end }) => index >= start && index <= end);
+    let tokenStart = segment?.start ?? index;
+    const tokenEnd = segment?.end ?? value.length;
+    if (segment?.quoted) return { start: tokenStart, end: tokenEnd };
+    const segmentBeforeCursor = value.slice(tokenStart, index);
     const activeAfterSpaceMatch = segmentBeforeCursor.match(/\s+([^\s,]*)$/u);
     if (activeAfterSpaceMatch?.index !== undefined && activeAfterSpaceMatch[1]) {
         const priorTokens = segmentBeforeCursor.slice(0, activeAfterSpaceMatch.index).trim().split(/\s+/);
@@ -123,15 +124,14 @@ const getCurrentTokenBounds = (value: string, cursor: number | null): { start: n
             tokenStart += activeAfterSpaceMatch.index + activeAfterSpaceMatch[0].length - activeAfterSpaceMatch[1].length;
         }
     }
-    const nextComma = afterCursor.indexOf(',');
-    const tokenEnd = nextComma === -1 ? value.length : index + nextComma;
     return { start: tokenStart, end: tokenEnd };
 };
 
 const getCurrentTokenQuery = (value: string, cursor: number | null): string => {
     const { start } = getCurrentTokenBounds(value, cursor);
     const index = typeof cursor === 'number' ? cursor : value.length;
-    return value.slice(start, index).trim();
+    const query = value.slice(start, index).trim();
+    return query.startsWith('"') ? '' : query;
 };
 
 const getTokensOutsideCurrentQuery = (value: string, cursor: number | null): string[] => {
@@ -150,14 +150,13 @@ const replaceCurrentToken = (value: string, cursor: number | null, token: string
         ...splitTokens(value.slice(end)),
     ];
     const seen = new Set<string>();
-    return nextTokens
+    return formatTaskTokenInput(nextTokens
         .filter((item) => {
-            const key = canonicalToken(item);
+            const key = unprefixedToken(item);
             if (seen.has(key)) return false;
             seen.add(key);
             return true;
-        })
-        .join(', ');
+        }));
 };
 
 function SuggestionList({
@@ -330,10 +329,11 @@ function ToggleTokenField({
         () => new Set(getTokensOutsideCurrentQuery(value, cursor).map(canonicalToken)),
         [cursor, value]
     );
-    const suggestionOptions = useMemo(
-        () => uniqueOptions([...suggestions, ...options]),
+    const knownTokens = useMemo(
+        () => [...suggestions, ...options],
         [options, suggestions]
     );
+    const suggestionOptions = useMemo(() => uniqueOptions(knownTokens), [knownTokens]);
     const filteredSuggestions = useMemo(() => {
         if (!focused || !query) return [];
         const trimmedQuery = query.trim().toLowerCase();
@@ -354,6 +354,12 @@ function ToggleTokenField({
         setCursor(null);
         setFocused(false);
         requestAnimationFrame(() => inputRef.current?.focus());
+    };
+
+    const toggleToken = (token: string, keyFor: (value: string) => string) => {
+        const key = keyFor(token);
+        const remaining = currentTokens.filter((item) => keyFor(item) !== key);
+        onChange(formatTaskTokenInput(remaining.length === currentTokens.length ? [...currentTokens, token] : remaining));
     };
 
     const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
@@ -416,6 +422,7 @@ function ToggleTokenField({
                     onSelect={selectSuggestion}
                 />
             </div>
+            <TokenPicker t={t} label={label} tokens={knownTokens} selected={currentTokens} onToggle={(token) => toggleToken(token, unprefixedToken)} />
             <div className="flex flex-wrap gap-2 pt-1">
                 {options.map((token) => {
                     const isActive = currentTokens.some((item) => canonicalToken(item) === canonicalToken(token));
@@ -423,12 +430,7 @@ function ToggleTokenField({
                         <button
                             key={token}
                             type="button"
-                            onClick={() => {
-                                const nextTokens = isActive
-                                    ? currentTokens.filter((item) => canonicalToken(item) !== canonicalToken(token))
-                                    : [...currentTokens, token];
-                                onChange(nextTokens.join(', '));
-                            }}
+                            onClick={() => toggleToken(token, canonicalToken)}
                             className={cn(
                                 'text-[10px] px-2 py-0.5 rounded-full border transition-colors',
                                 isActive

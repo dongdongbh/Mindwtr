@@ -334,6 +334,7 @@ export const deOverrides: Record<string, string> = {
         'keybindings.focusSidebar': 'Fokus einen Bereich nach links verschieben',
         'keybindings.focusContent': 'Fokus einen Bereich nach rechts verschieben',
         'keybindings.goInbox': 'Zum Eingang gehen',
+        'keybindings.goForward': 'Vorwärts',
         'keybindings.goNext': 'Zu Nächste Aktionen gehen ',
         'keybindings.goAgenda': 'Zu Fokus gehen',
         'keybindings.goProjects': 'Zu Projekte gehen',

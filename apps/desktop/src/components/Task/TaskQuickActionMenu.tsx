@@ -13,6 +13,8 @@ import { createPortal } from 'react-dom';
 import { Calendar, CalendarClock, Check, ChevronRight, Copy, Flag, Folder, ListChecks, Pencil, Tag, Trash2 } from 'lucide-react';
 import {
     buildTaskMovePatch,
+    formatTaskTokenInput,
+    splitTaskTokenInput,
     getAdvancedReviewDate,
     getChecklistMoveTargets,
     isDueForReview,
@@ -128,12 +130,7 @@ const suppressDismissClick = () => {
     window.addEventListener('dragstart', cleanup, { capture: true, once: true });
 };
 
-const parseTokenInput = (value: string) => Array.from(new Set(
-    value
-        .split(',')
-        .map((token) => token.trim())
-        .filter(Boolean)
-));
+const parseTokenInput = (value: string) => [...new Set(splitTaskTokenInput(value))];
 
 const preserveFocusedDatePanelLayout = (event: ReactMouseEvent<HTMLDivElement>) => {
 
@@ -229,7 +226,7 @@ export function TaskQuickActionMenu({
             ? { kind: 'area', id: task.areaId }
             : { kind: 'none' };
     const initialSectionDraft = task.projectId ? task.sectionId || '' : '';
-    const initialContextsDraft = task.contexts?.join(', ') || '';
+    const initialContextsDraft = formatTaskTokenInput(task.contexts ?? []);
     const [startDateDraft, setStartDateDraft] = useState(initialStartDraft.date);
     const [startTimeDraft, setStartTimeDraft] = useState(initialStartDraft.time);
     const [dueDateDraft, setDueDateDraft] = useState(initialDueDraft.date);
@@ -329,7 +326,7 @@ export function TaskQuickActionMenu({
                 ? { kind: 'area', id: task.areaId }
                 : { kind: 'none' });
         setSectionDraft(task.projectId ? task.sectionId || '' : '');
-        setContextsDraft(task.contexts?.join(', ') || '');
+        setContextsDraft(formatTaskTokenInput(task.contexts ?? []));
         contextsBaseRef.current = task;
     }, [task.areaId, task.contexts, task.dueDate, task.id, task.projectId, task.reviewAt, task.startTime]);
 
@@ -608,7 +605,7 @@ export function TaskQuickActionMenu({
         } else if (panelId === 'checklist') {
             setChecklistQuery('');
         } else if (panelId === 'contexts') {
-            setContextsDraft(task.contexts?.join(', ') || '');
+            setContextsDraft(formatTaskTokenInput(task.contexts ?? []));
             contextsBaseRef.current = task;
         }
         setActivePanel(panelId);

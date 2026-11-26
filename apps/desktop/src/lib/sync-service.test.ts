@@ -3564,6 +3564,22 @@ describe('SyncService testability hooks', () => {
         expect(fetchSpy).toHaveBeenCalledOnce();
     });
 
+    it('stops WebDAV verification before sending a request when the stored password cannot be read', async () => {
+        const { fetchSpy } = createTestWebdavCapabilityFetch();
+        __syncServiceTestUtils.setDependenciesForTests({
+            getTauriFetch: async () => fetchSpy as unknown as typeof fetch,
+            invoke: async () => { throw new Error('Credential binding does not match'); },
+            isTauriRuntime: () => true,
+        });
+
+        await expect(SyncService.testWebDavConnection({
+            url: 'https://example.com/webdav',
+            username: 'alice',
+            hasPassword: true,
+        })).rejects.toThrow('Could not read the saved WebDAV password');
+        expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
     it('reuses the stored WebDAV password when settings only expose hasPassword', async () => {
         const { fetchSpy } = createTestWebdavCapabilityFetch();
         const invoke = vi.fn(async (command: string) => {

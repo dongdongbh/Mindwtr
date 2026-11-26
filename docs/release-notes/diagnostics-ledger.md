@@ -62,11 +62,23 @@ The v1.3.6 task-editor correction is confirmed by the visible disappearance of t
 
 - **`v1.3.10/desktop-regional-date`** — `apps/desktop/src/main.tsx`, #1499. Launch the desktop app with an English UI and Portuguese regional settings. Diagnostics records `Desktop regional date formatting initialized` with `outcome=configured` after startup applies the regional format. With System default selected, check that a task due 23 November displays day before month in both the row and its editor.
 
+- **`v1.3.10/native-editor-legacy-tokens`** — `packages/core/src/native-task-editor-save-checkpoint.ts`. Resume a native editor save checkpoint written by the older picker with a single context or tag containing two space-separated prefixed words. Diagnostics records `Native editor checkpoint accepted legacy token format` with `outcome=validated` when the checkpoint matches its save request.
+
+- **`v1.3.10/desktop-navigation-history`** — `apps/desktop/src/App.tsx`. Move between two desktop views, then use the mouse Back and Forward buttons or Alt+Left and Alt+Right. Verify that each command restores the expected view and records `Desktop navigation history replayed`, `direction=back` or `direction=forward`, and `source=keyboard`, `source=mouse`, or `source=gtk-mouse`. The latter confirms the Linux GTK button reached the app. The marker contains no view, filter, or task data. (#1623)
+
+- **`v1.3.10/gmail-unsupported-mime`** — `packages/core/src/gmail-capture.ts`. On a Gmail test build, label an attachment-only message and an email with inline text, then check Gmail capture. The text email is imported and Diagnostics shows `Gmail capture advanced past unsupported messages` with the `count` of messages bypassed on the committed page. Bypassed messages keep their Gmail label and receive no local receipt. The line includes no account, label, message ID, or content.
+
+- **`v1.3.10/webdav-password-read`** — Desktop `sync-service.ts`. When a stored WebDAV password cannot be read, look for `Saved WebDAV password unavailable` and `outcome=unavailable` before the request. No endpoint or credential is included.
+
 - **`v1.3.10/attachment-task-link`** — Desktop `use-task-deep-link.ts`. Open a copied task link from an attachment. Look for `Task link route requested` with `outcome=opened` or `missing`. No task ID or URL is logged.
 
 - **`v1.3.10/widget-shortcut-filter`** — RN mobile `focus.tsx`. Opening a separate saved Focus list records `Saved list kept Today widget filter` with `outcome=preserved`. The marker confirms the filter was preserved. Check widget rendering on the Home Screen.
 
 - **`v1.3.10/ai-area-suggestion`** — #1608. In the desktop or mobile task editor or Inbox, accept a configured-provider Area suggestion. The marker records acceptance into the draft, without task text, names or IDs.
+
+- **`v1.3.10/apple-project-event`** — `packages/core/src/external-calendar-feeds.ts`. On iPhone, open a project’s event picker with an enabled Apple calendar. Look for `Apple calendar event identities loaded` and a positive count. Verify the selected occurrence separately after reopening and syncing. No calendar, account, or event details are logged.
+
+- **`v1.3.10/native-project-calendar-partial`** — `packages/core/src/native-host-contract-project-calendar-reference.ts`. With a working calendar subscription and a failing device calendar read, open the native project event picker. Look for `Native project calendar kept subscription events` when it offers a subscribed event or resolves an existing subscription link. Verify that the offered event can be linked and reopened. No event or calendar details are logged.
 
 - **`v1.3.10/store-attachment-access`** — Desktop `src-tauri/src/install.rs`. On Windows Store startup, look for `Store attachment directory registration` with `outcome=registered`. Then preview an existing attachment and verify the WebDAV switch separately. The marker confirms scope registration only and contains no path or filename. (#1607)
 
@@ -80,6 +92,10 @@ The v1.3.6 task-editor correction is confirmed by the visible disappearance of t
 
 - **`v1.3.10/local-api-section-write`** — `apps/desktop/src-tauri/src/local_api.rs`. Create or rename a project section through the desktop Local API. After commit, expect `outcome=created`, `existing`, `renamed`, or `unchanged`. (#1595)
 
+- **`v1.3.10/local-api-repeating-project-step`** — `apps/desktop/src-tauri/src/local_api.rs`. Try creating a recurring task in a repeating project, adding recurrence to a step, or moving a recurring task there. Expect the Local API to refuse the write and Diagnostics to show `Desktop Local API rejected individual recurrence in a repeating project` with `outcome=rejected`. No task or project details are logged.
+
+- **`v1.3.10/local-api-repeating-project-completion`** — `apps/desktop/src-tauri/src/local_api.rs`. Complete a step with an existing daily recurrence in a repeating project through the Local API. Confirm the task is done, no individual successor exists, and Diagnostics shows `Desktop Local API skipped individual recurrence for a repeating project` with `outcome=suppressed`. No task or project details are logged.
+
 - **`v1.3.10/preview-backdated-completion`** — React Native `apps/mobile/components/task-edit/use-task-edit-state.ts` and native Android `InboxViewModel.kt`. Long-press Mark Done from the task preview and choose a date and time. After the owned save is acknowledged, expect `Preview task saved with selected completion time` with `platform=rn` or `platform=android` and `outcome=saved`. No task text, identifier, timestamp or duration is logged. (#835)
 
 - **`v1.3.10/windows-regional-date`** — `apps/desktop/src/main.tsx`. After restarting Mindwtr on Windows, `outcome=native` confirms the current user's regional locale and short-date pattern were read. Check the System default date example against Windows. (#1594)
@@ -87,6 +103,12 @@ The v1.3.6 task-editor correction is confirmed by the visible disappearance of t
 - **`v1.3.10/project-repeat-interval-migration`** — `apps/desktop/src-tauri/src/storage.rs`. Opening a desktop database with the former monthly repeat column records this marker once the migration commits.
 
 - **`v1.3.10/repeat-project`** — `packages/core/src/store-projects/project-actions.ts`. Completing a repeating project saves its next run. Look for `Next project run saved` after completion.
+
+- **`v1.3.10/desktop-shared-attachment`** — `apps/desktop/src/components/Task/useTaskItemAttachments.ts`. On desktop with sync off, complete a repeating project that has a task file attachment. Reactivate the original project, remove that attachment from its task and save. The next run's attachment should still open, and Diagnostics should show `Persisted task attachment file retained during editor cleanup`. The marker records that editor cleanup kept a previously saved file and contains no paths, filenames or IDs.
+
+- **`v1.3.10/desktop-attachment-cleanup-owner`** — `apps/desktop/src-tauri/src/storage.rs`. Run desktop Attachment cleanup on a removed managed file. `Desktop attachment ownership checked before local cleanup` records `outcome=absent` when the file was removed or already missing, and `outcome=retained` when the durable library could not confirm removal. No paths, filenames or IDs are logged.
+
+- **`v1.3.10/attachment-remote-owner-deferred`** — `packages/core/src/attachment-cleanup.ts`. When attachment cleanup cannot finish a local ownership check, `Remote attachment cleanup deferred pending local ownership check` counts associated remote objects held for retry. No remote identifiers, paths or filenames are logged.
 
 - **`v1.3.10/native-project-repeat`** — `packages/core/src/store-projects/project-actions.ts` (`logNativeProjectRunCreated`, called once the prepared Complete's save lands). On native Android, set a project to repeat every 2 weeks in Project details, then select Complete. The log must show `Next project run saved` with `releaseCheck=v1.3.10/native-project-repeat` and `outcome=created`. No titles or IDs are logged.
 
@@ -1541,7 +1563,7 @@ Original tags remain for unconfirmed paths; closed #1270, #1297 and #1298 diagno
 
 - **`v1.3.2/automation-failed-operation-settled`** — `scripts/mindwtr-automation-core.ts`, after a failed operation successfully drains pending saves while its original profile adapter still owns the singleton store. Message: `Automation failed operation pending work settled`; fields: `releaseCheck` only, on stderr. A rejected task capture after project creation may retain the project in its original profile; the next profile must receive none of that snapshot. A terminal settlement failure retains the original operation error, emits no marker, and still cannot redirect queued data to another profile. No content, identifiers, paths or credentials are logged.
 
-- **`v1.3.2/dictation-store-files-protected`** — desktop `apps/desktop/src/components/Task/useTaskItemAttachments.ts`, when draft reset or unmount suppresses deletion of a file generation observed in the store after the editor's initial baseline. Message: `Store attachment files protected during draft settlement`; fields: `releaseCheck` only, forced with debug logging off. The file must remain after cancelling retained dictation, while truly uncommitted draft files can still be cleaned. Durable save settlement clears this protection and retains normal deletion behavior. No content, identifiers or paths are logged.
+- **`v1.3.2/dictation-store-files-protected`** — desktop `apps/desktop/src/components/Task/useTaskItemAttachments.ts`, when draft settlement preserves a file observed in the store after the editor's initial baseline. Message `Store attachment files protected during draft settlement`, forced with debug logging off. The file remains after saving or cancelling retained dictation. The editor can still remove abandoned draft-only files. No content, identifiers or paths are logged.
 
 - **`v1.3.2/cloud-quick-add-capture`** — `apps/cloud/src/server.ts`, after the single durable document write for `POST /v1/tasks`. Message: `Cloud quick-add capture saved`; fields: `releaseCheck` only. The task must retain parsed natural dates and link to an eligible existing or newly created project. Explicit props override parsed metadata; invalid dates and later validation failures persist neither task nor project and emit no success marker. The marker covers title-only capture too. No titles, identifiers, paths, tokens or raw input are logged.
 

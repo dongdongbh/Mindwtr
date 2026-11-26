@@ -3754,8 +3754,21 @@ private struct InboxBulkOrganizeDialog: View {
                 }
             }
             destination("project"); destination("area")
-            if view["waitingFor"] is CoreObject {
-                input("delegateWho", part: view.object("waitingFor"))
+            if view["priority"] is CoreObject {
+                let priority = view.object("priority")
+                Text(priority.text("label")).rnFont(14, .semibold)
+                organizeChoices(priority.objects("options"), field: "priority")
+            }
+            if view["person"] is CoreObject {
+                let person = view.object("person")
+                input("delegateWho", part: person, maxLength: 500)
+                organizeChoices(person.objects("options"), field: "person")
+                AppChipFlow {
+                    ForEach(Array(person.objects("suggestions").enumerated()), id: \.offset) { index, suggestion in
+                        organizeChip(suggestion.text("name"), selected: false, id: "person-suggestion-\(index)",
+                                     edit: suggestion.object("edit"))
+                    }
+                }
             }
             ForEach(Array(view.objects("dates").enumerated()), id: \.offset) { _, dateField in
                 AnyView(date(dateField))
@@ -3773,23 +3786,29 @@ private struct InboxBulkOrganizeDialog: View {
     private func estimate(_ part: CoreObject) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(part.text("label")).rnFont(14, .semibold)
-            AppChipFlow {
-                let options = part.objects("options")
-                ForEach(options.indices, id: \.self) { index in
-                    let option = options[index]
-                    Button { model.editInboxBulkOrganize(option.object("edit")) } label: {
-                        Text(option.text("label")).rnFont(14).padding(.horizontal, 12).padding(.vertical, 10)
-                            .frame(minHeight: 44).foregroundStyle(option.flag("selected") ? palette.onTint : palette.text)
-                            .background(option.flag("selected") ? palette.tint : palette.filter, in: RoundedRectangle(cornerRadius: 12))
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain).disabled(locked)
-                    .accessibilityAddTraits(option.flag("selected") ? .isSelected : [])
-                    .accessibilityIdentifier(prefix + "-estimate-" + option.text("value"))
-                }
-            }
+            organizeChoices(part.objects("options"), field: "estimate")
             if part["custom"] is CoreObject { input("estimateText", part: part.object("custom"), maxLength: 100) }
         }
+    }
+    private func organizeChoices(_ options: [CoreObject], field: String) -> some View {
+        AppChipFlow {
+            ForEach(options.indices, id: \.self) { index in
+                let option = options[index]
+                organizeChip(option.text("label"), selected: option.flag("selected"),
+                             id: field + "-" + option.text("value"), edit: option.object("edit"))
+            }
+        }
+    }
+    private func organizeChip(_ label: String, selected: Bool, id: String, edit: CoreObject) -> some View {
+        Button { model.editInboxBulkOrganize(edit) } label: {
+            Text(label).rnFont(14).padding(.horizontal, 12).padding(.vertical, 10)
+                .frame(minHeight: 44).foregroundStyle(selected ? palette.onTint : palette.text)
+                .background(selected ? palette.tint : palette.filter, in: RoundedRectangle(cornerRadius: 12))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain).disabled(locked)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+        .accessibilityIdentifier(prefix + "-" + id)
     }
     private func destination(_ kind: String) -> some View {
         let part = view.object(kind)

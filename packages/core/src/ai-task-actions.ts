@@ -1,6 +1,7 @@
 
 
 
+import { formatTaskTokenInput, splitTaskTokenInput } from './task-token-input';
 import type {
     AIAreaCandidate,
     BreakdownInput,
@@ -83,9 +84,7 @@ export function getTaskCopilotParts(
 
 export const formatTaskCopilotApplied = formatCaptureModalCopilotApplied;
 
-const splitDraftTokens = (value: string | undefined) => (
-    (value ?? '').split(',').map((token) => token.trim()).filter(Boolean)
-);
+const splitDraftTokens = (value: string | undefined) => splitTaskTokenInput(value ?? '');
 
 
 export function applyTaskCopilotParts(
@@ -97,8 +96,8 @@ export function applyTaskCopilotParts(
     const estimate = parts.find((part) => part.kind === 'timeEstimate')?.value;
     const tags = parts.filter((part) => part.kind === 'tag').map((part) => part.value);
     const patch: Partial<Pick<TaskDraft, 'contexts' | 'tags' | 'timeEstimate'>> = {};
-    if (context) patch.contexts = Array.from(new Set([...splitDraftTokens(draft.contexts), context])).join(', ');
-    if (tags.length) patch.tags = Array.from(new Set([...splitDraftTokens(draft.tags), ...tags])).join(', ');
+    if (context) patch.contexts = formatTaskTokenInput([...new Set([...splitDraftTokens(draft.contexts), context])]);
+    if (tags.length) patch.tags = formatTaskTokenInput([...new Set([...splitDraftTokens(draft.tags), ...tags])]);
     const timeEstimate = estimate && timeEstimatesEnabled ? estimate as TimeEstimate : undefined;
     if (timeEstimate) patch.timeEstimate = timeEstimate;
     return { ...(context ? { context } : {}), tags, ...(timeEstimate ? { timeEstimate } : {}), patch };
@@ -193,7 +192,7 @@ export function getTaskClarifySuggestionEdit(
 ): { title?: string; patch: Partial<Pick<TaskDraft, 'timeEstimate' | 'contexts'>> } {
     const patch: Partial<Pick<TaskDraft, 'timeEstimate' | 'contexts'>> = {};
     if (suggested.timeEstimate) patch.timeEstimate = suggested.timeEstimate;
-    if (suggested.context) patch.contexts = Array.from(new Set([...splitDraftTokens(draftContexts), suggested.context])).join(', ');
+    if (suggested.context) patch.contexts = formatTaskTokenInput([...new Set([...splitDraftTokens(draftContexts), suggested.context])]);
     return { ...(suggested.title ? { title: suggested.title } : {}), patch };
 }
 

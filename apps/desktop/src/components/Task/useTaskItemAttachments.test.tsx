@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it, vi, beforeEach } from 'vitest';
 import { act, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import type { DatabaseSync } from 'node:sqlite';
 import * as core from '@mindwtr/core';
 import { useTaskStore, type Attachment, type Task } from '@mindwtr/core';
 import { readFile } from '@tauri-apps/plugin-fs';
@@ -436,7 +441,7 @@ describe('useTaskItemAttachments resetAttachmentState orphan cleanup', () => {
         expect(removeMock).not.toHaveBeenCalledWith(storeGeneration.uri);
     });
 
-    it('removes the managed copy when a converted link persists, keeps it on cancel', async () => {
+    it('keeps the persisted managed copy after link conversion or cancellation', async () => {
 
 
         const legacy = {
@@ -478,7 +483,7 @@ describe('useTaskItemAttachments resetAttachmentState orphan cleanup', () => {
             result.current.resetAttachmentState([savedPointer]);
             await Promise.resolve();
         });
-        expect(removeMock).toHaveBeenCalledWith('/data/mindwtr/attachments/legacy-1.docx');
+        expect(removeMock).not.toHaveBeenCalled();
     });
 
     it('does not remove a file that was already on the task', async () => {
@@ -504,7 +509,7 @@ describe('useTaskItemAttachments resetAttachmentState orphan cleanup', () => {
         expect(result.current.editAttachments).toEqual(taskWithAttachment.attachments);
     });
 
-    it('removes a managed file only after its soft-delete is saved', async () => {
+    it('keeps a previously persisted file when the attachment removal becomes the new baseline', async () => {
         const existingAttachment = {
             id: 'existing-1',
             kind: 'file' as const,
@@ -531,11 +536,11 @@ describe('useTaskItemAttachments resetAttachmentState orphan cleanup', () => {
             result.current.resetAttachmentState([committedDelete]);
             await Promise.resolve();
         });
-        expect(removeMock).toHaveBeenCalledWith(existingAttachment.uri);
+        expect(removeMock).not.toHaveBeenCalled();
         expect(deleted.deletedAt).toBeTruthy();
     });
 
-    it('waits for durable persistence before deleting a baseline-owned file', async () => {
+    it('reports baseline file retention after durable persistence even when the draft still shows the old generation', async () => {
         const existingAttachment = {
             id: 'existing-1',
             kind: 'file' as const,
@@ -545,22 +550,100 @@ describe('useTaskItemAttachments resetAttachmentState orphan cleanup', () => {
             updatedAt: new Date().toISOString(),
         };
         const taskWithAttachment = { ...task, attachments: [existingAttachment] };
-        const { result } = renderHook(() => useTaskItemAttachments({ task: taskWithAttachment, t }));
+        const { result, unmount } = renderHook(() => useTaskItemAttachments({ task: taskWithAttachment, t }));
 
         act(() => result.current.removeAttachment(existingAttachment.id));
-        const committedDelete = result.current.editAttachments[0];
         act(() => result.current.beginAttachmentSave());
-        await act(async () => {
-            result.current.resetAttachmentState([committedDelete]);
-            await Promise.resolve();
-        });
-        expect(removeMock).not.toHaveBeenCalled();
+        expect(logInfoMock).not.toHaveBeenCalled();
 
         await act(async () => {
-            result.current.settlePersistedAttachmentSave([committedDelete]);
-            await Promise.resolve();
+            result.current.settlePersistedAttachmentSave([{ ...existingAttachment, uri: '/data/mindwtr/attachments/existing-1.new.txt' }]);
+            unmount();
         });
-        expect(removeMock).toHaveBeenCalledWith(existingAttachment.uri);
+        expect(removeMock).not.toHaveBeenCalled();
+        expect(logInfoMock).toHaveBeenCalledWith('Persisted task attachment file retained during editor cleanup', {
+            scope: 'attachment', extra: { releaseCheck: 'v1.3.10/desktop-shared-attachment' }, force: true,
+        });
+    });
+
+    it.each([
+        ['a live task', undefined],
+        ['a task in Trash', task.updatedAt],
+    ])('keeps a managed file after a saved removal when %s still references it', async (_owner, deletedAt) => {
+        const attachment: Attachment = {
+            id: 'source-file',
+            kind: 'file',
+            title: 'notes.txt',
+            uri: '/data/mindwtr/attachments/source-file.txt',
+            createdAt: task.createdAt,
+            updatedAt: task.updatedAt,
+        };
+        const source = { ...task, attachments: [attachment] };
+        const nextRun = { ...task, id: 'next-run-task', deletedAt, attachments: [{ ...attachment, id: 'next-run-file' }] };
+        const previousTasks = useTaskStore.getState()._allTasks;
+        const { result } = renderHook(() => useTaskItemAttachments({ task: source, t }));
+
+        act(() => result.current.removeAttachment(attachment.id));
+        const committedAttachments = result.current.editAttachments;
+        act(() => result.current.beginAttachmentSave());
+        try {
+            await act(async () => {
+                useTaskStore.setState({ _allTasks: [{ ...source, attachments: committedAttachments }, nextRun] });
+                result.current.settlePersistedAttachmentSave(committedAttachments);
+            });
+
+            expect(removeMock).not.toHaveBeenCalled();
+            expect(logInfoMock).toHaveBeenCalledWith('Persisted task attachment file retained during editor cleanup', {
+                scope: 'attachment',
+                extra: { releaseCheck: 'v1.3.10/desktop-shared-attachment' },
+                force: true,
+            });
+        } finally {
+            act(() => useTaskStore.setState({ _allTasks: previousTasks }));
+        }
+    });
+
+    it('keeps a saved file referenced by a competing SQLite writer before the renderer learns about it', async () => {
+        const attachment: Attachment = {
+            id: 'durable-file', kind: 'file', title: 'Notes', uri: '/data/mindwtr/attachments/durable-file.txt',
+            createdAt: task.createdAt, updatedAt: task.updatedAt,
+        };
+        const source = { ...task, attachments: [attachment] };
+        const other = { ...task, id: 'local-api-task', attachments: [{ ...attachment, id: 'local-api-file' }] };
+        const directory = mkdtempSync(join(tmpdir(), 'mindwtr-attachment-settlement-'));
+        const databasePath = join(directory, 'mindwtr.sqlite');
+        const sqlite: typeof import('node:sqlite') = createRequire(import.meta.url)('node:sqlite');
+        const db = new sqlite.DatabaseSync(databasePath);
+        const otherWriter = new sqlite.DatabaseSync(databasePath);
+        const previousTasks = useTaskStore.getState()._allTasks;
+        const insert = (connection: DatabaseSync, value: Task) => connection.prepare(
+            'INSERT INTO tasks (id, title, status, attachments, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?)',
+        ).run(value.id, value.title, value.status, JSON.stringify(value.attachments), value.createdAt, value.updatedAt);
+        try {
+            db.exec(core.SQLITE_BASE_SCHEMA);
+            insert(db, source);
+            act(() => useTaskStore.setState({ _allTasks: [source] }));
+            const { result } = renderHook(() => useTaskItemAttachments({ task: source, t }));
+            act(() => result.current.removeAttachment(attachment.id));
+            act(() => result.current.beginAttachmentSave());
+            const committedAttachments = result.current.editAttachments;
+            db.prepare('UPDATE tasks SET attachments = ? WHERE id = ?').run(JSON.stringify(committedAttachments), source.id);
+            insert(otherWriter, other);
+            expect(db.prepare('SELECT attachments FROM tasks WHERE id = ?').get(other.id))
+                .toEqual({ attachments: JSON.stringify(other.attachments) });
+            await act(async () => {
+                useTaskStore.setState({ _allTasks: [{ ...source, attachments: committedAttachments }] });
+                result.current.settlePersistedAttachmentSave(committedAttachments);
+            });
+
+            expect(useTaskStore.getState()._tasksById.has(other.id)).toBe(false);
+            expect(removeMock).not.toHaveBeenCalled();
+        } finally {
+            act(() => useTaskStore.setState({ _allTasks: previousTasks }));
+            otherWriter.close();
+            db.close();
+            rmSync(directory, { recursive: true, force: true });
+        }
     });
 
     it('preserves draft and baseline files when a submitted save never becomes durable', async () => {

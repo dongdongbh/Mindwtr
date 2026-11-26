@@ -245,11 +245,17 @@ internal fun committedTokens(typed: String, shown: EditorSuggestions?): String? 
     shown?.takeIf { it.text == typed }?.draftValue?.takeIf { it != typed }
 
 
-data class EditorSuggestions(val text: String, val draftValue: String, val matches: List<Pair<String, String>>, val quick: List<Triple<String, Boolean, String>>) {
+data class EditorSuggestions(val text: String, val draftValue: String, val matches: List<Pair<String, String>>, val quick: List<Triple<String, Boolean, String>>,
+    val browse: List<TokenBrowseOption> = emptyList(), val draftTokens: List<String> = emptyList()) {
+    fun toggledToken(option: TokenBrowseOption): String =
+        (if (option.selected) draftTokens.filterNot { it == option.text } else draftTokens + option.text).joinToString(", ")
+
     companion object {
         fun parse(text: String, json: JSONObject) = EditorSuggestions(text, json.getString("draftValue"),
             json.getJSONArray("matches").objects().map { it.getString("value") to it.getString("text") },
-            json.getJSONArray("quick").objects().map { Triple(it.getString("value"), it.getBoolean("selected"), it.getString("text")) })
+            json.getJSONArray("quick").objects().map { Triple(it.getString("value"), it.getBoolean("selected"), it.getString("text")) },
+            tokenBrowseOptions(json.optJSONArray("browse")),
+            json.optJSONArray("draftTokens")?.let { tokens -> List(tokens.length()) { tokens.getString(it) } }.orEmpty())
     }
 }
 
@@ -857,6 +863,10 @@ private fun EditorField(model: InboxViewModel, editor: TaskEditor, id: String, l
                 !locked, singleLine = true, description = label, tag = "editor-$id",
                 commit = { committedTokens(editor.input(id), suggestions[id])?.let { editInput(id, it) } })
             val shown = suggestions[id]?.takeIf { it.text == editor.input(id) }
+            TokenBrowsePicker("editor-${editor.id}-$id", label, t("settings.browse"), t("common.search"), t("common.noMatches"),
+                suggestions[id]?.browse.orEmpty(), !locked && shown != null) { option ->
+                shown?.let { editInput(id, it.toggledToken(option)) }
+            }
             if (shown != null && shown.matches.isNotEmpty()) SuggestionMenu(shown.matches, !locked) { editInput(id, it) }
             if (shown != null && shown.quick.isNotEmpty()) FlowRow(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)) {

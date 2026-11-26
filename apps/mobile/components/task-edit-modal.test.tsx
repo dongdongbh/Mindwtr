@@ -867,6 +867,31 @@ describe('TaskEditModal', () => {
     const contextField = form.props.renderField('contexts');
     expect(contextField.props.contextTokenSuggestions).toEqual(['@arch-saved', '@archived-only']);
     expect(contextField.props.frequentContextSuggestions).toEqual(['@active-only']);
+    expect(contextField.props.contextSuggestionPool).toEqual(expect.arrayContaining(['@arch-saved', '@archived-only', '@Seasonal Planning']));
+    expect(contextField.props.contextSuggestionPool).not.toContain('@deleted-only');
+  });
+
+  it('saves and reopens an exact token with commas, quotes and backslashes', async () => {
+    const timestamp = '2026-11-24T00:00:00.000Z';
+    const savedToken = '#Research, "Planning" \\ backlog';
+    const task: Task = { id: 'punctuation', title: 'Punctuation', status: 'next', contexts: [], tags: ['#Client', '#client'],
+      createdAt: timestamp, updatedAt: timestamp };
+    taskEditStore.current!.settings.taxonomy = { tags: [{ token: savedToken, rev: 1, revBy: 'test', updatedAt: timestamp }] };
+    const onSave = vi.fn();
+    let tree!: renderer.ReactTestRenderer;
+    await act(async () => { tree = renderer.create(<TaskEditModal visible task={task} onClose={vi.fn()} onSave={onSave} />); });
+    const field = () => tree.root.findByType('TaskEditFormTab' as any).props.renderField('tags').props;
+    expect(field().tagSuggestionPool).toEqual(expect.arrayContaining(['#Client', '#client', savedToken]));
+    await act(async () => { field().toggleQuickTagToken(savedToken); });
+    const header = tree.root.find((node) => typeof node.props.onDone === 'function' && typeof node.props.onDelete === 'function');
+    await act(async () => { await header.props.onDone(); });
+    expect(onSave).toHaveBeenCalledWith(task.id, expect.objectContaining({ tags: ['#Client', '#client', savedToken] }));
+
+    await act(async () => tree.unmount());
+    const reopened = { ...task, ...onSave.mock.calls[0]?.[1] };
+    await act(async () => { tree = renderer.create(<TaskEditModal visible task={reopened} onClose={vi.fn()} onSave={onSave} />); });
+    expect([...field().selectedTagTokens]).toEqual(['#Client', '#client', savedToken]);
+    await act(async () => tree.unmount());
   });
 
   it('does not focus an editor field without recovered Activity input state', () => {

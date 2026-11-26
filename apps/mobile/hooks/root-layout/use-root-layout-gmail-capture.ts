@@ -22,7 +22,7 @@ export function useRootLayoutGmailCapture({ canonicalDataReady, disabled = false
                 addTasks: (items) => useTaskStore.getState().addTasks(items),
                 flushPendingSave: flushPendingTaskActionSave,
                 initialDelayMs: 1_000,
-                logInfo: (message, extra) => { void logInfo(message, { scope: 'gmail-capture', extra }); },
+                logInfo: (message, extra, force) => { void logInfo(message, { scope: 'gmail-capture', extra, force }); },
             });
             registerGmailCaptureController(controller);
             controller.start();

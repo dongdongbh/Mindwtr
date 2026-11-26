@@ -55,6 +55,7 @@ The native client is a Kotlin and Jetpack Compose app in `apps/android-native`. 
 
 ## Selection mode and Bulk organize
 
+- Bulk organize can set or clear a person or priority independently while keeping each task’s status. Priority requires priorities to be enabled.
 - With Time Estimates enabled, open Contexts › Filters › Time estimate › No estimate. Select tasks › Bulk organize › Time estimate to keep, set or clear their estimates. Setting an estimate removes the task from this filter.
 - Bulk organize status includes Inbox for returning tasks to processing; existing project, notes, tags and dates stay unchanged unless explicitly edited.
 
@@ -66,6 +67,7 @@ The native client is a Kotlin and Jetpack Compose app in `apps/android-native`. 
 
 ## Process Inbox
 
+- In task editing and Inbox processing, open Browse beside Contexts or Tags to search or toggle multiple saved and in-use values. An empty search shows the full list.
 - Reach: Inbox › Process Inbox (N). The header switches between Guided and Quick and has Skip and Close.
 - Selectors: `process-inbox`, `process-title`
 - Code: `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/ProcessInbox.kt`
@@ -577,7 +579,7 @@ The native client is a Kotlin and Jetpack Compose app in `apps/android-native`. 
 - Selectors: `project-calendar-reference`, `project-calendar-link`, `project-calendar-unlink`, `project-calendar-search`, `project-calendar-cancel`, `project-calendar-title`, `project-calendar-date`, `project-calendar-status`, `project-calendar-picker-status`, `project-calendar-save-failed`; each picker row is `project-calendar-event-` plus its index
 - Code: `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/ProjectDetails.kt`, `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/core/CoreHost.kt`, `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/core/WriteJournal.kt`, `packages/core/src/native-host-contract-project-calendar-reference.ts`
 - Checks: `packages/core/src/native-host-contract-project-calendar-reference.test.ts`, `apps/android-native/bundle/host-project-calendar-reference.test.ts`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/core/WriteJournalTest.kt`, `apps/android-native/scripts/check-project-calendar-device.mjs` (phone: link from a local ICS stub, the stored event at once after a restart, "start – end", unlink)
-- Notes: One read-only ICS event reference belongs to the Project. Linking creates no task and changes no calendar event. Ambiguous identities and incomplete feed reads offer no candidates; unavailable feeds show last-known details. Opening a Project reads the stored link first with `summary: true`, which never downloads feeds. Feeds download only when a link exists (to refresh it) or the picker is open, on core's own `projectCalendar` feed slot, so the Project never cancels a Calendar-screen load. Dates show "start – end"; an all-day end moves back one day. Archived Projects are read-only. Explicit unlink persists a null marker. Native writes freeze the selected candidate and Project snapshot before journaling, retain exact retries, and acknowledge only after durable storage.
+- Notes: One read-only ICS event reference belongs to the Project. Linking creates no task and changes no calendar event. If only the device calendar read fails, the picker reports that source and still offers identifiable events from successfully loaded subscriptions. Ambiguous identities and unqualified incomplete reads yield no candidates. Unavailable feeds show last-known details. Opening a Project reads the stored link first with `summary: true`, which never downloads feeds. Feeds download only when a link exists (to refresh it) or the picker is open, on core's own `projectCalendar` feed slot, so the Project never cancels a Calendar-screen load. Dates show "start – end"; an all-day end moves back one day. Archived Projects are read-only. Explicit unlink persists a null marker. Native writes freeze the selected candidate and Project snapshot before journaling, retain exact retries, and acknowledge only after durable storage.
 
 ## Date-only task reminders (#1570)
 

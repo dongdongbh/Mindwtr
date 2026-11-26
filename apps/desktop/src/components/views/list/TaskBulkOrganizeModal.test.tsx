@@ -115,6 +115,32 @@ describe('TaskBulkOrganizeModal', () => {
         expect(onApply).toHaveBeenCalledWith({ status: 'inbox', contexts: [], tags: [] });
     });
 
+    it('sets and clears priority and Assigned To with status kept', () => {
+        const saved = tokenTask('known', { assignedTo: 'Alex Rivera' });
+        act(() => useTaskStore.setState({ _allTasks: [saved] }));
+        const { getByRole, getByLabelText, onApply, queryByLabelText } = renderModal();
+        const person = getByLabelText('Assigned To', { selector: 'input' });
+        const priority = getByLabelText('Priority');
+        const apply = getByRole('button', { name: 'Apply to selected' });
+        fireEvent.change(person, { target: { value: 'Alex' } });
+        expect(document.getElementById(person.getAttribute('list') ?? '')?.querySelector('option')).toHaveValue('Alex Rivera');
+        fireEvent.change(person, { target: { value: '  Alex Rivera  ' } });
+        fireEvent.change(priority, { target: { value: 'high' } });
+        fireEvent.click(apply);
+        expect(onApply).toHaveBeenLastCalledWith({ contexts: [], tags: [], priority: 'high', assignedTo: 'Alex Rivera' });
+
+        fireEvent.click(getByRole('button', { name: 'Unassigned' }));
+        fireEvent.change(priority, { target: { value: '__NONE__' } });
+        fireEvent.click(apply);
+        expect(onApply).toHaveBeenLastCalledWith({ contexts: [], tags: [], priority: null, assignedTo: null });
+
+        act(() => useTaskStore.setState({ settings: { features: { priorities: false } } }));
+        expect(queryByLabelText('Priority')).toBeNull();
+        fireEvent.click(getByRole('button', { name: 'Keep existing' }));
+        fireEvent.click(apply);
+        expect(onApply).toHaveBeenLastCalledWith({ contexts: [], tags: [] });
+    });
+
     it('uses the translated bulk organize label for the heading', () => {
         const { getByRole } = renderModal({
             t: (key) => key === 'bulk.organize' ? '批量整理' : key,

@@ -38,3 +38,16 @@ index 55797275ad434acf0e4dc66e311520d89842a26f..5fa1a574379bf25074ec3d77e792c4d0
              promise.reject("E_EVENT_NOT_SAVED", "Event could not be saved", e)
            }
          }
+diff --git a/ios/Conversions/Conversions.swift b/ios/Conversions/Conversions.swift
+index 259840e8d..0394f366c 100644
+--- a/ios/Conversions/Conversions.swift
++++ b/ios/Conversions/Conversions.swift
+@@ -80,6 +80,8 @@ func serializeCalendar(events: [EKEvent]) -> [[String: Any?]] {
+ 
+ func serializeCalendar(event: EKEvent) -> [String: Any?] {
+   var serializedCalendarEvent = serializeCalendar(item: event, with: dateFormatter)
++  serializedCalendarEvent["externalIdentifier"] = event.calendarItemExternalIdentifier
++  serializedCalendarEvent["isRecurring"] = event.isDetached || !(event.recurrenceRules ?? []).isEmpty
+ 
+   if let startDate = event.startDate {
+     print("StartDate \(dateFormatter.string(from: startDate))")

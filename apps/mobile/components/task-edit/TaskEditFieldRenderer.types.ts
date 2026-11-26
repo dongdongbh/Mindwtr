@@ -50,6 +50,7 @@ export type TaskEditFieldRendererProps = {
     commitTagDraft: () => void;
     checklist: Task['checklist'];
     contextInputDraft: string;
+    contextSuggestionPool: string[];
     contextTokenSuggestions: string[];
     createAssignedToPerson: (name: string) => Promise<Person | null>;
     customWeekdays: RecurrenceWeekday[];
@@ -116,6 +117,7 @@ export type TaskEditFieldRendererProps = {
     showDescriptionPreview: boolean;
     styles: Record<string, any>;
     tagInputDraft: string;
+    tagSuggestionPool: string[];
     tagTokenSuggestions: string[];
     task: Task | null;
     t: (key: string) => string;

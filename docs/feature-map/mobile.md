@@ -71,6 +71,8 @@ Source: `apps/mobile`. Routes live in `apps/mobile/app` (expo-router). Labels be
 
 ## Quick capture sheet
 
+- If the destination section disappears during project capture, **Clear** removes the stale destination and keeps the draft available to save or assign elsewhere.
+
 - Reach: Center Add Task tab button. Also an empty-list action on Inbox.
 - Shortcuts: Long press Add Task to switch text and voice. Deep link `mindwtr:///capture-quick?mode=text&entry=details` opens this sheet over Inbox.
 - Selectors: `quick-capture-adaptive-surface`, `quick-capture-scroll`, `quick-capture-close`, `quick-capture-syntax-help-toggle`, `quick-add-preview`, `quick-date-chips-row`
@@ -154,6 +156,7 @@ Source: `apps/mobile`. Routes live in `apps/mobile/app` (expo-router). Labels be
 ## Bulk selection
 
 - With Time Estimates enabled, open Contexts › Filters › Time estimate › No estimate. Select tasks › Bulk organize › Time estimate to keep, set or clear their estimates. Setting an estimate removes the task from this filter.
+- In Bulk organize, set or clear the person or priority independently. Keep existing preserves each selected task’s value. The priority field requires priorities to be enabled.
 - Bulk organize status includes Inbox for returning tasks to processing; existing project, notes, tags and dates stay unchanged unless explicitly edited.
 
 - Reach: Long press a task row in Inbox, project tasks, Waiting For, Someday, Contexts, or Review. The bar shows Move to, Bulk organize, Range, Add tag, Remove tag, Delete, and Done to exit.
@@ -190,10 +193,12 @@ Source: `apps/mobile`. Routes live in `apps/mobile/app` (expo-router). Labels be
 - Code: `apps/mobile/components/projects-screen/ProjectDetailModal.tsx`, `apps/mobile/components/projects-screen/ProjectCalendarReference.tsx`, `apps/mobile/components/projects-screen/ProjectTaskList.tsx`, `apps/mobile/components/projects-screen/ProjectToSectionModal.tsx`
 - Checks: `apps/mobile/components/projects-screen/ProjectCalendarReference.test.tsx`, `apps/mobile/components/projects-screen/ProjectDetailModal.test.tsx`, `apps/mobile/components/projects-screen/ProjectToSectionModal.test.tsx`, `apps/mobile/components/project-next-action-prompt.test.tsx`, `apps/mobile/components/task-list.test.tsx`, `apps/mobile/tests/capture-modal.test.tsx`
 - Notes: Details › Link calendar event selects an existing read-only event from the next 90 days as the scheduled next step. Search by event title or calendar name across the full upcoming list; at most 200 matches are displayed. Replace and Unlink change only the reference. Elapsed events invite an outcome review; unavailable calendars preserve last known details.
+- On iPhone, enabled Apple device calendars can supply read-only project links. A unique calendar and event occurrence must match; unavailable or ambiguous matches retain the saved title and date.
 - Notes: An Archived project is read-only and accepts no new tasks. Tasks moved in land at the end of the Unsectioned group.
 
 ## Contexts and tags
 
+- In task editing and Inbox processing, open Browse beside Contexts or Tags to search or toggle multiple saved and in-use values. An empty search shows the full list.
 - Reach: Menu › Contexts. Chips list each @context and #tag with a count.
 - Shortcuts: Tap a chip to show only that token. Long press a chip to add it to or remove it from the selection. Deep link route `/contexts?token=@home`.
 - Code: `apps/mobile/components/views/contexts-view.tsx`, `apps/mobile/app/(drawer)/contexts.tsx`, `apps/mobile/app/(drawer)/(tabs)/contexts-tab.tsx`

@@ -94,6 +94,7 @@ App Intents and Siri belong to the RN app. They are not in `apps/ios-native`. Th
 
 ## Inbox bulk selection
 
+- Bulk organize can set or clear a person or priority independently while keeping each task’s status. Priority requires priorities to be enabled.
 - Reach: Inbox › long-press a task card. A bar shows the count and Next, Waiting, Someday, Done, Reference, Add tag, Remove tag, Organize and Delete.
 - Shortcuts: Long-press a card to start selecting. Use the range control to select a range.
 - Selectors: `inbox-bulk-count`, `inbox-bulk-range`, `inbox-bulk-exit`, `inbox-bulk-delete`, `inbox-bulk-confirm`, `inbox-bulk-tag-open`, `inbox-bulk-remove-tag-open`, `inbox-bulk-organize-open`
@@ -103,6 +104,7 @@ App Intents and Siri belong to the RN app. They are not in `apps/ios-native`. Th
 
 ## Process Inbox
 
+- In task editing and Inbox processing, open Browse beside Contexts or Tags to search or toggle multiple saved and in-use values. An empty search shows the full list.
 - Reach: Inbox › Process Inbox (N). The sheet walks one item at a time.
 - Selectors: `process-inbox-sheet`, `process-inbox-title`, `process-inbox-next-action`, `process-inbox-skip`, `process-inbox-delegate-who`, `process-inbox-project-search`, `process-inbox-deferred-projects`, `process-inbox-close`, `process-inbox-toast`
 - Code: `apps/ios-native/App/ProcessInboxSheet.swift`
@@ -187,6 +189,7 @@ App Intents and Siri belong to the RN app. They are not in `apps/ios-native`. Th
 
 ## Projects
 
+- Repeat after completion: Project Details, Weekly Review and the next-action prompt omit Complete for synced repeating projects in the SwiftUI client. Complete those projects on desktop, in the React Native app, or on native Android.
 - Reach: Menu › Projects (or the Quick Access tab when it is set to Projects) › a project. Each list row has a … menu (Move up, Move down, Area), a long press that offers Move up and Move down, a right swipe to Duplicate and a left swipe to Delete, as in RN (#1489). Project Details holds the actions menu (Complete, Duplicate, Delete, Cancel project), Sections, Notes, Tags, Area, attachments and task view options (Show completed, Sort, Filters, Order).
 - Selectors: `projects-scroll`, `projects-create-title`, `projects-create-add`, `projects-tag-filter-toggle`, `project-row-menu-`, `project-row-menu-area-`, `task-swipe-`, `project-row-delete-confirm`, `project-row-error`, `project-detail-title`, `project-back`, `project-actions-menu`, `project-sections-open`, `project-notes-input`, `project-tags-open`, `project-area-open`, `project-task-view-options-button`, `project-attachment-add-link`, `project-bulk-reorder`
 - Code: `apps/ios-native/App/ProjectsScreen.swift`
@@ -430,12 +433,13 @@ App Intents and Siri belong to the RN app. They are not in `apps/ios-native`. Th
 - Compatibility: older clients skip these selective reminders and cannot edit or preserve the new policy reliably. Update every device before using the new modes.
 
 ## Project calendar reference
+- On iPhone, enabled Apple device calendars can supply read-only project links. A unique calendar and event occurrence must match; unavailable or ambiguous matches retain the saved title and date.
 
 - Reach: Projects › open a Project › expand Details › the calendar card (first in Details, as in RN) › Link calendar event, Replace linked event, or Unlink calendar event. The picker opens inside the card. Search the upcoming 90-day events by event title or calendar name.
 - Selectors: `project-calendar-reference`, `project-calendar-link`, `project-calendar-unlink`, `project-calendar-search`, `project-calendar-cancel`, `project-calendar-title`, `project-calendar-date`, `project-calendar-status`, `project-calendar-picker-status`, `project-calendar-save-failed`; each picker row is `project-calendar-event-` plus its index
 - Code: `apps/ios-native/App/ProjectsScreen.swift`, `apps/ios-native/App/CoreModel.swift`, `apps/ios-native/Sources/MindwtrNativeCore/CoreHost.swift`, `packages/core/src/native-host-contract-project-calendar-reference.ts`
 - Checks: `packages/core/src/native-host-contract-project-calendar-reference.test.ts`, `apps/ios-native/Tests/MindwtrNativeCoreTests/CoreHostTests.swift` (testProjectCalendarReference…)
-- Notes: One read-only ICS event reference belongs to the Project. Linking creates no task and changes no calendar event. Ambiguous identities and incomplete feed reads offer no candidates; unavailable feeds show last-known details. Expanding Details reads the stored link first with `summary: true`, which never downloads feeds; feeds download only when a link exists or the picker is open. Dates show "start – end". Archived Projects are read-only. Explicit unlink persists a null marker. Native writes freeze the selected candidate and Project snapshot before journaling, retain exact retries, and acknowledge only after durable storage.
+- Notes: One read-only ICS event reference belongs to the Project. Linking creates no task and changes no calendar event. If only the device calendar read fails, the picker reports that source and still offers identifiable events from successfully loaded subscriptions. Ambiguous identities and unqualified incomplete reads yield no candidates. Unavailable feeds show last-known details. Expanding Details reads the stored link first with `summary: true`, which never downloads feeds; feeds download only when a link exists or the picker is open. Dates show "start – end". Archived Projects are read-only. Explicit unlink persists a null marker. Native writes freeze the selected candidate and Project snapshot before journaling, retain exact retries, and acknowledge only after durable storage.
 
 ## Date-only task reminders (#1570)
 

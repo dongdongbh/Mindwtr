@@ -42,6 +42,7 @@ import {
 import { isSelectableProjectForTaskAssignment } from './project-utils';
 import { resolveFeatureFlags } from './resolve-feature-flags';
 import { getProjectAccentColor } from './task-accent-color';
+import { TASK_EDITOR_PRIORITY_OPTIONS } from './task-editor-model';
 import { getTrashUndoLabel } from './trash-view-model';
 import {
     buildReviewSteps,
@@ -105,7 +106,7 @@ import { useTaskStore } from './store';
 import { themeDescriptor } from './theme-scheme';
 import { EMPTY_BULK_ORGANIZE_DRAFT, type BulkOrganizeDraft, type BulkOrganizeDraftEdit } from './task-list-bulk-actions';
 import { getBulkTrashConfirmation, type ListConfirmation } from './trash-view-model';
-import type { Task, TaskStatus } from './types';
+import type { Project, Task, TaskStatus } from './types';
 
 type NativeHostErrorCode = Extract<NativeHostResult<never>, { ok: false }>['error']['code'];
 type Translate = (key: string) => string;
@@ -113,6 +114,7 @@ type Translate = (key: string) => string;
 export type ReviewViewDeps = {
     readiness: () => NativeHostResult<null>;
     save: () => Promise<NativeHostResult<null>>;
+    canCompleteProject: (project: Project) => boolean;
 
     revision: (now: Date) => string;
     t: () => Translate;
@@ -268,6 +270,7 @@ export type NativeWeeklyReviewItem =
 
         countLabel: string;
         expanded: boolean;
+        completionBlocked?: true;
 
         openLabel: string;
     };
@@ -402,6 +405,7 @@ const isDateValue = (value: unknown) => value === null || (isText(value, 64) && 
 const isOrganizeInput = (value: unknown): value is BulkOrganizeTaskUpdateInput => {
     if (!isObjectRecord(value)) return false;
     const state = useTaskStore.getState();
+    const flags = resolveFeatureFlags(state.settings);
     const optionalId = (key: string, exists: (id: string) => boolean) => (
         !(key in value) || value[key] === null || (isText(value[key]) && exists(value[key] as string))
     );
@@ -417,11 +421,13 @@ const isOrganizeInput = (value: unknown): value is BulkOrganizeTaskUpdateInput =
         && (value.contexts === undefined || isTextList(value.contexts))
         && (value.tags === undefined || isTextList(value.tags))
         && ['startTime', 'dueDate', 'reviewAt'].every((key) => !(key in value) || isDateValue(value[key]))
-        && (value.timeEstimate === undefined || (resolveFeatureFlags(state.settings).timeEstimates
+        && (value.timeEstimate === undefined || (flags.timeEstimates
             && (value.timeEstimate === null || isTimeEstimate(value.timeEstimate))))
+        && (value.priority === undefined || (flags.priorities
+            && (value.priority === null || TASK_EDITOR_PRIORITY_OPTIONS.some((priority) => priority === value.priority))))
         && (!('assignedTo' in value) || value.assignedTo === null || isText(value.assignedTo))
         && Object.keys(value).every((key) => [
-            'status', 'projectId', 'sectionId', 'sectionProjectId', 'areaId', 'contexts', 'tags', 'startTime', 'dueDate', 'reviewAt', 'assignedTo', 'timeEstimate',
+            'status', 'projectId', 'sectionId', 'sectionProjectId', 'areaId', 'contexts', 'tags', 'startTime', 'dueDate', 'reviewAt', 'assignedTo', 'timeEstimate', 'priority',
         ].includes(key));
 };
 const isPicker = (value: unknown) => (
@@ -727,6 +733,7 @@ export function createReviewViewMethods(deps: ReviewViewDeps) {
                 entries.push({ kind: 'item', item: {
                     type: 'project', id: entry.project.id, title: entry.project.title, areaColor: entry.areaColor,
                     badge: entry.badge, countLabel, expanded,
+                    ...(step === 'projects' && !deps.canCompleteProject(entry.project) ? { completionBlocked: true } : {}),
                     openLabel: formatI18nTemplate(t('task.aria.openProject'), { name: entry.project.title }),
                 } });
                 if (expanded) {

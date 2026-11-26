@@ -299,6 +299,7 @@ export const itOverrides: Record<string, string> = {
         'keybindings.focusSidebar': 'Sposta il focus di un pannello a sinistra',
         'keybindings.focusContent': 'Sposta il focus di un pannello a destra',
         'keybindings.goInbox': 'Vai a Entrata',
+        'keybindings.goForward': 'Avanti',
         'keybindings.goNext': 'Vai a Prossime azioni',
         'keybindings.goAgenda': 'Vai a Focus',
         'keybindings.goProjects': 'Vai a Progetti',

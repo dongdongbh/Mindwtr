@@ -1,5 +1,6 @@
 
 export const nlOverrides: Record<string, string> = {
+    'keybindings.goForward': 'Vooruit',
     "settings.fetchLinkTitles": "Paginatitels ophalen",
     "settings.fetchLinkTitlesHint": "Bezoek de gekoppelde website om opgeslagen links op dit apparaat een naam te geven.",
         'inbox.browseProjects': 'Projecten bekijken',

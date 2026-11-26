@@ -12,6 +12,7 @@ import {
     parseAttachmentLinkBatch,
     enterProcessInboxStep,
     getPersonOptionNames,
+    getTaskTokenCatalog,
     findSimilarTasks,
     goBackProcessInboxStep,
     isSelectableProjectForTaskAssignment,
@@ -902,13 +903,15 @@ export function useInboxProcessingController({
     ]);
 
     const showStartButton = inboxCount > 0 && !isProcessing;
+    const taxonomy = settings?.taxonomy;
+    const tokenCatalog = useMemo(() => getTaskTokenCatalog(allTasks, taxonomy), [allTasks, taxonomy]);
 
     const options = useMemo<InboxProcessingOptionLists>(() => ({
         projects,
         sections,
         areas: activeAreas,
-        allContexts,
-        allTags,
+        allContexts: [...new Set([...allContexts, ...tokenCatalog.contexts])],
+        allTags: [...new Set([...allTags, ...tokenCatalog.tags])],
         suggestedContexts,
         suggestedTags,
         personOptions,
@@ -923,6 +926,7 @@ export function useInboxProcessingController({
         suggestedContexts,
         suggestedTags,
         timeEstimateOptions,
+        tokenCatalog,
     ]);
 
     const quickPanelProps = isProcessing && processingTask && processingMode === 'quick'

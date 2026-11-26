@@ -325,6 +325,7 @@ export const csOverrides: Record<string, string> = {
         'keybindings.focusSidebar': 'Přesunout fokus o jeden panel doleva',
         'keybindings.focusContent': 'Přesunout fokus o jeden panel doprava',
         'keybindings.goInbox': 'Přejít do Schránky',
+        'keybindings.goForward': 'Vpřed',
         'keybindings.goNext': 'Přejít na Další kroky',
         'keybindings.goAgenda': 'Přejít na Fokus',
         'keybindings.goProjects': 'Přejít na Projekty',

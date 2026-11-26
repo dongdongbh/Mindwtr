@@ -398,6 +398,7 @@ export const koOverrides: Record<string, string> = {
         'keybindings.focusSidebar': '포커스를 한 패널 왼쪽으로 이동',
         'keybindings.focusContent': '포커스를 한 패널 오른쪽으로 이동',
         'keybindings.goInbox': '수집함으로 이동',
+        'keybindings.goForward': '앞으로',
         'keybindings.goNext': '다음 행동으로 이동',
         'keybindings.goAgenda': '집중로 이동',
         'keybindings.goProjects': '프로젝트로 이동',

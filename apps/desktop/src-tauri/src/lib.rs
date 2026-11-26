@@ -138,8 +138,8 @@ use storage::{
     create_data_snapshot, delete_calendar_sync_entry, get_all_calendar_sync_entries,
     get_calendar_sync_entry, get_data, get_data_path_cmd, get_db_path_cmd,
     get_device_config_path_for_startup, list_data_snapshots, query_tasks, read_data_json,
-    read_data_snapshot, read_sync_encryption_trusted_local, save_data, save_task, search_fts,
-    upsert_calendar_sync_entry,
+    read_data_snapshot, read_sync_encryption_trusted_local, remove_unreferenced_managed_attachment,
+    save_data, save_task, search_fts, upsert_calendar_sync_entry,
 };
 use sync::{
     acquire_file_sync_lease, clear_sync_path, cloud_get_json, cloud_put_json, connect_dropbox,
@@ -2067,6 +2067,7 @@ pub fn run() {
             check_microsoft_store_update,
             get_data,
             read_sync_encryption_trusted_local,
+            remove_unreferenced_managed_attachment,
             read_data_json,
             save_data,
             save_task,
