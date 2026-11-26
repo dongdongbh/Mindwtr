@@ -116,7 +116,7 @@ export type CloudConfig = {
 };
 
 export type AttachmentBackendDeps = {
-    getTauriFetch: () => Promise<typeof fetch | undefined>;
+    getTauriFetch: (webdavFolder?: string) => Promise<typeof fetch | undefined>;
     isTauriRuntimeEnv: () => boolean;
     logSyncInfo: (message: string, extra?: Record<string, string>) => void;
     logSyncWarning: (message: string, error?: unknown, extra?: Record<string, string>) => void;
@@ -275,7 +275,7 @@ const createAttachmentDownloadStagePath = async (
     join: AttachmentDownloadStageOps['join'],
 ): Promise<string> => join(
     managedAttachmentsDir,
-    `.download-${Date.now()}-${Math.random().toString(16).slice(2, 14)}`,
+    `mindwtr-download-${Date.now()}-${Math.random().toString(16).slice(2, 14)}`,
 );
 
 const resolveAttachmentDownloadTarget = async (
@@ -534,7 +534,7 @@ export async function syncWebdavAttachments(
         return null;
     }
 
-    const fetcher = await deps.getTauriFetch();
+    const fetcher = await deps.getTauriFetch(webDavConfig.url);
     const { BaseDirectory, exists, mkdir, readFile, stat, writeFile, remove } = await import('@tauri-apps/plugin-fs');
     const { dataDir, join } = await import('@tauri-apps/api/path');
     const password = await deps.resolveWebdavPassword(webDavConfig);

@@ -345,7 +345,7 @@ export type SyncEncryptionServiceDeps<Lease> = {
     fetch: typeof fetch;
     parseWebdavXml: WebdavXmlParser;
     loadWebDavConfig(): Promise<SyncEncryptionWebDavConfig | null>;
-    webDavRequestOptions(allowInsecureHttp?: boolean): WebDavOptions;
+    webDavRequestOptions(allowInsecureHttp?: boolean, folder?: string): WebDavOptions;
     getDropboxClientId(): Promise<string>;
 
     runDropboxAuthorized<T>(clientId: string, operation: (accessToken: string) => Promise<T>): Promise<T>;
@@ -764,7 +764,7 @@ export const createSyncEncryptionService = <Lease>(deps: SyncEncryptionServiceDe
         if (!config?.url) throw new Error('WebDAV is not configured');
         const baseSyncUrl = getBaseSyncUrl(config.url);
         const requestOptions = {
-            ...deps.webDavRequestOptions(config.allowInsecureHttp),
+            ...deps.webDavRequestOptions(config.allowInsecureHttp, config.url),
             username: config.username,
             password: config.password,
         };

@@ -42,7 +42,7 @@ export type AttachmentCleanupDeps = {
     getCloudProvider: () => Promise<CloudProvider>;
     getDropboxAccessToken: (clientId: string, options?: { forceRefresh?: boolean }) => Promise<string>;
     getDropboxAppKey: () => Promise<string>;
-    getTauriFetch: () => Promise<typeof fetch | undefined>;
+    getTauriFetch: (webdavFolder?: string) => Promise<typeof fetch | undefined>;
     getWebDavConfig: () => Promise<WebDavConfig>;
     isTauriRuntimeEnv: () => boolean;
     logSyncInfo: (message: string, extra?: Record<string, string>) => void;
@@ -189,7 +189,7 @@ export const cleanupOrphanedAttachments = async (
             return undefined;
         }
 
-        const fetcher = await deps.getTauriFetch();
+        const fetcher = await deps.getTauriFetch(webdavConfig?.url);
         const dropboxFetcher = fetcher ?? fetch;
         const webdavPassword = webdavConfig ? await deps.resolveWebdavPassword(webdavConfig) : '';
         let dropboxAccessToken: string | null = null;

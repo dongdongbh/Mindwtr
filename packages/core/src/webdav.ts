@@ -16,6 +16,7 @@ import {
     SYNC_LOCAL_INSECURE_URL_OPTIONS,
     toUint8Array,
 } from './http-utils';
+import { WebdavOriginRejectedError } from './sync-service-utils';
 import { logWarn } from './logger';
 import { traceSection } from './perf-trace';
 import {
@@ -915,6 +916,11 @@ export async function webdavGetFileVersionedWithServerTime(
             const serverNowMs = Number.isFinite(parsedServerNow) ? parsedServerNow : null;
             if (res.status === 404) return { bytes: null, version: null, serverNowMs };
             if (!res.ok) {
+                if (res.status === 401) {
+                    const failure = await readResponseText(res, MAX_ERROR_BODY_BYTES, signal)
+                        .then(text => JSON.parse(text)).catch(() => null);
+                    if (failure?.msg === 'Auth failed: invalid request origin') throw new WebdavOriginRejectedError();
+                }
                 const error = new Error(`WebDAV File GET failed (${res.status})`);
                 (error as { status?: number }).status = res.status;
                 throw error;

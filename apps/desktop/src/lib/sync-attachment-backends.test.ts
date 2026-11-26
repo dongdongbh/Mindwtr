@@ -368,7 +368,7 @@ describe('desktop sync attachment backends', () => {
             const installCall = installerMocks.installAttachmentDownload.mock.calls[0];
             expect(installCall).toBeDefined();
             const [stagedPath, targetPath, expectation, expectedDownloadSha256] = installCall;
-            expect(stagedPath).toMatch(/^\/app-data\/mindwtr\/attachments\/\.download-/);
+            expect(stagedPath).toMatch(/^\/app-data\/mindwtr\/attachments\/mindwtr-download-/);
             expect(targetPath).toBe('/app-data/mindwtr/attachments/attachment-1.txt');
             expect(expectation).toEqual({ kind: 'absent' });
             expect(expectedDownloadSha256).toBe(DOWNLOAD_BYTES_HASH);
@@ -462,7 +462,7 @@ describe('desktop sync attachment backends', () => {
         expect(result).toBe(false);
         const [stagedPath, targetPath, expectation, expectedDownloadSha256] =
             installerMocks.installAttachmentDownload.mock.calls[0];
-        expect(stagedPath).toMatch(/^\/app-data\/mindwtr\/attachments\/\.download-/);
+        expect(stagedPath).toMatch(/^\/app-data\/mindwtr\/attachments\/mindwtr-download-/);
         expect(targetPath).toBe(canonicalPath);
         expect(expectation).toEqual({ kind: 'present', sha256: localBytesHash });
         expect(expectedDownloadSha256).toBe(DOWNLOAD_BYTES_HASH);
@@ -516,7 +516,7 @@ describe('desktop sync attachment backends', () => {
         expect(result).toBe(false);
         const [recordName, stagedPath] = cloudKitMocks.fetchCloudKitAttachmentAsset.mock.calls[0];
         expect(recordName).toBe('attachment-1');
-        expect(stagedPath).toMatch(/^\/app-data\/mindwtr\/attachments\/\.download-/);
+        expect(stagedPath).toMatch(/^\/app-data\/mindwtr\/attachments\/mindwtr-download-/);
         expect(stagedPath).not.toBe(canonicalPath);
         expect(installerMocks.installAttachmentDownload).not.toHaveBeenCalled();
         expect(fsMocks.remove).toHaveBeenCalledWith(stagedPath);
@@ -1580,7 +1580,7 @@ describe('desktop sync attachment backends', () => {
         const result = (await syncCloudKitAttachments(appData, deps)) || appData;
         const stagedPath = cloudKitMocks.fetchCloudKitAttachmentAsset.mock.calls[0]?.[1];
 
-        expect(stagedPath).toMatch(/^\/app-data\/mindwtr\/attachments\/\.download-/);
+        expect(stagedPath).toMatch(/^\/app-data\/mindwtr\/attachments\/mindwtr-download-/);
         expect(fsMocks.remove).toHaveBeenCalledWith(stagedPath);
         expect(installerMocks.installAttachmentDownload).not.toHaveBeenCalled();
         expect(result.tasks[0].attachments?.[0]).toMatchObject({

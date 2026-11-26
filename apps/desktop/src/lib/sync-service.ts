@@ -100,6 +100,7 @@ import {
     runSyncStoreSave,
 } from '@mindwtr/core';
 import { isTauriRuntime } from './runtime';
+import { isLocalWebdavFolder, localWebdavFetch } from './local-webdav';
 import { getTauriHttpFetch } from './tauri-http';
 import { invokeNative } from './tauri-invoke';
 import { reportError } from './report-error';
@@ -625,8 +626,9 @@ async function persistSyncSettings(updates: Partial<AppSettings>): Promise<void>
 const DROPBOX_REDIRECT_URI_FALLBACK = 'http://127.0.0.1:53682/oauth/dropbox/callback';
 const DROPBOX_TEST_TIMEOUT_MS = 15_000;
 
-async function getTauriFetch(): Promise<typeof fetch | undefined> {
-    return syncServiceDependencies.getTauriFetch();
+async function getTauriFetch(webdavFolder?: string): Promise<typeof fetch | undefined> {
+    const transport = await syncServiceDependencies.getTauriFetch();
+    return transport && isLocalWebdavFolder(webdavFolder) ? localWebdavFetch(webdavFolder, transport) : transport;
 }
 
 
@@ -957,7 +959,7 @@ const createDesktopSyncCycleContext = (): DesktopSyncCycleContext => ({
 });
 
 const createFetchWithAbortForContext = async (context: DesktopSyncCycleContext): Promise<typeof fetch> => {
-    const baseFetch = (await getTauriFetch()) ?? fetch;
+    const baseFetch = (await getTauriFetch(context.backend === 'webdav' ? context.webdavConfig?.url : undefined)) ?? fetch;
     return createAbortableFetch(baseFetch, { baseSignal: context.requestAbortController.signal });
 };
 
@@ -1741,7 +1743,10 @@ export class SyncService {
                     allowInsecureHttp: config.allowInsecureHttp,
                 };
             },
-            webDavRequestOptions: (allowInsecureHttp) => ({ allowInsecureHttp, fetcher: tauriOrWebviewFetch }),
+            webDavRequestOptions: (allowInsecureHttp, folder) => ({
+                allowInsecureHttp,
+                fetcher: async (input, init) => ((await getTauriFetch(folder)) ?? fetch)(input, init),
+            }),
             getDropboxClientId: () => SyncService.getDropboxAppKey(),
             runDropboxAuthorized: async (clientId, operation) => operation(await getDropboxAccessTokenDirect(clientId)),
         });
@@ -1913,7 +1918,7 @@ export class SyncService {
         const url = config.url.trim();
         if (!url) throw new Error('WebDAV URL not configured');
         const normalizedUrl = normalizeWebdavUrl(url);
-        const fetcher = await getTauriFetch();
+        const fetcher = await getTauriFetch(url);
 
 
         const password = await resolveWebdavPassword({
@@ -2597,7 +2602,7 @@ export class SyncService {
                 const webdavConfig = context.webdavConfig;
                 if (!webdavConfig?.url) throw new Error('WebDAV URL not configured');
                 const password = await resolveWebdavPassword(webdavConfig);
-                const fetcher = (await getTauriFetch()) ?? fetch;
+                const fetcher = (await getTauriFetch(webdavConfig.url)) ?? fetch;
                 return acquireSyncRemoteMutationFence(
                     createWebdavSyncRemoteMutationFencePort(
                         normalizeWebdavUrl(webdavConfig.url),

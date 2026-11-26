@@ -608,6 +608,17 @@ describe('webdavGetFile download cap', () => {
 });
 
 describe('versioned WebDAV transition byte operations', () => {
+    it.each([
+        ['{"code":-1,"msg":"Auth failed: invalid request origin"}', 'The WebDAV server rejected the request origin (401).'],
+        ['{"msg":"invalid credentials"}', 'WebDAV File GET failed (401)'],
+        ['private server error', 'WebDAV File GET failed (401)'],
+    ])('reports only a recognized origin rejection for a 401 response', async (body, message) => {
+        const fetcher = vi.fn(async () => new Response(body, { status: 401 }));
+        await expect(probeWebdavSyncCompatibility('https://example.com/dav/data.json', { fetcher }))
+            .rejects.toMatchObject({ status: 401, message });
+        expect(fetcher).toHaveBeenCalledTimes(1);
+    });
+
     it('returns bytes and the strong ETag from one GET, and distinguishes missing', async () => {
         const found = await webdavGetFileVersioned('https://example.com/dav/a.bin', {
             fetcher: async () => new Response(new Uint8Array([1, 2]), {

@@ -2620,6 +2620,7 @@ export const en: Record<string, string> = {
         'settings.syncMobile.clearPendingAttachmentDeletes': 'Clear pending attachment deletes?',
         'settings.syncMobile.cloudkitIsRestrictedOnThisDeviceCheckScreenTimeMdm': 'CloudKit is restricted on this device. Check Screen Time, MDM, or iCloud restrictions, then try again.',
         'settings.syncMobile.connectedToDropbox': 'Connected to Dropbox.',
+        'settings.syncMobile.webdavOriginRejected': 'The WebDAV server rejected the request origin (401).',
         'settings.syncMobile.connectionFailed': 'Connection failed',
         'settings.syncMobile.connectionOk': 'Connection OK',
         'settings.syncMobile.disconnected': 'Disconnected',
