@@ -72,7 +72,7 @@ val LABEL_KEYS = listOf(
     "tab.menu", "settings.syncBadgeSyncing", "settings.syncBadgeHealthy", "settings.syncBadgeWarning",
     "waiting.title", "someday.title", "nav.reference", "nav.history", "taskEdit.moreOptions", "common.search",
     "filters.excluded", "filters.remove", "filters.clear", "filters.active", "filters.contexts", "filters.projects", "filters.timeEstimate",
-    "filters.more", "filters.priority", "bulk.selected", "viewSections.add", "viewSections.nameHint", "viewSections.namePlaceholder", "common.all",
+    "filters.more", "filters.priority", "bulk.selected", "viewSections.add", "viewSections.addTask", "viewSections.nameHint", "viewSections.namePlaceholder", "common.all",
 
     "contexts.title", "trash.title", "nav.review", "projects.title", "tab.review", "nav.contexts", "nav.done", "common.delete", "task.aria.delete",
     "common.noMatches", "review.markReviewed", "review.markReviewedDone", "review.advanceWeek", "task.select", "task.deselect",

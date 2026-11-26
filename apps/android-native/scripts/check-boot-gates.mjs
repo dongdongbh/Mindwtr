@@ -10732,6 +10732,39 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     assert.match(source('EntryPoints.kt'), /openedCapture\(it, capture\.getString\("text"\), AutoRecord\.forCaptureLink\(url\)\)/);
 }
 {
+    const firstAt = (text, needles) => needles.map((needle) => text.indexOf(needle)).every((at) => at >= 0)
+        ? needles.map((needle, rank) => [text.indexOf(needle), rank]).sort(([a], [b]) => a - b).map(([, rank]) => rank) : null;
+    const sections = ['status', 'priority', 'estimate', 'project', 'area', 'person', 'dates', 'contexts', 'tags'];
+    const rnOrganize = readFileSync(resolve(app, '../mobile/components/task-list/TaskListBulkOrganizeModal.tsx'), 'utf8');
+    const rnOrder = firstAt(rnOrganize, ['{dialog.statusLabel}', '{priority.label}', '{estimate.label}', '{dialog.project.label}',
+        '{dialog.area.label}', '{person.label}', 'dialog.dates.map', '{dialog.contexts.label}', '{dialog.tags.label}']);
+    const organizeUi = code(bulkUi.slice(bulkUi.indexOf('fun OrganizeDialog(')));
+    const nativeOrder = firstAt(organizeUi, ['organize.getString("statusLabel")', 'organize.optJSONObject("priority")', 'organize.optJSONObject("estimate")',
+        'listOf("project", "area")', 'listOf("project", "area")', 'organize.optJSONObject("person")', 'organize.menuObjects("dates")',
+        'listOf("contexts", "tags")', 'listOf("contexts", "tags")']);
+    assert.deepEqual(rnOrder?.map((rank) => sections[rank]), sections, 'RN Bulk Organize keeps its section order');
+    assert.deepEqual(nativeOrder?.map((rank) => sections[rank]), sections, 'native Bulk Organize lists its sections in RN order');
+    assert.match(organizeUi, /ModalInput\(open\.optString\("typed:\$name", tokens\.getString\("value"\)\), tokens\.getString\("placeholder"\), tokens\.getString\("label"\), enabled = !locked\)/,
+        'Contexts and Tags lock with the rest of the dialog');
+
+    const browse = code(source('TokenBrowsePicker.kt'));
+    assert.doesNotMatch(browse, /Checkbox\(|OutlinedTextField/, 'Browse rows have no Material checkbox and the search box has no floating label, like RN');
+    assert.match(browse, /\.background\(if \(option\.selected\) colors\.filterBg else colors\.cardBg\)/, 'a selected Browse row is tinted filterBg');
+    assert.match(browse, /Text\(option\.token, style = rnText\(14, 400\), color = colors\.text, modifier = Modifier\.weight\(1f\)\)\s+if \(option\.selected\) Icon\(Lucide\.Check, contentDescription = null, tint = colors\.tint, modifier = Modifier\.size\(18\.dp\)\)/,
+        'the token comes first and a trailing check marks the selected row');
+    assert.match(browse, /if \(query\.isEmpty\(\)\) Text\(searchLabel, style = rnText\(14, 400\), color = colors\.secondaryText\)/, 'Search is a placeholder');
+    assert.match(browse, /Text\(noMatchesLabel,[^\n]*\n[^\n]*\n\s+\.semantics \{ liveRegion = LiveRegionMode\.Polite \}\)/, 'No matches is a polite live region');
+
+    const heading = code(projectsUi.slice(projectsUi.indexOf('private fun ProjectSectionHeading('), projectsUi.indexOf('private fun projectTagLabel(')));
+    assert.match(heading, /val addLabel = t\("viewSections\.addTask"\)\.replace\("\{section\}", entry\.title\)/, 'the section Add button reads RN\'s "Add task to {section}"');
+    assert.match(labelsKt, /"viewSections\.addTask"/);
+    assert.match(heading, /Text\(entry\.title\.uppercase\(\), style = rnText\(13, 700, letterSpacing = 0\.6f\), color = if \(entry\.muted\) colors\.secondaryText else colors\.text,/,
+        'the section title uses RN\'s 13 pt text color');
+    assert.match(heading, /Text\("\$\{entry\.count\}", style = rnText\(11, 600\), color = colors\.secondaryText\)/, 'the count is bare, like RN');
+    assert.match(heading, /Icon\(Lucide\.PlusPlain, null,/, 'RN\'s Plus icon');
+    console.log('Browse rows, Bulk Organize order and the project section heading match RN');
+}
+{
     const { hostGateGaps } = await import('../../ios-native/scripts/check-host-gates.mjs');
     assert.deepEqual(hostGateGaps(resolve(app, '../ios-native')), [], 'every iOS app host read must pass its CoreHost.swift gate');
     console.log('iOS host gates admit every menuRead name the app sends and every Organize list core offers');

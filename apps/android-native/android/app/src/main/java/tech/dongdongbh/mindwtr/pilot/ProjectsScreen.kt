@@ -212,7 +212,7 @@ private fun ProjectSectionHeading(entry: DetailSection, enabled: Boolean, toggle
     val colors = LocalTheme.current.colors
     val toggleLabel = t(if (entry.collapsed) "markdown.expand" else "markdown.collapse")
     val spoken = listOfNotNull(entry.title, entry.flowLabel, entry.count.toString()).joinToString(" · ")
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().padding(horizontal = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
         Row(Modifier.weight(1f).heightIn(min = 48.dp)
             .clearAndSetSemantics {
                 text = AnnotatedString(spoken)
@@ -222,20 +222,22 @@ private fun ProjectSectionHeading(entry: DetailSection, enabled: Boolean, toggle
                 testTag = "project-section-heading-${entry.id}"
                 if (enabled) onClick(label = toggleLabel) { toggle(); true } else disabled()
             }
-            .clickable(enabled = enabled, role = Role.Button, onClickLabel = toggleLabel, onClick = toggle).padding(horizontal = 6.dp),
+            .clickable(enabled = enabled, role = Role.Button, onClickLabel = toggleLabel, onClick = toggle),
             horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(if (entry.collapsed) Lucide.ChevronRight else Lucide.ChevronDownPlain, null,
-                tint = colors.secondaryText, modifier = Modifier.size(15.dp))
-            Text(entry.title.uppercase(), style = rnText(12, 700, letterSpacing = 1f), color = colors.secondaryText,
-                maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
-            entry.flowLabel?.let { Text(it, style = rnText(11, 600), color = colors.secondaryText) }
-            Text("(${entry.count})", style = rnText(12, 600), color = colors.secondaryText)
+            Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Icon(if (entry.collapsed) Lucide.ChevronRight else Lucide.ChevronDownPlain, null,
+                    tint = colors.secondaryText, modifier = Modifier.size(15.dp))
+                Text(entry.title.uppercase(), style = rnText(13, 700, letterSpacing = 0.6f), color = if (entry.muted) colors.secondaryText else colors.text,
+                    maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                entry.flowLabel?.let { Text(it, style = rnText(11, 600), color = colors.secondaryText) }
+            }
+            Text("${entry.count}", style = rnText(11, 600), color = colors.secondaryText)
         }
         if (add != null) {
-            val addLabel = "${t("nav.addTask")} · ${entry.title}"
-            IconButton(onClick = add, enabled = enabled, modifier = Modifier
+            val addLabel = t("viewSections.addTask").replace("{section}", entry.title)
+            IconButton(onClick = add, enabled = enabled, modifier = Modifier.size(48.dp)
                 .semantics { contentDescription = addLabel }.testTag("project-section-add-${entry.id}")) {
-                Icon(SettingsIonicons.Add, null, tint = if (enabled) colors.tint else colors.secondaryText, modifier = Modifier.size(22.dp))
+                Icon(Lucide.PlusPlain, null, tint = if (enabled) colors.tint else colors.secondaryText, modifier = Modifier.size(20.dp))
             }
         }
     }

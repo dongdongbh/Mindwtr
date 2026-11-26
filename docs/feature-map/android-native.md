@@ -56,6 +56,7 @@ The native client is a Kotlin and Jetpack Compose app in `apps/android-native`. 
 ## Selection mode and Bulk organize
 
 - Bulk organize can set or clear a person or priority independently while keeping each task’s status. Priority requires priorities to be enabled.
+- Bulk organize lists its sections in RN's order: Status, Priority, Time estimate, Project, Area, Person, dates, Contexts, Tags. Every input locks while a change is saving.
 - With Time Estimates enabled, open Contexts › Filters › Time estimate › No estimate. Select tasks › Bulk organize › Time estimate to keep, set or clear their estimates. Setting an estimate removes the task from this filter.
 - Bulk organize status includes Inbox for returning tasks to processing; existing project, notes, tags and dates stay unchanged unless explicitly edited.
 
@@ -67,7 +68,7 @@ The native client is a Kotlin and Jetpack Compose app in `apps/android-native`. 
 
 ## Process Inbox
 
-- In task editing and Inbox processing, open Browse beside Contexts or Tags to search or toggle multiple saved and in-use values. An empty search shows the full list.
+- In task editing and Inbox processing, open Browse beside Contexts or Tags to search or toggle multiple saved and in-use values. An empty search shows the full list. As in RN, each row shows the value with a check at the end, a selected row is tinted, and No matches is announced.
 - Reach: Inbox › Process Inbox (N). The header switches between Guided and Quick and has Skip and Close.
 - Selectors: `process-inbox`, `process-title`
 - Code: `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/ProcessInbox.kt`
@@ -318,7 +319,7 @@ The native client is a Kotlin and Jetpack Compose app in `apps/android-native`. 
 
 ## Project details
 
-- Add Task keeps the current project open while the capture form is visible. Each project section heading collapses or expands its tasks. The folds stay per project after the project closes or the app restarts, in RN's store (`mindwtr:view:group-collapse:all:v1`, axis `project:<id>`). The section's Add Task button opens capture with that section selected, including when the section is folded or empty. Archived projects allow folding and hide Add Task.
+- Add Task keeps the current project open while the capture form is visible. Each project section heading collapses or expands its tasks. The folds stay per project after the project closes or the app restarts, in RN's store (`mindwtr:view:group-collapse:all:v1`, axis `project:<id>`). The section's Add button ("Add task to <section>", as in RN) opens capture with that section selected, including when the section is folded or empty. Archived projects allow folding and hide Add Task.
 
 - Reach: Projects › a project › Details. It holds status, area, dates (Review date), a repeat interval (Repeat every N days, weeks, months or years after completion, with Save), scope (Sequential, Parallel), notes with Preview, tags, sections, and attachments. The ⋯ sheet has Duplicate, Archive, Convert to section, and Delete.
 - Shortcuts: Link `mindwtr-native-dev:///open?project=<id>`.

@@ -240,12 +240,6 @@ fun OrganizeDialog(model: InboxViewModel, open: JSONObject) = with(model.menu) {
                         }
                     }
                 }
-                for (name in listOf("project", "area")) {
-                    val picker = organize.getJSONObject(name)
-                    Section(picker.getString("label")) {
-                        PickerRow(picker.getString("accessibilityLabel"), picker.getString("value"), !locked && !picker.optBoolean("disabled")) { organizePicker(name) }
-                    }
-                }
                 organize.optJSONObject("priority")?.let { priority ->
                     Section(priority.getString("label")) {
                         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -253,6 +247,26 @@ fun OrganizeDialog(model: InboxViewModel, open: JSONObject) = with(model.menu) {
                                 organizeEdit(option.getJSONObject("edit"))
                             }
                         }
+                    }
+                }
+                organize.optJSONObject("estimate")?.let { estimate ->
+                    Section(estimate.getString("label")) {
+                        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            for (option in estimate.menuObjects("options")) OrganizeChip(option.getString("label"), option.getBoolean("selected"), !locked) {
+                                organizeEdit(option.getJSONObject("edit"))
+                            }
+                        }
+                        estimate.optJSONObject("custom")?.let { custom ->
+                            ModalInput(open.optString("typed:estimateText", custom.getString("value")), custom.getString("placeholder"), custom.getString("label"), enabled = !locked) {
+                                organizeType("estimateText", it.take(100))
+                            }
+                        }
+                    }
+                }
+                for (name in listOf("project", "area")) {
+                    val picker = organize.getJSONObject(name)
+                    Section(picker.getString("label")) {
+                        PickerRow(picker.getString("accessibilityLabel"), picker.getString("value"), !locked && !picker.optBoolean("disabled")) { organizePicker(name) }
                     }
                 }
                 organize.optJSONObject("person")?.let { person ->
@@ -271,24 +285,10 @@ fun OrganizeDialog(model: InboxViewModel, open: JSONObject) = with(model.menu) {
                     }
                 }
                 for (date in organize.menuObjects("dates")) DateField(model, open, date, locked)
-                organize.optJSONObject("estimate")?.let { estimate ->
-                    Section(estimate.getString("label")) {
-                        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            for (option in estimate.menuObjects("options")) OrganizeChip(option.getString("label"), option.getBoolean("selected"), !locked) {
-                                organizeEdit(option.getJSONObject("edit"))
-                            }
-                        }
-                        estimate.optJSONObject("custom")?.let { custom ->
-                            ModalInput(open.optString("typed:estimateText", custom.getString("value")), custom.getString("placeholder"), custom.getString("label"), enabled = !locked) {
-                                organizeType("estimateText", it.take(100))
-                            }
-                        }
-                    }
-                }
                 for (name in listOf("contexts", "tags")) {
                     val tokens = organize.getJSONObject(name)
                     Section(tokens.getString("label")) {
-                        ModalInput(open.optString("typed:$name", tokens.getString("value")), tokens.getString("placeholder"), tokens.getString("label")) { organizeType(name, it) }
+                        ModalInput(open.optString("typed:$name", tokens.getString("value")), tokens.getString("placeholder"), tokens.getString("label"), enabled = !locked) { organizeType(name, it) }
                     }
                 }
                 if (open.optBoolean("validation")) Text(organize.getString("validationMessage"), style = rnText(12, 600), color = c.danger,
