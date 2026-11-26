@@ -403,6 +403,7 @@ The native client is a Kotlin and Jetpack Compose app in `apps/android-native`. 
 ## Settings and General
 
 - Reach: Menu › Settings. The menu has a search field and General, GTD, Manage, Data, Notifications, Sync, Advanced, and About. General has Theme, Language, Week starts on, the quick-access view, App lock, and Look up page titles.
+- Tasks and Compact widget settings: choose a transparent text mode and adjust Background opacity from 0% to 100% per widget.
 - Notes: E-Ink uses monochrome identity accents and readable review-state labels on a light fill. Menu and Settings sync indicators use refresh/check/warning glyphs with translated accessible status labels. Stored colors and picker swatches stay unchanged. Android widgets share RN's per-widget foreground handling for transparent text modes.
 - Selectors: `settings-search`, `settings-picker`, `settings-field-sheet`
 - Code: `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/SettingsScreen.kt`, `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/SettingsModel.kt`, `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/Labels.kt`

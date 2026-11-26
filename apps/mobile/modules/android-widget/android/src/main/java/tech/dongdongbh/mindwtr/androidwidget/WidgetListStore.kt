@@ -113,8 +113,13 @@ object WidgetListStore {
       else -> WidgetBackground.entries.firstOrNull { it.stored != null && it.stored == stored } ?: WidgetBackground.DEFAULT
     }
 
-  fun writeBackground(context: Context, appWidgetId: Int, background: WidgetBackground) {
+  fun backgroundOpacity(context: Context, appWidgetId: Int): Int =
+    context.getSharedPreferences(BACKGROUNDS_PREFS_NAME, Context.MODE_PRIVATE)
+      .getInt("opacity:$appWidgetId", 0).coerceIn(0, 100)
+
+  fun writeBackground(context: Context, appWidgetId: Int, background: WidgetBackground, opacity: Int = 0) {
     val editor = context.getSharedPreferences(BACKGROUNDS_PREFS_NAME, Context.MODE_PRIVATE).edit()
+    editor.putInt("opacity:$appWidgetId", opacity.coerceIn(0, 100))
     background.stored?.let { editor.putString(appWidgetId.toString(), it) } ?: editor.remove(appWidgetId.toString())
     editor.commit()
   }
@@ -122,7 +127,10 @@ object WidgetListStore {
   fun remove(context: Context, appWidgetIds: IntArray) {
     for (name in listOf(PREFS_NAME, BACKGROUNDS_PREFS_NAME, FOCUS_AVAILABLE_PREFS_NAME)) {
       val editor = context.getSharedPreferences(name, Context.MODE_PRIVATE).edit()
-      for (id in appWidgetIds) editor.remove(id.toString())
+      for (id in appWidgetIds) {
+        editor.remove(id.toString())
+        if (name == BACKGROUNDS_PREFS_NAME) editor.remove("opacity:$id")
+      }
       editor.apply()
     }
   }
