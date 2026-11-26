@@ -215,6 +215,13 @@ class MenuModel(internal val shell: InboxViewModel, private val saved: SavedStat
 
     val focusControls = FocusModel(this, saved)
 
+    private val linkTitleListener: (JSONObject) -> Unit = { event -> if (event.optString("type") == "linkTitle") shell.ui { whenIdle { shell.refresh() } } }
+
+    init {
+        ProcessCoreHost.listenSync(linkTitleListener)
+        shell.addCloseable { ProcessCoreHost.unlistenSync(linkTitleListener) }
+    }
+
     var bulkBusy by mutableStateOf<String?>(null); private set
 
     var projectBulk by mutableStateOf<JSONObject?>(null); private set
@@ -777,10 +784,9 @@ class MenuModel(internal val shell: InboxViewModel, private val saved: SavedStat
     private fun keepContextsSavedFilter(id: String?) = keepOwn("contexts", contextsWithSavedFilter(own("contexts"), id))
 
     private fun openWidgetFocusFilter(id: String) {
-        focusControls.resetForWidgetSavedFilter()
         toTabs()
         shell.show(Screen.Focus)
-        shell.editFocusControls(JSONObject().put("type", "applySavedFilter").put("id", id))
+        focusControls.openWidgetSavedList(id)
         shell.anyTime({ it.logLine("Native Android widget Focus filter selected releaseCheck=v1.3.9/widget-focus-filter",
             JSONObject().put("releaseCheck", "v1.3.9/widget-focus-filter").put("outcome", "selected")) }, {})
     }

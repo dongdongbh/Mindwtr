@@ -81,13 +81,13 @@ async function open(initial: Partial<AppData> = {}, failure: { disk?: () => bool
 afterEach(async () => { vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); await flushPendingSave(); resetForTests(); });
 
 describe('prepared Project-owned file Add foundation', () => {
-    it('prepares, validates and commits with the actual host URL polyfill that has no href property', async () => {
+    it('prepares, validates and commits with the actual host URL polyfill', async () => {
         const env = await open();
         const source = readFileSync(new URL('../../../apps/android-native/bundle/host-polyfills.js', import.meta.url), 'utf8');
         const context = createContext({ URL: undefined, __mindwtrNative: { log() {} } });
         runInContext(source, context);
         const HostURL = runInContext('URL', context) as typeof URL;
-        expect(new HostURL(directory).href).toBeUndefined();
+        expect(new HostURL(directory).href).toBe(directory);
         vi.stubGlobal('URL', HostURL);
         const frozen = await env.prepare();
         expect(env.methods.validatePreparedProjectFileAddWrite(frozen)).toEqual({ ok: true, value: frozen.prepared.result });

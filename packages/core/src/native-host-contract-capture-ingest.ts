@@ -84,13 +84,15 @@ export function createCaptureIngestMethods(deps: CaptureIngestDeps) {
             lastApplied: PendingCaptureRecordPort;
             audio?: PendingCaptureAudioPort;
             settleWatchChecklist?: PendingCaptureDrainDeps['settleWatchChecklist'];
+            onTextCaptureSaved?: PendingCaptureDrainDeps['onTextCaptureSaved'];
         }): Promise<NativeHostResult<{ ingested: number }>> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
             if (!isObjectRecord(input) || typeof input.requestId !== 'string' || !deps.requestIdPattern.test(input.requestId)
                 || !isQueuePort(input.queue) || !isRecordPort(input.lastApplied)
                 || (input.audio !== undefined && !isAudioPort(input.audio))
-                || (input.settleWatchChecklist !== undefined && typeof input.settleWatchChecklist !== 'function')) {
+                || (input.settleWatchChecklist !== undefined && typeof input.settleWatchChecklist !== 'function')
+                || (input.onTextCaptureSaved !== undefined && typeof input.onTextCaptureSaved !== 'function')) {
                 return fail('INVALID_INPUT', 'A request UUID, a queue with list, read and delete, and a lastApplied record with read and write are required');
             }
             const { queue, lastApplied } = input;
@@ -114,6 +116,7 @@ export function createCaptureIngestMethods(deps: CaptureIngestDeps) {
                     lastApplied,
                     audio: input.audio,
                     settleWatchChecklist: input.settleWatchChecklist,
+                    onTextCaptureSaved: input.onTextCaptureSaved,
                     log,
                     onUnfinished: (state) => { unfinished[state] += 1; },
                 });

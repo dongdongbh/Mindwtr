@@ -441,6 +441,7 @@
             return this.protocol + '//' + credentials + this.host + this.pathname + query + this.hash;
         };
         global.URL.prototype.toJSON = function () { return this.toString(); };
+        Object.defineProperty(global.URL.prototype, 'href', { configurable: true, get: function () { return this.toString(); } });
     }
 
     if (typeof global.URLSearchParams !== 'function') {

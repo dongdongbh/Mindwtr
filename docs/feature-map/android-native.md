@@ -93,6 +93,7 @@ The native client is a Kotlin and Jetpack Compose app in `apps/android-native`. 
 - Checks: `apps/android-native/scripts/check-capture-device.mjs`, `apps/android-native/scripts/check-keyboard-device.mjs`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/TokenCommitTest.kt`
 - Notes: Several lines ask core's question first. Create tasks writes a recovery snapshot, then one task per line in one write. Close discards the draft, as in RN.
 - Destination shows the contextual project/section, default Area, or None. Explicit choices override title syntax without changing status. Unavailable targets remain visible and prevent saving. Local `@`, `+`, `#` suggestions replace the complete token at the caret, with project choices retaining their IDs.
+- Saving one HTTP(S) URL keeps its link and then looks up the page title, as in RN (#1606). The capture screen and shared links use the same lookup. Save & edit skips the lookup, so the open editor never goes stale. Settings › General › Privacy › Look up page titles turns the requests off.
 
 ## Capture screen
 
@@ -341,6 +342,7 @@ The native client is a Kotlin and Jetpack Compose app in `apps/android-native`. 
 - Code: `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/Attachments.kt`, `apps/android-native/bundle/host-attachments.ts`
 - Checks: `apps/android-native/scripts/check-attachments-device.mjs`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/DraftAttachmentsTest.kt`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/AttachmentLogTest.kt`
 - Notes: Files are copied into the app and named by their IDs. Remove soft-deletes the attachment (it sets deletedAt).
+- A bare URL added in the task editor gets its page title as the link label after Save, unless Look up page titles is off (#1606).
 
 ## Missing attachment files
 
@@ -384,8 +386,9 @@ The native client is a Kotlin and Jetpack Compose app in `apps/android-native`. 
 - Shortcuts: Link `mindwtr-native-dev:///widget-list`.
 - Selectors: `swipe-done`, `swipe-focus`
 - Code: `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/WidgetListScreen.kt`, `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/MenuModel.kt`
-- Checks: `apps/android-native/scripts/check-widget-list-device.mjs`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/WidgetContextsFilterTest.kt`
+- Checks: `apps/android-native/scripts/check-widget-list-device.mjs`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/WidgetContextsFilterTest.kt`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/WidgetSavedListTest.kt`, `apps/android-native/bundle/host-android-linktitle-widget.test.ts`
 - Notes: A saved filter that is gone shows "No results" with no rows. A saved Contexts filter link opens the Contexts screen with that filter selected and editable, as in RN (#1485).
+- A saved Focus filter link opens Focus with that filter, but the Today widget keeps the main Focus filter. Leaving Focus, tapping the Focus tab, or opening the Today widget's Focus link brings back the main Focus filter (#1485).
 
 ## Automation capture
 
@@ -398,7 +401,7 @@ The native client is a Kotlin and Jetpack Compose app in `apps/android-native`. 
 
 ## Settings and General
 
-- Reach: Menu › Settings. The menu has a search field and General, GTD, Manage, Data, Notifications, Sync, Advanced, and About. General has Theme, Language, Week starts on, the quick-access view, and App lock.
+- Reach: Menu › Settings. The menu has a search field and General, GTD, Manage, Data, Notifications, Sync, Advanced, and About. General has Theme, Language, Week starts on, the quick-access view, App lock, and Look up page titles.
 - Notes: E-Ink uses monochrome identity accents and readable review-state labels on a light fill. Menu and Settings sync indicators use refresh/check/warning glyphs with translated accessible status labels. Stored colors and picker swatches stay unchanged. Android widgets share RN's per-widget foreground handling for transparent text modes.
 - Selectors: `settings-search`, `settings-picker`, `settings-field-sheet`
 - Code: `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/SettingsScreen.kt`, `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/SettingsModel.kt`, `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/Labels.kt`

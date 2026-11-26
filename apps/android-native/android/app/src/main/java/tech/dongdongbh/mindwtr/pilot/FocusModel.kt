@@ -5,7 +5,12 @@ import android.os.Looper
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.lifecycle.SavedStateHandle
+import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
 import tech.dongdongbh.mindwtr.pilot.InboxViewModel.Part
@@ -13,6 +18,34 @@ import java.util.UUID
 
 
 private const val WINDOW = 100
+
+private const val MAIN_CONTROLS = "focusMainControls"
+
+private const val TODAY_WIDGET_FILTER = "todayWidgetFilter"
+
+internal const val WIDGET_SAVED_LIST_RELEASE_CHECK = "v1.3.10/widget-shortcut-filter"
+
+
+internal fun widgetSavedListEdit(id: String): JSONObject =
+    JSONObject().put("type", "applySavedFilter").put("id", id).put(TODAY_WIDGET_FILTER, "hold")
+
+internal fun mainControlsReturnEdit(): JSONObject = JSONObject().put(TODAY_WIDGET_FILTER, "release")
+
+internal fun widgetSavedListShown(screen: Screen, menuScreen: MenuScreen?): Boolean = screen == Screen.Focus && menuScreen == null
+
+
+internal class WidgetSavedList(private val read: () -> String?, private val write: (String?) -> Unit, private val retireFocusReplies: () -> Unit) {
+    val open: Boolean get() = read() != null
+
+    fun begin(main: JSONObject) { if (!open) write(main.toString()) }
+
+    fun end(): JSONObject? {
+        val main = read() ?: return null
+        write(null)
+        retireFocusReplies()
+        return JSONObject(main)
+    }
+}
 
 class FocusModel(private val menu: MenuModel, private val saved: SavedStateHandle) {
     private val shell get() = menu.shell
@@ -33,6 +66,19 @@ class FocusModel(private val menu: MenuModel, private val saved: SavedStateHandl
     fun keepDialog(value: JSONObject?) { dialog = value; saved["focusDialog"] = value?.toString() }
     private fun keepReordering(on: Boolean) { reordering = on; saved["focusReorder"] = on }
 
+    private var widgetSavedListWatch: Job? = null
+
+    private val widgetSavedList = WidgetSavedList({ saved.get<String>(MAIN_CONTROLS) },
+        { main -> if (main == null) saved.remove<String>(MAIN_CONTROLS) else saved[MAIN_CONTROLS] = main }) { shell.fresh(shell.issue(), Part.Focus) }
+
+    init {
+        saved.get<String>(MAIN_CONTROLS)?.let { main ->
+            saved.remove<String>(MAIN_CONTROLS)
+            keepState(JSONObject(main))
+        }
+        shell.addCloseable { saved.get<String>(MAIN_CONTROLS)?.let { main -> shell.anyTime({ it.focus(1, main, mainControlsReturnEdit().toString()) }, {}) } }
+    }
+
 
     fun adopt(view: FocusView) {
         val controls = view.controls ?: return
@@ -41,10 +87,39 @@ class FocusModel(private val menu: MenuModel, private val saved: SavedStateHandl
     }
 
 
-    fun resetForWidgetSavedFilter() {
+    private val focusCommandsAccepted get() = shell.host != null && shell.failedAction == null
+
+    fun openWidgetSavedList(id: String) = menu.whenIdle {
+        val accepted = focusCommandsAccepted
+        if (accepted) {
+            widgetSavedList.begin(state)
+            replaceControls(JSONObject())
+            shell.editFocusControls(widgetSavedListEdit(id))
+            if (widgetSavedListWatch?.isActive != true) widgetSavedListWatch = shell.viewModelScope.launch {
+                snapshotFlow { widgetSavedListShown(shell.screen, menu.screen) }.first { !it }
+                menu.whenIdle { widgetSavedList.end()?.let(::returnToMainControls) }
+            }
+        }
+        shell.anyTime({ it.logLine("Native Android saved list kept Today widget filter releaseCheck=$WIDGET_SAVED_LIST_RELEASE_CHECK",
+            JSONObject().put("releaseCheck", WIDGET_SAVED_LIST_RELEASE_CHECK).put("outcome", if (accepted) "preserved" else "refused")) }, {})
+    }
+
+    fun openMainFocus() {
+        if (widgetSavedList.open) menu.whenIdle { widgetSavedList.end()?.let(::returnToMainControls) }
+    }
+
+    private fun returnToMainControls(main: JSONObject) {
+        widgetSavedListWatch?.cancel()
+        widgetSavedListWatch = null
+        replaceControls(main)
+        if (focusCommandsAccepted) shell.editFocusControls(mainControlsReturnEdit())
+        else shell.anyTime({ it.focus(1, main.toString(), mainControlsReturnEdit().toString()) }, {})
+    }
+
+    private fun replaceControls(controls: JSONObject) {
         typed += 1
         searched += 1
-        keepState(JSONObject())
+        keepState(controls)
         keepDialog(null)
         keepReordering(false)
         lists = null

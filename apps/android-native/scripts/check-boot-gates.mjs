@@ -2010,9 +2010,15 @@ assert.match(editorUi, /clickable\(enabled = !busy && !failed && editor\.preview
 
 assert.match(coreHost, /fun focus\(limit: Int, controls: String = "", controlEdit: String = "", folds: String = ""\): JSONObject =\s*callAsync\("focus", limit, controls, controlEdit, folds\)/);
 assert.match(coreHost, /fun focusWindow\(key: String, offset: Int, limit: Int, revision: String, controls: String = "", folds: String = ""\): JSONObject =\s*callAsync\("focusWindow", key, offset, limit, revision, controls, folds\)/);
-assert.match(hostEntry, /focus\(limit: number, controls = '', controlEdit = '', folds = ''\): string \{\s*return submit\(async \(\) => \{\s*requireSaved\(\);\s*const focus = unwrap\(contract\.getFocus\(\{ limit, \.\.\.\(controls \? \{ controls: JSON\.parse\(controls\) \} : \{\}\), \.\.\.\(controlEdit \? \{ controlEdit: JSON\.parse\(controlEdit\) \} : \{\}\),\s*\.\.\.\(folds \? \{ collapsedGroupIds: JSON\.parse\(folds\) \} : \{\}\) \}\)\);/);
+assert.match(hostEntry, /focus\(limit: number, controls = '', controlEdit = '', folds = ''\): string \{\s*return submit\(async \(\) => \{\s*const \{ todayWidgetFilter, \.\.\.edit \} = controlEdit \? JSON\.parse\(controlEdit\) : \{\};\s*if \(todayWidgetFilter === 'hold' \|\| todayWidgetFilter === 'release'\) todayWidgetFilterHeld = todayWidgetFilter === 'hold';\s*requireSaved\(\);\s*const focus = unwrap\(contract\.getFocus\(\{ limit, \.\.\.\(controls \? \{ controls: JSON\.parse\(controls\) \} : \{\}\), \.\.\.\(Object\.keys\(edit\)\.length \? \{ controlEdit: edit \} : \{\}\),\s*\.\.\.\(folds \? \{ collapsedGroupIds: JSON\.parse\(folds\) \} : \{\}\) \}\)\);\s*cacheIOSFocusWidgetFilter\(focus\);\s*if \(!todayWidgetFilterHeld\) widgets\?\.focusFilter\(focus\.controls\?\.widgetFilter\);/);
 assert.match(hostEntry, /focusWindow\(key: string, offset: number, limit: number, revision: string, controls = '', folds = ''\): string \{\s*return submit\(async \(\) => \{\s*requireSaved\(\);\s*return unwrap\(contract\.getFocusSectionWindow\(\{ key: key as FocusTaskSectionKey, offset, limit, revision, \.\.\.\(controls \? \{ controls: JSON\.parse\(controls\) \} : \{\}\),\s*\.\.\.\(folds \? \{ collapsedGroupIds: JSON\.parse\(folds\) \} : \{\}\) \}\)\);/);
 assert.equal(model.match(/runtime\.focus\(/g).length, 1);
+assert.match(menuModel, /private fun openWidgetFocusFilter\(id: String\) \{\s+toTabs\(\)\s+shell\.show\(Screen\.Focus\)\s+focusControls\.openWidgetSavedList\(id\)/, 'a widget saved list holds the Today widget filter');
+assert.match(menuModel, /event\.optString\("type"\) == "linkTitle"\) shell\.ui \{ whenIdle \{ shell\.refresh\(\) \} \}[\s\S]{0,200}ProcessCoreHost\.listenSync\(linkTitleListener\)\s+shell\.addCloseable \{ ProcessCoreHost\.unlistenSync\(linkTitleListener\) \}/, 'a looked-up page title refreshes the shown lists');
+assert.match(focusModelKt, /snapshotFlow \{ widgetSavedListShown\(shell\.screen, menu\.screen\) \}\.first \{ !it \}\s+menu\.whenIdle \{ widgetSavedList\.end\(\)\?\.let\(::returnToMainControls\) \}/, 'leaving Focus ends the widget saved list once the hold read is done');
+assert.match(focusModelKt, /WidgetSavedList\(\{ saved\.get<String>\(MAIN_CONTROLS\) \},[\s\S]{0,200}\{ shell\.fresh\(shell\.issue\(\), Part\.Focus\) \}/, 'ending a widget saved list retires older Focus replies');
+assert.match(code(source('EntryPoints.kt')), /route == "\/focus" -> \{\s+menu\.toTabs\(\)\s+menu\.focusControls\.openMainFocus\(\)\s+show\(Screen\.Focus\)/, 'the Today widget\'s Focus link opens the main Focus controls');
+assert.match(code(source('MainActivity.kt')), /rnTabPress\(active\) \{ menu\.closeSheet\(\); if \(tab == Screen\.Focus\) menu\.focusControls\.openMainFocus\(\); show\(tab\) \}/, 'the Focus tab opens the main Focus controls');
 assert.equal(model.match(/runtime\.focusWindow\(/g).length, 1);
 assert.match(model, /FocusView\.parse\(runtime\.focus\(PAGE, controls, edit, folds\)\)/, 'every Focus read sends the control state and the folds');
 assert.match(model, /view\.append\(runtime\.focusWindow\(key, loaded\.rows\.size, PAGE, view\.revision, state, folds\)\)/, 'later windows go with the state core answered');
@@ -2624,7 +2630,8 @@ assert.match(coreHost, /fun createQuickCaptureSnapshot\(snapshots: File, protect
 for (const read of ['captureOpen(): string', 'captureView(json: string): string', 'captureEdit(json: string): string']) {
     assert.match(hostEntry, new RegExp(`${read.replace(/[()]/g, '\\$&')} \\{\\s*return submit\\(async \\(\\) => \\{\\s*requireSaved\\(\\);`), `${read} waits for an owed save`);
 }
-for (const [method, operation, call] of [['captureSubmit', 'quickCapture', 'submitQuickCapture'], ['captureLines', 'quickCaptureLines', 'submitQuickCaptureLines'],
+assert.match(hostEntry, /captureSubmit\(json: string\): string \{\s*return submit\(async \(\) => \{\s*const input = JSON\.parse\(json\);\s*const result = taskResult\('quickCapture', await contract\.submitQuickCapture\(input\)\);\s*if \(result\.kind === 'saved' && input\.openAfterSave !== true\) enrichAndroidCaptureTitle\(result\.taskId, input\.text\);\s*return result;/);
+for (const [method, operation, call] of [['captureLines', 'quickCaptureLines', 'submitQuickCaptureLines'],
     ['capturePicker', 'quickCapturePicker', 'submitQuickCapturePickerQuery']]) {
     assert.match(hostEntry, new RegExp(`${method}\\(json: string\\): string \\{\\s*return submit\\(async \\(\\) => taskResult\\('${operation}', await contract\\.${call}\\(JSON\\.parse\\(json\\)\\)\\)\\);`));
 }
@@ -3292,7 +3299,8 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
         assert.match(hostEntry, new RegExp(`^\\s+${name}: \\(input\\) => contract\\.${method}\\(input\\),$`, 'm'), `menuRead ${name} is core's ${method}`);
     }
 
-    assert.match(hostEntry, /^\s+generalSettings: \(input\) => contract\.getGeneralSettings\(nativeAppSearch\n\s+\? \{ \.\.\.\(input as Parameters<typeof contract\.getGeneralSettings>\[0\]\), appSearch: nativeAppSearch\.device\(\) \} : input\),$/m);
+    assert.match(hostEntry, /^\s+generalSettings: \(input\) => contract\.getGeneralSettings\(\{ \.\.\.\(input as Parameters<typeof contract\.getGeneralSettings>\[0\]\),\n\s+\.\.\.\(nativeAppSearch \? \{ appSearch: nativeAppSearch\.device\(\) \} : \{\}\),\n\s+\.\.\.\(globalThis\.__mindwtrHostPlatform === 'android' \? \{ fetchLinkTitlesRow: true \} : \{\}\) \}\),$/m);
+    assert.match(code(settingsUi), /privacy\.optJSONObject\("appLockRelockDelay"\)[^\n]*\n\s+privacy\.optJSONObject\("fetchLinkTitles"\)\?\.let \{ ToggleRow\(model, it, true, props = theme\.generalSwitch\) \{ edit -> settings\.general\(edit\) \} \}\n\s+privacy\.optJSONObject\("appSearch"\)/, 'Look up page titles sits between App lock and System search, as in RN');
     for (const [name, method] of [['generalSetting', 'setGeneralSetting'], ['gtdSetting', 'setGtdSetting'], ['manageEditor', 'saveManageEditor'],
         ['manageDelete', 'deleteManageItem'], ['somedayRename', 'renameSomedaySection'], ['somedayReorder', 'reorderSomedaySections'], ['somedayDelete', 'deleteSomedaySection']]) {
         assert.match(hostEntry, new RegExp(`^\\s+${name}: \\(input\\) => contract\\.${method}\\(input\\),$`, 'm'), `menuCommand ${name} is core's ${method}`);
@@ -4086,7 +4094,7 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     assert.match(graphic, /offset\(x = if \(on\) 10\.dp else \(-10\)\.dp\)\.size\(20\.dp\)/);
 
     const settingsUiKt = code(source('SettingsScreen.kt'));
-    assert.equal(settingsUiKt.match(/theme\.generalSwitch/g)?.length, 4, 'General\'s three switches and the Sandbox page\'s Show task age, which is General\'s own setting');
+    assert.equal(settingsUiKt.match(/theme\.generalSwitch/g)?.length, 5, 'General\'s four switches and the Sandbox page\'s Show task age, which is General\'s own setting');
     assert.match(settingsUiKt, /props: RnSwitchProps = LocalTheme\.current\.settingsSwitch/);
     assert.match(code(captureUi), /RnSwitch\(on, enabled = !locked, label = label, props = theme\.captureSwitch\)/);
     assert.match(code(menuUi), /RnSwitchGraphic\(on, true, LocalTheme\.current\.referenceSwitch\)/);
@@ -4146,8 +4154,9 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
         ['captureModalDiscard', 'discardCaptureModal']]) {
         assert.match(hostEntry, new RegExp(`^\\s+${name}: \\(input\\) => contract\\.${call}\\(input\\),$`, 'm'), `${name} is a Menu read`);
     }
+    assert.match(hostEntry, /captureModalSubmit\(json: string\): string \{\s*return submit\(async \(\) => \{\s*const input = JSON\.parse\(json\);\s*const result = taskResult\('captureModal', await contract\.submitCaptureModal\(input\)\);\s*if \(result\.kind === 'saved' && input\.openAfterSave !== true\) enrichAndroidCaptureTitle\(result\.taskId, input\.draft\.text\);\s*return result;/);
     for (const [method, operation, call] of [['captureModalSubmit', 'captureModal', 'submitCaptureModal'], ['captureModalLines', 'captureModalLines', 'submitCaptureModalLines']]) {
-        assert.match(hostEntry, new RegExp(`${method}\\(json: string\\): string \\{\\s*return submit\\(async \\(\\) => taskResult\\('${operation}', await contract\\.${call}\\(JSON\\.parse\\(json\\)\\)\\)\\);`));
+        if (method === 'captureModalLines') assert.match(hostEntry, new RegExp(`${method}\\(json: string\\): string \\{\\s*return submit\\(async \\(\\) => taskResult\\('${operation}', await contract\\.${call}\\(JSON\\.parse\\(json\\)\\)\\)\\);`));
         assert.match(coreHost, new RegExp(`fun ${call}\\(json: String\\): JSONObject = callAsync\\("${method}", json\\)`), `CoreHost.${call} reaches ${method}`);
         assert.match(modalKt, new RegExp(`runtime\\.${call}\\(request\\)`));
     }
@@ -4294,7 +4303,7 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     const pendingTs = readFileSync(resolve(app, '../../packages/core/src/pending-captures.ts'), 'utf8');
     assert.equal(/const val DIRECTORY = "([^"]+)"/.exec(rnWidget('PendingCaptureWriter.kt'))[1], /export const PENDING_CAPTURES_DIRECTORY = '([^']+)'/.exec(pendingTs)[1]);
     assert.match(hostEntry, /const QUEUE = `files\/\$\{PENDING_CAPTURES_DIRECTORY\}`;/);
-    assert.match(hostEntry, /ingest\(requestId: string\): string \{\s+return submit\(async \(\) => taskResult\('ingest', await contract\.ingestPendingCaptures\(\{ requestId, queue: pendingCaptureQueue, lastApplied: lastAppliedRecord \}\)\)\);/);
+    assert.match(hostEntry, /ingest\(requestId: string\): string \{\s+return submit\(async \(\) => taskResult\('ingest', await contract\.ingestPendingCaptures\(\{ requestId, queue: pendingCaptureQueue, lastApplied: lastAppliedRecord,\s+onTextCaptureSaved: enrichAndroidCaptureTitle \}\)\)\);/);
 
     const settingsModel = source('SettingsModel.kt');
     assert.match(settingsModel, /input\.put\("captureIntent", JSONObject\(\)\.put\("enabled", it\.getOrNull\(\)\?\.enabled \?: JSONObject\.NULL\)\)/);
@@ -5171,7 +5180,8 @@ export function setSha256HexProvider() {
 const hostSyncTs = readFileSync(resolve(app, 'bundle/host-sync.ts'), 'utf8') + readFileSync(resolve(app, 'bundle/host-attachments.ts'), 'utf8')
     + readFileSync(resolve(app, 'bundle/host-reminders.ts'), 'utf8') + readFileSync(resolve(app, 'bundle/host-widgets.ts'), 'utf8')
     + readFileSync(resolve(app, 'bundle/host-calendar.ts'), 'utf8') + readFileSync(resolve(app, 'bundle/host-gmail.ts'), 'utf8')
-    + readFileSync(resolve(app, 'bundle/host-widget-audio.ts'), 'utf8') + readFileSync(resolve(app, 'bundle/host-voice.ts'), 'utf8');
+    + readFileSync(resolve(app, 'bundle/host-widget-audio.ts'), 'utf8') + readFileSync(resolve(app, 'bundle/host-voice.ts'), 'utf8')
+    + readFileSync(resolve(app, 'bundle/host-link-title.ts'), 'utf8');
 const syncOnly = [...new Set([...hostSyncTs.matchAll(/^import \{([\s\S]*?)\} from '@mindwtr\/core';/gm)].flatMap((m) => [...m[1].matchAll(/^\s+(\w+),$/gm)].map((n) => n[1])))]
     .filter((name) => !new RegExp(`export (?:async )?(?:function|const|class) ${name}\\b|export \\{[^}]*\\b${name}\\b`).test(fakeCore));
 assert(syncOnly.includes('createMobileSyncService') && syncOnly.includes('createMobileSyncTriggers'), 'host-sync.ts\'s core imports parsed');
@@ -10630,7 +10640,7 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     assert.match(coreHost, /fun ingestPendingAudio\(\): JSONObject = callLong\("ingestAudio"\)/);
     assert.match(hostEntry, /ingestAudio\(\): string \{\s*return submit\(async \(\) => \{\s*if \(!widgetAudioPort\) return \{ ingested: 0 \};\s*const result = unwrap\(await contract\.ingestPendingAudio\(\{ queue: pendingCaptureQueue, lastApplied: lastAppliedRecord, audio: widgetAudioPort \}\)\);/);
 
-    assert.match(hostEntry, /contract\.ingestPendingCaptures\(\{ requestId, queue: pendingCaptureQueue, lastApplied: lastAppliedRecord \}\)/);
+    assert.match(hostEntry, /contract\.ingestPendingCaptures\(\{ requestId, queue: pendingCaptureQueue, lastApplied: lastAppliedRecord,\s+onTextCaptureSaved: enrichAndroidCaptureTitle \}\)/);
     assert.match(processHost, /syncHost = runtime\s*network\.start\(\)\s*drainAudio\(app, runtime, SystemClock\.uptimeMillis\(\)\)/);
     assert.match(processHost, /if \(state == "active"\) application\?\.let \{ drainAudio\(it, runtime, resumedAt, quietSince = resumedAt\) \{ appState != "active" \} \}/);
 

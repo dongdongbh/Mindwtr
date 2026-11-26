@@ -326,6 +326,7 @@ class EntryRouter(private val shell: InboxViewModel, dir: File, private val stag
             }
             route == "/focus" -> {
                 menu.toTabs()
+                menu.focusControls.openMainFocus()
                 show(Screen.Focus)
                 reply.menuText("taskId")?.let { id -> highlight(id); menu.whenIdle { openEditor(id, "view") } }
             }

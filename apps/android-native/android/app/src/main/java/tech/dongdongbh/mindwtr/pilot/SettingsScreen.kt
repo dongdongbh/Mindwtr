@@ -407,6 +407,7 @@ private fun GeneralSettings(model: InboxViewModel, view: JSONObject) = with(mode
         }
 
         privacy.optJSONObject("appLockRelockDelay")?.let { PressRow(it.getString("label"), it.getString("value"), true, idle) { open("appLockRelockDelay") } }
+        privacy.optJSONObject("fetchLinkTitles")?.let { ToggleRow(model, it, true, props = theme.generalSwitch) { edit -> settings.general(edit) } }
         privacy.optJSONObject("appSearch")?.let { ToggleRow(model, it, true, props = theme.generalSwitch) { edit -> settings.general(edit) } }
     }
     SectionTitle(language.getString("title"), top = 16)
