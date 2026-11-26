@@ -2700,6 +2700,7 @@ export const jaOverrides: Record<string, string> = {
         'settings.syncMobile.iosFolderFallbackConfirm': 'バックアップファイルを選択',
         'settings.syncMobile.useRedirectUri': 'このリダイレクト URI を使用',
         'settings.syncMobile.webdavEndpointIsReachable': 'WebDAV のエンドポイントに接続できました。',
+        'settings.syncMobile.webdavOriginRejected': 'WebDAV サーバーがリクエストの送信元を拒否しました（401）。',
         'settings.persistentCaptureLabel': '通知バーからクイックキャプチャ',
         'settings.persistentCaptureDesc': '常駐する通知を表示して、ロック画面を含めどこからでも書き留められるようにします。',
         'settings.exactAlarmsLabel': 'リマインダーが遅れる可能性があります',

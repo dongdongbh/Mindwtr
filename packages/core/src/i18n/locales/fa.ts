@@ -2672,6 +2672,7 @@ export const faOverrides: Record<string, string> = {
         'settings.syncMobile.iosFolderFallbackConfirm': 'انتخاب فایل پشتیبان',
         'settings.syncMobile.useRedirectUri': 'استفاده از آدرس بازگشت',
         'settings.syncMobile.webdavEndpointIsReachable': 'نقطه پایانی WebDAV در دسترس است.',
+        'settings.syncMobile.webdavOriginRejected': 'سرور WebDAV مبدأ درخواست را رد کرد (401).',
         'settings.persistentCaptureLabel': 'ثبت سریع در نوار اعلان',
         'settings.persistentCaptureDesc': 'یک اعلان پایدار برای ثبت از هر جا، از جمله صفحه قفل، نگه دار.',
         'settings.exactAlarmsLabel': 'یادآورها ممکن است دیر برسند',

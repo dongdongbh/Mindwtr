@@ -2635,6 +2635,7 @@ export const huOverrides: Record<string, string> = {
     'settings.syncMobile.iosFolderFallbackConfirm': 'Biztonsági mentés fájl kiválasztása',
     'settings.syncMobile.useRedirectUri': 'Átirányítási URI használata',
     'settings.syncMobile.webdavEndpointIsReachable': 'A WebDAV végpont elérhető.',
+    'settings.syncMobile.webdavOriginRejected': 'A WebDAV-kiszolgáló elutasította a kérés eredetét (401).',
     'settings.persistentCaptureLabel': 'Gyors rögzítés az értesítési sávban',
     'settings.persistentCaptureDesc': 'Tartson fenn egy állandó értesítést, hogy bárhonnan rögzíthessen, a lezárási képernyőt is beleértve.',
     'settings.exactAlarmsLabel': 'Az emlékeztetők késve érkezhetnek',

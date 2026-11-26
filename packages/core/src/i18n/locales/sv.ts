@@ -2666,6 +2666,7 @@ export const svOverrides: Record<string, string> = {
         'settings.syncMobile.iosFolderFallbackConfirm': 'Välj säkerhetskopia',
         'settings.syncMobile.useRedirectUri': 'Använd omdirigerings-URI',
         'settings.syncMobile.webdavEndpointIsReachable': 'WebDAV-slutpunkten är nåbar.',
+        'settings.syncMobile.webdavOriginRejected': 'WebDAV-servern avvisade begärans ursprung (401).',
         'settings.persistentCaptureLabel': 'Snabbinspelning i aviseringsfältet',
         'settings.persistentCaptureDesc': 'Behåll en beständig avisering för att spela in varifrån som helst, inklusive låsskärmen.',
         'settings.exactAlarmsLabel': 'Påminnelser kan komma sent',

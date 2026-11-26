@@ -2633,6 +2633,7 @@ export const esOverrides: Record<string, string> = {
 'settings.syncMobile.iosFolderFallbackConfirm': "Seleccionar archivo de copia de seguridad",
 'settings.syncMobile.useRedirectUri': "Usar URI de redirección",
 'settings.syncMobile.webdavEndpointIsReachable': "El endpoint de WebDAV es accesible.",
+'settings.syncMobile.webdavOriginRejected': 'El servidor WebDAV rechazó el origen de la solicitud (401).',
 'settings.persistentCaptureLabel': "Captura rápida en la barra de notificaciones",
 'settings.persistentCaptureDesc': "Mantén una notificación persistente para capturar desde cualquier lugar, incluida la pantalla de bloqueo.",
 'settings.exactAlarmsLabel': "Los recordatorios pueden llegar tarde",

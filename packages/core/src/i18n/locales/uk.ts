@@ -2636,6 +2636,7 @@ export const ukOverrides: Record<string, string> = {
     "settings.syncMobile.iosFolderFallbackConfirm": "Виберіть файл резервної копії",
     "settings.syncMobile.useRedirectUri": "Використовуйте URI перенаправлення",
     "settings.syncMobile.webdavEndpointIsReachable": "Кінцева точка WebDAV доступна.",
+    "settings.syncMobile.webdavOriginRejected": "Сервер WebDAV відхилив джерело запиту (401).",
     "settings.persistentCaptureLabel": "Швидкий запис на панелі сповіщень",
     "settings.persistentCaptureDesc": "Залишайте постійне сповіщення для швидкого запису з будь-якого екрана, навіть екрана блокування.",
     "settings.exactAlarmsLabel": "Нагадування можуть надходити із запізненням",
