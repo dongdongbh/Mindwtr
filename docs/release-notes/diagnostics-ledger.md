@@ -60,6 +60,8 @@ The v1.3.6 task-editor correction is confirmed by the visible disappearance of t
 
 ## v1.3.10 (add before tagging, trim in the release after)
 
+- **`v1.3.10/desktop-regional-date`** — `apps/desktop/src/main.tsx`, #1499. Launch the desktop app with an English UI and Portuguese regional settings. Diagnostics records `Desktop regional date formatting initialized` with `outcome=configured` after startup applies the regional format. With System default selected, check that a task due 23 November displays day before month in both the row and its editor.
+
 - **`v1.3.10/attachment-task-link`** — Desktop `use-task-deep-link.ts`. Open a copied task link from an attachment. Look for `Task link route requested` with `outcome=opened` or `missing`. No task ID or URL is logged.
 
 - **`v1.3.10/widget-shortcut-filter`** — RN mobile `focus.tsx`. Opening a separate saved Focus list records `Saved list kept Today widget filter` with `outcome=preserved`. The marker confirms the filter was preserved. Check widget rendering on the Home Screen.

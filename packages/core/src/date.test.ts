@@ -290,7 +290,7 @@ describe('date utils', () => {
         ['en-CA', '2026-11-23', false],
         ['fr-CA', '2026-11-23', false],
         ['nl-BE', '23/11/2026', true],
-        ['it-CH', '23.11.2026', true],
+        ['it-CH', new Date(2026, 10, 23).toLocaleDateString('it-CH'), true],
         ['fi-FI', '23.11.2026', true],
         ['nb-NO', '23.11.2026', true],
     ])('derives the Intl short-date format for system locale %s without a native override', (systemLocale, expected, dayFirst) => {

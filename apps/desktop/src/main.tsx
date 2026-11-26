@@ -299,6 +299,10 @@ async function bootstrap() {
         calendarSystem: sandboxSettings?.calendarSystem,
         timeFormat: sandboxSettings?.timeFormat,
     });
+    if (!isQuickAddWindow && isTauriRuntime()) void logInfo('Desktop regional date formatting initialized', {
+        scope: 'settings', force: true,
+        extra: { releaseCheck: 'v1.3.10/desktop-regional-date', outcome: 'configured' },
+    });
     ReactDOM.createRoot(document.getElementById('root')!).render(
         <React.StrictMode>
             <LanguageProvider initialLanguage={initialLanguage} persistLanguage={!sandboxMode}>

@@ -58,6 +58,13 @@ describe('getSystemDefaultLocale', () => {
         expect(getSystemDefaultLocale()).toBe('pt-PT');
     });
 
+    it.each(['pt-PT', 'en-ZA', 'zh-HK', 'fi-FI', 'en-US'])('uses the regional preview pattern for %s in task dates', (locale) => {
+        const date = new Date(2026, 0, 2);
+        const options = Intl.DateTimeFormat().resolvedOptions();
+        vi.spyOn(Intl.DateTimeFormat.prototype, 'resolvedOptions').mockReturnValue({ ...options, locale });
+        expect(createDateFormatter(getSystemDateFormatting())(date, 'P')).toBe(date.toLocaleDateString(locale));
+    });
+
     it('falls back to the navigator locale when Intl is unavailable', () => {
         const originalDateTimeFormat = Intl.DateTimeFormat;
         setNavigatorLocale('pt-PT', ['pt-PT', 'en-US']);

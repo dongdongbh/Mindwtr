@@ -165,13 +165,12 @@ const withShortDatePattern = (locale: Locale, pattern: string): Locale => ({
 const intlShortDateFormatCache = new Map<string, string | undefined>();
 const INTL_SHORT_DATE_PROBE = new Date(2026, 0, 2);
 
-const deriveIntlShortDateFormat = (systemLocale: string): string | undefined => {
+export const deriveIntlShortDateFormat = (systemLocale: string): string | undefined => {
     if (intlShortDateFormatCache.has(systemLocale)) return intlShortDateFormatCache.get(systemLocale);
     let derived: string | undefined;
     try {
         if (typeof Intl !== 'undefined' && typeof Intl.DateTimeFormat === 'function') {
-            Intl.getCanonicalLocales?.(systemLocale);
-            const parts = new Intl.DateTimeFormat(systemLocale, { year: 'numeric', month: '2-digit', day: '2-digit' })
+            const parts = new Intl.DateTimeFormat(systemLocale, { calendar: 'gregory' })
                 .formatToParts(INTL_SHORT_DATE_PROBE);
             let pattern = '';
             for (const { type, value } of parts) {

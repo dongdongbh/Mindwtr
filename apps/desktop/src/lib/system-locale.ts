@@ -1,6 +1,8 @@
 import {
     configureDateFormatting,
     createDateFormatter,
+    deriveIntlShortDateFormat,
+    normalizeSystemDateFormat,
     getDateFormattingConfig,
     setHostSystemLocale,
     type DateFormattingConfig,
@@ -19,7 +21,7 @@ export function getSystemShortDatePattern(): string | undefined {
 
 export function getSystemDateFormatting(): { systemLocale: string; systemDateFormat?: string } {
     const systemLocale = getSystemDefaultLocale();
-    const systemDateFormat = getSystemShortDatePattern();
+    const systemDateFormat = normalizeSystemDateFormat(getSystemShortDatePattern()) ?? deriveIntlShortDateFormat(systemLocale);
     return systemDateFormat ? { systemLocale, systemDateFormat } : { systemLocale };
 }
 
