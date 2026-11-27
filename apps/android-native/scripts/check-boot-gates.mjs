@@ -1019,6 +1019,17 @@ for (const [file, opener] of [['TaskRowView.kt', /private fun DatesSheet[\s\S]{0
     assert.match(contexts, /Icon\(Lucide\.SlidersHorizontal, null, tint = c\.tint, modifier = Modifier\.size\(20\.dp\)\)\s+\}\s+view\.optJSONObject\("sort"\)\?\.let \{ sort ->\s+DirectControl\(Lucide\.ArrowUpDown/,
         'the Contexts header shows RN\'s sliders Filter button before Sort');
     assert.doesNotMatch(contexts, /Lucide\.Filter\b/, 'the Contexts header uses RN\'s sliders icon, not a funnel');
+    assert.match(contexts, /item\(key = "saved-filters"\) \{\s+Row\(Modifier\.horizontalScroll\(rememberScrollState\(\)\)\.padding\(8\.dp\), horizontalArrangement = Arrangement\.spacedBy\(8\.dp\)\)/,
+        'the Contexts saved-filter strip pads 8 dp on every side, as RN\'s ScrollView padding: 8 does');
+    assert.doesNotMatch(contexts, /openContextsSave/, 'the Contexts header has no Save button; RN puts Save in the Filters sheet');
+    assert.match(menuWidgets, /onSave = if \(list == "contexts" && it\.optBoolean\("canSave"\)\) \(\{ openContextsSave\(\) \}\) else null/,
+        'the Contexts Filters sheet offers Save under RN\'s canSave rule');
+    assert.match(menuWidgets, /if \(picker == null && onSave != null\) Text\(t\("common\.save"\)[^\n]*Modifier\.padding\(end = 8\.dp\)\.heightIn\(min = 44\.dp\)\n[^\n]*\{ onSave\(\) \}[^\n]*\n\s+if \(filters\.getBoolean\("hasActive"\)/,
+        'Save sits in the Filters sheet header on the overview page, 8 dp before Clear (RN\'s action gap), as in RN');
+    assert.match(source('MenuModel.kt'), /open\.optString\("kind"\) == "contextsSave" -> \{ openDialog\("filters"\); reload\(\) \}/,
+        'cancelling the Contexts save name returns to the Filters sheet, as RN\'s overlay does');
+    assert.match(source('MenuModel.kt'), /put\("kind", "contextsSave"\)\.put\("text", own\("contexts"\)\.optJSONArray\("tokens"\)\.ids\(\)\.joinToString\(" \+ "\)\)/,
+        'the Contexts save name starts as the selected contexts joined by " + ", as RN\'s does');
 }
 assert.match(rowUi, /Box\(if \(offset\.value != 0f\) Modifier\.clipToBounds\(\) else Modifier\) \{/, 'an open tray clips the moved row at the row bounds, as RN\'s Swipeable does');
 assert.match(rowUi, /background\(theme\.einkSafe\(coreColorOrNull\(part\.dotColor\) \?: c\.tint\)\)/, 'a row\'s project and area dot goes through einkSafe, as RN\'s row does');

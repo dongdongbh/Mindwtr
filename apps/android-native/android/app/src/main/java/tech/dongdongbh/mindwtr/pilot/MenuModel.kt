@@ -1016,6 +1016,7 @@ class MenuModel(internal val shell: InboxViewModel, private val saved: SavedStat
             open.has("page") -> dialogPage(null)
             open.has("picker") -> keepDialog(JSONObject(open.toString()).apply { remove("picker"); remove("query") })
             open.optString("kind") == "newSection" && open.has("taskIds") -> openMove(open.getJSONArray("taskIds").strings(), open.optJSONObject("taskRevisions") ?: JSONObject())
+            open.optString("kind") == "contextsSave" -> { openDialog("filters"); reload() }
             else -> keepDialog(null)
         }
     }
@@ -1112,7 +1113,7 @@ class MenuModel(internal val shell: InboxViewModel, private val saved: SavedStat
         val view = page?.takeIf { it.list == "contexts" }?.view ?: return
         val controls = view.optJSONObject("saveControls") ?: return
         if (!idle || !view.optBoolean("canSave")) return
-        keepDialog(JSONObject().put("kind", "contextsSave").put("text", "")
+        keepDialog(JSONObject().put("kind", "contextsSave").put("text", own("contexts").optJSONArray("tokens").ids().joinToString(" + "))
             .put("requestId", UUID.randomUUID().toString()).put("controls", controls))
     }
 
@@ -1634,7 +1635,7 @@ class MenuModel(internal val shell: InboxViewModel, private val saved: SavedStat
             "focusGroup", "focusSave", "focusCriterion", "focusDelete", "focusReorder" -> {
                 if (action.kind == "focusSave" && JSONObject(action.title).optString("view") == "contexts") {
                     keepOwn("contexts", contextsAfterSave(own("contexts"), reply.getJSONObject("controls").getString("savedFilterId")))
-                    closeDialog("contextsSave")
+                    if (dialog?.optString("kind") == "contextsSave") { openDialog("filters"); reload() }
                     Log.i(CoreHost.TAG, "Native Context filter saved releaseCheck=v1.3.8/context-filter-save outcome=confirmed")
                 } else focusControls.done(action, reply)
             }

@@ -475,7 +475,8 @@ fun MenuDialogs(model: InboxViewModel) = with(model.menu) {
     val controls = if (list == "inbox") view?.optJSONObject("toolbar") else view
     when (open.optString("kind")) {
         "overflow" -> view?.let { OverflowFor(model, it, open) }
-        "filters" -> view?.let { FilterSheet(model.menu, if (list == "contexts") JSONObject(it.toString()).put("chips", it.optJSONArray("filterChips") ?: JSONArray()) else it, open) }
+        "filters" -> view?.let { FilterSheet(model.menu, if (list == "contexts") JSONObject(it.toString()).put("chips", it.optJSONArray("filterChips") ?: JSONArray()) else it, open,
+            onSave = if (list == "contexts" && it.optBoolean("canSave")) ({ openContextsSave() }) else null) }
         "sort" -> controls?.getJSONObject("sort")?.let { modal ->
             ChoiceModal(model, modal.getString("title"), modal.menuObjects("options").map { option ->
                 Choice(option.getString("label"), option.getBoolean("selected")) { sort(option.optJSONObject("edit")?.getString("sortBy") ?: option.getString("value")) }
@@ -594,7 +595,7 @@ interface FilterSheetHost {
 }
 
 @Composable
-internal fun FilterSheet(host: FilterSheetHost, view: JSONObject, open: JSONObject) = with(host) {
+internal fun FilterSheet(host: FilterSheetHost, view: JSONObject, open: JSONObject, onSave: (() -> Unit)? = null) = with(host) {
     val theme = LocalTheme.current
     val c = theme.colors
     val filters = view.getJSONObject("filters")
@@ -618,6 +619,8 @@ internal fun FilterSheet(host: FilterSheetHost, view: JSONObject, open: JSONObje
                 val title = t(when (picker) { "tokens" -> "filters.contexts"; "projects" -> "filters.projects"; else -> "filters.label" })
                 Text(title, style = rnText(16, 700),
                     color = c.text, modifier = Modifier.weight(1f).semantics { heading() })
+                if (picker == null && onSave != null) Text(t("common.save"), style = rnText(14, 400), color = c.tint, modifier = Modifier.padding(end = 8.dp).heightIn(min = 44.dp)
+                    .clickable(enabled = idle, role = Role.Button) { onSave() }.padding(horizontal = 8.dp, vertical = 12.dp))
                 if (filters.getBoolean("hasActive") || view.optBoolean("includeArchivedProjects")) {
                     Text(t("filters.clear"), style = rnText(13, 600), color = c.tint, modifier = Modifier.heightIn(min = 44.dp)
                         .clickable(enabled = idle, role = Role.Button) { filterEdit(filters.getJSONObject("clearEdit")) }.padding(horizontal = 10.dp, vertical = 12.dp))

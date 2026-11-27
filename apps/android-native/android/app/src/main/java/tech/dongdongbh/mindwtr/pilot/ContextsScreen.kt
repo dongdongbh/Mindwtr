@@ -81,14 +81,11 @@ fun ContextsList(model: InboxViewModel) = with(model.menu) {
                 view.optJSONObject("sort")?.let { sort ->
                     DirectControl(Lucide.ArrowUpDown, sort.getString("accessibilityLabel"), null, null, idle) { openDialog("sort") }
                 }
-                if (view.optBoolean("canSave")) {
-                    DirectControl(Lucide.Plus, t("common.save"), null, null, idle) { openContextsSave() }
-                }
             }
         }
         val savedFilters = view.optJSONObject("savedFilters")?.menuObjects("items").orEmpty()
         if (savedFilters.isNotEmpty()) item(key = "saved-filters") {
-            Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(Modifier.horizontalScroll(rememberScrollState()).padding(8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 for (filter in savedFilters) {
                     val on = filter.optBoolean("selected")
                     SheetChip(filter.getString("name"), on, excluded = false, enabled = idle) {

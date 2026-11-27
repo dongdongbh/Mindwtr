@@ -8,6 +8,7 @@ use tokio::sync::Semaphore;
 const MAX_URL_BYTES: usize = 4096;
 const MAX_HTML_BYTES: usize = 64 * 1024;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(4);
+const LINK_TITLE_USER_AGENT: &str = "Mindwtr (Desktop; +https://github.com/dongdongbh/Mindwtr)";
 static LOOKUP_LIMIT: Semaphore = Semaphore::const_new(4);
 static DNS_LIMIT: Semaphore = Semaphore::const_new(4);
 
@@ -109,18 +110,10 @@ impl dns::Resolve for PublicPageDns {
     }
 }
 
-#[tauri::command]
-pub(crate) async fn load_public_link_html(
-    window: tauri::WebviewWindow,
-    url: String,
-) -> Option<String> {
-    if window.label() != "main" {
-        return None;
-    }
-    let url = public_page_url(&url)?;
-    let _permit = LOOKUP_LIMIT.try_acquire().ok()?;
-    let client = Client::builder()
+fn link_title_client() -> Option<Client> {
+    Client::builder()
         .dns_resolver(Arc::new(PublicPageDns))
+        .user_agent(LINK_TITLE_USER_AGENT)
         .no_proxy()
         .no_gzip()
         .no_brotli()
@@ -131,8 +124,20 @@ pub(crate) async fn load_public_link_html(
         .retry(reqwest::retry::never())
         .timeout(REQUEST_TIMEOUT)
         .build()
-        .ok()?;
-    let mut response = client
+        .ok()
+}
+
+#[tauri::command]
+pub(crate) async fn load_public_link_html(
+    window: tauri::WebviewWindow,
+    url: String,
+) -> Option<String> {
+    if window.label() != "main" {
+        return None;
+    }
+    let url = public_page_url(&url)?;
+    let _permit = LOOKUP_LIMIT.try_acquire().ok()?;
+    let mut response = link_title_client()?
         .get(url)
         .header(header::ACCEPT, "text/html, application/xhtml+xml")
         .header(header::ACCEPT_ENCODING, "identity")
@@ -166,7 +171,37 @@ pub(crate) async fn load_public_link_html(
 
 #[cfg(test)]
 mod tests {
-    use super::public_page_url;
+    use super::{link_title_client, public_page_url};
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+
+    #[tokio::test]
+    async fn link_lookup_names_mindwtr_in_the_user_agent() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0u8; 4096];
+            let read = stream.read(&mut request).unwrap();
+            stream
+                .write_all(b"HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n")
+                .unwrap();
+            String::from_utf8_lossy(&request[..read]).to_ascii_lowercase()
+        });
+        link_title_client()
+            .unwrap()
+            .get(format!("http://{address}/"))
+            .send()
+            .await
+            .unwrap();
+        let request = server.join().unwrap();
+        assert!(
+            request.contains(
+                "\r\nuser-agent: mindwtr (desktop; +https://github.com/dongdongbh/mindwtr)\r\n"
+            ),
+            "{request}"
+        );
+    }
 
     #[test]
     fn link_lookup_skips_nonpublic_destinations_and_non_web_ports() {

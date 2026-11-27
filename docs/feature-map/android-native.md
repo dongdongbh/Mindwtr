@@ -266,7 +266,7 @@ The native client is a Kotlin and Jetpack Compose app in `apps/android-native`. 
 - Selectors: `contexts-list`, `list-search`, `token-picker-list`
 - Code: `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/ContextsScreen.kt`
 - Checks: `apps/android-native/scripts/check-review-device.mjs`, `apps/android-native/scripts/check-review-organize-device.mjs`
-- Notes: The bulk bar here adds Add context and Remove context. While a saved filter is selected, the list uses that filter's sort. A sort change then lasts only until another saved filter is chosen or saved, and does not change the global sort. Back from the Contexts screen clears the selected saved filter and its sort, as in RN; switching quick-access tabs keeps them. A filter saved here stores no sort, so it follows the global sort (#1485). The saved-filter chips fit their text, as RN's do.
+- Notes: The bulk bar here adds Add context and Remove context. While a saved filter is selected, the list uses that filter's sort. A sort change then lasts only until another saved filter is chosen or saved, and does not change the global sort. Back from the Contexts screen clears the selected saved filter and its sort, as in RN; switching quick-access tabs keeps them. A filter saved here stores no sort, so it follows the global sort (#1485). The saved-filter chips fit their text, as RN's do. To save the current contexts as a filter, open Filters › Save, as in RN. The name starts as the selected contexts joined by " + ". Cancel and Save return to the Filters sheet.
 
 ## Trash
 
