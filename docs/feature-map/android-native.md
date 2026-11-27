@@ -68,6 +68,7 @@ The native client is a Kotlin and Jetpack Compose app in `apps/android-native`. 
 
 ## Process Inbox
 
+- During Inbox project conversion, Project name and Next action are separately editable. Back restores the task title from before conversion.
 - In task editing and Inbox processing, open Browse beside Contexts or Tags to search or toggle multiple saved and in-use values. An empty search shows the full list. As in RN, each row shows the value with a check at the end, a selected row is tinted, and No matches is announced.
 - Reach: Inbox › Process Inbox (N). The header switches between Guided and Quick and has Skip and Close.
 - Selectors: `process-inbox`, `process-title`

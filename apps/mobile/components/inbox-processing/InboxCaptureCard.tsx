@@ -73,6 +73,7 @@ export function InboxCaptureCard({
         </View>
       ) : null}
 
+      {convertToProject && <Text style={[styles.projectFieldLabel, { color: tc.secondaryText }]}>{t('projects.projectName')}</Text>}
       <TextInput
         ref={titleInputRef}
         style={[styles.anchorTitleInput, titleDirectionStyle, { color: tc.text }]}

@@ -4181,10 +4181,7 @@ function createInboxProcessingMethods(deps: InboxProcessingDeps) {
                 entry.session = advanceProcessInboxSession(entry.session, queue);
                 if (!openCurrent(entry, queue)) entry.ended = true;
             } else if (inboxTaskRevision(latest) !== entry.taskRevision) {
-                const previous = entry.draft;
-                entry.draft = { ...createProcessInboxDraft(latest, processInboxDefaultAreaId()), delegateWho: previous.delegateWho,
-                    followUp: previous.followUp, convertToProject: previous.convertToProject,
-                    nextAction: previous.nextAction, extraActions: previous.extraActions };
+                entry.draft = reloadProcessInboxDraft(entry.draft, latest, processInboxDefaultAreaId());
                 entry.taskRevision = inboxTaskRevision(latest);
             }
             return { ok: true, value: result(entry, null, null) };

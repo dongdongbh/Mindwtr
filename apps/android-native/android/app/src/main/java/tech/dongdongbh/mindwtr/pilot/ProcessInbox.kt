@@ -318,6 +318,9 @@ private fun InboxViewModel.CaptureCard(flow: InboxProcessing, locked: Boolean, s
             }
         }
         val titleLabel = capture.getString("titleLabel")
+        if (flow.view.child("project")?.child("conversion") != null) {
+            Text(titleLabel, style = rnText(12, 600), color = c.secondaryText)
+        }
         DraftInput("${flow.taskId}:title", capture.getString("title"), pending, titleLabel, titleLabel, !locked, Modifier.fillMaxWidth().testTag("process-title"),
             rnText(17, 700, 24), singleLine = false) { send(JSONObject().put("type", "set").put("field", "title").put("value", it)) }
         val similar = capture.items("similarTasks")

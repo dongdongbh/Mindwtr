@@ -465,7 +465,7 @@ export function observeProcessInbox(
     const writes = recorder.normalize(recorder.log.splice(0)) as unknown[];
     const toastEntries = recorder.normalize(toasts.splice(0)) as unknown[];
     if (!view) return { closed: true, step: 'none', writes, toasts: toastEntries };
-    const { dirtyScheduleFields: _dirty, projectBrowseScope: _browse, ...draft } = view.draft;
+    const { dirtyScheduleFields: _dirty, projectBrowseScope: _browse, titleBeforeConversion: _captureTitle, ...draft } = view.draft;
     if (draft.startTime) draft.startTime = { date: draft.startTime.date, dateOnly: draft.startTime.dateOnly };
     return recorder.normalize({
         closed: false,

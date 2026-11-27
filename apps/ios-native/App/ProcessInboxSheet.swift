@@ -316,6 +316,9 @@ private struct ProcessInboxCaptureCard: ProcessInboxPart {
                 }
                 .foregroundStyle(palette.secondary)
             }
+            if !view.object("project").object("conversion").isEmpty {
+                Text(capture.text("titleLabel")).rnFont(13, .semibold).foregroundStyle(palette.secondary)
+            }
             textInput("title", label: capture.text("titleLabel"), multiline: true)
                 .accessibilityIdentifier("process-inbox-title")
             if !capture.objects("similarTasks").isEmpty {

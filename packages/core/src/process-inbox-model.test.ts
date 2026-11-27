@@ -148,8 +148,8 @@ describe('Process Inbox steps', () => {
         expect(outcome.draft).toMatchObject({ convertToProject: true, nextAction: 'Plan trip', projectId: null });
 
         const back = answerProcessInboxStep({ choice: 'back', answers: outcome.answers,
-            draft: outcome.draft, mode: 'quick', plan: base, task, parseTitle: (title) => ({ title }) as never });
-        expect(back).toMatchObject({ type: 'flow', answers: INITIAL_PROCESS_INBOX_ANSWERS, draft: { convertToProject: false, nextAction: '' } });
+            draft: { ...outcome.draft, title: 'Visit Paris', nextAction: 'Book flights' }, mode: 'quick', plan: base, task, parseTitle: (title) => ({ title }) as never });
+        expect(back).toMatchObject({ type: 'flow', answers: INITIAL_PROCESS_INBOX_ANSWERS, draft: { title: 'Plan trip', convertToProject: false, nextAction: '' } });
     });
 
     it('takes the saved task again after the full editor, keeping the step\'s own drafts, as RN\'s reloadEditedTask (#1445)', () => {

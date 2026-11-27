@@ -59,6 +59,7 @@ Source: `apps/mobile`. Routes live in `apps/mobile/app` (expo-router). Labels be
 - Reach: Inbox › Process Inbox (N). A step-by-step clarify flow opens for each task.
 - Code: `apps/mobile/components/inbox-processing-modal.tsx`, `apps/mobile/components/inbox-processing/InboxStepFlow.tsx`, `apps/mobile/components/inbox-processing/useInboxProcessingController.ts`
 - Checks: `apps/mobile/components/inbox-processing-modal.test.tsx`, `apps/mobile/components/inbox-processing/process-inbox-parity.test.tsx`, `apps/mobile/components/inbox-processing/InboxProjectSection.test.tsx`
+- During Inbox project conversion, Project name and Next action are separately editable. Back restores the task title from before conversion.
 - Notes: Area assignment precedes Projects. Selecting a project shows its inherited Area and indented Section controls; a project with no Area shows No area. Browse projects has All areas, No area and named Areas; changing browsing preserves assignment and sections. Search remains global. More opens and closes without moving the scroll position. Setting a project clears a direct area, because a task has one Container.
 
 ## Mind Sweep

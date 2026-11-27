@@ -1523,7 +1523,10 @@ describe('InboxProcessingModal', () => {
     expect(findTextInputsByAccessibilityLabel(root, 'projects.projectName')).toHaveLength(1);
     expect(findTextInputsByAccessibilityLabel(root, 'taskEdit.titleLabel')).toHaveLength(0);
 
+    const capturedTitle = findTextInputByAccessibilityLabel(root, 'projects.projectName').props.value;
+    act(() => findTextInputByAccessibilityLabel(root, 'projects.projectName').props.onChangeText('A different outcome'));
     pressStep(root, '‹ Back');
+    expect(findTextInputByAccessibilityLabel(root, 'taskEdit.titleLabel').props.value).toBe(capturedTitle);
     expect(findTextInputsByAccessibilityLabel(root, 'projects.projectName')).toHaveLength(0);
     expect(findTextInputsByAccessibilityLabel(root, 'taskEdit.titleLabel')).toHaveLength(1);
     pressStep(root, 'process.moreThanOneStepYes');

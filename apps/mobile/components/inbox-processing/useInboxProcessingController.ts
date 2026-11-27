@@ -165,6 +165,7 @@ export function useInboxProcessingController({
   const [showDelegateDatePicker, setShowDelegateDatePicker] = useState(false);
   const [projectSearch, setProjectSearch] = useState('');
   const [convertToProject, setConvertToProject] = useState(false);
+  const titleBeforeConversion = useRef<string | undefined>(undefined);
   const [nextActionDraft, setNextActionDraft] = useState('');
   const [extraActionDrafts, setExtraActionDrafts] = useState<string[]>([]);
   const projectConversionInFlightRef = useRef(false);
@@ -504,6 +505,7 @@ export function useInboxProcessingController({
     setDelegateFollowUpDate(null);
     setDelegateFollowUpDateOnly(false);
     setShowDelegateDatePicker(false);
+    titleBeforeConversion.current = undefined;
     setConvertToProject(false);
     setNextActionDraft('');
     setExtraActionDrafts([]);
@@ -719,6 +721,7 @@ export function useInboxProcessingController({
       delegateWho,
       followUp: dateValue(delegateFollowUpDate, delegateFollowUpDateOnly, false, pendingTimes.followUp),
       convertToProject,
+      ...(titleBeforeConversion.current !== undefined ? { titleBeforeConversion: titleBeforeConversion.current } : {}),
       nextAction: nextActionDraft,
       extraActions: extraActionDrafts,
       somedaySectionId: selectedSomedaySectionId ?? null,
@@ -774,6 +777,8 @@ export function useInboxProcessingController({
       || outcome.draft.convertToProject !== convertToProject) {
       areaDestinationRevision.current += 1;
     }
+    titleBeforeConversion.current = outcome.draft.titleBeforeConversion;
+    setProcessingTitle(outcome.draft.title);
     setAnswers(outcome.answers);
     setConvertToProject(outcome.draft.convertToProject);
     setNextActionDraft(outcome.draft.nextAction);
@@ -783,7 +788,7 @@ export function useInboxProcessingController({
     setProjectSearch(outcome.draft.projectSearch);
     scrollProcessingToTop(true);
     return outcome;
-  }, [answers, buildDraft, convertToProject, currentTask, parseProcessingTitle, processInboxPlan, scrollProcessingToTop, selectedProjectId, selectedSectionId]);
+  }, [answers, buildDraft, convertToProject, currentTask, parseProcessingTitle, processInboxPlan, scrollProcessingToTop, selectedProjectId, selectedSectionId, setProcessingTitle]);
 
 
   const runCommit = useCallback(async (kind: ProcessInboxCommitKind | 'convert'): Promise<boolean> => {
@@ -953,12 +958,16 @@ export function useInboxProcessingController({
     areaDestinationRevision.current += 1;
     const next = selectProcessInboxProject(projectId);
     setProjectBrowseScope(effectiveProjectBrowseScope);
+    if (titleBeforeConversion.current !== undefined) {
+      setProcessingTitle(titleBeforeConversion.current);
+      titleBeforeConversion.current = undefined;
+    }
     setConvertToProject(next.convertToProject);
     setSelectedProjectId(next.projectId);
     if (next.projectId !== selectedProjectId) setSelectedSectionId(null);
     if (next.areaId === null) setSelectedAreaId(null);
     setProjectSearch(next.projectSearch);
-  }, [effectiveProjectBrowseScope, selectedProjectId]);
+  }, [effectiveProjectBrowseScope, selectedProjectId, setProcessingTitle]);
 
   const handleCreateProjectEarly = useCallback(async () => {
     const submit = resolveProcessInboxProjectSearchSubmit(projectSearch, exactProjectMatch, selectedAreaId);
@@ -983,11 +992,16 @@ export function useInboxProcessingController({
     const base = processingBaseRef.current;
     const latest = base ? useTaskStore.getState()._tasksById?.get(base.id) : undefined;
     if (!base || !latest || (latest.updatedAt === base.updatedAt && latest.rev === base.rev)) return;
+    const editedProjectName = processingTitle !== titleBeforeConversion.current ? processingTitle : undefined;
     primeTaskState(latest);
     setAnswers(answers);
     setDelegateWho(delegateWho);
     setDelegateFollowUpDate(delegateFollowUpDate);
     setDelegateFollowUpDateOnly(delegateFollowUpDateOnly);
+    if (convertToProject) {
+      titleBeforeConversion.current = latest.title;
+      if (editedProjectName !== undefined) setProcessingTitle(editedProjectName);
+    }
     setConvertToProject(convertToProject);
     setNextActionDraft(nextActionDraft);
     setExtraActionDrafts(extraActionDrafts);
@@ -996,7 +1010,7 @@ export function useInboxProcessingController({
     });
   }, [
     answers, convertToProject, delegateFollowUpDate, delegateFollowUpDateOnly, delegateWho, extraActionDrafts,
-    nextActionDraft, primeTaskState,
+    nextActionDraft, primeTaskState, processingTitle, setProcessingTitle,
   ]);
 
   const applyAppleClarificationStatus = useCallback((status: AppleClarificationSuggestion['status']) => {
