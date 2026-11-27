@@ -834,7 +834,7 @@ internal fun SheetChip(label: String, selected: Boolean, excluded: Boolean, remo
     val c = LocalTheme.current.colors
     val shape = RoundedCornerShape(22.dp)
     val color = if (excluded) c.danger else if (selected) c.onTint else c.text
-    Row(Modifier.widthIn(min = 104.dp).heightIn(min = 44.dp).clip(shape).background(if (selected && !excluded) c.tint else c.filterBg)
+    Row(Modifier.heightIn(min = 44.dp).clip(shape).background(if (selected && !excluded) c.tint else c.filterBg)
         .rnBorder(1.dp, if (excluded) c.danger else if (selected) c.tint else c.border, shape)
         .then(if (remove == null) Modifier.selectable(selected = selected, enabled = enabled, role = Role.Button, onClick = onClick)
             .semantics { contentDescription = if (excluded) "$label (${t("filters.excluded")})" else label } else Modifier)

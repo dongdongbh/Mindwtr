@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import { build } from 'esbuild';
 import { createCapturedWebLinkAttachment, resetForTests, setStorageAdapter, useTaskStore, type AppData, type Attachment, type StorageAdapter } from '@mindwtr/core';
-import { enrichAndroidCaptureTitle, enrichAndroidEditorLinkTitles, fetchAndroidLinkTitle } from './host-link-title';
+import { LINK_TITLE_USER_AGENT, enrichAndroidCaptureTitle, enrichAndroidEditorLinkTitles, fetchAndroidLinkTitle } from './host-link-title';
 
 const globals = globalThis as unknown as Record<string, unknown>;
 const originalPlatform = globals.__mindwtrHostPlatform;
@@ -67,6 +67,8 @@ describe('native Android link titles', () => {
         }) as typeof fetch);
         expect(title).toBe('Field & Notes');
         expect(inits[0]).toMatchObject({ credentials: 'omit', redirect: 'error' });
+        expect(inits[0].headers).toEqual({ Accept: 'text/html, application/xhtml+xml', 'User-Agent': LINK_TITLE_USER_AGENT });
+        expect(LINK_TITLE_USER_AGENT).not.toMatch(/okhttp/i);
     });
 
     it('reads the title with the native host polyfills for URL, fetch Response, Headers, AbortController and TextDecoder', async () => {
@@ -84,7 +86,7 @@ describe('native Android link titles', () => {
         vm.runInContext(readFileSync(new URL('./host-polyfills.js', import.meta.url), 'utf8'), context);
         let page = '<html><head><title>Getting Things Done - Wikipedia</title></head>';
         context.fetch = (input: string, init: { redirect?: string; signal?: unknown }) => {
-            requests.push({ input, redirect: init.redirect, signal: Boolean(init.signal) });
+            requests.push({ input, redirect: init.redirect, signal: Boolean(init.signal), agent: (init as { headers?: { get(name: string): string | null } }).headers?.get?.('user-agent') ?? (init as { headers?: Record<string, string> }).headers?.['User-Agent'] });
             const Polyfilled = context.Response as new (body: null, init: object) => Record<string, unknown>;
             const response = new Polyfilled(null, { status: 200, headers: [['content-type', 'text/html; charset=UTF-8']] });
             response.url = input;
@@ -97,7 +99,7 @@ describe('native Android link titles', () => {
         vm.runInContext(bundled.outputFiles[0].text, context);
         const host = context.linkTitle as { fetchAndroidLinkTitle(url: string): Promise<string | null> };
         expect(await host.fetchAndroidLinkTitle('https://en.wikipedia.org/wiki/Getting_Things_Done#History')).toBe('Getting Things Done - Wikipedia');
-        expect(requests).toEqual([{ input: 'https://en.wikipedia.org/wiki/Getting_Things_Done', redirect: 'error', signal: true }]);
+        expect(requests).toEqual([{ input: 'https://en.wikipedia.org/wiki/Getting_Things_Done', redirect: 'error', signal: true, agent: LINK_TITLE_USER_AGENT }]);
 
         page = `<html><head><meta name="x" content="${'a'.repeat(120_000)}"><title>Late in the head</title>`;
         expect(await host.fetchAndroidLinkTitle('https://example.org/late')).toBe('Late in the head');

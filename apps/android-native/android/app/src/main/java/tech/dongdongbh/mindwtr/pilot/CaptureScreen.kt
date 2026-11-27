@@ -462,7 +462,7 @@ private fun InboxViewModel.TitleField(value: String, label: String, enabled: Boo
                 val enter = event.key == Key.Enter || event.key == Key.NumPadEnter
                 if (enter && event.type == KeyEventType.KeyDown) saveCapture(openAfterSave = false)
                 enter
-            }.fillMaxWidth().heightIn(min = 44.dp, max = 120.dp).clip(shape).background(c.inputBg).rnBorder(1.dp, c.border, shape)
+            }.fillMaxWidth().height(44.dp).clip(shape).background(c.inputBg).rnBorder(1.dp, c.border, shape)
                 .testTag("capture-title").semantics { contentDescription = label },
             decorationBox = { inner ->
                 Box(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), contentAlignment = Alignment.CenterStart) {

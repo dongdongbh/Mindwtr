@@ -980,6 +980,11 @@ for (const [file, opener] of [['TaskRowView.kt', /private fun DatesSheet[\s\S]{0
     assert.match(capture, /TitleField\(draft\.text, copy\.getString\("inputLabel"\), !locked, Modifier\.weight\(1f\)\.overhangVertically\(2\.dp\)/,
         'the 44 dp title field takes 40 dp of row height and overhangs 2 dp above and below, as RN\'s inputRow measures on the phone');
     assert.match(capture, /private fun Modifier\.overhangVertically\(overhang: Dp\) = layout \{[\s\S]{0,200}?placeable\.height - 2 \* overhang\.roundToPx\(\)[\s\S]{0,120}?placeable\.place\(0, \(height - placeable\.height\) \/ 2\)/);
+    const rnTitleInput = readFileSync(resolve(app, '../mobile/components/quick-capture-sheet/QuickCaptureTitleInput.tsx'), 'utf8');
+    assert.match(rnTitleInput, /<View style=\{\{ flex: 1, minWidth: 0 \}\}>\s+<CompactTextInput \{\.\.\.props\} ref=\{inputRef\} value=\{value\} style=\{style\}/,
+        'RN wraps its flex: 1 title input in a column, so Yoga keeps it at its 44 dp minHeight and the text scrolls inside');
+    assert.match(capture, /\}\.fillMaxWidth\(\)\.height\(44\.dp\)\.clip\(shape\)\.background\(c\.inputBg\)/, 'the capture title field stays 44 dp and scrolls a long title, as RN\'s does on the phone');
+    assert.doesNotMatch(capture, /heightIn\(min = 44\.dp, max = 120\.dp\)/, 'the capture title field does not grow with its text');
     assert.match(capture, /Row\(Modifier\.padding\(top = 8\.dp\)\) \{\s+OptionChip\(Lucide\.Folder,[^\n]*\n[^\n]*fill = false,/, 'the Destination chip fits its text, as RN\'s destinationChip (alignSelf flex-start) does');
     const focus = source('FocusControls.kt');
     const viewOptions = focus.slice(focus.indexOf('private fun ViewOptionsSheet('), focus.indexOf('private fun FocusFilterSheet('));
@@ -989,6 +994,9 @@ for (const [file, opener] of [['TaskRowView.kt', /private fun DatesSheet[\s\S]{0
     assert.match(menuWidgets, /private val RN_FILTER_CHIP_BASIS = 104\.dp[\s\S]{0,800}?for \(row in \(0 until count\)\.chunked\(columns\)\)[^\n]*\n\s+for \(index in row\) Box\(Modifier\.weight\(1f\)\.fillMaxHeight\(\), propagateMinConstraints = true\)/,
         'a growing chip row puts as many chips on a line as RN\'s 104 dp FilterChip flexBasis allows, whatever their text, and fills the line like RN\'s flexGrow');
     assert.doesNotMatch(focus, /fun GrowingChipRows\(/, 'one growing chip row, shared from MenuWidgets.kt');
+    assert.match(menuWidgets, /internal fun SheetChip\([^\n]*\n[^\n]*\n[^\n]*\n[^\n]*\n\s+Row\(Modifier\.heightIn\(min = 44\.dp\)\.clip\(shape\)/,
+        'a strip chip (Focus active filters, Contexts saved filters) fits its text, as RN\'s FilterChip does in a horizontal scroll; growing rows set the 104 dp basis themselves');
+    assert.doesNotMatch(menuWidgets, /widthIn\(min = 104\.dp\)/, 'no chip carries its own 104 dp minimum width');
     assert.match(menuWidgets, /internal fun ChipFlow\(options: List<JSONObject>, enabled: Boolean, onEdit: \(JSONObject\) -> Unit\) = GrowingChipRows\(options\.size\)/,
         'filter sheet chips (status, task dates, time, energy, priority) grow like RN\'s FilterChip, not fit their text');
     assert.match(menuWidgets, /SheetLabel\(t\("filters\.active"\)\)\s+GrowingChipRows\(it\.size\)/, 'the list filter sheet\'s active chips grow like RN\'s FilterChip');
@@ -1028,6 +1036,8 @@ assert.match(activity, /if \(capture == null && !railed\) ToastCard\(model, Modi
 assert.match(activity, /if \(menu\.sheet && railed\) CompositionLocalProvider\(LocalMoreSheetFrame provides sheetFrame\) \{ MoreSheet\(model\) \}\s+if \(capture == null && railed\) Box\(Modifier\.fillMaxSize\(\)\.navigationBarsPadding\(\)\) \{\s+ToastCard\(model, Modifier\.align\(Alignment\.BottomCenter\)\.padding\(bottom = tabToastBottomAboveNavigationBar\(railed\)\)\)/, 'beside the rail the toast draws above the More card, as RN\'s does');
 assert.match(activity, /if \(screen != Screen\.Projects \|\| openProjectId == null \|\| quick\) TopBar\(/, 'the tab screens keep the top bar in landscape, as RN always shows its header');
 assert.doesNotMatch(activity, /ORIENTATION_LANDSCAPE/, 'no tab screen hides its header in landscape');
+assert.match(activity, /private fun TopBar\(model: InboxViewModel, title: String\) \{\s+val c = LocalTheme\.current\.colors\s+Box\(Modifier\.fillMaxWidth\(\)\.height\(64\.dp\)\.background\(c\.cardBg\)\.hairline\(c\.border, top = false\)\s+\.windowInsetsPadding\(WindowInsets\.displayCutout\.only\(WindowInsetsSides\.Horizontal\)\)/,
+    'the tab top bar moves its area switcher, title and Search clear of a side camera cutout, as RN\'s header pads by the safe-area insets; the list rows do not');
 assert.match(activity, /return \(if \(railed\) rnToastBottom\(navigation\) else rnTabToastBottom\(navigation\)\) - navigation/, 'beside the rail a tab toast sits where RN\'s overlay puts it with no tab bar');
 assert.match(activity, /internal fun tabBarHeight\(navigation: Dp\): Dp = 66\.dp \+ if \(navigation >= 20\.dp\) navigation - 12\.dp else 0\.dp[\s\S]{0,2000}?val inset = if \(navigation >= 20\.dp\) navigation - 12\.dp else 0\.dp\s+Row\(Modifier\.fillMaxWidth\(\)\.height\(66\.dp \+ inset\)/, 'the toast reads the tab bar\'s own height rule');
 assert.match(menuUi, /ToastCard\(model, Modifier\.align\(Alignment\.BottomCenter\)\.padding\(bottom = toastBottomAboveNavigationBar\(\)\)\)/, 'a menu screen toast sits where RN\'s overlay puts it');

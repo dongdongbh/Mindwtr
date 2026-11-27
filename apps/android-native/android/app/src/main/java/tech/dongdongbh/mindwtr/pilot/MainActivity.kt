@@ -3,6 +3,7 @@ package tech.dongdongbh.mindwtr.pilot
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.navigationBars
@@ -364,7 +365,8 @@ fun Modifier.bottomBorder(color: Color) = drawBehind {
 @Composable
 private fun TopBar(model: InboxViewModel, title: String) {
     val c = LocalTheme.current.colors
-    Box(Modifier.fillMaxWidth().height(64.dp).background(c.cardBg).hairline(c.border, top = false), contentAlignment = Alignment.Center) {
+    Box(Modifier.fillMaxWidth().height(64.dp).background(c.cardBg).hairline(c.border, top = false)
+        .windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.Horizontal)), contentAlignment = Alignment.Center) {
         Text(title, style = rnText(17, 700), color = c.text, maxLines = 1, overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(horizontal = 72.dp).semantics { heading() })
         AreaTrigger(model, Modifier.align(Alignment.CenterStart).padding(start = 16.dp))

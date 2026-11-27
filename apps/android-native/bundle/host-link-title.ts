@@ -40,8 +40,13 @@ const withBodyReader = (response: Response): Response => {
     return Object.assign(response, { body: { getReader: () => reader } });
 };
 
+export const LINK_TITLE_USER_AGENT = 'Mindwtr (Android; +https://github.com/dongdongbh/Mindwtr)';
+
 export const fetchAndroidLinkTitle = (url: string, fetcher: typeof fetch = globalThis.fetch): Promise<string | null> =>
-    fetchWebPageTitle(url, (address, init) => fetcher(address, init).then(withBodyReader));
+    fetchWebPageTitle(url, (address, init) => fetcher(address, {
+        ...init,
+        headers: { ...(init.headers as Record<string, string>), 'User-Agent': LINK_TITLE_USER_AGENT },
+    }).then(withBodyReader));
 
 type HostEvents = { __mindwtrNative?: { hostEvent?: (json: string) => unknown } };
 
