@@ -431,13 +431,13 @@ private fun BoardFilterSheet(model: InboxViewModel, shown: BoardPage, open: JSON
                     val extra = sheetView.menuObjects("additionalChips")
                     if (chips.isNotEmpty() || extra.isNotEmpty()) Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         SheetLabel(t("filters.active"))
-                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            for (chip in chips + extra) {
-                                val label = chip.getString("label")
-                                SheetChip(label, true, chip.optBoolean("excluded"), remove = "${t("filters.remove")}: $label", enabled = idle) { board.filterEdit(chip.getJSONObject("edit")) }
-                            }
-                            if (chips.size < shown.collectionTotal("chips")) MoreChip(idle) { board.more("chips") }
+                        val active = chips + extra
+                        GrowingChipRows(active.size) { index ->
+                            val chip = active[index]
+                            val label = chip.getString("label")
+                            SheetChip(label, true, chip.optBoolean("excluded"), remove = "${t("filters.remove")}: $label", enabled = idle) { board.filterEdit(chip.getJSONObject("edit")) }
                         }
+                        if (chips.size < shown.collectionTotal("chips")) MoreChip(idle) { board.more("chips") }
                     }
                     DueSection(model, sheetView.getJSONObject("due"), open)
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {

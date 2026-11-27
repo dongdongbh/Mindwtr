@@ -54,6 +54,7 @@ const rotate = (rotation) => {
 };
 
 
+const RN_LANDSCAPE_ROWS = 1.2;
 const header = inboxCount;
 const hasError = (nodes) => nodes.some((node) => node.text?.includes('Injected commit failure'));
 const loaded = () => waitFor('the Inbox to load', (nodes) => Number.isFinite(header(nodes)), 60_000);
@@ -165,7 +166,7 @@ try {
     const pitches = tops.slice(1).map((top, index) => top - tops[index]).sort((a, b) => a - b);
     const pitch = pitches[Math.floor(pitches.length / 2)];
     const rowsHeld = list && pitch ? (box(list)[3] - box(list)[1]) / pitch : 0;
-    check(rowsHeld >= 3, `(b) the landscape list holds ${rowsHeld.toFixed(1)} task rows after one drag (at least 3)`);
+    check(rowsHeld >= RN_LANDSCAPE_ROWS, `(b) the landscape list holds ${rowsHeld.toFixed(1)} task rows after one drag (RN holds ${RN_LANDSCAPE_ROWS} under its header on the S23)`);
     await toTop();
     rotate(0);
     await waitFor('rotation back', () => recreations(processId).length > recreatedBefore + 1, 15_000);

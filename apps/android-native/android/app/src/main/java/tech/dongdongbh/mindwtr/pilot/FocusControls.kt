@@ -11,11 +11,8 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -362,7 +359,6 @@ private fun SheetText(label: String, enabled: Boolean = true, action: () -> Unit
 }
 
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ViewOptionsSheet(model: InboxViewModel, controls: JSONObject) = with(model.menu.focusControls) {
     val c = LocalTheme.current.colors
@@ -397,21 +393,6 @@ private fun ViewOptionsSheet(model: InboxViewModel, controls: JSONObject) = with
 }
 
 
-private val RN_FILTER_CHIP_BASIS = 104.dp
-
-@Composable
-internal fun GrowingChipRows(count: Int, chip: @Composable (Int) -> Unit) = BoxWithConstraints(Modifier.fillMaxWidth()) {
-    val gap = 8.dp
-    val columns = ((maxWidth + gap) / (RN_FILTER_CHIP_BASIS + gap)).toInt().coerceAtLeast(1)
-    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(gap)) {
-        for (row in (0 until count).chunked(columns)) Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(gap)) {
-            for (index in row) Box(Modifier.weight(1f).fillMaxHeight(), propagateMinConstraints = true) { chip(index) }
-        }
-    }
-}
-
-
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun FocusFilterSheet(model: InboxViewModel, controls: JSONObject, open: JSONObject) = with(model.menu.focusControls) {
     val c = LocalTheme.current.colors
@@ -487,13 +468,14 @@ private fun FocusFilterSheet(model: InboxViewModel, controls: JSONObject, open: 
                 val advanced = sheet.menuObjects("advancedChips")
                 if (chips.isNotEmpty() || advanced.isNotEmpty()) Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     SheetLabel(text.getString("active"))
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        val remove = text.getString("removeFilter")
-                        for (chip in chips) {
+                    val remove = text.getString("removeFilter")
+                    GrowingChipRows(chips.size + advanced.size) { index ->
+                        if (index < chips.size) {
+                            val chip = chips[index]
                             val label = chip.getString("label")
                             SheetChip(label, true, chip.getBoolean("excluded"), remove = "$remove: $label", enabled = idle) { edit(chip.getJSONObject("edit")) }
-                        }
-                        for (chip in advanced) {
+                        } else {
+                            val chip = advanced[index - chips.size]
                             val label = chip.getString("label")
                             SheetChip(label, true, false, remove = "$remove: $label", enabled = idle) { confirmRemove(chip.getString("criterionId"), label) }
                         }
@@ -514,7 +496,7 @@ private fun FocusFilterSheet(model: InboxViewModel, controls: JSONObject, open: 
                         Disclosure(text.getString("energyLevel"), sheet.menuObjects("energyLevels"), all, open.optBoolean("energy"), idle, { toggle("energy") },
                             summaries.getString("energyLevels")) { edit(it) }
                     }
-                    if (visibility.optBoolean("priority") || visibility.optBoolean("location")) {
+                    if (visibility.optBoolean("priority") || visibility.optBoolean("location")) Column {
                         OverviewRow(text.getString("more"), summaries.getString("more"), all, open.optBoolean("more")) { toggle("more") }
                         if (open.optBoolean("more")) Column(Modifier.padding(start = 4.dp, end = 4.dp, top = 10.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                             if (visibility.optBoolean("priority")) Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {

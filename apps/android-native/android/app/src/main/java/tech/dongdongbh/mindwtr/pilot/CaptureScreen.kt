@@ -29,11 +29,13 @@ import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.ui.draw.shadow
@@ -95,6 +97,8 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 import org.json.JSONObject
@@ -272,7 +276,7 @@ fun CapturePopup(model: InboxViewModel, draft: CaptureDraft) = with(model) {
             Row(Modifier.fillMaxWidth().padding(bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(copy.getString("title"), style = rnText(16, 700), color = c.text, maxLines = 2, modifier = Modifier.weight(1f).semantics { heading() })
                 val close = copy.getString("close")
-                Box(Modifier.size(48.dp).clip(CircleShape).clickable(enabled = closable, role = Role.Button) { closeCapture() }
+                Box(Modifier.height(36.dp).requiredSize(48.dp).clip(CircleShape).clickable(enabled = closable, role = Role.Button) { closeCapture() }
                     .semantics { contentDescription = close }, contentAlignment = Alignment.Center) {
                     Icon(Lucide.X, null, tint = c.secondaryText, modifier = Modifier.size(18.dp))
                 }
@@ -310,7 +314,7 @@ fun CapturePopup(model: InboxViewModel, draft: CaptureDraft) = with(model) {
                 else Modifier.weight(1f, fill = false)) {
 
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    TitleField(draft.text, copy.getString("inputLabel"), !locked, Modifier.weight(1f).focusRequester(titleFocus)) { typed -> typeCapture(typed) }
+                    TitleField(draft.text, copy.getString("inputLabel"), !locked, Modifier.weight(1f).overhangVertically(2.dp).focusRequester(titleFocus)) { typed -> typeCapture(typed) }
                     MicButton(voice.state) { voice.toggle(draft.text, draft.options) }
                 }
 
@@ -422,6 +426,13 @@ private fun RecordingRows(state: VoiceUi) {
     if (state.busy) Row(Modifier.padding(top = 8.dp).testTag("capture-processing").semantics { liveRegion = LiveRegionMode.Polite }) {
         Text(t("quickAdd.audioProcessing"), style = rnText(12, 600), color = c.secondaryText, maxLines = 2)
     }
+}
+
+
+private fun Modifier.overhangVertically(overhang: Dp) = layout { measurable, constraints ->
+    val placeable = measurable.measure(constraints)
+    val height = (placeable.height - 2 * overhang.roundToPx()).coerceAtLeast(0)
+    layout(placeable.width, height) { placeable.place(0, (height - placeable.height) / 2) }
 }
 
 

@@ -12,7 +12,6 @@ import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.runtime.getValue
 import android.content.Intent
 import android.content.IntentSender
-import android.content.res.Configuration
 import android.os.Build
 import android.os.Bundle
 import android.window.SplashScreenView
@@ -93,7 +92,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -249,10 +247,8 @@ class MainActivity : FragmentActivity() {
                                     Row(Modifier.fillMaxSize()) {
                                         if (railed) TabRail(model, adaptive)
                                         Column(Modifier.weight(1f)) {
-                                            val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
-
                                             val quick = screen == Screen.Projects && menu.quickView != "projects"
-                                            if ((screen != Screen.Projects || openProjectId == null || quick) && (!landscape || railed)) TopBar(model, t(if (screen == Screen.Projects) menu.quickLabel else screen.label))
+                                            if (screen != Screen.Projects || openProjectId == null || quick) TopBar(model, t(if (screen == Screen.Projects) menu.quickLabel else screen.label))
 
                                             error?.let { message ->
                                                 FailureBanner(message) {

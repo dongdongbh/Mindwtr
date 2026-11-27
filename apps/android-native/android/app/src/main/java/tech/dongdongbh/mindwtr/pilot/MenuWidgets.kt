@@ -14,13 +14,13 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.offset
@@ -593,7 +593,6 @@ interface FilterSheetHost {
     fun archivedProjects(on: Boolean) {}
 }
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun FilterSheet(host: FilterSheetHost, view: JSONObject, open: JSONObject) = with(host) {
     val theme = LocalTheme.current
@@ -664,12 +663,11 @@ internal fun FilterSheet(host: FilterSheetHost, view: JSONObject, open: JSONObje
                     chips?.let {
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             SheetLabel(t("filters.active"))
-                            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                for (chip in it) {
-                                    val label = chip.getString("label")
-                                    SheetChip(label, true, chip.optBoolean("excluded"), remove = "${t("filters.remove")}: $label", enabled = idle) {
-                                        removeChip(chip.getJSONObject("action"))
-                                    }
+                            GrowingChipRows(it.size) { index ->
+                                val chip = it[index]
+                                val label = chip.getString("label")
+                                SheetChip(label, true, chip.optBoolean("excluded"), remove = "${t("filters.remove")}: $label", enabled = idle) {
+                                    removeChip(chip.getJSONObject("action"))
                                 }
                             }
                         }
@@ -716,7 +714,7 @@ internal fun FilterSheet(host: FilterSheetHost, view: JSONObject, open: JSONObje
                         if (visibility.optBoolean("energyLevel")) {
                             Disclosure(t("taskEdit.energyLevel"), filters.menuObjects("energyLevels"), all, open.optBoolean("energy"), idle, { toggleDisclosure("energy") }) { filterEdit(it) }
                         }
-                        if (visibility.optBoolean("priority") || visibility.optBoolean("location")) {
+                        if (visibility.optBoolean("priority") || visibility.optBoolean("location")) Column {
                             val priorities = filters.menuObjects("priorities")
                             val location = state.optString("location").trim()
                             val summary = (priorities.chosenLabels() + listOfNotNull(location.takeIf { it.isNotEmpty() }?.let { "${t("taskEdit.locationLabel")}: $it" }))
@@ -779,18 +777,28 @@ internal fun OverviewRow(label: String, summary: String, all: String, expanded: 
 
 @Composable
 internal fun Disclosure(label: String, options: List<JSONObject>, all: String, open: Boolean, enabled: Boolean, onToggle: () -> Unit,
-                        summary: String? = null, onEdit: (JSONObject) -> Unit) {
+                        summary: String? = null, onEdit: (JSONObject) -> Unit) = Column {
     OverviewRow(label, summary ?: options.chosenLabels().joinToString(", ").ifEmpty { all }, all, open, onToggle)
     if (open) Box(Modifier.padding(start = 4.dp, end = 4.dp, top = 10.dp)) { ChipFlow(options, enabled, onEdit) }
 }
 
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
-internal fun ChipFlow(options: List<JSONObject>, enabled: Boolean, onEdit: (JSONObject) -> Unit) {
-    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        for (option in options) SheetChip(option.getString("label"), option.getBoolean("selected"), false, enabled = enabled) {
-            onEdit(option.getJSONObject("edit"))
+internal fun ChipFlow(options: List<JSONObject>, enabled: Boolean, onEdit: (JSONObject) -> Unit) = GrowingChipRows(options.size) { index ->
+    val option = options[index]
+    SheetChip(option.getString("label"), option.getBoolean("selected"), false, enabled = enabled) { onEdit(option.getJSONObject("edit")) }
+}
+
+
+private val RN_FILTER_CHIP_BASIS = 104.dp
+
+@Composable
+internal fun GrowingChipRows(count: Int, chip: @Composable (Int) -> Unit) = BoxWithConstraints(Modifier.fillMaxWidth()) {
+    val gap = 8.dp
+    val columns = ((maxWidth + gap) / (RN_FILTER_CHIP_BASIS + gap)).toInt().coerceAtLeast(1)
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(gap)) {
+        for (row in (0 until count).chunked(columns)) Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(gap)) {
+            for (index in row) Box(Modifier.weight(1f).fillMaxHeight(), propagateMinConstraints = true) { chip(index) }
         }
     }
 }

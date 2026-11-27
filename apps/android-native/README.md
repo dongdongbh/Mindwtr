@@ -154,7 +154,7 @@ Every device check waits for its phone first: it runs itself again under `flock`
 
 The device checks type digits through the phone's own keyboard and never change its settings. Before launching and before any typing they read the current keyboard layout from `dumpsys input_method`; unless it is English (a Chinese Pinyin layout holds or reorders typed digits), or when the layout cannot be read, they stop with exit 3 and ask you to switch it with the globe key. `MINDWTR_KEYBOARD_OK=1` skips this after you have checked the keyboard yourself.
 
-The lifecycle check proves each owed capture was sent again exactly once (one task carries the capture UUID it read from the no-backup file before the relaunch), scrolls the landscape popup to Save, and checks that the landscape Inbox shows at least three full task rows once its Process Inbox button scrolls away. The checks read the Inbox count from that button's spoken label (0 for RN's empty Inbox). All device checks clear the language property first, so they expect the phone's language to resolve to English.
+The lifecycle check proves each owed capture was sent again exactly once (one task carries the capture UUID it read from the no-backup file before the relaunch), scrolls the landscape popup to Save, and checks that the landscape Inbox shows at least as many task rows as RN (1.2 on the S23, below RN's header) once its Process Inbox button scrolls away. The checks read the Inbox count from that button's spoken label (0 for RN's empty Inbox). All device checks clear the language property first, so they expect the phone's language to resolve to English.
 
 Rotation and process death are validated only for this development identity, not for a production identity.
 

@@ -975,18 +975,36 @@ for (const [file, opener] of [['TaskRowView.kt', /private fun DatesSheet[\s\S]{0
     assert.match(capture, /if \(kind == "destination"\) return CaptureDestinationPicker\(draft, picker, locked\)/, 'quick capture opens RN\'s Destination picker, not the generic capture picker card');
     assert.match(capture, /fun InboxViewModel\.CaptureDestinationPicker[\s\S]{0,300}?PickerDialog\(picker\.getString\("title"\), this::closeCapturePicker, search = \{[\s\S]{0,900}?listOf\("area" to areaLabel, "project" to projectsLabel, "deferred" to t\("projects\.deferredSection"\)\)[\s\S]{0,200}?PickerHeading\(heading\)/,
         'the capture Destination picker groups Area, Projects and Someday / Waiting under RN\'s headings, with RN\'s Cancel button');
+    assert.match(capture, /Row\(Modifier\.fillMaxWidth\(\)\.padding\(bottom = 10\.dp\)[^\n]*\n[^\n]*copy\.getString\("title"\)[^\n]*\n[^\n]*\n\s+Box\(Modifier\.height\(36\.dp\)\.requiredSize\(48\.dp\)\.clip\(CircleShape\)/,
+        'the capture header is RN\'s: the 48 dp close button takes 36 dp of height (marginVertical -6)');
+    assert.match(capture, /TitleField\(draft\.text, copy\.getString\("inputLabel"\), !locked, Modifier\.weight\(1f\)\.overhangVertically\(2\.dp\)/,
+        'the 44 dp title field takes 40 dp of row height and overhangs 2 dp above and below, as RN\'s inputRow measures on the phone');
+    assert.match(capture, /private fun Modifier\.overhangVertically\(overhang: Dp\) = layout \{[\s\S]{0,200}?placeable\.height - 2 \* overhang\.roundToPx\(\)[\s\S]{0,120}?placeable\.place\(0, \(height - placeable\.height\) \/ 2\)/);
     assert.match(capture, /Row\(Modifier\.padding\(top = 8\.dp\)\) \{\s+OptionChip\(Lucide\.Folder,[^\n]*\n[^\n]*fill = false,/, 'the Destination chip fits its text, as RN\'s destinationChip (alignSelf flex-start) does');
     const focus = source('FocusControls.kt');
-    const viewOptions = focus.slice(focus.indexOf('private fun ViewOptionsSheet('), focus.indexOf('internal fun GrowingChipRows('));
+    const viewOptions = focus.slice(focus.indexOf('private fun ViewOptionsSheet('), focus.indexOf('private fun FocusFilterSheet('));
     assert.equal(viewOptions.match(/GrowingChipRows\(/g)?.length, 3, 'Focus View options lays out its Sort, Group and Details chips as RN\'s growing FilterChips');
     assert.doesNotMatch(viewOptions, /ChipFlow\(|FlowRow\(|spacedBy\(10\.dp\)/, 'Focus View options has no fit-to-text chips and no gaps RN\'s sheet lacks');
-    assert.match(focus, /private val RN_FILTER_CHIP_BASIS = 104\.dp[\s\S]{0,800}?for \(row in \(0 until count\)\.chunked\(columns\)\)[^\n]*\n\s+for \(index in row\) Box\(Modifier\.weight\(1f\)\.fillMaxHeight\(\), propagateMinConstraints = true\)/,
+    const menuWidgets = source('MenuWidgets.kt');
+    assert.match(menuWidgets, /private val RN_FILTER_CHIP_BASIS = 104\.dp[\s\S]{0,800}?for \(row in \(0 until count\)\.chunked\(columns\)\)[^\n]*\n\s+for \(index in row\) Box\(Modifier\.weight\(1f\)\.fillMaxHeight\(\), propagateMinConstraints = true\)/,
         'a growing chip row puts as many chips on a line as RN\'s 104 dp FilterChip flexBasis allows, whatever their text, and fills the line like RN\'s flexGrow');
+    assert.doesNotMatch(focus, /fun GrowingChipRows\(/, 'one growing chip row, shared from MenuWidgets.kt');
+    assert.match(menuWidgets, /internal fun ChipFlow\(options: List<JSONObject>, enabled: Boolean, onEdit: \(JSONObject\) -> Unit\) = GrowingChipRows\(options\.size\)/,
+        'filter sheet chips (status, task dates, time, energy, priority) grow like RN\'s FilterChip, not fit their text');
+    assert.match(menuWidgets, /SheetLabel\(t\("filters\.active"\)\)\s+GrowingChipRows\(it\.size\)/, 'the list filter sheet\'s active chips grow like RN\'s FilterChip');
+    assert.match(focus, /SheetLabel\(text\.getString\("active"\)\)\s+val remove = text\.getString\("removeFilter"\)\s+GrowingChipRows\(chips\.size \+ advanced\.size\)/, 'the Focus filter sheet\'s active chips grow like RN\'s FilterChip');
+    assert.match(menuWidgets, /summary: String\? = null, onEdit: \(JSONObject\) -> Unit\) = Column \{\s+OverviewRow\(label,/,
+        'a disclosure row and its chips sit in one block, so the chips start 10 dp under the row as in RN, without the sheet\'s 8 dp row gap');
+    for (const [file, text] of [['MenuWidgets.kt', menuWidgets], ['FocusControls.kt', focus]]) {
+        assert.match(text, /if \(visibility\.optBoolean\("priority"\) \|\| visibility\.optBoolean\("location"\)\) Column \{/, `${file}: More filters and its panel sit in one block, as RN's wrapper View does`);
+        assert.doesNotMatch(text, /FlowRow\(/, `${file}: no filter sheet chip row fits its text`);
+    }
     const board = source('BoardScreen.kt');
     assert.match(board, /DueSection\(model, sheetView\.getJSONObject\("due"\), open\)\s+Column\(verticalArrangement = Arrangement\.spacedBy\(8\.dp\)\) \{\s+TaskDates\(model, filters, open\)/, 'Board filters show RN\'s Task dates row first in the overview rows');
     assert.match(board, /put\("type", "setAnyDateRange"\)[\s\S]{0,900}?OverviewRow\(t\("filters\.taskDates"\)[\s\S]{0,400}?GrowingChipRows\(options\.size\)[\s\S]{0,300}?board\.filterEdit\(option\.getJSONObject\("edit"\)\)/,
         'the Board Task dates row edits core\'s board filter through setAnyDateRange, with RN\'s growing chips');
     assert.match(board, /if \(expanded\) GrowingChipRows\(presets\.size\)/, 'the Board Due date chips grow like RN\'s FilterChips');
+    assert.match(board, /SheetLabel\(t\("filters\.active"\)\)\s+val active = chips \+ extra\s+GrowingChipRows\(active\.size\)/, 'the Board filter sheet\'s active chips grow like RN\'s FilterChip');
     assert.match(source('CalendarScreen.kt'), /val primary = buttons\.indexOfLast \{ it\.getString\("style"\) == "default" \}\.takeIf \{ it == buttons\.lastIndex \} \?: -1/,
         'a calendar sheet fills only a last default button, as RN\'s themed alert does');
     const contexts = source('ContextsScreen.kt');
@@ -1008,7 +1026,8 @@ assert.match(editorUi, /"destination" -> PickerDialog\(t\("task\.destination"\),
 assert.match(editorUi, /internal fun PickerHeading\(text: String\) \{\s+Text\(text, style = rnText\(16, 700\), color = LocalTheme\.current\.colors\.secondaryText\)/, 'picker headings sit at the list\'s left edge, as RN\'s do');
 assert.match(activity, /if \(capture == null && !railed\) ToastCard\(model, Modifier\.align\(Alignment\.BottomCenter\)\.padding\(bottom = tabToastBottomAboveNavigationBar\(railed\)\)\)/, 'a tab toast sits 12 dp above the tab bar from the screen bottom, as RN\'s overlay does');
 assert.match(activity, /if \(menu\.sheet && railed\) CompositionLocalProvider\(LocalMoreSheetFrame provides sheetFrame\) \{ MoreSheet\(model\) \}\s+if \(capture == null && railed\) Box\(Modifier\.fillMaxSize\(\)\.navigationBarsPadding\(\)\) \{\s+ToastCard\(model, Modifier\.align\(Alignment\.BottomCenter\)\.padding\(bottom = tabToastBottomAboveNavigationBar\(railed\)\)\)/, 'beside the rail the toast draws above the More card, as RN\'s does');
-assert.match(activity, /quick\) && \(!landscape \|\| railed\)\) TopBar\(/, 'a window with the rail keeps the top bar in landscape, as RN always shows its header');
+assert.match(activity, /if \(screen != Screen\.Projects \|\| openProjectId == null \|\| quick\) TopBar\(/, 'the tab screens keep the top bar in landscape, as RN always shows its header');
+assert.doesNotMatch(activity, /ORIENTATION_LANDSCAPE/, 'no tab screen hides its header in landscape');
 assert.match(activity, /return \(if \(railed\) rnToastBottom\(navigation\) else rnTabToastBottom\(navigation\)\) - navigation/, 'beside the rail a tab toast sits where RN\'s overlay puts it with no tab bar');
 assert.match(activity, /internal fun tabBarHeight\(navigation: Dp\): Dp = 66\.dp \+ if \(navigation >= 20\.dp\) navigation - 12\.dp else 0\.dp[\s\S]{0,2000}?val inset = if \(navigation >= 20\.dp\) navigation - 12\.dp else 0\.dp\s+Row\(Modifier\.fillMaxWidth\(\)\.height\(66\.dp \+ inset\)/, 'the toast reads the tab bar\'s own height rule');
 assert.match(menuUi, /ToastCard\(model, Modifier\.align\(Alignment\.BottomCenter\)\.padding\(bottom = toastBottomAboveNavigationBar\(\)\)\)/, 'a menu screen toast sits where RN\'s overlay puts it');
