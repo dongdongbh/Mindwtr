@@ -163,6 +163,9 @@ describe('GlobalSearch', () => {
         for (const region of scrollRegions) {
             expect(region.className).toContain('min-h-0');
         }
+        expect(scrollRegions[0].className).toContain('shrink-0');
+        expect(scrollRegions[0].className).toContain('max-h-[30vh]');
+        expect(scrollRegions[1].className).toContain('flex-1');
 
 
         expect(screen.queryByText('Type to search...')).not.toBeInTheDocument();
@@ -721,6 +724,61 @@ describe('GlobalSearch', () => {
 
             expect(rowFor('Zeta unstamped').textContent).not.toMatch(/Due|Completed/);
         });
+    });
+
+    it('offers a button to include hidden Done and Archived matches and keeps input focus', async () => {
+        render(
+            <LanguageProvider>
+                <GlobalSearch onNavigate={vi.fn()} />
+            </LanguageProvider>
+        );
+
+        await act(async () => {
+            window.dispatchEvent(new Event('mindwtr:open-search'));
+            await vi.advanceTimersByTimeAsync(50);
+        });
+
+        const input = screen.getByRole('textbox');
+        await act(async () => {
+            fireEvent.change(input, { target: { value: 'report' } });
+            await vi.advanceTimersByTimeAsync(200);
+        });
+
+        const includeButton = screen.getByRole('button', { name: '2 more in Done and Archived' });
+        const renderedTitles = () => Array.from(
+            screen.getByRole('dialog').querySelectorAll('[data-search-index] .font-medium')
+        ).map((element) => element.textContent);
+        expect(renderedTitles()).toEqual([]);
+
+        await act(async () => {
+            fireEvent.click(includeButton);
+            await vi.advanceTimersByTimeAsync(50);
+        });
+
+        expect(screen.queryByRole('button', { name: '2 more in Done and Archived' })).not.toBeInTheDocument();
+        expect(renderedTitles()).toEqual(['Completed report', 'Archived report']);
+        expect(screen.getByRole('button', { name: 'Include Done and Archived tasks' })).toBeInTheDocument();
+        expect(document.activeElement).toBe(input);
+    });
+
+    it('hides the Done and Archived button when no finished items match the query', async () => {
+        render(
+            <LanguageProvider>
+                <GlobalSearch onNavigate={vi.fn()} />
+            </LanguageProvider>
+        );
+
+        await act(async () => {
+            window.dispatchEvent(new Event('mindwtr:open-search'));
+            await vi.advanceTimersByTimeAsync(50);
+        });
+
+        await act(async () => {
+            fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Work task' } });
+            await vi.advanceTimersByTimeAsync(200);
+        });
+
+        expect(screen.queryByText(/more in Done and Archived/)).not.toBeInTheDocument();
     });
 });
 

@@ -210,7 +210,7 @@ Source: `apps/desktop/src` (Tauri + React). Labels come from `packages/core/src/
 - Selectors: `virtualized-task-list`
 - Code: `apps/desktop/src/components/GlobalSearch.tsx`, `apps/desktop/src/components/views/SearchView.tsx`
 - Checks: `e2e/global-search-highlights.spec.ts`, `apps/desktop/src/components/GlobalSearch.test.tsx`, `apps/desktop/src/components/views/SearchView.test.tsx`, `apps/desktop/src/App.search-highlight.test.tsx`
-- Notes: Opening a result outside the current area filter switches the filter to All areas. The query accepts operators such as `status:`, `context:`, `tag:`, `project:`, and `due:<=7d`.
+- Notes: Opening a result outside the current area filter switches the filter to All areas. The query accepts operators such as `status:`, `context:`, `tag:`, `project:`, and `due:<=7d`. When a search has hidden Done or Archived matches, a button above the results includes them in one click.
 
 ## Filters and saved filters
 

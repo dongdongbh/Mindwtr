@@ -261,7 +261,7 @@ export function GlobalSearch({ onNavigate, defaultIncludeCompleted = false }: Gl
     const hideFutureTasksText = hideFutureTasksLabel === 'filters.hideFutureTasks'
         ? 'Hide future tasks'
         : hideFutureTasksLabel;
-    const { totalResultsLabel, results, isTruncated, hasActiveSearch } = useMemo(() => computeGlobalSearchResults({
+    const { totalResultsLabel, results, isTruncated, hasActiveSearch, hiddenCompletedCount } = useMemo(() => computeGlobalSearchResults({
         query: searchQuery,
         tasks: _allTasks,
         projects,
@@ -611,7 +611,7 @@ export function GlobalSearch({ onNavigate, defaultIncludeCompleted = false }: Gl
                 </div>
             )}
             {filtersOpen && (
-                <div className="min-h-0 overflow-y-auto px-4 py-3 border-b space-y-3 text-xs">
+                <div className="min-h-0 max-h-[30vh] shrink-0 overflow-y-auto px-4 py-3 border-b space-y-3 text-xs">
                     <div className="space-y-2">
                         <div className="text-[11px] uppercase tracking-wide text-muted-foreground/80">{filterPresentation.sections.status}</div>
                         <div className="flex flex-wrap gap-2">
@@ -776,7 +776,25 @@ export function GlobalSearch({ onNavigate, defaultIncludeCompleted = false }: Gl
                 </div>
             )}
 
-            <div ref={resultsRef} className="min-h-0 max-h-[60vh] overflow-y-auto p-2">
+            {hasActiveSearch && hiddenCompletedCount > 0 && (
+                <div className="shrink-0 border-b px-4 py-2">
+                    <button
+                        type="button"
+                        onClick={() => {
+                            setIncludeCompleted(true);
+                            inputRef.current?.focus();
+                        }}
+                        className="w-full rounded-md border border-border bg-muted/40 px-3 py-1.5 text-center text-xs font-medium text-primary transition-colors hover:bg-muted/70"
+                    >
+                        {formatI18nTemplate(
+                            tFallback(t, 'search.hiddenCompletedMatches', '{{count}} more in Done and Archived'),
+                            { count: hiddenCompletedCount },
+                        )}
+                    </button>
+                </div>
+            )}
+
+            <div ref={resultsRef} className="min-h-0 flex-1 max-h-[60vh] overflow-y-auto p-2">
                 {isTruncated && (
                     <div className="px-3 pb-2 text-xs text-muted-foreground">
                         {t('search.showingFirst')
