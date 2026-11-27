@@ -7,6 +7,10 @@ import { dispatchDesktopOnboardingEvent } from './lib/desktop-onboarding-events'
 import { loadWindowsRegionalDate } from './lib/system-locale';
 import * as tauriInvoke from './lib/tauri-invoke';
 import { useUiStore } from './store/ui-store';
+import * as runtime from './lib/runtime';
+import * as tauriEvent from '@tauri-apps/api/event';
+
+vi.mock('@tauri-apps/api/event', { spy: true });
 
 const renderWithProviders = (ui: React.ReactElement) => {
     return render(
@@ -70,6 +74,32 @@ describe('App', () => {
     it('renders Sidebar navigation', () => {
         const { getByRole } = renderWithProviders(<App />);
         expect(getByRole('button', { name: 'Projects' })).toBeInTheDocument();
+    });
+
+    it('opens Settings when the native application menu requests it', async () => {
+        const runtimeSpy = vi.spyOn(runtime, 'isTauriRuntime').mockReturnValue(true);
+        let openSettings: (() => void) | undefined;
+        const eventSpy = vi.spyOn(tauriEvent, 'listen').mockImplementation(async (name, handler) => {
+            if (name === 'open-settings') {
+                openSettings = () => handler({ event: name, id: 1, payload: undefined as never });
+            }
+            return () => {};
+        });
+        tauriInvoke.setNativeInvokeTransport(async (command) => {
+            if (command === 'list_system_fonts') return [] as never;
+            throw new Error(`Unexpected native command: ${command}`);
+        });
+        const { getByRole, unmount } = renderWithProviders(<App />);
+        try {
+            await waitFor(() => expect(openSettings).toBeDefined());
+            act(() => openSettings?.());
+            await waitFor(() => expect(getByRole('button', { name: 'Settings' })).toHaveAttribute('aria-current', 'page'));
+        } finally {
+            unmount();
+            tauriInvoke.setNativeInvokeTransport(null);
+            eventSpy.mockRestore();
+            runtimeSpy.mockRestore();
+        }
     });
 
     it('prefers the view in the URL over the restored last view (#931)', async () => {

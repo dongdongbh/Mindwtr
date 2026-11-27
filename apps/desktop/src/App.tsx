@@ -1387,6 +1387,30 @@ function App() {
     }, [applyViewChange, navigationHistory]);
 
 
+    useEffect(() => {
+        if (sandboxMode || !isTauriRuntime()) return;
+        let disposed = false;
+        let unlisten: (() => void) | undefined;
+
+        const setup = async () => {
+            const { listen } = await import('@tauri-apps/api/event');
+            const stop = await listen('open-settings', () => {
+                if (!disposed) handleViewChange('settings');
+            }, { target: 'main' });
+            if (disposed) stop();
+            else unlisten = stop;
+        };
+
+        setup().catch((error) => {
+            void logError(error, { scope: 'navigation', step: 'listenForOpenSettings' });
+        });
+
+        return () => {
+            disposed = true;
+            unlisten?.();
+        };
+    }, [handleViewChange, sandboxMode]);
+
     const pendingSearchHighlightRef = useRef<{ view: string; taskId: string } | null>(null);
     const handleSearchNavigate = useCallback((view: string, _id?: string, options?: { highlightTaskId?: string }) => {
         const taskId = options?.highlightTaskId;
