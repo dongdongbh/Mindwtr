@@ -931,7 +931,9 @@ for (const [file, opener] of [['TaskRowView.kt', /private fun DatesSheet[\s\S]{0
     ['TaskRowView.kt', /fun StatusMenu[\s\S]{0,600}?Box\(Modifier\.fillMaxSize\(\)\.windowScrim\(theme\.menuScrim\)/],
     ['TaskEditor.kt', /internal fun PickerDialog[\s\S]{0,300}?Box\(Modifier\.fillMaxSize\(\)\.windowScrim\(theme\.pickerScrim\)/],
     ['MenuWidgets.kt', /fun ChoiceModal[\s\S]{0,300}?Box\(Modifier\.fillMaxSize\(\)\.windowScrim\(theme\.pickerScrim\)/],
-    ['WeeklyReviewScreen.kt', /fun WeeklyProjectCompletePrompt[\s\S]{0,400}?Box\(Modifier\.fillMaxSize\(\)\.windowScrim\(theme\.promptScrim\)/]]) {
+    ['WeeklyReviewScreen.kt', /fun WeeklyProjectCompletePrompt[\s\S]{0,400}?Box\(Modifier\.fillMaxSize\(\)\.windowScrim\(theme\.promptScrim\)/],
+    ['BulkBar.kt', /fun OrganizeDialog[\s\S]{0,400}?BoxWithConstraints\(Modifier\.fillMaxSize\(\)\.windowScrim\(theme\.pickerScrim\)/],
+    ['BulkBar.kt', /private fun OrganizePicker[\s\S]{0,400}?Box\(Modifier\.fillMaxSize\(\)\.windowScrim\(theme\.pickerScrim\)/]]) {
     assert.match(source(file), opener, `${file}: the scrim dims the whole window and centers the card on it, as RN's Modal does`);
 }
 assert.match(rowUi, /Box\(if \(offset\.value != 0f\) Modifier\.clipToBounds\(\) else Modifier\) \{/, 'an open tray clips the moved row at the row bounds, as RN\'s Swipeable does');
@@ -10763,6 +10765,35 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     assert.match(heading, /Text\("\$\{entry\.count\}", style = rnText\(11, 600\), color = colors\.secondaryText\)/, 'the count is bare, like RN');
     assert.match(heading, /Icon\(Lucide\.PlusPlain, null,/, 'RN\'s Plus icon');
     console.log('Browse rows, Bulk Organize order and the project section heading match RN');
+}
+{
+    const rnChips = readFileSync(resolve(app, '../mobile/components/QuickDateChips.tsx'), 'utf8');
+    const rnBulkDate = readFileSync(resolve(app, '../mobile/components/task-list/TaskListBulkDateField.tsx'), 'utf8');
+    assert.match(rnChips, /chip: \{[^}]*flexBasis: 92,\s+flexGrow: 1,\s+flexShrink: 1,\s+paddingHorizontal: 10,\s+paddingVertical: 7,/, 'RN quick date chips grow to share the row');
+    assert.match(rnChips, /content: \{[^}]*gap: 6,\s+paddingRight: 4,/);
+    assert.match(rnBulkDate, /presets=\{\['today', 'tomorrow'\]\}/, 'RN Bulk organize offers two quick dates, so they always fit one row');
+    const rnListStyles = readFileSync(resolve(app, '../mobile/components/task-list/task-list.styles.ts'), 'utf8');
+    assert.match(rnListStyles, /bulkOrganizeCard: \{[^}]*maxHeight: '86%',/);
+    assert.match(rnListStyles, /modalOverlay: \{[^}]*justifyContent: 'center',[^}]*padding: 20,/, 'RN centers Bulk organize in a 20 dp padded overlay');
+    assert.match(code(bulkUi.slice(bulkUi.indexOf('fun OrganizeDialog('))), /Column\(Modifier\.widthIn\(max = 440\.dp\)\.fillMaxWidth\(\)\.heightIn\(max = maxHeight \* 0\.86f\)/,
+        'Bulk organize caps the card at 86% of the padded overlay, like RN\'s maxHeight, not of the whole screen');
+    const dateField = code(bulkUi.slice(bulkUi.indexOf('private fun DateField('), bulkUi.indexOf('private fun OrganizePicker(')));
+    assert.match(dateField, /Row\(Modifier\.padding\(end = 4\.dp\), horizontalArrangement = Arrangement\.spacedBy\(6\.dp\)\) \{\s+for \(chip in date\.menuObjects\("quickDates"\)\)/,
+        'Bulk organize quick dates share one row with RN\'s 6 dp gap');
+    assert.match(dateField, /Box\(Modifier\.weight\(1f\)\.widthIn\(min = 44\.dp\)\.heightIn\(min = 44\.dp\)/, 'each quick date chip takes an equal share of the row, like RN\'s flexGrow');
+    assert.match(dateField, /\.padding\(horizontal = 10\.dp, vertical = 7\.dp\)/);
+    assert.match(dateField, /Text\(chip\.getString\("label"\), style = rnText\(12, 600\)\.compact\(\), color = if \(on\) c\.onTint else c\.secondaryText, textAlign = TextAlign\.Center, maxLines = 2\)/,
+        'quick date labels are centered RN CompactText in secondaryText');
+
+    const rnTabs = readFileSync(resolve(app, '../mobile/components/task-edit/TaskEditTabs.tsx'), 'utf8');
+    assert.match(rnTabs, /width: containerWidth \/ 2,[\s\S]{0,300}?outputRange: \[0, containerWidth \/ 2\]/, 'RN sizes the editor tab indicator from the pager width, not the track');
+    assert.match(rnTabs, /modeTabs: \{[^}]*paddingHorizontal: 16,/);
+    const tabs = code(source('TaskView.kt').slice(source('TaskView.kt').indexOf('fun EditorTabs('), source('TaskView.kt').indexOf('fun TaskViewTab(')));
+    assert.match(tabs, /BoxWithConstraints\(Modifier\.fillMaxWidth\(\)\.background\(c\.cardBg\)\.rnBorderBottom\(c\.border\)\) \{\s+val indicatorWidth = maxWidth \/ 2/,
+        'the editor tab indicator is half the editor width, like RN\'s containerWidth / 2');
+    assert.match(tabs, /offset\(x = indicatorOffset\)\.width\(indicatorWidth\)\.clip\(shape\)\.background\(c\.tint\)/, 'one sliding indicator, clipped by the track');
+    assert.doesNotMatch(tabs, /background\(if \(open\) c\.tint/, 'tabs do not paint their own half of the track');
+    console.log('Bulk organize centers on the window, its quick dates share the row, and the editor tab indicator matches RN');
 }
 {
     const { hostGateGaps } = await import('../../ios-native/scripts/check-host-gates.mjs');

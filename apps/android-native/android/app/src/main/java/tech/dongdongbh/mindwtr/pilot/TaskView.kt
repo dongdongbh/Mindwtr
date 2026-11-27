@@ -1,5 +1,6 @@
 package tech.dongdongbh.mindwtr.pilot
 
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
@@ -24,6 +25,7 @@ import tech.dongdongbh.mindwtr.pilot.core.CoreHost
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -33,10 +35,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -100,17 +104,22 @@ import org.json.JSONObject
 fun EditorTabs(model: InboxViewModel, editor: TaskEditor) {
     val c = LocalTheme.current.colors
     val shape = RoundedCornerShape(12.dp)
-    Row(Modifier.fillMaxWidth().background(c.cardBg).rnBorderBottom(c.border).padding(horizontal = 16.dp, vertical = 10.dp)) {
-        Row(Modifier.weight(1f).clip(shape).background(c.filterBg).rnBorder(1.dp, c.border, shape)) {
-            for ((tab, icon, key) in listOf(Triple("task", SettingsLucide.Pencil, "markdown.edit"), Triple("view", Lucide.Eye, "markdown.preview"))) {
-                val open = editor.tab == tab
-                val label = t(key)
-                Row(Modifier.weight(1f).clip(shape).background(if (open) c.tint else c.filterBg)
-                    .clearAndSetSemantics { contentDescription = label; role = Role.Tab; selected = open; onClick { model.editorTab(tab); true } }
-                    .clickable { model.editorTab(tab) }.padding(vertical = 10.dp),
-                    horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
-                    Icon(icon, null, tint = if (open) c.onTint else c.text, modifier = Modifier.size(16.dp))
-                    Text(label, style = rnText(14, 600), color = if (open) c.onTint else c.text, modifier = Modifier.padding(start = 6.dp))
+    BoxWithConstraints(Modifier.fillMaxWidth().background(c.cardBg).rnBorderBottom(c.border)) {
+        val indicatorWidth = maxWidth / 2
+        val indicatorOffset by animateDpAsState(if (editor.tab == "view") indicatorWidth else 0.dp, label = "editorTabIndicator")
+        Box(Modifier.padding(horizontal = 16.dp, vertical = 10.dp).fillMaxWidth().clip(shape).background(c.filterBg).rnBorder(1.dp, c.border, shape)) {
+            Box(Modifier.matchParentSize().wrapContentWidth(Alignment.Start, unbounded = true).offset(x = indicatorOffset).width(indicatorWidth).clip(shape).background(c.tint))
+            Row(Modifier.fillMaxWidth()) {
+                for ((tab, icon, key) in listOf(Triple("task", SettingsLucide.Pencil, "markdown.edit"), Triple("view", Lucide.Eye, "markdown.preview"))) {
+                    val open = editor.tab == tab
+                    val label = t(key)
+                    Row(Modifier.weight(1f)
+                        .clearAndSetSemantics { contentDescription = label; role = Role.Tab; selected = open; onClick { model.editorTab(tab); true } }
+                        .clickable { model.editorTab(tab) }.padding(vertical = 10.dp),
+                        horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+                        Icon(icon, null, tint = if (open) c.onTint else c.text, modifier = Modifier.size(16.dp))
+                        Text(label, style = rnText(14, 600), color = if (open) c.onTint else c.text, modifier = Modifier.padding(start = 6.dp))
+                    }
                 }
             }
         }

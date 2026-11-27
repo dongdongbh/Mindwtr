@@ -6,13 +6,17 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -215,10 +219,10 @@ fun OrganizeDialog(model: InboxViewModel, open: JSONObject) = with(model.menu) {
     val c = theme.colors
     val locked = !idle
     val close = organize.getString("closeLabel")
-    Box(Modifier.fillMaxSize().background(theme.pickerScrim).clickable(role = Role.Button) { if (!model.busy) keepDialog(null) }
-        .semantics { contentDescription = close }.imePadding().padding(20.dp), contentAlignment = Alignment.Center) {
+    BoxWithConstraints(Modifier.fillMaxSize().windowScrim(theme.pickerScrim).clickable(role = Role.Button) { if (!model.busy) keepDialog(null) }
+        .semantics { contentDescription = close }.padding(WindowInsets.ime.asPaddingValues()).padding(20.dp), contentAlignment = Alignment.Center) {
         val shape = RoundedCornerShape(12.dp)
-        Column(Modifier.widthIn(max = 440.dp).fillMaxWidth().heightIn(max = (LocalConfiguration.current.screenHeightDp * 0.86f).dp).clip(shape)
+        Column(Modifier.widthIn(max = 440.dp).fillMaxWidth().heightIn(max = maxHeight * 0.86f).clip(shape)
             .background(c.cardBg).rnBorder(1.dp, c.border, shape).pointerInput(Unit) { detectTapGestures { } }) {
             Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Icon(Lucide.ClipboardCheck, null, tint = c.tint, modifier = Modifier.size(18.dp))
@@ -355,7 +359,6 @@ private fun PickerRow(description: String, value: String, enabled: Boolean, acti
 }
 
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun DateField(model: InboxViewModel, open: JSONObject, date: JSONObject, locked: Boolean) = with(model.menu) {
     val c = LocalTheme.current.colors
@@ -376,15 +379,15 @@ private fun DateField(model: InboxViewModel, open: JSONObject, date: JSONObject,
                 Icon(Lucide.Calendar, null, tint = c.secondaryText, modifier = Modifier.size(18.dp))
             }
         }
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(Modifier.padding(end = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             for (chip in date.menuObjects("quickDates")) {
                 val on = chip.getBoolean("selected")
                 val spoken = chip.getString("accessibilityLabel")
                 val pick = { organizeDate(field, chip.getJSONObject("edit")) }
-                Box(Modifier.widthIn(min = 44.dp).heightIn(min = 44.dp).clip(CircleShape).background(if (on) c.tint else c.filterBg).rnBorder(1.dp, if (on) c.tint else c.border, CircleShape)
+                Box(Modifier.weight(1f).widthIn(min = 44.dp).heightIn(min = 44.dp).clip(CircleShape).background(if (on) c.tint else c.filterBg).rnBorder(1.dp, if (on) c.tint else c.border, CircleShape)
                     .clearAndSetSemantics { contentDescription = spoken; role = Role.Button; selected = on; if (!locked) onClick { pick(); true } else disabled() }
-                    .clickable(enabled = !locked) { pick() }.padding(horizontal = 12.dp), contentAlignment = Alignment.Center) {
-                    Text(chip.getString("label"), style = rnText(12, 600), color = if (on) c.onTint else c.text)
+                    .clickable(enabled = !locked) { pick() }.padding(horizontal = 10.dp, vertical = 7.dp), contentAlignment = Alignment.Center) {
+                    Text(chip.getString("label"), style = rnText(12, 600).compact(), color = if (on) c.onTint else c.secondaryText, textAlign = TextAlign.Center, maxLines = 2)
                 }
             }
         }
@@ -399,7 +402,7 @@ private fun OrganizePicker(model: InboxViewModel, open: JSONObject, kind: String
     val picker = bulkView?.optJSONObject("picker")?.takeIf { it.getString("kind") == kind }
     val organize = bulkView?.optJSONObject("organize") ?: return
     val title = organize.getJSONObject(kind).getString("label")
-    Box(Modifier.fillMaxSize().background(theme.pickerScrim).clickable(role = Role.Button) { organizePicker(null) }.imePadding().padding(20.dp),
+    Box(Modifier.fillMaxSize().windowScrim(theme.pickerScrim).clickable(role = Role.Button) { organizePicker(null) }.padding(WindowInsets.ime.asPaddingValues()).padding(20.dp),
         contentAlignment = Alignment.Center) {
         val shape = RoundedCornerShape(14.dp)
         Column(Modifier.widthIn(max = 440.dp).fillMaxWidth().heightIn(max = (LocalConfiguration.current.screenHeightDp * 0.8f).dp).clip(shape)
