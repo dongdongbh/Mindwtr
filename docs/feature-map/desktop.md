@@ -75,7 +75,7 @@ Source: `apps/desktop/src` (Tauri + React). Labels come from `packages/core/src/
 
 ## Inbox processing
 
-- Reach: Sidebar › Inbox › Process Inbox (n). Modes: Guided and Quick. Settings › GTD › Inbox processing sets the default mode and steps.
+- Reach: Sidebar › Inbox › Process Inbox (n). Modes: Guided and Quick. In Guided, Turn into project shows editable Project name and Next action together. Creating the project moves the original task into it and advances the Inbox session. Settings › GTD › Inbox processing sets the default mode and steps.
 - Code: `apps/desktop/src/components/views/InboxProcessor.tsx`, `apps/desktop/src/components/InboxProcessingWizard.tsx`, `apps/desktop/src/components/InboxProcessingQuickPanel.tsx`, `apps/desktop/src/components/InboxProcessingScheduleFields.tsx`, `apps/desktop/src/components/InboxProcessingSectionField.tsx`, `apps/desktop/src/components/InboxProcessingLinks.tsx`, `apps/desktop/src/components/InboxSimilarTasks.tsx`, `apps/desktop/src/components/InboxNextActionDrafts.tsx`, `apps/desktop/src/components/views/inbox/useInboxProcessingController.ts`
 - Checks: `e2e/clarify.spec.ts`, `e2e/inbox-similarity.spec.ts`, `e2e/onboarding.spec.ts`, `apps/desktop/src/components/views/InboxProcessor.test.tsx`, `apps/desktop/src/components/InboxProcessingPanels.test.tsx`, `apps/desktop/src/components/InboxProcessingScheduleFields.test.tsx`, `apps/desktop/src/components/views/inbox/useInboxProcessingController.test.tsx`
 - Notes: The queue ignores the area filter, like the Inbox list. Similar-task matches are offline title matches and never change existing tasks.

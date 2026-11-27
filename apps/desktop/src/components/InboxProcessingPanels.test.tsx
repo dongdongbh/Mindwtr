@@ -138,6 +138,8 @@ function QuickPanelHarness({ initialDraft, ...overrides }: Partial<InboxProcessi
             onCreateSection={noop as InboxProcessingQuickPanelProps['onCreateSection']}
             toggleContext={noop}
             toggleTag={noop}
+            projectName={draft.title}
+            setProjectName={noop}
             convertToProject={false}
             setConvertToProject={noop}
             nextActionDraft=""
@@ -209,6 +211,8 @@ function WizardHarness({ processingStep = 'refine' as ProcessingStep, initialDra
             toggleContext={noop}
             toggleTag={noop}
             handleConfirmContexts={noop}
+            projectName={draft.title}
+            setProjectName={noop}
             convertToProject={false}
             setConvertToProject={noop}
             setNextActionDraft={noop}
@@ -405,12 +409,15 @@ describe('InboxProcessingWizard draft editing', () => {
         expect(queryByText('taskEdit.titleLabel')).toBeNull();
     });
 
-    it('does not render a second project name input in the project step', () => {
-        const { queryByText } = render(
-            <WizardHarness processingStep="project" convertToProject />,
+    it('offers independent project name and next action fields in the project step', () => {
+        const setProjectName = vi.fn();
+        const { getByLabelText } = render(
+            <WizardHarness processingStep="project" convertToProject nextActionDraft="Call Alex" setProjectName={setProjectName} />,
         );
 
-        expect(queryByText('projects.projectName')).toBeNull();
+        fireEvent.change(getByLabelText('projects.projectName'), { target: { value: 'Launch event' } });
+        expect(setProjectName).toHaveBeenCalledWith('Launch event');
+        expect(getByLabelText('process.nextAction')).toHaveValue('Call Alex');
     });
 
     it('writes organization-step selections through the draft', () => {

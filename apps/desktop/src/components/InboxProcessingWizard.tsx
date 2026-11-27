@@ -99,6 +99,8 @@ export type InboxProcessingWizardProps = {
     toggleContext: (ctx: string) => void;
     toggleTag: (tag: string) => void;
     handleConfirmContexts: () => void;
+    projectName: string;
+    setProjectName: (value: string) => void;
     convertToProject: boolean;
     setConvertToProject: (value: boolean) => void;
     setNextActionDraft: (value: string) => void;
@@ -177,6 +179,8 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
     toggleContext,
     toggleTag,
     handleConfirmContexts,
+    projectName,
+    setProjectName,
     convertToProject,
     setConvertToProject,
     setNextActionDraft,
@@ -525,8 +529,8 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
                             </label>
                             <input
                                 ref={titleInputRef}
-                                value={processingTitle}
-                                onChange={(e) => setProcessingTitle(e.target.value)}
+                                value={convertToProject ? projectName : processingTitle}
+                                onChange={(e) => (convertToProject ? setProjectName : setProcessingTitle)(e.target.value)}
                                 className="w-full bg-muted/50 border border-border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/40 focus:outline-none"
                             />
                         </div>
@@ -1202,10 +1206,6 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
                         <button
                             type="button"
                             onClick={() => {
-                                if (!convertToProject) {
-                                    setNextActionDraft('');
-                                    setExtraActionDrafts([]);
-                                }
                                 setDestinationRevision((revision) => revision + 1);
                                 setConvertToProject(!convertToProject);
                             }}
@@ -1238,6 +1238,14 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
                                     />
                                 </div>
                             ) : null}
+                            <label className="block space-y-1">
+                                <span className="text-xs text-muted-foreground font-medium">{t('projects.projectName')}</span>
+                                <input
+                                    value={projectName}
+                                    onChange={(event) => setProjectName(event.target.value)}
+                                    className="w-full bg-card border border-border rounded-lg py-2 px-3 text-sm focus:ring-2 focus:ring-primary"
+                                />
+                            </label>
                             <InboxNextActionDrafts
                                 t={t}
                                 nextActionDraft={nextActionDraft}
@@ -1248,6 +1256,7 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
                             />
                             <button
                                 type="button"
+                                disabled={!projectName.trim() || !nextActionDraft.trim()}
                                 onClick={handleConvertToProject}
                                 className="w-full py-3 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90"
                             >

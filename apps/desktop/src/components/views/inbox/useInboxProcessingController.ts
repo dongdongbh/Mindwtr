@@ -129,6 +129,8 @@ export function useInboxProcessingController({
         setProjectSearch,
         convertToProject,
         setConvertToProject,
+        projectNameDraft,
+        setProjectNameDraft,
         nextActionDraft,
         setNextActionDraft,
         extraActionDrafts,
@@ -550,13 +552,19 @@ export function useInboxProcessingController({
         continueFromProjectCheck();
     }, [continueFromProjectCheck]);
 
-    const handleProjectCheckYes = useCallback(() => {
-        const baseTitle = parsedTitle.title.trim() || draft.title.trim() || processingTask?.title || '';
-        setConvertToProject(true);
-        setNextActionDraft(baseTitle);
-        setExtraActionDrafts([]);
+    const changeProjectConversion = (enabled: boolean) => {
+        if (enabled && !convertToProject) {
+            setProjectNameDraft(draft.title);
+            setNextActionDraft(parsedTitle.title.trim() || draft.title.trim() || processingTask?.title || '');
+            setExtraActionDrafts([]);
+        }
+        setConvertToProject(enabled);
+    };
+
+    const handleProjectCheckYes = () => {
+        changeProjectConversion(true);
         goToStep('project');
-    }, [draft.title, goToStep, parsedTitle.title, processingTask?.title, setExtraActionDrafts]);
+    };
 
     const handleTwoMinDone = useCallback(async () => {
         if (!processingTask) return;
@@ -743,7 +751,7 @@ export function useInboxProcessingController({
 
     const handleConvertToProject = useCallback(async () => {
         if (!processingTask || projectConversionInFlightRef.current) return;
-        const projectTitle = draft.title.trim();
+        const projectTitle = (projectNameDraft ?? draft.title).trim();
         const nextAction = nextActionDraft.trim();
         if (!projectTitle) return;
         if (!nextAction) {
@@ -804,6 +812,7 @@ export function useInboxProcessingController({
         applyWorkflowDecision,
         draft.areaId,
         draft.title,
+        projectNameDraft,
         nextActionDraft,
         processingTask,
         processNext,
@@ -966,7 +975,9 @@ export function useInboxProcessingController({
             toggleContext,
             toggleTag,
             convertToProject,
-            setConvertToProject,
+            setConvertToProject: changeProjectConversion,
+            projectName: projectNameDraft ?? draft.title,
+            setProjectName: setProjectNameDraft,
             nextActionDraft,
             setNextActionDraft,
             extraActionDrafts,
@@ -1029,7 +1040,9 @@ export function useInboxProcessingController({
         toggleTag,
         handleConfirmContexts,
         convertToProject,
-        setConvertToProject,
+        setConvertToProject: changeProjectConversion,
+        projectName: projectNameDraft ?? draft.title,
+        setProjectName: setProjectNameDraft,
         setNextActionDraft,
         nextActionDraft,
         extraActionDrafts,

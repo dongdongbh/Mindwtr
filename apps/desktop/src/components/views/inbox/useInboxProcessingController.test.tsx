@@ -690,11 +690,28 @@ describe('useInboxProcessingController project conversion persistence', () => {
         });
         act(() => {
             result.current.wizardProps.setConvertToProject(true);
-            result.current.wizardProps.setField('title', 'Plan Launch');
+            result.current.wizardProps.setProjectName('Plan Launch');
             result.current.wizardProps.setNextActionDraft('Draft launch brief');
             result.current.wizardProps.setExtraActionDrafts(extras);
         });
     };
+
+    it('keeps project edits separate when going back or leaving conversion', async () => {
+        const { result } = renderController(vi.fn(), vi.fn());
+        await waitFor(() => expect(result.current.wizardProps.processingTask?.id).toBe('one'));
+        const captured = result.current.wizardProps.draft.title;
+        act(() => result.current.wizardProps.handleProjectCheckYes());
+        expect(result.current.wizardProps.projectName).toBe(captured);
+        expect(result.current.wizardProps.nextActionDraft).toBe(captured);
+        act(() => result.current.wizardProps.setProjectName('Launch outcome'));
+        expect(result.current.wizardProps.nextActionDraft).toBe(captured);
+        act(() => result.current.wizardProps.setNextActionDraft('Call Alex'));
+        act(() => result.current.wizardProps.handleProjectCheckYes());
+        expect(result.current.wizardProps.projectName).toBe('Launch outcome');
+        expect(result.current.wizardProps.nextActionDraft).toBe('Call Alex');
+        act(() => result.current.wizardProps.setConvertToProject(false));
+        expect(result.current.wizardProps.draft.title).toBe(captured);
+    });
 
     it('creates all extra actions before moving the original Inbox task', async () => {
         const addTask = vi.fn(async () => ({ success: true }));

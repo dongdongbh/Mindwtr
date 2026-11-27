@@ -81,6 +81,8 @@ export type InboxProcessingQuickPanelProps = {
     onCreateSection: (title: string) => Promise<string | null>;
     toggleContext: (ctx: string) => void;
     toggleTag: (tag: string) => void;
+    projectName: string;
+    setProjectName: (value: string) => void;
     convertToProject: boolean;
     setConvertToProject: (value: boolean) => void;
     nextActionDraft: string;
@@ -156,6 +158,8 @@ export function InboxProcessingQuickPanel({
     onCreateSection,
     toggleContext,
     toggleTag,
+    projectName,
+    setProjectName,
     convertToProject,
     setConvertToProject,
     nextActionDraft,
@@ -518,8 +522,8 @@ export function InboxProcessingQuickPanel({
                         <input
                             ref={titleInputRef}
                             aria-label={t(convertToProject ? 'projects.projectName' : 'taskEdit.titleLabel')}
-                            value={processingTitle}
-                            onChange={(event) => setProcessingTitle(event.target.value)}
+                            value={convertToProject ? projectName : processingTitle}
+                            onChange={(event) => (convertToProject ? setProjectName : setProcessingTitle)(event.target.value)}
                             className="w-full bg-muted/50 border border-border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/40 focus:outline-none"
                         />
                     </div>
@@ -807,10 +811,6 @@ export function InboxProcessingQuickPanel({
                             <button
                                 type="button"
                                 onClick={() => {
-                                    if (!convertToProject) {
-                                        setNextActionDraft('');
-                                        setExtraActionDrafts([]);
-                                    }
                                     setConvertToProject(!convertToProject);
                                 }}
                                 className={cn(
