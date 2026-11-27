@@ -1,6 +1,7 @@
 package tech.dongdongbh.mindwtr.pilot
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -28,7 +29,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
@@ -291,10 +291,10 @@ internal fun GmailLabelPicker(model: InboxViewModel) {
     val theme = LocalTheme.current
     val c = theme.colors
     BackHandler { gmail.closePicker() }
-    Box(Modifier.fillMaxSize().background(theme.settingsScrim).pointerInput(Unit) { detectTapGestures { gmail.closePicker() } }.padding(20.dp),
+    BoxWithConstraints(Modifier.fillMaxSize().windowScrim(theme.settingsScrim).pointerInput(Unit) { detectTapGestures { gmail.closePicker() } }.padding(20.dp),
         contentAlignment = Alignment.Center) {
         val shape = RoundedCornerShape(16.dp)
-        Column(Modifier.widthIn(max = 440.dp).fillMaxWidth().heightIn(max = (LocalConfiguration.current.screenHeightDp * 0.7f).dp).clip(shape).background(c.cardBg)
+        Column(Modifier.widthIn(max = 440.dp).fillMaxWidth().heightIn(max = maxHeight * 0.7f).clip(shape).background(c.cardBg)
             .rnBorder(1.dp, c.border, shape).pointerInput(Unit) { detectTapGestures { } }.padding(16.dp).testTag("gmail-label-sheet")) {
             Text(t("settings.gmailCaptureLabel"), style = rnText(16, 700), color = c.text, modifier = Modifier.padding(bottom = 12.dp).semantics { heading() })
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {

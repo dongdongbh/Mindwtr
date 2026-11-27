@@ -18,7 +18,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
@@ -275,7 +274,7 @@ fun TokenPicker(model: InboxViewModel, open: JSONObject) = with(model.menu) {
             else -> act("contextsAction", editTaskTokens(ids, open.getString("field"), open.getString("mode"), values, revisions))
         }
     }
-    Box(Modifier.fillMaxSize().background(theme.pickerScrim).clickable(role = Role.Button) { keepDialog(null) }.imePadding().padding(20.dp),
+    Box(Modifier.fillMaxSize().windowScrim(theme.pickerScrim).clickable(role = Role.Button) { keepDialog(null) }.windowImePadding().padding(20.dp),
         contentAlignment = Alignment.Center) {
         val shape = RoundedCornerShape(18.dp)
         Column(Modifier.fillMaxWidth().clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape).pointerInput(Unit) { detectTapGestures { } }

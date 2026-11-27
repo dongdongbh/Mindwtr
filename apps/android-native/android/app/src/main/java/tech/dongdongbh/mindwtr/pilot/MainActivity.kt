@@ -284,6 +284,7 @@ class MainActivity : FragmentActivity() {
 
                                                     if (quick || screen == Screen.Inbox) MenuDialogs(model)
                                                     if (screen == Screen.Focus) FocusDialogs(model)
+                                                    if (quick && menu.list == "calendar") CalendarSheets(model)
                                                     StatusMenu(model)
                                                 }
                                             }

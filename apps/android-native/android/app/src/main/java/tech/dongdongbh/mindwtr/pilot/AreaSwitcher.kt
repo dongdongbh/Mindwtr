@@ -1,6 +1,7 @@
 package tech.dongdongbh.mindwtr.pilot
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.ui.unit.max
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -85,12 +86,12 @@ fun AreaSheet(model: InboxViewModel) = with(model) {
     val theme = LocalTheme.current
     val c = theme.colors
     BackHandler { showAreaSheet(false) }
-    Box(Modifier.fillMaxSize()) {
-        Box(Modifier.fillMaxSize().background(theme.scrim).pointerInput(Unit) { detectTapGestures { showAreaSheet(false) } })
+    Box(Modifier.fillMaxSize().windowScrim(theme.scrim)) {
+        Box(Modifier.fillMaxSize().pointerInput(Unit) { detectTapGestures { showAreaSheet(false) } })
         val shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
         Column(
             Modifier.align(Alignment.BottomCenter).fillMaxWidth().heightIn(max = (LocalConfiguration.current.screenHeightDp * 0.7f).dp).clip(shape).background(c.cardBg)
-                .rnBorder(1.dp, c.border, shape).padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 20.dp),
+                .rnBorder(1.dp, c.border, shape).padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = max(20.dp, windowNavigationBottom() + 12.dp)),
         ) {
             Text(t("projects.areaFilter"), style = rnText(16, 700), color = c.text,
                 modifier = Modifier.padding(bottom = if (filter.isDefault) 12.dp else 4.dp).semantics { heading() })

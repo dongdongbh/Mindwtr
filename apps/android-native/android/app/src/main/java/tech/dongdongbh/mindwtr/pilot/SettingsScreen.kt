@@ -1,6 +1,8 @@
 package tech.dongdongbh.mindwtr.pilot
 
 import android.content.ClipData
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.ui.unit.max
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
@@ -55,7 +57,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
@@ -516,10 +517,10 @@ private fun ArchiveRetentionReview(model: InboxViewModel, review: JSONObject) = 
     val c = theme.colors
     val close = { settings.editLocal { remove("archiveReview") } }
     BackHandler { close() }
-    Box(Modifier.fillMaxSize().background(theme.settingsScrim).pointerInput(Unit) { detectTapGestures { close() } }.padding(20.dp),
+    BoxWithConstraints(Modifier.fillMaxSize().windowScrim(theme.settingsScrim).pointerInput(Unit) { detectTapGestures { close() } }.padding(20.dp),
         contentAlignment = Alignment.Center) {
         val shape = RoundedCornerShape(16.dp)
-        Column(Modifier.widthIn(max = 440.dp).fillMaxWidth().heightIn(max = (LocalConfiguration.current.screenHeightDp * 0.7f).dp).clip(shape).background(c.cardBg)
+        Column(Modifier.widthIn(max = 440.dp).fillMaxWidth().heightIn(max = maxHeight * 0.7f).clip(shape).background(c.cardBg)
             .rnBorder(1.dp, c.border, shape).pointerInput(Unit) { detectTapGestures { } }.padding(16.dp).testTag("archive-retention-review")) {
             Text(review.getString("title"), style = rnText(16, 700), color = c.text, modifier = Modifier.padding(bottom = 12.dp).semantics { heading() })
             Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {
@@ -1281,10 +1282,10 @@ private fun Picker(model: InboxViewModel, view: JSONObject, picker: String) = wi
         else listOf(source.menuObjects("options"))
     val write = { edit: JSONObject -> keepDialog(null); when (picker) { "defaultArea" -> settings.gtd(edit); "weeklyReviewDay", "taskReminderDefault" -> settings.notifications(edit); else -> settings.general(edit) } }
     BackHandler { keepDialog(null) }
-    Box(Modifier.fillMaxSize().background(theme.settingsScrim).pointerInput(Unit) { detectTapGestures { keepDialog(null) } }.padding(20.dp),
+    BoxWithConstraints(Modifier.fillMaxSize().windowScrim(theme.settingsScrim).pointerInput(Unit) { detectTapGestures { keepDialog(null) } }.padding(20.dp),
         contentAlignment = Alignment.Center) {
         val shape = RoundedCornerShape(16.dp)
-        Column(Modifier.widthIn(max = 440.dp).fillMaxWidth().heightIn(max = (LocalConfiguration.current.screenHeightDp * 0.7f).dp).clip(shape).background(c.cardBg)
+        Column(Modifier.widthIn(max = 440.dp).fillMaxWidth().heightIn(max = maxHeight * 0.7f).clip(shape).background(c.cardBg)
             .rnBorder(1.dp, c.border, shape).pointerInput(Unit) { detectTapGestures { } }.padding(16.dp).testTag("settings-picker")) {
             Text(source.getString("pickerTitle"), style = rnText(16, 700), color = c.text, modifier = Modifier.padding(bottom = 12.dp).semantics { heading() })
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1333,7 +1334,7 @@ private fun ManageEditor(model: InboxViewModel, view: JSONObject, open: JSONObje
     val canSave = owed || (idle && checked != null && !checked.getBoolean("saveDisabled"))
 
     BackHandler(enabled = !owed) { keepDialog(null) }
-    Box(Modifier.fillMaxSize().background(theme.settingsScrim).pointerInput(owed) { detectTapGestures { if (!owed) keepDialog(null) } }.imePadding().padding(20.dp),
+    Box(Modifier.fillMaxSize().windowScrim(theme.settingsScrim).pointerInput(owed) { detectTapGestures { if (!owed) keepDialog(null) } }.windowImePadding().padding(20.dp),
         contentAlignment = Alignment.Center) {
         val shape = RoundedCornerShape(16.dp)
         Column(Modifier.widthIn(max = 440.dp).fillMaxWidth().clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape)
@@ -1392,10 +1393,10 @@ private fun FieldSheet(model: InboxViewModel, field: JSONObject) = with(model.me
     val sheet = field.getJSONObject("sheet")
     val close = { editLocal { remove("sheetField") } }
     BackHandler { close() }
-    Box(Modifier.fillMaxSize().background(theme.scrim).pointerInput(Unit) { detectTapGestures { close() } }) {
+    Box(Modifier.fillMaxSize().windowScrim(theme.scrim).pointerInput(Unit) { detectTapGestures { close() } }) {
         val shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
         Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape)
-            .pointerInput(Unit) { detectTapGestures { } }.padding(bottom = 24.dp).testTag("settings-field-sheet")) {
+            .pointerInput(Unit) { detectTapGestures { } }.padding(bottom = 16.dp + max(windowNavigationBottom(), 8.dp)).testTag("settings-field-sheet")) {
             Box(Modifier.padding(top = 10.dp, bottom = 2.dp).align(Alignment.CenterHorizontally).size(42.dp, 5.dp).clip(CircleShape).background(c.border))
             Column(Modifier.padding(16.dp)) {
                 Text(sheet.getString("title"), style = rnText(16, 700), color = c.text, modifier = Modifier.padding(bottom = 4.dp).semantics { heading() })

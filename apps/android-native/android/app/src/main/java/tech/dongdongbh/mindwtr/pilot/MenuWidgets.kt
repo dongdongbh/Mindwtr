@@ -22,7 +22,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -89,6 +89,7 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.max
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
@@ -164,6 +165,7 @@ fun MenuScreenHost(model: InboxViewModel, screen: MenuScreen) = with(model) {
             }
         }
         MenuDialogs(model)
+        if (menu.list == "calendar") CalendarSheets(model)
         StatusMenu(model)
         capture?.let { CapturePopup(model, it) }
         if (areaSheet) AreaSheet(model)
@@ -226,12 +228,13 @@ fun OverflowSheet(model: InboxViewModel, title: String, actions: List<OverflowAc
     val theme = LocalTheme.current
     val c = theme.colors
     val close = t("common.close")
-    Box(Modifier.fillMaxSize().background(theme.overflowScrim).clickable(role = Role.Button) { keepDialog(null) }
+    val bottom = max(12.dp, windowNavigationBottom() + 8.dp)
+    BoxWithConstraints(Modifier.fillMaxSize().windowScrim(theme.overflowScrim).clickable(role = Role.Button) { keepDialog(null) }
         .semantics { contentDescription = close }.padding(start = 12.dp, end = 12.dp, top = 24.dp)) {
         val shape = RoundedCornerShape(16.dp)
-        Column(Modifier.align(Alignment.BottomCenter).widthIn(max = 440.dp).fillMaxWidth().heightIn(max = (LocalConfiguration.current.screenHeightDp * 0.82f).dp)
+        Column(Modifier.align(Alignment.BottomCenter).widthIn(max = 440.dp).fillMaxWidth().heightIn(max = maxHeight * 0.82f)
             .clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape).pointerInput(Unit) { detectTapGestures { } }
-            .padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 12.dp)) {
+            .padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = bottom)) {
             Row(Modifier.heightIn(min = 52.dp), verticalAlignment = Alignment.CenterVertically) {
                 if (dialog?.has("page") == true) {
                     val back = t("common.back")
@@ -603,12 +606,13 @@ internal fun FilterSheet(host: FilterSheetHost, view: JSONObject, open: JSONObje
     val all = t("common.all")
     val excluded = t("filters.excluded")
     val close = t("common.close")
-    Box(Modifier.fillMaxSize().background(theme.scrim).clickable(role = Role.Button) { closeFilters() }.semantics { contentDescription = close }) {
+    val bottom = max(12.dp, windowNavigationBottom())
+    Box(Modifier.fillMaxSize().windowScrim(theme.scrim).clickable(role = Role.Button) { closeFilters() }.semantics { contentDescription = close }) {
         val shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
         val tall = (LocalConfiguration.current.screenHeightDp * 0.82f).dp
-        Column(Modifier.align(Alignment.BottomCenter).imePadding().fillMaxWidth().then(if (picker != null) Modifier.height(tall) else Modifier.heightIn(max = tall))
+        Column(Modifier.align(Alignment.BottomCenter).windowImePadding().fillMaxWidth().then(if (picker != null) Modifier.height(tall) else Modifier.heightIn(max = tall))
             .clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape).pointerInput(Unit) { detectTapGestures { } }
-            .semantics { contentDescription = t("filters.label") }.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 12.dp)) {
+            .semantics { contentDescription = t("filters.label") }.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = bottom)) {
             Row(Modifier.fillMaxWidth().padding(bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                 if (picker != null) Text(t("common.back"), style = rnText(13, 600), color = c.tint, modifier = Modifier.heightIn(min = 44.dp)
                     .clickable(role = Role.Button) { dialogPage(null) }.padding(end = 8.dp, top = 12.dp, bottom = 12.dp))
@@ -941,9 +945,9 @@ private fun CreateDialog(model: InboxViewModel, open: JSONObject) = with(model.m
 internal fun DialogCard(model: InboxViewModel, dismissible: Boolean, content: @Composable ColumnScope.() -> Unit) {
     val theme = LocalTheme.current
     val c = theme.colors
-    Box(Modifier.fillMaxSize().background(theme.pickerScrim)
+    Box(Modifier.fillMaxSize().windowScrim(theme.pickerScrim)
         .then(if (dismissible) Modifier.clickable(role = Role.Button) { if (!model.busy) model.menu.backInDialog() } else Modifier.pointerInput(Unit) { detectTapGestures { } })
-        .imePadding(), contentAlignment = Alignment.Center) {
+        .windowImePadding(), contentAlignment = Alignment.Center) {
         Column(Modifier.fillMaxWidth(0.88f).heightIn(max = (LocalConfiguration.current.screenHeightDp * 0.8f).dp).clip(RoundedCornerShape(14.dp))
             .background(c.cardBg).rnBorder(1.dp, c.border, RoundedCornerShape(14.dp)).pointerInput(Unit) { detectTapGestures { } }.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp), content = content)

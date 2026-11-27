@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
@@ -227,7 +226,7 @@ fun ReviewDialog(model: InboxViewModel, open: JSONObject) = with(model.menu) {
     val kind = open.getString("kind")
     val bulk = view.optJSONObject("bulk")
     val selected = bulk?.optJSONArray("selectedIds").ids()
-    Box(Modifier.fillMaxSize().background(theme.pickerScrim).clickable(role = Role.Button) { keepDialog(null) }.imePadding().padding(20.dp),
+    Box(Modifier.fillMaxSize().windowScrim(theme.pickerScrim).clickable(role = Role.Button) { keepDialog(null) }.windowImePadding().padding(20.dp),
         contentAlignment = Alignment.Center) {
         Column(Modifier.widthIn(max = 360.dp).fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(c.cardBg).pointerInput(Unit) { detectTapGestures { } }
             .padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {

@@ -1,6 +1,11 @@
 package tech.dongdongbh.mindwtr.pilot
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -13,6 +18,7 @@ import androidx.compose.ui.layout.findRootCoordinates
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.round
@@ -36,3 +42,11 @@ fun Modifier.windowScrim(color: Color): Modifier {
         }
         .background(color)
 }
+
+
+@Composable
+fun Modifier.windowImePadding(): Modifier = padding(WindowInsets.ime.asPaddingValues())
+
+
+@Composable
+fun windowNavigationBottom(): Dp = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()

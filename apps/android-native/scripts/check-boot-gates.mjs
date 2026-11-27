@@ -936,6 +936,41 @@ for (const [file, opener] of [['TaskRowView.kt', /private fun DatesSheet[\s\S]{0
     ['BulkBar.kt', /private fun OrganizePicker[\s\S]{0,400}?Box\(Modifier\.fillMaxSize\(\)\.windowScrim\(theme\.pickerScrim\)/]]) {
     assert.match(source(file), opener, `${file}: the scrim dims the whole window and centers the card on it, as RN's Modal does`);
 }
+{
+    const pilot = resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr/pilot');
+    const fullWindowHosts = new Set(['AboutSettings.kt:FeedbackModal', 'AreaOrderSheet.kt:AreaOrderSheet', 'Attachments.kt:LinkSheetDialog', 'Attachments.kt:ImagePreview',
+        'Attachments.kt:AudioPlayer', 'CompletedAtFlow.kt:TimeSpentCard', 'MoreSheet.kt:MoreSheet', 'NextActionPrompt.kt:NextActionPrompt', 'ProjectDetails.kt:Overlay',
+        'SearchScreen.kt:FilterSheet', 'SearchScreen.kt:SaveSearchDialog', 'StartupPrompts.kt:PromptWindow', 'StartupPrompts.kt:WelcomeSheet',
+        'TaskEditor.kt:WaitingPrompt', 'TaskEditor.kt:MonthlyCustomDialog', 'ThemedAlert.kt:ThemedAlert']);
+    const bulkBarScrimsLeftToItsOwnTask = new Set(['BulkBar.kt:ModalCard', 'BulkBar.kt:OrganizeDialog', 'BulkBar.kt:OrganizePicker']);
+    const plainScrims = new Set();
+    for (const file of readdirSync(pilot).filter((name) => name.endsWith('.kt'))) {
+        const text = readFileSync(resolve(pilot, file), 'utf8');
+        for (const scrim of text.matchAll(/\.background\((?:theme|LocalTheme\.current)\.(?:scrim|\w+Scrim)\)/g)) {
+            const owner = [...text.slice(0, scrim.index).matchAll(/^(?:private |internal )?fun (?:Modifier\.)?(\w+)\(/gm)].at(-1)?.[1];
+            plainScrims.add(`${file}:${owner}`);
+        }
+    }
+    for (const modal of plainScrims) {
+        assert(fullWindowHosts.has(modal) || bulkBarScrimsLeftToItsOwnTask.has(modal),
+            `${modal}: a modal hosted below the app header dims the whole window and centers on it with windowScrim, as RN's Modal does`);
+    }
+    for (const modal of fullWindowHosts) assert(plainScrims.has(modal), `${modal} no longer has a plain scrim: drop it from the full-window list`);
+    for (const file of ['ContextsScreen.kt', 'ReviewScreen.kt', 'WeeklyReviewScreen.kt', 'FocusControls.kt', 'CaptureScreen.kt', 'MenuWidgets.kt', 'SettingsScreen.kt', 'CalendarScreen.kt', 'BoardScreen.kt']) {
+        assert.doesNotMatch(source(file), /windowScrim\([^\n]*\.imePadding\(\)|windowScrim[\s\S]{0,400}?Alignment\.BottomCenter\)\.imePadding\(\)/, `${file}: a window-wide modal pads by the whole keyboard height, since its host already took the navigation bar`);
+    }
+    const calendarUi = source('CalendarScreen.kt');
+    assert.doesNotMatch(calendarUi.slice(calendarUi.indexOf('fun CalendarList('), calendarUi.indexOf('fun CalendarSheets(')), /ItemSheet\(|ComposerSheet\(/,
+        'the calendar sheets are not drawn inside the clipped tab content, so they can dim the whole window like RN\'s Modal');
+    assert.match(activity, /if \(screen == Screen\.Focus\) FocusDialogs\(model\)\s+if \(quick && menu\.list == "calendar"\) CalendarSheets\(model\)/);
+    assert.match(source('MenuWidgets.kt'), /MenuDialogs\(model\)\s+if \(menu\.list == "calendar"\) CalendarSheets\(model\)/);
+    assert.match(source('MenuWidgets.kt'), /val bottom = max\(12\.dp, windowNavigationBottom\(\) \+ 8\.dp\)\s+BoxWithConstraints\(Modifier\.fillMaxSize\(\)\.windowScrim\(theme\.overflowScrim\)[\s\S]{0,400}?heightIn\(max = maxHeight \* 0\.82f\)/,
+        'the list overflow sheet copies RN: 82% of the space under its 24 dp top padding, bottom padding max(12, nav + 8)');
+    for (const file of ['SettingsScreen.kt', 'GmailCapture.kt', 'AISettings.kt']) {
+        assert.doesNotMatch(source(file), /windowScrim\(theme\.settingsScrim\)[\s\S]{0,300}?screenHeightDp \* 0\.7f/, `${file}: a settings picker caps at 70% of the padded overlay, as RN's pickerCard does`);
+    }
+    assert.match(source('CaptureScreen.kt'), /val sheetMax = max\(260\.dp, maxHeight - max\(statusTop, 12\.dp\) - 8\.dp\)/, 'quick capture caps its sheet like RN: window height minus the status bar and 8 dp');
+}
 assert.match(rowUi, /Box\(if \(offset\.value != 0f\) Modifier\.clipToBounds\(\) else Modifier\) \{/, 'an open tray clips the moved row at the row bounds, as RN\'s Swipeable does');
 assert.match(rowUi, /background\(theme\.einkSafe\(coreColorOrNull\(part\.dotColor\) \?: c\.tint\)\)/, 'a row\'s project and area dot goes through einkSafe, as RN\'s row does');
 assert.match(rowUi, /if \(details\) meta\.description\?\.let \{ json ->[\s\S]{0,700}?maxLines = if \(task\.status == "reference"\) 3 else 1/, 'a row with details shows RN\'s one-line description preview');

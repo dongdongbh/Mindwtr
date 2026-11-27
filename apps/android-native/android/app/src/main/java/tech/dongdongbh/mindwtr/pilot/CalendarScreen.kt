@@ -1,6 +1,7 @@
 package tech.dongdongbh.mindwtr.pilot
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.ui.unit.max
 import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -30,7 +31,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -198,9 +198,14 @@ fun CalendarList(model: InboxViewModel) = with(model.menu.calendar) {
                 }
             }
         }
-        sheet?.let { ItemSheet(model, it) }
-        composer?.let { ComposerSheet(model, it) }
     }
+}
+
+
+@Composable
+fun CalendarSheets(model: InboxViewModel) = with(model.menu.calendar) {
+    sheet?.let { ItemSheet(model, it) }
+    composer?.let { ComposerSheet(model, it) }
 }
 
 
@@ -1027,7 +1032,7 @@ private fun ItemSheet(model: InboxViewModel, sheet: JSONObject) = with(model.men
     val theme = LocalTheme.current
     val c = theme.colors
     val title = sheet.getString("title")
-    Box(Modifier.fillMaxSize().background(theme.alertScrim).clickable(role = Role.Button) { calendar.closeSheet() }.semantics { contentDescription = title }
+    Box(Modifier.fillMaxSize().windowScrim(theme.alertScrim).clickable(role = Role.Button) { calendar.closeSheet() }.semantics { contentDescription = title }
         .padding(24.dp), contentAlignment = Alignment.Center) {
         val shape = RoundedCornerShape(18.dp)
         Column(Modifier.fillMaxWidth().shadow(14.dp, shape).clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape)
@@ -1069,12 +1074,13 @@ private fun ComposerSheet(model: InboxViewModel, draft: ComposerDraft) = with(mo
     val owed = calendar.owed(draft) != null
     val locked = model.busy || (model.failedAction != null && !owed)
     val close = text.getString("close")
-    Box(Modifier.fillMaxSize().background(theme.composerScrim).clickable(role = Role.Button, enabled = !owed) { calendar.closeComposer() }
+    Box(Modifier.fillMaxSize().windowScrim(theme.composerScrim).clickable(role = Role.Button, enabled = !owed) { calendar.closeComposer() }
         .semantics { contentDescription = close }) {
         val shape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp)
-        Column(Modifier.align(Alignment.BottomCenter).imePadding().fillMaxWidth().heightIn(max = (LocalConfiguration.current.screenHeightDp * 0.82f).dp)
+        Column(Modifier.align(Alignment.BottomCenter).windowImePadding().fillMaxWidth().heightIn(max = (LocalConfiguration.current.screenHeightDp * 0.82f).dp)
             .clip(shape).background(c.cardBg).edge(c.border, top = true).pointerInput(Unit) { detectTapGestures { } }.testTag("calendar-composer")
-            .verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            .verticalScroll(rememberScrollState()).padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = max(18.dp, windowNavigationBottom() + 14.dp)),
+            verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Column(Modifier.weight(1f)) {
                     Text(text.getString("title"), style = rnText(18, 900), color = c.text, modifier = Modifier.semantics { heading() })

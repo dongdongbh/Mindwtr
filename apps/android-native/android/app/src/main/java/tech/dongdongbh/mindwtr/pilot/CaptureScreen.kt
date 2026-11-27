@@ -1,6 +1,9 @@
 package tech.dongdongbh.mindwtr.pilot
 
 import android.content.res.Configuration
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.ui.unit.max
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -258,12 +261,14 @@ fun CapturePopup(model: InboxViewModel, draft: CaptureDraft) = with(model) {
     }
 
     val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
-    BoxWithConstraints(Modifier.fillMaxSize().testTag("quick-capture")) {
-        val sheetMax = maxHeight - 8.dp
-        Box(Modifier.fillMaxSize().background(theme.scrim).pointerInput(closable) { detectTapGestures { if (closable) closeCapture() } })
-        Column(Modifier.align(Alignment.BottomCenter).imePadding().widthIn(max = 860.dp).fillMaxWidth().heightIn(max = sheetMax)
+    val statusTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+    val navigation = windowNavigationBottom()
+    BoxWithConstraints(Modifier.fillMaxSize().windowScrim(theme.scrim).testTag("quick-capture")) {
+        val sheetMax = max(260.dp, maxHeight - max(statusTop, 12.dp) - 8.dp)
+        Box(Modifier.fillMaxSize().pointerInput(closable) { detectTapGestures { if (closable) closeCapture() } })
+        Column(Modifier.align(Alignment.BottomCenter).windowImePadding().widthIn(max = 860.dp).fillMaxWidth().heightIn(max = sheetMax)
             .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)).background(c.cardBg).pointerInput(Unit) { detectTapGestures { } }
-            .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = if (draft.expanded) 20.dp else 12.dp)) {
+            .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = if (draft.expanded) max(20.dp, navigation + 12.dp) else max(12.dp, navigation + 6.dp))) {
             Row(Modifier.fillMaxWidth().padding(bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(copy.getString("title"), style = rnText(16, 700), color = c.text, maxLines = 2, modifier = Modifier.weight(1f).semantics { heading() })
                 val close = copy.getString("close")
@@ -601,7 +606,7 @@ private fun DueDates(due: JSONObject, enabled: Boolean, send: (JSONObject) -> Un
 internal fun PickerCard(title: String, dismiss: () -> Unit, content: @Composable () -> Unit) {
     val theme = LocalTheme.current
     val c = theme.colors
-    Box(Modifier.fillMaxSize().imePadding().background(theme.scrim).pointerInput(Unit) { detectTapGestures { dismiss() } }.padding(horizontal = 20.dp),
+    Box(Modifier.fillMaxSize().windowScrim(theme.scrim).windowImePadding().pointerInput(Unit) { detectTapGestures { dismiss() } }.padding(horizontal = 20.dp),
         contentAlignment = Alignment.Center) {
         val shape = RoundedCornerShape(16.dp)
         Column(Modifier.fillMaxWidth().clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape).pointerInput(Unit) { detectTapGestures { } }

@@ -1,6 +1,7 @@
 package tech.dongdongbh.mindwtr.pilot
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.ui.unit.max
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -22,7 +23,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -337,16 +337,17 @@ fun FocusDialogs(model: InboxViewModel) = with(model.menu.focusControls) {
 
 
 @Composable
-private fun FocusSheet(model: InboxViewModel, tall: Boolean = false, content: @Composable ColumnScope.() -> Unit) {
+private fun FocusSheet(model: InboxViewModel, filters: Boolean = false, tall: Boolean = false, content: @Composable ColumnScope.() -> Unit) {
     val theme = LocalTheme.current
     val c = theme.colors
     val close = t("common.close")
-    Box(Modifier.fillMaxSize().background(theme.scrim).clickable(role = Role.Button) { model.menu.focusControls.keepDialog(null) }.semantics { contentDescription = close }) {
+    val bottom = if (filters) max(12.dp, windowNavigationBottom()) else 20.dp
+    Box(Modifier.fillMaxSize().windowScrim(theme.scrim).clickable(role = Role.Button) { model.menu.focusControls.keepDialog(null) }.semantics { contentDescription = close }) {
         val shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
-        val height = (LocalConfiguration.current.screenHeightDp * (if (tall) 0.82f else 0.78f)).dp
-        Column(Modifier.align(Alignment.BottomCenter).imePadding().fillMaxWidth().then(if (tall) Modifier.height(height) else Modifier.heightIn(max = height))
+        val height = (LocalConfiguration.current.screenHeightDp * (if (filters) 0.82f else 0.78f)).dp
+        Column(Modifier.align(Alignment.BottomCenter).windowImePadding().fillMaxWidth().then(if (tall) Modifier.height(height) else Modifier.heightIn(max = height))
             .clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape).pointerInput(Unit) { detectTapGestures { } }
-            .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 20.dp), content = content)
+            .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = bottom), content = content)
     }
 }
 
@@ -403,7 +404,7 @@ private fun FocusFilterSheet(model: InboxViewModel, controls: JSONObject, open: 
     val picker = open.menuText("page")
     val revision = model.focus?.let { model.focusRevision } ?: return
     val idle = model.menu.idle
-    FocusSheet(model, tall = picker != null) {
+    FocusSheet(model, filters = true, tall = picker != null) {
         Row(Modifier.fillMaxWidth().padding(bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             if (picker != null) SheetText(text.getString("back")) { page(null) }
             val title = if (picker == null) sheet.getString("title") else text.getString(if (picker == "tokens") "contexts" else "projects")
@@ -527,7 +528,7 @@ private fun SaveFilterDialog(model: InboxViewModel, controls: JSONObject, open: 
     val name = open.optString("text")
     val owed = model.failedAction != null && model.failedAction == saveAction()
     val canSave = name.isNotBlank() && model.writable && !model.busy && (model.failedAction == null || owed)
-    Box(Modifier.fillMaxSize().background(theme.scrim).clickable(role = Role.Button) { if (!model.busy && !owed) back() }.imePadding().padding(horizontal = 24.dp),
+    Box(Modifier.fillMaxSize().windowScrim(theme.scrim).clickable(role = Role.Button) { if (!model.busy && !owed) back() }.windowImePadding().padding(horizontal = 24.dp),
         contentAlignment = Alignment.Center) {
         val shape = RoundedCornerShape(14.dp)
         Column(Modifier.fillMaxWidth().clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape).pointerInput(Unit) { detectTapGestures { } }.padding(16.dp)) {

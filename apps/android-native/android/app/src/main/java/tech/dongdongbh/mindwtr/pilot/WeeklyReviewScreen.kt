@@ -19,7 +19,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
@@ -768,7 +767,7 @@ fun ProjectTaskPrompt(model: InboxViewModel, open: JSONObject) = with(model.menu
     val owed = model.failedAction != null && model.failedAction == action
     val canSave = action != null && model.writable && !model.busy && (model.failedAction == null || owed)
     val text = open.optString("text")
-    Box(Modifier.fillMaxSize().background(theme.promptScrim).pointerInput(Unit) { detectTapGestures { } }.imePadding().padding(horizontal = 20.dp),
+    Box(Modifier.fillMaxSize().windowScrim(theme.promptScrim).pointerInput(Unit) { detectTapGestures { } }.windowImePadding().padding(horizontal = 20.dp),
         contentAlignment = Alignment.Center) {
         val shape = RoundedCornerShape(12.dp)
         Column(Modifier.fillMaxWidth().clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape).padding(16.dp)) {

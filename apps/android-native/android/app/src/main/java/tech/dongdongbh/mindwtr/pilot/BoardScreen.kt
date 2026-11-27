@@ -1,6 +1,7 @@
 package tech.dongdongbh.mindwtr.pilot
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.ui.unit.max
 import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -20,7 +21,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
@@ -375,12 +375,13 @@ private fun BoardFilterSheet(model: InboxViewModel, shown: BoardPage, open: JSON
     val excluded = t("filters.excluded")
     val close = t("common.close")
     val setSheet = { value: JSONObject? -> board.keepSheet(value) }
-    Box(Modifier.fillMaxSize().background(theme.scrim).clickable(role = Role.Button) { setSheet(null) }.semantics { contentDescription = close }) {
+    val bottom = max(12.dp, windowNavigationBottom())
+    Box(Modifier.fillMaxSize().windowScrim(theme.scrim).clickable(role = Role.Button) { setSheet(null) }.semantics { contentDescription = close }) {
         val shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
         val tall = (LocalConfiguration.current.screenHeightDp * 0.82f).dp
-        Column(Modifier.align(Alignment.BottomCenter).imePadding().fillMaxWidth().then(if (picker != null) Modifier.height(tall) else Modifier.heightIn(max = tall))
+        Column(Modifier.align(Alignment.BottomCenter).windowImePadding().fillMaxWidth().then(if (picker != null) Modifier.height(tall) else Modifier.heightIn(max = tall))
             .clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape).pointerInput(Unit) { detectTapGestures { } }.testTag("board-filters")
-            .semantics { contentDescription = t("filters.label") }.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 12.dp)) {
+            .semantics { contentDescription = t("filters.label") }.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = bottom)) {
             Row(Modifier.fillMaxWidth().padding(bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                 if (picker != null) Text(t("common.back"), style = rnText(13, 600), color = c.tint, modifier = Modifier.heightIn(min = 44.dp)
                     .clickable(role = Role.Button) { board.closePicker() }.padding(end = 8.dp, top = 12.dp, bottom = 12.dp))

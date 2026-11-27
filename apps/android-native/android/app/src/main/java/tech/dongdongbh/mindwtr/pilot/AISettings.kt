@@ -1,6 +1,7 @@
 package tech.dongdongbh.mindwtr.pilot
 
 import android.os.Handler
+import androidx.compose.foundation.layout.BoxWithConstraints
 import android.os.Looper
 import android.util.Log
 import androidx.activity.compose.BackHandler
@@ -40,7 +41,6 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -611,10 +611,10 @@ private fun AIPicker(model: InboxViewModel, view: JSONObject, picker: String) {
     }
     val close = { ai.openPicker(null) }
     BackHandler { close() }
-    Box(Modifier.fillMaxSize().background(theme.settingsScrim).pointerInput(Unit) { detectTapGestures { close() } }.padding(20.dp),
+    BoxWithConstraints(Modifier.fillMaxSize().windowScrim(theme.settingsScrim).pointerInput(Unit) { detectTapGestures { close() } }.padding(20.dp),
         contentAlignment = Alignment.Center) {
         val shape = RoundedCornerShape(16.dp)
-        Column(Modifier.widthIn(max = 440.dp).fillMaxWidth().heightIn(max = (LocalConfiguration.current.screenHeightDp * 0.7f).dp).clip(shape).background(c.cardBg)
+        Column(Modifier.widthIn(max = 440.dp).fillMaxWidth().heightIn(max = maxHeight * 0.7f).clip(shape).background(c.cardBg)
             .rnBorder(1.dp, c.border, shape).pointerInput(Unit) { detectTapGestures { } }.padding(16.dp).testTag("ai-picker")) {
             Text(title, style = rnText(16, 700), color = c.text, modifier = Modifier.padding(bottom = 12.dp).semantics { heading() })
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
