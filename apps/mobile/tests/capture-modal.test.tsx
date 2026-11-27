@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import { act, create } from 'react-test-renderer';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createAIProvider } from '@mindwtr/core';
+import { createAIProvider, type Section } from '@mindwtr/core';
 
 import { CaptureForm } from '@/components/CaptureForm';
 import CaptureScreen, { sanitizeCaptureReturnToParam } from '@/app/capture-modal';
@@ -65,6 +65,7 @@ const { appLanguage, hardwareBack, navigationGuard, openTaskScreen, parseQuickAd
       addTask: vi.fn(),
       addTasks: vi.fn(),
       projects: [] as any[],
+      sections: [] as Section[],
       tasks: [] as any[],
       settings: { ai: { enabled: false }, features: {} },
       areas: [] as any[],
@@ -111,6 +112,7 @@ vi.mock('@mindwtr/core', async () => {
   },
   getUsedTaskTokens: vi.fn(() => []),
   isSandboxMode: () => false,
+  isCaptureDestinationAvailable: actual.isCaptureDestinationAvailable,
   sanitizeAttachmentUriForSyncMerge: actual.sanitizeAttachmentUriForSyncMerge,
   isNaturalLanguageDatesEnabled: (settings?: { gtd?: { naturalLanguageDates?: boolean } } | null) =>
     settings?.gtd?.naturalLanguageDates !== false,
@@ -131,9 +133,9 @@ vi.mock('@mindwtr/core', async () => {
     const value = t(key);
     return value && value !== key ? value : fallback;
   },
-  useTaskStore: (selector?: (state: typeof storeState) => unknown) => (
+  useTaskStore: Object.assign((selector?: (state: typeof storeState) => unknown) => (
     typeof selector === 'function' ? selector(storeState) : storeState
-  ),
+  ), { getState: () => storeState }),
 };
 });
 
@@ -287,6 +289,7 @@ describe('CaptureScreen', () => {
     storeState.addTask.mockResolvedValue({ success: true, id: 'task-created' });
     storeState.addTasks.mockResolvedValue({ success: true });
     storeState.projects = [];
+    storeState.sections = [];
     storeState.areas = [];
   });
 
@@ -1722,6 +1725,59 @@ describe('CaptureScreen', () => {
     act(() => tree.unmount());
   });
 
+  it.each(['Save', 'Save & edit', 'Remove destination', 'Move destination', 'Remove destination during bulk confirmation'] as const)('handles section capture on Android with %s', async (action) => {
+    setPlatform('android');
+    const at = '2026-06-01T00:00:00.000Z';
+    const section = { id: 'section-1', title: 'Planning', projectId: 'project-1', order: 0, createdAt: at, updatedAt: at };
+    storeState.projects = [{ id: section.projectId, title: 'Launch', status: 'active' }];
+    storeState.sections = [section];
+    const projectModal = { close: vi.fn(), edit: vi.fn() };
+    const bulk = action === 'Remove destination during bulk confirmation';
+    const params = {
+      initialValue: bulk ? 'Section task\nAnother task' : 'Section task',
+      initialProps: JSON.stringify({ projectId: section.projectId, sectionId: section.id, status: 'next' }),
+    };
+    let tree!: ReturnType<typeof create>;
+    act(() => { tree = create(<CaptureForm params={params} projectModal={projectModal} />); });
+    expect(tree.root.findAllByProps({ testID: 'capture-project-section-destination' })[0].props.children).toBe('Launch / Planning');
+    const draft = action === 'Move destination' ? 'Edited section task' : params.initialValue;
+
+    if (action === 'Move destination') {
+      act(() => tree.root.findByType(TextInput).props.onChangeText(draft));
+      storeState.sections = [{ ...section, projectId: 'other-project' }];
+      act(() => tree.update(<CaptureForm params={params} projectModal={projectModal} />));
+      expect(findTouchableByText(tree, 'Save').props.disabled).toBe(true);
+      await act(async () => { tree.root.findByType(TextInput).props.onSubmitEditing(); });
+    } else {
+      if (action === 'Remove destination') storeState.sections = [];
+      await act(async () => { findTouchableByText(tree, action === 'Save & edit' ? action : 'Save').props.onPress(); });
+      if (bulk) {
+        storeState.sections = [];
+        await act(async () => { findTouchableByText(tree, 'Create tasks').props.onPress(); });
+      }
+    }
+
+    if (action !== 'Save' && action !== 'Save & edit') {
+      expect(storeState.addTask).not.toHaveBeenCalled();
+      expect(storeState.addTasks).not.toHaveBeenCalled();
+      expect(projectModal.close).not.toHaveBeenCalled();
+      expect(tree.root.findByType(TextInput).props.value).toBe(draft);
+      expect(tree.root.findAllByType(Text).some((node) => (
+        node.props.children === 'Destination unavailable. Choose another destination.'
+      ))).toBe(true);
+      if (action === 'Move destination') {
+        await act(async () => { findTouchableByText(tree, 'Clear').props.onPress(); });
+        await act(async () => { findTouchableByText(tree, 'Save').props.onPress(); });
+        expect(storeState.addTask).toHaveBeenCalledWith(draft, { status: 'next' });
+      }
+    } else {
+      expect(storeState.addTask).toHaveBeenCalledWith('Section task', { status: 'next', projectId: section.projectId, sectionId: section.id });
+      if (action === 'Save') expect(projectModal.close).toHaveBeenCalledOnce();
+      else expect(projectModal.edit).toHaveBeenCalledWith('task-created');
+    }
+    act(() => tree.unmount());
+  });
+
   it('opens the created task when save and edit is requested', async () => {
     routeParams.current = {
       initialValue: encodeURIComponent('Project task'),
@@ -1759,11 +1815,13 @@ describe('CaptureScreen', () => {
     expect(routerMocks.replace).not.toHaveBeenCalledWith('/inbox');
   });
 
-  it('stashes the editor open and pops when save and edit came from the project screen', async () => {
+  it.each([undefined, 'section-1'])('saves and opens the editor from the iOS project route for section %s', async (sectionId) => {
+    setPlatform('ios');
     routeParams.current = {
       initialValue: encodeURIComponent('Project task'),
       initialProps: encodeURIComponent(JSON.stringify({
         projectId: 'project-1',
+        sectionId,
         status: 'next',
       })),
       returnTo: encodeURIComponent('/projects-screen?projectId=project-1'),
@@ -1773,6 +1831,10 @@ describe('CaptureScreen', () => {
       title: 'Launch',
       status: 'active',
     }];
+    if (sectionId) {
+      const at = '2026-06-01T00:00:00.000Z';
+      storeState.sections = [{ id: sectionId, projectId: 'project-1', title: 'Planning', order: 0, createdAt: at, updatedAt: at }];
+    }
     storeState.addTask.mockResolvedValueOnce({ success: true, id: 'task-new' });
     routerMocks.canGoBack.mockReturnValue(true);
 
@@ -1789,6 +1851,7 @@ describe('CaptureScreen', () => {
     });
 
 
+    expect(storeState.addTask).toHaveBeenCalledWith('Project task', { status: 'next', projectId: 'project-1', sectionId });
     expect(stashPendingCaptureTaskOpen).toHaveBeenCalledWith({
       taskId: 'task-new',
       projectId: 'project-1',
@@ -1796,6 +1859,7 @@ describe('CaptureScreen', () => {
     });
     expect(openTaskScreen).not.toHaveBeenCalled();
     expect(routerMocks.back).toHaveBeenCalled();
+    act(() => tree.unmount());
   });
 
   describe('copilot suggestion chips (#1022)', () => {

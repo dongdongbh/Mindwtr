@@ -10,6 +10,15 @@ export const DEFAULT_FILE_SYNC_LOCK_RETRY_AFTER_MS = 5_000;
 const FILE_SYNC_LOCK_UNAVAILABLE_PATTERN = /SYNC_FILE_LOCK_UNAVAILABLE|Safe File Sync locking is unavailable|cannot safely lock this File Sync location/i;
 const FILE_SYNC_GENERATION_CORRUPT_PATTERN = /SYNC_FILE_GENERATION_CORRUPT|File Sync attachment generation remains corrupt after bounded retries/i;
 
+export class WebdavOriginRejectedError extends Error {
+    readonly status = 401;
+
+    constructor() {
+        super('The WebDAV server rejected the request origin (401).');
+        this.name = 'WebdavOriginRejectedError';
+    }
+}
+
 export class SyncFileLockBusyError extends Error {
     constructor(public readonly retryAfterMs = DEFAULT_FILE_SYNC_LOCK_RETRY_AFTER_MS) {
         super('File Sync is temporarily busy because another Mindwtr operation holds the folder lock.');
@@ -168,6 +177,7 @@ export const formatSyncErrorMessage = (error: unknown, backend: SyncBackend): st
         return raw;
     }
     if (backend !== 'webdav') return raw;
+    if (error instanceof WebdavOriginRejectedError) return error.message;
 
     const status = typeof error === 'object' && error !== null && 'status' in error
         ? Number((error as { status?: unknown }).status)

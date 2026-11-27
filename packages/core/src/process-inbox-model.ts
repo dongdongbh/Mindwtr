@@ -37,7 +37,7 @@ import {
 import { filterProjectsBySelectedArea, getProjectChoiceState, getProjectSectionsForView, groupProjectsForPicker, isSelectableProjectForTaskAssignment } from './project-utils';
 import type { StoreActionResult } from './store-types';
 import { findSimilarTasks, type TaskSimilarityIndex } from './task-similarity';
-import { collectTaskTokenUsage } from './task-token-usage';
+import { collectTaskTokenUsage, getTaskTokenCatalog, getTaskTokenPickerOptions } from './task-token-usage';
 import { formatTaskMarkedDoneMessage, formatTaskMovedMessage } from './undo-task-completion';
 import { getSomedaySectionChoices } from './task-editor-model';
 import { setTaskViewSectionId, sortViewSectionDefinitions } from './view-sections';
@@ -1010,6 +1010,7 @@ export type ProcessInboxDraft = {
     delegateWho: string;
     followUp: ProcessInboxDateValue;
     convertToProject: boolean;
+    titleBeforeConversion?: string;
     nextAction: string;
     extraActions: string[];
     somedaySectionId: string | null;
@@ -1060,6 +1061,8 @@ export function reloadProcessInboxDraft(draft: ProcessInboxDraft, task: Task, de
         delegateWho: draft.delegateWho,
         followUp: draft.followUp,
         convertToProject: draft.convertToProject,
+        ...(draft.convertToProject && draft.titleBeforeConversion !== undefined
+            ? { titleBeforeConversion: task.title, title: draft.title === draft.titleBeforeConversion ? task.title : draft.title } : {}),
         nextAction: draft.nextAction,
         extraActions: draft.extraActions,
     };
@@ -1116,6 +1119,11 @@ const markDirty = (draft: ProcessInboxDraft, field: ProcessInboxDateField): Proc
 );
 
 
+function cancelProjectSplit(draft: ProcessInboxDraft): ProcessInboxDraft {
+    const { titleBeforeConversion, ...remaining } = draft;
+    return { ...remaining, title: titleBeforeConversion ?? draft.title, convertToProject: false, nextAction: '', extraActions: [] };
+}
+
 export function applyProcessInboxDraftEdit(
     draft: ProcessInboxDraft,
     edit: ProcessInboxDraftEdit,
@@ -1145,7 +1153,7 @@ export function applyProcessInboxDraftEdit(
             return { ...draft, projectBrowseScope: edit.value };
         case 'selectProject': {
             const { convertToProject, projectId, areaId, projectSearch } = selectProcessInboxProject(edit.value);
-            return { ...draft, convertToProject, projectId, projectSearch,
+            return { ...(draft.convertToProject ? cancelProjectSplit(draft) : draft), convertToProject, projectId, projectSearch,
                 projectBrowseScope: draft.projectBrowseScope ?? (draft.areaId ? { kind: 'area', areaId: draft.areaId } : { kind: 'all' }),
                 ...(areaId === null ? { areaId } : {}),
 
@@ -1438,6 +1446,12 @@ export type ProcessInboxViewDateRow = {
 export type ProcessInboxViewTokens = {
     title: string;
     placeholder: string;
+    browse: {
+        label: string;
+        searchLabel: string;
+        noMatchesLabel: string;
+        options: ReturnType<typeof getTaskTokenPickerOptions>;
+    };
     selectedContexts: ProcessInboxViewOption[];
     selectedContextsLabel: string | null;
     selectedTags: ProcessInboxViewOption[];
@@ -1633,6 +1647,7 @@ export type ProcessInboxViewInput = {
     plan: ProcessInboxPlan;
     settings: AppSettings | undefined;
     tasks: Task[];
+    tokenCatalog?: ReturnType<typeof getTaskTokenCatalog>;
     projects: Project[];
 
     sections?: readonly Section[];
@@ -1693,6 +1708,7 @@ export function buildProcessInboxStepView(input: ProcessInboxViewInput): Process
     };
 
     const pools = getProcessInboxTokenPools(input.tasks);
+    const tokenCatalog = input.tokenCatalog ?? getTaskTokenCatalog(input.tasks, input.settings?.taxonomy);
     const terms = getProcessInboxSuggestionTerms(draft.title, draft.description, draft.tokenInput);
     const tokenSuggestions = getProcessInboxTokenSuggestions({
         tokenInput: draft.tokenInput,
@@ -1721,6 +1737,14 @@ export function buildProcessInboxStepView(input: ProcessInboxViewInput): Process
         return {
             title: showContexts ? t('taskEdit.contextsLabel') : t('taskEdit.tagsLabel'),
             placeholder: section.placeholder ?? t('inbox.addContextPlaceholder'),
+            browse: {
+                label: t('settings.browse'),
+                searchLabel: t('common.search'),
+                noMatchesLabel: t('common.noMatches'),
+                options: showContexts
+                    ? getTaskTokenPickerOptions(tokenCatalog.contexts, draft.contexts)
+                    : getTaskTokenPickerOptions(tokenCatalog.tags, draft.tags),
+            },
             selectedContextsLabel: showContexts && draft.contexts.length > 0 ? t('inbox.selectedLabel') : null,
             selectedContexts: showContexts
                 ? draft.contexts.map((token) => ({ label: `${token} x`, selected: true, edit: { type: 'toggleContext', value: token } }))
@@ -2008,14 +2032,14 @@ export function answerProcessInboxStep(input: {
             taskTitle: input.task.title,
             nextActionDraft: draft.nextAction,
         });
-        return { ...draft, convertToProject: true, nextAction: started.nextActionDraft, projectId: null, projectSearch: '',
+        return { ...draft, titleBeforeConversion: draft.titleBeforeConversion ?? draft.title, convertToProject: true, nextAction: started.nextActionDraft, projectId: null, projectSearch: '',
             ...(draft.sectionId ? { sectionId: null } : {}) };
     };
     if (choice === 'back') {
         if (step === getProcessInboxEntryStep(mode, plan)) return { type: 'invalid' };
         const back = backProcessInboxStep(answers, mode, plan);
         return flow(back.answers, back.cancelProjectConversion
-            ? { ...draft, convertToProject: false, nextAction: '', extraActions: [] }
+            ? cancelProjectSplit(draft)
             : draft);
     }
     switch (step) {
@@ -2032,7 +2056,7 @@ export function answerProcessInboxStep(input: {
 
             if (choice === 'next') {
                 return flow(chooseQuickProcessInboxDestination(answers, choice, plan),
-                    { ...draft, convertToProject: false, nextAction: '', extraActions: [] });
+                    cancelProjectSplit(draft));
             }
 
             if (choice === 'project' && plan.visibleFields.project) {
@@ -2052,7 +2076,7 @@ export function answerProcessInboxStep(input: {
             return { type: 'invalid' };
         case 'oneAction':
             if (choice === 'single') {
-                return flow({ ...answers, oneActionAnswered: true }, { ...draft, convertToProject: false, nextAction: '', extraActions: [] });
+                return flow({ ...answers, oneActionAnswered: true }, cancelProjectSplit(draft));
             }
             if (choice === 'project') return flow({ ...answers, oneActionAnswered: true }, startProjectSplit());
             return { type: 'invalid' };

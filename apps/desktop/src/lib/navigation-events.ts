@@ -49,3 +49,11 @@ export function subscribeNavigateEvent(
     window.addEventListener(MINDWTR_NAVIGATE_EVENT, listener);
     return () => window.removeEventListener(MINDWTR_NAVIGATE_EVENT, listener);
 }
+
+export class OpenAttachmentTaskEvent extends Event {
+    static readonly eventName = 'mindwtr:open-attachment-task';
+
+    constructor(readonly taskId: string) {
+        super(OpenAttachmentTaskEvent.eventName);
+    }
+}

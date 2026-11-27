@@ -2053,18 +2053,20 @@ private struct ProjectDetailTopBar: View {
                     }
             }
             Menu {
-                Button {
-                    let id = model.projectHeader.text("id")
-                    let revision = model.projectDetail.text("projectRevision")
-                    let action = model.projectLifecycleAction
-                    Task { await model.changeProjectLifecycle(expectedID: id, expectedRevision: revision, action: action) }
-                } label: {
-                    Label(model.label(model.projectLifecycleAction == "complete" ? "projects.complete" : "projects.reactivate"),
-                          systemImage: model.projectLifecycleAction == "complete" ? "archivebox" : "arrow.uturn.backward")
+                if model.projectLifecycleActionVisible {
+                    Button {
+                        let id = model.projectHeader.text("id")
+                        let revision = model.projectDetail.text("projectRevision")
+                        let action = model.projectLifecycleAction
+                        Task { await model.changeProjectLifecycle(expectedID: id, expectedRevision: revision, action: action) }
+                    } label: {
+                        Label(model.label(model.projectLifecycleAction == "complete" ? "projects.complete" : "projects.reactivate"),
+                              systemImage: model.projectLifecycleAction == "complete" ? "archivebox" : "arrow.uturn.backward")
+                    }
+                    .disabled(!model.projectLifecycleOpenEnabled)
+                    .accessibilityHint(model.projectLifecycleAction == "complete" ? model.label("projects.archiveHelp") : "")
+                    .accessibilityIdentifier(model.projectLifecycleAction == "complete" ? "project-archive-button" : "project-reactivate-button")
                 }
-                .disabled(!model.projectLifecycleOpenEnabled)
-                .accessibilityHint(model.projectLifecycleAction == "complete" ? model.label("projects.archiveHelp") : "")
-                .accessibilityIdentifier(model.projectLifecycleAction == "complete" ? "project-archive-button" : "project-reactivate-button")
                 if model.projectLifecycleAction == "complete" {
                     Button(role: .destructive) {
                         guard model.projectLifecycleOpenEnabled else { return }
@@ -3212,7 +3214,9 @@ private struct ProjectCalendarReferenceCard: View {
                         .accessibilityIdentifier("project-calendar-picker-status")
                 }
             } else if !options.flag("available") {
-                Text(model.label("projects.calendarLoadFailed")).rnFont(14).foregroundStyle(palette.secondary)
+                let message = candidates.isEmpty ? model.label("projects.calendarLoadFailed")
+                    : model.label("settings.deviceCalendars") + " · " + model.label("settings.calendarMobile.failedToLoadEvents")
+                Text(message).rnFont(14).foregroundStyle(palette.secondary)
                     .accessibilityIdentifier("project-calendar-picker-status")
             } else if candidates.isEmpty {
                 Text(model.label(query.isEmpty ? "projects.calendarEmpty" : "common.noMatches")).rnFont(14).foregroundStyle(palette.secondary)

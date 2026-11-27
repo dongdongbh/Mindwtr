@@ -13,6 +13,7 @@ import {
   ensureBulkOrganizeDestinationSaved,
   getBulkOrganizeAreaOptions,
   getBulkOrganizeProjectOptions,
+  getPersonOptionNames,
   resolveFeatureFlags,
   useTaskStore,
   type Area,
@@ -68,6 +69,10 @@ export function TaskListBulkOrganizeModal({
   const filledButton = useFilledButtonColors();
   const keyboardInset = useAndroidKeyboardInset(visible);
   const timeEstimatesEnabled = useTaskStore((state) => resolveFeatureFlags(state.settings).timeEstimates);
+  const prioritiesEnabled = useTaskStore((state) => resolveFeatureFlags(state.settings).priorities);
+  const tasks = useTaskStore((state) => visible ? state.tasks : null);
+  const people = useTaskStore((state) => visible ? state.people : null);
+  const personNames = useMemo(() => tasks && people ? getPersonOptionNames(people, tasks) : [], [people, tasks]);
 
   const [draft, setDraft] = useState(EMPTY_BULK_ORGANIZE_DRAFT);
   const editDraft = useCallback((edit: BulkOrganizeDraftEdit) => {
@@ -127,8 +132,10 @@ export function TaskListBulkOrganizeModal({
   const activeAreas = useMemo(() => getBulkOrganizeAreaOptions(areas), [areas]);
 
 
-  const dialog = buildBulkOrganizeDialogModel({ draft, projects: activeProjects, areas: activeAreas, selectedCount, timeEstimatesEnabled, t });
-  const { estimate } = dialog;
+  const dialog = buildBulkOrganizeDialogModel({
+    draft, projects: activeProjects, areas: activeAreas, selectedCount, timeEstimatesEnabled, prioritiesEnabled, personNames, t,
+  });
+  const { estimate, person, priority } = dialog;
   const selectedProjectId = dialog.project.selectedId;
   const selectedAreaId = dialog.area.selectedId;
   const isBusy = isApplying || isCreatingDestination;
@@ -222,7 +229,7 @@ export function TaskListBulkOrganizeModal({
       setShowValidation(true);
       return;
     }
-    void onApply(buildBulkOrganizeInput(draft, timeEstimatesEnabled));
+    void onApply(buildBulkOrganizeInput(draft, timeEstimatesEnabled, prioritiesEnabled));
   };
 
   return (
@@ -287,6 +294,15 @@ export function TaskListBulkOrganizeModal({
               </ScrollView>
             </View>
 
+            {priority && (
+              <View style={styles.bulkOrganizeSection}>
+                <Text style={[styles.bulkOrganizeLabel, { color: themeColors.secondaryText }]}>{priority.label}</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.bulkOrganizeChipRow}>
+                  {priority.options.map(({ value, label, selected, edit }) => renderChip(value, label, selected, () => editDraft(edit)))}
+                </ScrollView>
+              </View>
+            )}
+
             {estimate && (
               <View style={styles.bulkOrganizeSection}>
                 <Text style={[styles.bulkOrganizeLabel, { color: themeColors.secondaryText }]}>{estimate.label}</Text>
@@ -339,27 +355,35 @@ export function TaskListBulkOrganizeModal({
               })}
             </View>
 
-            {dialog.waitingFor && (
-              <View style={styles.bulkOrganizeSection}>
-                <Text style={[styles.bulkOrganizeLabel, { color: themeColors.secondaryText }]}>
-                  {dialog.waitingFor.label}
-                </Text>
-                <TextInput
-                  accessibilityLabel={dialog.waitingFor.label}
-                  value={draft.delegateWho}
-                  onChangeText={(value) => {
-                    editDraft({ type: 'setText', field: 'delegateWho', value });
-                    setShowValidation(false);
-                  }}
-                  placeholder={dialog.waitingFor.placeholder}
-                  placeholderTextColor={themeColors.secondaryText}
-                  style={[
-                    styles.bulkOrganizeInput,
-                    { backgroundColor: themeColors.inputBg, borderColor: themeColors.border, color: themeColors.text },
-                  ]}
-                />
-              </View>
-            )}
+            <View style={styles.bulkOrganizeSection}>
+              <Text style={[styles.bulkOrganizeLabel, { color: themeColors.secondaryText }]}>{person.label}</Text>
+              <TextInput
+                accessibilityLabel={person.label}
+                value={person.value}
+                onChangeText={(value) => {
+                  editDraft({ type: 'setText', field: 'delegateWho', value });
+                  setShowValidation(false);
+                }}
+                placeholder={person.placeholder}
+                placeholderTextColor={themeColors.secondaryText}
+                editable={!isBusy}
+                maxLength={500}
+                style={[
+                  styles.bulkOrganizeInput,
+                  { backgroundColor: themeColors.inputBg, borderColor: themeColors.border, color: themeColors.text },
+                ]}
+              />
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={styles.bulkOrganizeChipRow}>
+                {person.options.map(({ value, label, selected, edit }) => renderChip(value, label, selected, () => {
+                  editDraft(edit);
+                  setShowValidation(false);
+                }))}
+                {person.suggestions.map(({ name, edit }) => renderChip(`person:${name}`, name, false, () => {
+                  editDraft(edit);
+                  setShowValidation(false);
+                }))}
+              </ScrollView>
+            </View>
 
             <View style={styles.bulkOrganizeDateGrid}>
               {dialog.dates.map(({ field, label }) => (

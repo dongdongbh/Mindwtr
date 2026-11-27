@@ -1,5 +1,6 @@
 import { generateUUID, normalizeCloudProvider, type CloudProvider } from '@mindwtr/core';
 
+import { logWarn } from './app-log';
 import type { CloudConfig, WebDavConfig } from './sync-attachment-backends';
 import { normalizeSyncBackend, type SyncBackend } from './sync-service-utils';
 
@@ -170,7 +171,7 @@ export async function writeSyncBackend(backend: SyncBackend, deps: ConfigWriteDe
 
 export async function readWebDavConfig(
     deps: ConfigDeps,
-    options?: { silent?: boolean },
+    options?: { silent?: boolean; required?: boolean },
 ): Promise<WebDavConfig> {
     if (!deps.isTauriRuntimeEnv()) return getWebDavConfigLocal();
     await deps.maybeMigrateLegacyLocalStorageToConfig();
@@ -179,6 +180,12 @@ export async function readWebDavConfig(
     } catch (error) {
         if (!options?.silent) {
             deps.reportError('Failed to get WebDAV config', error);
+        }
+        if (options?.required) {
+            void logWarn('WebDAV sync stopped before probing unreadable settings', {
+                scope: 'sync', extra: { releaseCheck: 'v1.3.10/webdav-config-read', outcome: 'unavailable' },
+            });
+            throw new Error('Could not read the saved WebDAV settings. Open Sync settings and save your WebDAV credentials again.');
         }
         return { url: '', username: '', hasPassword: false, allowInsecureHttp: false, allowWeakFingerprint: true };
     }

@@ -35,12 +35,15 @@ export function KeybindingHelpModal({
     const appLockEnabled = useAppLockStore((state) => state.enabled);
     const isMac = typeof navigator !== 'undefined' && /mac/i.test(navigator.platform);
     const primary = isMac ? 'Cmd' : 'Ctrl';
+    const alt = isMac ? 'Option' : 'Alt';
     const quickAddShortcutDisplay = formatGlobalQuickAddShortcutForDisplay(quickAddShortcut, isMac, t);
     const sharedGlobal: HelpItem[] = [
         { keys: quickAddShortcutDisplay, labelKey: 'keybindings.globalQuickAdd', fallbackLabel: 'Global quick add' },
         { keys: 'a', labelKey: 'keybindings.inAppQuickAdd', fallbackLabel: 'In-app quick add' },
         { keys: isMac ? 'Cmd+Option+S' : 'Ctrl+Alt+S', labelKey: 'settings.syncNow', fallbackLabel: 'Sync now' },
         { keys: `${primary}+,`, labelKey: 'keybindings.openSettings' },
+        { keys: `${alt}+←`, labelKey: 'common.back' },
+        { keys: `${alt}+→`, labelKey: 'keybindings.goForward', fallbackLabel: 'Forward' },
         { keys: `${primary}+B / ${primary}+\\`, labelKey: 'keybindings.toggleSidebar' },
         { keys: `${primary}+Shift+\\`, labelKey: 'keybindings.toggleFocusMode' },
         { keys: `${primary}+Shift+D`, labelKey: 'keybindings.list.toggleDetails' },

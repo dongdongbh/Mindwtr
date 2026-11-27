@@ -215,6 +215,13 @@ class MenuModel(internal val shell: InboxViewModel, private val saved: SavedStat
 
     val focusControls = FocusModel(this, saved)
 
+    private val linkTitleListener: (JSONObject) -> Unit = { event -> if (event.optString("type") == "linkTitle") shell.ui { whenIdle { shell.refresh() } } }
+
+    init {
+        ProcessCoreHost.listenSync(linkTitleListener)
+        shell.addCloseable { ProcessCoreHost.unlistenSync(linkTitleListener) }
+    }
+
     var bulkBusy by mutableStateOf<String?>(null); private set
 
     var projectBulk by mutableStateOf<JSONObject?>(null); private set
@@ -598,6 +605,11 @@ class MenuModel(internal val shell: InboxViewModel, private val saved: SavedStat
         shell.readSucceeded()
         if (list == "widgetList") widgetContextsFilterId(next.view)?.let { return openWidgetContextsFilter(it) }
         if (list == "widgetList") widgetFocusFilterId(next.view)?.let { return openWidgetFocusFilter(it) }
+        if (list == "widgetList") next.view.menuText("contextToken")?.let { token ->
+            keepOwn("contexts", JSONObject().put("tokens", JSONArray().put(token)))
+            open(MenuScreen.Contexts)
+            return
+        }
 
         loaded = if (list in BULK_LISTS && own(list).optJSONObject("bulk") == null) next.withBulk(null) else next
         editOwn(list) {
@@ -772,10 +784,9 @@ class MenuModel(internal val shell: InboxViewModel, private val saved: SavedStat
     private fun keepContextsSavedFilter(id: String?) = keepOwn("contexts", contextsWithSavedFilter(own("contexts"), id))
 
     private fun openWidgetFocusFilter(id: String) {
-        focusControls.resetForWidgetSavedFilter()
         toTabs()
         shell.show(Screen.Focus)
-        shell.editFocusControls(JSONObject().put("type", "applySavedFilter").put("id", id))
+        focusControls.openWidgetSavedList(id)
         shell.anyTime({ it.logLine("Native Android widget Focus filter selected releaseCheck=v1.3.9/widget-focus-filter",
             JSONObject().put("releaseCheck", "v1.3.9/widget-focus-filter").put("outcome", "selected")) }, {})
     }
@@ -1343,13 +1354,20 @@ class MenuModel(internal val shell: InboxViewModel, private val saved: SavedStat
 
     fun organizeEdit(edit: JSONObject) {
 
-        if (edit.optString("type") in listOf("setStatus", "setEstimate") || edit.optString("field") in listOf("delegateWho", "estimateText")) {
+        if (edit.optString("type") in listOf("setStatus", "setEstimate", "setPerson") || edit.optString("field") in listOf("delegateWho", "estimateText")) {
             dialog?.let { keepDialog(JSONObject(it.toString()).apply { remove("validation") }) }
         }
         bulkReload(JSONObject().put("organizeEdit", edit))
     }
 
     private var organizeTyped = 0
+
+    fun organizePerson(edit: JSONObject) {
+        val open = dialog?.takeIf { it.optString("kind") == "organize" } ?: return
+        ++organizeTyped
+        keepDialog(JSONObject(open.toString()).put("typed:delegateWho", if (edit.optString("type") == "setText") edit.getString("value") else ""))
+        organizeEdit(edit)
+    }
 
 
     fun organizeType(field: String, text: String) {

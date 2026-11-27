@@ -56,6 +56,12 @@ describe('native host contract: widget list screen', () => {
         expect(view.validUntil).toBe(turns);
     });
 
+    it('opens a raw context in Contexts with its full hierarchy selected', async () => {
+        const host = await open({});
+        expect(value(host.getWidgetListView({ id: 'context:@person/Teddy' })).contextToken).toBe('@person/Teddy');
+        expect(value(host.getWidgetListView({ id: 'next' })).contextToken).toBeUndefined();
+    });
+
     it('opens the full Upcoming list through the header route and re-evaluates the local day', async () => {
         vi.useFakeTimers({ toFake: ['Date'] });
         vi.setSystemTime(new Date(2026, 9, 17, 12));

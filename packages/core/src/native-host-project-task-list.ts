@@ -11,18 +11,22 @@ import { resolveListFilterState, type ListFilterState, type ResolvedListFilter }
 import { record } from './native-host-contract-project-shared';
 
 export type NativeProjectBulkParams = { projectId: string; showCompleted: boolean; completedCollapsed: boolean;
-    filters: ListFilterState; filterSheetOpen: false };
+    collapsedSectionIds?: string[]; filters: ListFilterState; filterSheetOpen: false };
 export type NativeProjectTaskListData = Pick<AppData, 'tasks' | 'projects' | 'sections' | 'areas' | 'settings'>;
 
+export const isProjectSectionIdList = (value: unknown): value is string[] =>
+    Array.isArray(value) && value.every(id => typeof id === 'string' && id.trim().length > 0 && id.length <= 500);
+
 export const readProjectBulkParams = (value: unknown): NativeProjectBulkParams | null => {
-    if (!record(value) || Object.keys(value).some(key => !['projectId', 'showCompleted', 'completedCollapsed', 'filters', 'filterSheetOpen'].includes(key))
+    if (!record(value) || Object.keys(value).some(key => !['projectId', 'showCompleted', 'completedCollapsed', 'collapsedSectionIds', 'filters', 'filterSheetOpen'].includes(key))
         || typeof value.projectId !== 'string' || !value.projectId.trim() || value.projectId.length > 500
         || typeof value.showCompleted !== 'boolean' || typeof value.completedCollapsed !== 'boolean'
+        || value.collapsedSectionIds !== undefined && !isProjectSectionIdList(value.collapsedSectionIds)
         || value.filterSheetOpen !== undefined && value.filterSheetOpen !== false || !record(value.filters)) return null;
     const filters = readFilterState(value.filters);
     return filters && !filters.projects.length && !filters.timeEstimates.length
         ? { projectId: value.projectId, showCompleted: value.showCompleted, completedCollapsed: value.completedCollapsed,
-            filters, filterSheetOpen: false } : null;
+            collapsedSectionIds: value.collapsedSectionIds, filters, filterSheetOpen: false } : null;
 };
 
 export const nativeProjectTaskSources = (data: NativeProjectTaskListData, projectId: string, showCompleted: boolean) => {
@@ -45,18 +49,22 @@ export const nativeProjectFilterVisibility = (sources: NativeProjectTaskSources,
         prioritiesEnabled: resolveFeatureFlags(settings).priorities, timeEstimatesEnabled: false,
     });
 export const nativeProjectTaskModel = (data: NativeProjectTaskListData, sources: NativeProjectTaskSources,
-    completedCollapsed: boolean, resolved: Pick<ResolvedListFilter, 'criteria' | 'searchQuery'> | undefined, t: (key: string) => string) => {
+    completedCollapsed: boolean, resolved: Pick<ResolvedListFilter, 'criteria' | 'searchQuery' | 'hasActive'> | undefined,
+    t: (key: string) => string, collapsedSectionIds?: readonly string[]) => {
     const projectSortBy = resolveTaskSortByForFeatures(sources.project.taskSortBy ?? 'default', data.settings);
     return buildProjectTaskListModel({ project: sources.project, tasks: sources.filterableTasks,
         visibleTasks: selectVisibleTasks(data.tasks), sections: selectVisibleSections(data.sections ?? []), allSections: data.sections ?? [],
         statusFilter: 'all', criteria: resolved?.criteria ?? {}, searchQuery: resolved?.searchQuery ?? '',
         sortBy: resolveNonDoneTaskSortBy(projectSortBy, data.settings), projectOrder: sources.options.enableProjectReorder,
-        reorderMode: false, groupCompletedTasksLast: sources.options.groupCompletedTasksLast, completedCollapsed, t });
+        reorderMode: false, groupCompletedTasksLast: sources.options.groupCompletedTasksLast, completedCollapsed,
+        collapsedSectionIds: collapsedSectionIds === undefined ? undefined : new Set(collapsedSectionIds),
+        showEmptySections: collapsedSectionIds !== undefined && sources.options.allowAdd && !resolved?.hasActive, t });
 };
 export const nativeProjectSelectableTasks = (data: NativeProjectTaskListData, params: NativeProjectBulkParams) => {
     const sources = nativeProjectTaskSources(data, params.projectId, params.showCompleted);
     if (!sources || sources.options.readOnly || sources.project.purgedAt) return [];
     const t = (key: string) => key;
     const resolved = resolveListFilterState(params.filters, { visibility: nativeProjectFilterVisibility(sources, data.settings), t });
-    return nativeProjectTaskModel(data, sources, params.completedCollapsed, resolved, t).items.flatMap(item => item.type === 'task' ? [item.task] : []);
+    return nativeProjectTaskModel(data, sources, params.completedCollapsed, resolved, t, params.collapsedSectionIds)
+        .items.flatMap(item => item.type === 'task' ? [item.task] : []);
 };

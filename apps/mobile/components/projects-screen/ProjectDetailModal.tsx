@@ -85,7 +85,7 @@ type ProjectDetailModalProps = {
     onBeforeConvertToSection?: () => Promise<boolean>;
     onConvertedToSection?: (result: { destinationProjectId: string; receipt: import('@mindwtr/core').ProjectToSectionReceipt }) => void;
     onOpenAreaPicker: () => void;
-    onOpenQuickAdd: (project: Project) => void;
+    onOpenQuickAdd: (project: Project, sectionId?: string) => void;
     onOpenTagPicker: () => void;
 
 
@@ -861,10 +861,11 @@ export function ProjectDetailModal({
             !task.deletedAt && (taskListOptions.includeDone || task.status !== 'done')
         ))
     );
-    const openProjectQuickAdd = React.useCallback(() => {
+    const openProjectQuickAdd = React.useCallback((sectionId?: string) => {
         const current = getMutableSelectedProject();
         if (!current || !taskListOptions.allowAdd) return;
-        onOpenQuickAdd(current);
+        if (sectionId === undefined) onOpenQuickAdd(current);
+        else onOpenQuickAdd(current, sectionId);
     }, [getMutableSelectedProject, onOpenQuickAdd, taskListOptions.allowAdd]);
     const openProjectTaskFilters = React.useCallback(() => {
         setProjectTaskFilterOpenSignal((value) => value + 1);
@@ -999,7 +1000,7 @@ export function ProjectDetailModal({
                 <TouchableOpacity
                     accessibilityLabel={addProjectTaskLabel}
                     accessibilityRole="button"
-                    onPress={openProjectQuickAdd}
+                    onPress={() => openProjectQuickAdd()}
                     hitSlop={8}
                     style={[
                         styles.projectTaskPinnedAddButton,
@@ -1981,6 +1982,7 @@ export function ProjectDetailModal({
                                         sequenceCueLabels={sequenceCueLabels}
                                         reorderMode={projectTaskReorderMode}
                                         onReorderModeChange={handleProjectTaskReorderModeChange}
+                                        onAddTaskToSection={openProjectQuickAdd}
                                         listHeaderComponent={projectTaskReorderMode ? null : projectDetailListHeader}
                                         listRef={projectDetailListRef}
                                         onListScroll={handleProjectListScroll}

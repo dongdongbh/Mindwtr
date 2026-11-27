@@ -523,7 +523,7 @@ private fun RowScope.TabItem(model: InboxViewModel, tab: Screen, icon: ImageVect
     val active = screen == tab
     val color = if (active) c.tabIconSelected else c.tabIconDefault
     Column(
-        Modifier.weight(1f).fillMaxHeight().rnTabPress(active) { menu.closeSheet(); show(tab) },
+        Modifier.weight(1f).fillMaxHeight().rnTabPress(active) { menu.closeSheet(); if (tab == Screen.Focus) menu.focusControls.openMainFocus(); show(tab) },
         horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center,
     ) {
         Icon(icon, null, tint = color, modifier = Modifier.size(if (active) 26.dp else 24.dp).fade(if (active) 1f else RN_TAB_ICON_IDLE))

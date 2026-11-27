@@ -18,6 +18,7 @@ import android.view.ViewGroup
 import android.widget.BaseAdapter
 import android.widget.ListView
 import android.widget.TextView
+import android.widget.SeekBar
 import android.widget.Spinner
 import android.widget.ArrayAdapter
 import android.widget.AdapterView
@@ -104,7 +105,9 @@ class WidgetConfigureActivity : AppCompatActivity() {
       onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
         override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
           val currentPosition = (groupingOptions.indexOf(WidgetListStore.grouping(pendingSelection)?.first) + 1).coerceAtLeast(0)
-          if (position != currentPosition) pendingSelection = WidgetListStore.withGrouping(pendingSelection, groupingOptions.getOrNull(position - 1))
+          if (position == currentPosition) return
+          pendingSelection = WidgetListStore.withGrouping(pendingSelection, groupingOptions.getOrNull(position - 1))
+          if (dropdown) save()
         }
         override fun onNothingSelected(parent: AdapterView<*>?) {}
       }
@@ -120,6 +123,24 @@ class WidgetConfigureActivity : AppCompatActivity() {
       text = payload.listTitles["background"] ?: "Background"
       setTextColor(textColor)
     }
+    val opacityRow = findViewById<View>(R.id.mindwtr_widget_opacity_row)
+    val opacityLabel = findViewById<TextView>(R.id.mindwtr_widget_opacity_label)
+    opacityLabel.setTextColor(textColor)
+    findViewById<SeekBar>(R.id.mindwtr_widget_opacity).apply {
+      progress = savedInstanceState?.getInt("opacity") ?: WidgetListStore.backgroundOpacity(this@WidgetConfigureActivity, appWidgetId)
+      opacityLabel.text = getString(R.string.mindwtr_widget_opacity, progress)
+      setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+        override fun onProgressChanged(bar: SeekBar, value: Int, fromUser: Boolean) {
+          opacityLabel.text = getString(R.string.mindwtr_widget_opacity, value)
+        }
+        override fun onStartTrackingTouch(bar: SeekBar) {}
+        override fun onStopTrackingTouch(bar: SeekBar) {}
+      })
+    }
+    fun updateOpacityVisibility() {
+      opacityRow.visibility = if (!dropdown && pendingBackground.isTransparent) View.VISIBLE else View.GONE
+    }
+    updateOpacityVisibility()
     findViewById<Spinner>(R.id.mindwtr_widget_configure_background).apply {
 
       this.adapter = spinnerAdapter(listOf(payload.listTitles["groupDefault"] ?: "Default",
@@ -127,7 +148,10 @@ class WidgetConfigureActivity : AppCompatActivity() {
         payload.listTitles["backgroundDarkText"] ?: "Transparent, dark text"), textColor, palette)
       setSelection(pendingBackground.ordinal)
       onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-        override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) { pendingBackground = WidgetBackground.entries[position] }
+        override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+          pendingBackground = WidgetBackground.entries[position]
+          updateOpacityVisibility()
+        }
         override fun onNothingSelected(parent: AdapterView<*>?) {}
       }
     }
@@ -180,6 +204,7 @@ class WidgetConfigureActivity : AppCompatActivity() {
 
   override fun onSaveInstanceState(outState: Bundle) {
     outState.putString("listSelection", pendingSelection)
+    outState.putInt("opacity", findViewById<SeekBar>(R.id.mindwtr_widget_opacity).progress)
     outState.putString("background", pendingBackground.name)
     outState.putBoolean("focusAvailable", pendingFocusAvailable)
     super.onSaveInstanceState(outState)
@@ -188,8 +213,10 @@ class WidgetConfigureActivity : AppCompatActivity() {
   private fun save() {
     if (kind == WidgetKind.TASKS) WidgetListStore.write(this, appWidgetId, pendingSelection)
 
-    if (kind == WidgetKind.TASKS && !dropdown) WidgetListStore.writeFocusAvailable(this, appWidgetId, pendingFocusAvailable)
-    WidgetListStore.writeBackground(this, appWidgetId, pendingBackground)
+    if (!dropdown) {
+      if (kind == WidgetKind.TASKS) WidgetListStore.writeFocusAvailable(this, appWidgetId, pendingFocusAvailable)
+      WidgetListStore.writeBackground(this, appWidgetId, pendingBackground, findViewById<SeekBar>(R.id.mindwtr_widget_opacity).progress)
+    }
     val manager = AppWidgetManager.getInstance(this)
     WidgetRenderer.render(this, manager, intArrayOf(appWidgetId), kind)
     CaptureSyncHeadlessService.startWidgetRefresh(this)
@@ -200,7 +227,7 @@ class WidgetConfigureActivity : AppCompatActivity() {
   private fun updateGroupingVisibility() {
     val focus = WidgetListStore.baseListId(pendingSelection) == WidgetListStore.DEFAULT_LIST
     findViewById<View>(R.id.mindwtr_widget_configure_grouping_row).visibility =
-      if (dropdown || focus || kind != WidgetKind.TASKS) View.GONE else View.VISIBLE
+      if (focus || kind != WidgetKind.TASKS) View.GONE else View.VISIBLE
 
     findViewById<View>(R.id.mindwtr_widget_configure_available).visibility =
       if (!dropdown && focus && kind == WidgetKind.TASKS) View.VISIBLE else View.INVISIBLE

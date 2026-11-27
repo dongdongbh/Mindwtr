@@ -2,7 +2,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import { isSandboxMode, resolveFeatureFlags, shallow, useTaskStore } from '@mindwtr/core';
 import { useLanguage } from './language-context';
 import { KeybindingHelpModal } from '../components/KeybindingHelpModal';
-import { isFlatpakRuntime, isTauriRuntime } from '../lib/runtime';
+import { isFlatpakRuntime, isLinuxRuntime, isTauriRuntime } from '../lib/runtime';
 import { reportError } from '../lib/report-error';
 import { isImeComposing } from '../lib/ime';
 import { nextDensityMode } from '../lib/density';
@@ -19,6 +19,7 @@ import {
 import { areaFilterSelectionToFilters } from '@mindwtr/core';
 import type { TaskStatus } from '@mindwtr/core';
 import { getWorkspaceCache } from '../lib/workspace-cache';
+import type { NavigationDirection, NavigationInput } from '../lib/navigation-history';
 
 export type KeybindingStyle = 'vim' | 'emacs' | 'standard';
 
@@ -85,7 +86,7 @@ function isEditableTarget(target: EventTarget | null): boolean {
     if (!(target instanceof HTMLElement)) return false;
     const tag = target.tagName.toLowerCase();
     return tag === 'input' || tag === 'textarea' || tag === 'select' || target.isContentEditable
-        || target.closest('[contenteditable]:not([contenteditable="false"])') !== null;
+        || target.closest('[contenteditable]:not([contenteditable="false"]), [role="textbox"]') !== null;
 }
 
 
@@ -237,10 +238,12 @@ export function KeybindingProvider({
     children,
     currentView,
     onNavigate,
+    onNavigateHistory,
 }: {
     children: React.ReactNode;
     currentView: string;
     onNavigate: (view: string) => void;
+    onNavigateHistory?: (direction: NavigationDirection, input: NavigationInput) => void;
 }) {
     const sandboxMode = isSandboxMode();
     const isTest = import.meta.env.MODE === 'test' || import.meta.env.VITEST || process.env.NODE_ENV === 'test';
@@ -828,8 +831,38 @@ export function KeybindingProvider({
             }
         };
 
+        const isHistoryNavigationBlocked = (target: EventTarget | null) => (
+            Boolean(useUiStore.getState().editingTaskId)
+            || isEditableTarget(target)
+            || isEditableTarget(document.activeElement)
+            || hasModalDialogOpen()
+            || hasOpenPopup()
+        );
+        const navigateHistory = (direction: NavigationDirection, input: NavigationInput) => {
+            pendingRef.current.key = null;
+            onNavigateHistory?.(direction, input);
+        };
+        const handleHistoryMouseEvent = (e: MouseEvent) => {
+            if (!onNavigateHistory || (e.button !== 3 && e.button !== 4)) return;
+            e.preventDefault();
+            e.stopPropagation();
+            const isWryGtkMouseRelease = e.type === 'mouseup' && !e.isTrusted && isTauriRuntime() && isLinuxRuntime();
+            if ((e.type === 'auxclick' || isWryGtkMouseRelease) && !isHistoryNavigationBlocked(e.target)) {
+                navigateHistory(e.button === 3 ? -1 : 1, isWryGtkMouseRelease ? 'gtk-mouse' : 'mouse');
+            }
+        };
         const handleKeyDown = (e: KeyboardEvent) => {
             if (e.defaultPrevented || isImeComposing(e)) return;
+            if (onNavigateHistory && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
+                const back = e.altKey ? e.key === 'ArrowLeft' : e.key === 'BrowserBack';
+                const forward = e.altKey ? e.key === 'ArrowRight' : e.key === 'BrowserForward';
+                if (back || forward) {
+                    if (isHistoryNavigationBlocked(e.target)) return;
+                    e.preventDefault();
+                    if (!e.repeat) navigateHistory(back ? -1 : 1, 'keyboard');
+                    return;
+                }
+            }
             if (pendingRef.current.key === 'y' && (style !== 'vim' || e.key === 'F11' || e.metaKey || e.ctrlKey || e.altKey
                 || CHORD_MODIFIER_KEYS.has(e.key) || editingTaskIdRef.current || isEditableTarget(e.target)
                 || hasModalDialogOpen()
@@ -1048,13 +1081,21 @@ export function KeybindingProvider({
         };
 
         window.addEventListener('keydown', handleKeyDown);
-        return () => window.removeEventListener('keydown', handleKeyDown);
+        const historyMouseEvents = ['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'auxclick'] as const;
+        if (onNavigateHistory) {
+            for (const type of historyMouseEvents) window.addEventListener(type, handleHistoryMouseEvent, true);
+        }
+        return () => {
+            window.removeEventListener('keydown', handleKeyDown);
+            for (const type of historyMouseEvents) window.removeEventListener(type, handleHistoryMouseEvent, true);
+        };
     }, [
         style,
         quickAddShortcut,
         vimGoMap,
         emacsAltMap,
         onNavigate,
+        onNavigateHistory,
         isHelpOpen,
         toggleSidebar,
         toggleFocusMode,

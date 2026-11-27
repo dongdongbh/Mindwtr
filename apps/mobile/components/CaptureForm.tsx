@@ -25,6 +25,7 @@ import {
   createAIProvider,
   getUsedTaskTokens,
   getSavedTaxonomyTokens,
+  isCaptureDestinationAvailable,
   parseQuickAdd,
   resolveQuickCaptureDefaultAreaId,
   formatQuickAddHelp,
@@ -46,7 +47,9 @@ import {
   getCaptureModalBulkConfirm,
   getCaptureModalCloseTarget,
   getCaptureModalCopilotParts,
+  getProjectQuickCaptureReturnToProjectId,
   keepCaptureModalCopilotSuggestion,
+  readCaptureModalInitialDestination,
   readCaptureModalInitialProps,
   readCaptureModalInitialText,
   readCaptureModalOrigin,
@@ -87,7 +90,7 @@ export function CaptureForm({ params, projectModal }: {
 }) {
   const router = useRouter();
   const navigation = useNavigation();
-  const { addProject, addTask, addTasks, projects, tasks, allTasks, settings, areas, people } = useTaskStore((state) => ({
+  const { addProject, addTask, addTasks, projects, tasks, allTasks, settings, areas, people, sections } = useTaskStore((state) => ({
     addProject: state.addProject,
     addTask: state.addTask,
     addTasks: state.addTasks,
@@ -97,6 +100,7 @@ export function CaptureForm({ params, projectModal }: {
     settings: state.settings,
     areas: state.areas,
     people: state.people,
+    sections: state.sections,
   }), shallow);
   const tc = useThemeColors();
   const { showToast } = useToast();
@@ -106,12 +110,28 @@ export function CaptureForm({ params, projectModal }: {
     () => readCaptureModalInitialProps(params.initialProps, projects, areas),
     [areas, params.initialProps, projects]
   );
-
-  const defaultNewTaskAreaId = resolveQuickCaptureDefaultAreaId(settings, areas) ?? undefined;
   const returnTo = React.useMemo(
     () => sanitizeCaptureReturnToParam(params.returnTo),
     [params.returnTo]
   );
+  const [clearedSectionRoute, setClearedSectionRoute] = useState<typeof params.initialProps>();
+  const sectionCleared = clearedSectionRoute !== undefined && clearedSectionRoute === params.initialProps;
+  const sectionDestination = React.useMemo(() => {
+    if (sectionCleared) return undefined;
+    const destination = readCaptureModalInitialDestination(params.initialProps);
+    if (destination?.kind !== 'project' || !destination.sectionId) return undefined;
+    return projectModal || getProjectQuickCaptureReturnToProjectId(returnTo) === destination.id
+      ? destination : undefined;
+  }, [params.initialProps, projectModal, returnTo, sectionCleared]);
+  const destinationSection = sectionDestination && sections.find((section) => (
+    section.id === sectionDestination.sectionId && section.projectId === sectionDestination.id && !section.deletedAt
+  ));
+  const destinationProject = sectionDestination && projects.find((project) => project.id === sectionDestination.id);
+  const destinationUnavailableMessage = tFallback(t, 'quickAdd.destinationUnavailable', 'Destination unavailable. Choose another destination.');
+  const sectionDestinationError = sectionDestination && !isCaptureDestinationAvailable(sectionDestination, { projects, sections })
+    ? destinationUnavailableMessage : undefined;
+
+  const defaultNewTaskAreaId = resolveQuickCaptureDefaultAreaId(settings, areas) ?? undefined;
   const initialDescription = String(initialProps.description ?? '');
   const initialProjectTitle = readCaptureModalProjectParam(params);
   const [value, setValue] = useState(initialText);
@@ -149,8 +169,8 @@ export function CaptureForm({ params, projectModal }: {
   }, []);
 
   useEffect(() => {
-    if (Platform.OS !== 'android' || !captureError || isSubmitting) return;
-    const announcement = captureError.message;
+    const announcement = sectionDestinationError ?? captureError?.message;
+    if (Platform.OS !== 'android' || !announcement || isSubmitting) return;
     const handle = setTimeout(() => {
       if (!screenMountedRef.current || submissionInFlightRef.current) return;
       AccessibilityInfo.announceForAccessibility(announcement);
@@ -160,7 +180,7 @@ export function CaptureForm({ params, projectModal }: {
       });
     }, 0);
     return () => clearTimeout(handle);
-  }, [captureError, isSubmitting]);
+  }, [captureError, isSubmitting, sectionDestinationError]);
 
   usePreventRemove(isSubmitting, ({ data }) => {
     if (!allowCaptureRemovalRef.current || !screenMountedRef.current) return;
@@ -212,11 +232,12 @@ export function CaptureForm({ params, projectModal }: {
 
   const previewEntries = React.useMemo(() => {
     if (!value.trim()) return [];
-    return buildQuickAddPreviewEntries(
+    const entries = buildQuickAddPreviewEntries(
       parseQuickAdd(value, projects, new Date(), areas, quickAddParseOptions),
       { t, projects, areas, rawInput: value },
     );
-  }, [areas, projects, quickAddParseOptions, t, value]);
+    return sectionDestination ? entries.filter(({ kind }) => kind !== 'project' && kind !== 'area') : entries;
+  }, [areas, projects, quickAddParseOptions, sectionDestination, t, value]);
 
   useEffect(() => {
     const title = value.trim();
@@ -362,8 +383,10 @@ export function CaptureForm({ params, projectModal }: {
 
   const showCaptureFailure = () => {
     if (!screenMountedRef.current) return;
+    const destinationUnavailable = sectionDestination
+      && !isCaptureDestinationAvailable(sectionDestination, useTaskStore.getState());
     setCaptureError({
-      message: tFallback(t, 'task.addFailed', 'Failed to add task'),
+      message: destinationUnavailable ? destinationUnavailableMessage : tFallback(t, 'task.addFailed', 'Failed to add task'),
     });
   };
 
@@ -377,6 +400,10 @@ export function CaptureForm({ params, projectModal }: {
     const parsed = parseQuickAdd(inputValue, currentProjects as Project[], new Date(), areas, quickAddParseOptions);
 
     const surfaceProps = { ...initialProps };
+    if (sectionCleared) {
+      delete surfaceProps.sectionId;
+      delete surfaceProps.projectId;
+    }
     if (surfaceProps.attachments?.length) {
       const managed = await filterManagedAttachments(surfaceProps.attachments);
       if (managed.length > 0) {
@@ -385,17 +412,22 @@ export function CaptureForm({ params, projectModal }: {
         delete surfaceProps.attachments;
       }
     }
-    return buildCaptureModalRequest({
+    const request = buildCaptureModalRequest({
       parsed,
       text: inputValue,
       projects: currentProjects,
       initialProps: surfaceProps,
-      projectParam: initialProjectTitle,
+      projectParam: sectionCleared ? '' : initialProjectTitle,
       defaultAreaId: defaultNewTaskAreaId,
       description: descriptionValue,
       copilot: appliedCopilot,
       timeEstimatesEnabled,
     });
+    if (sectionDestination) {
+      const live = useTaskStore.getState();
+      return { ...request, input: { ...request.input, destination: sectionDestination, projects: live.projects, sections: live.sections } };
+    }
+    return request;
   };
 
   const createTaskFromInput = async (
@@ -519,7 +551,7 @@ export function CaptureForm({ params, projectModal }: {
 
 
   const handleSave = async ({ openAfterSave = false }: { openAfterSave?: boolean } = {}) => {
-    if (!value.trim()) return;
+    if (!value.trim() || sectionDestinationError) return;
     const bulkLines = splitQuickAddBulkLines(value);
     if (bulkLines.length > 1) {
       setPendingBulkLines(bulkLines);
@@ -558,6 +590,7 @@ export function CaptureForm({ params, projectModal }: {
     setPendingBulkLines(null);
   };
 
+  const captureErrorMessage = sectionDestinationError ?? captureError?.message;
   const form = (
     <KeyboardAvoidingView
       style={[styles.container, { backgroundColor: tc.bg }]}
@@ -595,6 +628,11 @@ export function CaptureForm({ params, projectModal }: {
               </TouchableOpacity>
             </View>
           </View>
+          {!sectionDestinationError && destinationProject && destinationSection && (
+            <Text style={[styles.fieldLabel, { color: tc.secondaryText }]} testID="capture-project-section-destination">
+              {`${destinationProject.title} / ${destinationSection.title}`}
+            </Text>
+          )}
           <TextInput
             ref={inputRef}
             style={[styles.input, { backgroundColor: tc.inputBg, borderColor: tc.border, color: tc.text }]}
@@ -680,15 +718,23 @@ export function CaptureForm({ params, projectModal }: {
           {showHelp && (
             <Text style={[styles.help, { color: tc.secondaryText }]}>{formatQuickAddHelp(t('quickAdd.help'), { priorities: prioritiesEnabled, timeEstimates: timeEstimatesEnabled })}</Text>
           )}
-          {captureError ? (
+          {captureErrorMessage ? (
             <Text
               accessibilityLiveRegion={Platform.OS === 'android' ? undefined : 'assertive'}
               accessibilityRole={Platform.OS === 'android' ? undefined : 'alert'}
               style={[styles.captureError, { color: tc.danger }]}
             >
-              {captureError.message}
+              {captureErrorMessage}
             </Text>
           ) : null}
+          {sectionDestination && captureErrorMessage === destinationUnavailableMessage && (
+            <TouchableOpacity accessibilityRole="button" onPress={() => {
+              setClearedSectionRoute(params.initialProps);
+              setCaptureError(null);
+            }}>
+              <Text style={{ color: tc.tint }}>{tFallback(t, 'common.clear', 'Clear')}</Text>
+            </TouchableOpacity>
+          )}
           <View style={styles.actions}>
             <TouchableOpacity
               disabled={isSubmitting}
@@ -698,7 +744,7 @@ export function CaptureForm({ params, projectModal }: {
               <Text style={{ color: tc.text }}>{t('common.cancel')}</Text>
             </TouchableOpacity>
             <TouchableOpacity
-              disabled={isSubmitting}
+              disabled={isSubmitting || Boolean(sectionDestinationError)}
               onPress={() => {
                 void handleSave({ openAfterSave: true });
               }}
@@ -707,7 +753,7 @@ export function CaptureForm({ params, projectModal }: {
                                 <Text style={{ color: tc.text }}>{t('quickAdd.saveAndEdit')}</Text>
             </TouchableOpacity>
             <TouchableOpacity
-              disabled={isSubmitting}
+              disabled={isSubmitting || Boolean(sectionDestinationError)}
               onPress={() => {
                 void handleSave();
               }}

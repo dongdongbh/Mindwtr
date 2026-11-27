@@ -169,7 +169,7 @@ export type CalendarViewDeps = {
 export type NativeCalendarFeed =
     | { status: 'loading'; calendars?: ExternalCalendarSubscription[]; events?: ExternalCalendarEvent[] }
     | { status: 'error'; message: string; calendars?: ExternalCalendarSubscription[] }
-    | { status: 'ready'; calendars: ExternalCalendarSubscription[]; events: ExternalCalendarEvent[]; warning?: string };
+    | { status: 'ready'; calendars: ExternalCalendarSubscription[]; events: ExternalCalendarEvent[]; warning?: string; warningScope?: 'device' };
 
 
 export type NativeCalendarState = { viewMode: CalendarViewMode; selectedDate: string | null; visibleMonth: string };

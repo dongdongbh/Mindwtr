@@ -136,7 +136,7 @@ data class ProjectsView(val buckets: Map<String, List<ProjectGroup>>, val moves:
 sealed interface DetailItem
 
 data class DetailSection(val id: String, val title: String, val count: Int, val muted: Boolean, val collapsible: Boolean = false,
-                         val collapsed: Boolean = false, val flowLabel: String? = null) : DetailItem
+                         val collapsed: Boolean = false, val flowLabel: String? = null, val sectionId: String? = null) : DetailItem
 data class DetailTask(val row: TaskRow, val sequenceCue: String?) : DetailItem
 
 
@@ -167,7 +167,7 @@ data class ProjectDetail(val revision: String, val projectId: String, val readOn
                     items.getJSONObject(index).let { item ->
                         if (item.getString("type") == "section") {
                             DetailSection(item.getString("id"), item.getString("title"), item.getInt("count"), item.getBoolean("muted"),
-                                item.optBoolean("collapsible"), item.optBoolean("collapsed"), item.menuText("flowLabel"))
+                                item.optBoolean("collapsible"), item.optBoolean("collapsed"), item.menuText("flowLabel"), item.menuText("sectionId"))
                         } else {
                             DetailTask(item.getJSONObject("row").taskRow(), if (item.isNull("sequenceCue")) null else item.getString("sequenceCue"))
                         }
@@ -204,6 +204,42 @@ private fun CompletedHeading(entry: DetailSection, enabled: Boolean, toggle: () 
         Text(entry.title.uppercase(), style = rnText(13, 700, letterSpacing = 0.6f), color = if (entry.muted) c.secondaryText else c.text,
             modifier = Modifier.weight(1f))
         Text("${entry.count}", style = rnText(11, 600), color = c.secondaryText)
+    }
+}
+
+@Composable
+private fun ProjectSectionHeading(entry: DetailSection, enabled: Boolean, toggle: () -> Unit, add: (() -> Unit)?) {
+    val colors = LocalTheme.current.colors
+    val toggleLabel = t(if (entry.collapsed) "markdown.expand" else "markdown.collapse")
+    val spoken = listOfNotNull(entry.title, entry.flowLabel, entry.count.toString()).joinToString(" · ")
+    Row(Modifier.fillMaxWidth().padding(horizontal = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.weight(1f).heightIn(min = 48.dp)
+            .clearAndSetSemantics {
+                text = AnnotatedString(spoken)
+                heading()
+                role = Role.Button
+                stateDescription = toggleLabel
+                testTag = "project-section-heading-${entry.id}"
+                if (enabled) onClick(label = toggleLabel) { toggle(); true } else disabled()
+            }
+            .clickable(enabled = enabled, role = Role.Button, onClickLabel = toggleLabel, onClick = toggle),
+            horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Icon(if (entry.collapsed) Lucide.ChevronRight else Lucide.ChevronDownPlain, null,
+                    tint = colors.secondaryText, modifier = Modifier.size(15.dp))
+                Text(entry.title.uppercase(), style = rnText(13, 700, letterSpacing = 0.6f), color = if (entry.muted) colors.secondaryText else colors.text,
+                    maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                entry.flowLabel?.let { Text(it, style = rnText(11, 600), color = colors.secondaryText) }
+            }
+            Text("${entry.count}", style = rnText(11, 600), color = colors.secondaryText)
+        }
+        if (add != null) {
+            val addLabel = t("viewSections.addTask").replace("{section}", entry.title)
+            IconButton(onClick = add, enabled = enabled, modifier = Modifier.size(48.dp)
+                .semantics { contentDescription = addLabel }.testTag("project-section-add-${entry.id}")) {
+                Icon(Lucide.PlusPlain, null, tint = if (enabled) colors.tint else colors.secondaryText, modifier = Modifier.size(20.dp))
+            }
+        }
     }
 }
 
@@ -515,10 +551,12 @@ private fun ProjectDetailList(model: InboxViewModel, modifier: Modifier) = with(
     BackHandler(enabled = failedAction == null) { backFromProject() }
     val c = LocalTheme.current.colors
     val detail = project
+    val projectId = detail?.projectId
     val completable = detail?.readOnly == false
     val bulkParams = detail?.takeIf { !it.readOnly && it.projectId == openProjectId }?.let { shown ->
         JSONObject().put("projectId", shown.projectId).put("showCompleted", shown.controls?.optBoolean("showCompleted") == true)
             .put("completedCollapsed", shown.controls?.optBoolean("completedCollapsed") == true)
+            .put("collapsedSectionIds", shown.controls?.optJSONArray("collapsedSectionIds"))
             .put("filters", shown.listFilters?.optJSONObject("filters")?.optJSONObject("state") ?: JSONObject()).put("filterSheetOpen", false)
     }
     val selection = menu.projectBulkView?.takeIf { menu.projectBulk != null }
@@ -584,7 +622,7 @@ private fun ProjectDetailList(model: InboxViewModel, modifier: Modifier) = with(
                 val addLabel = t("nav.addTask")
                 val addShape = RoundedCornerShape(14.dp)
                 Box(Modifier.size(width = 56.dp, height = 44.dp).clip(addShape).background(theme.filledBg).rnBorder(1.dp, theme.filledBg, addShape)
-                    .clickable(enabled = writable && failedAction == null, role = Role.Button) { openProjectId?.let(::openProjectCapture) }
+                    .clickable(enabled = writable && failedAction == null, role = Role.Button) { openProjectId?.let { openProjectCapture(it) } }
                     .semantics { contentDescription = addLabel }.testTag("project-add-task-button"), contentAlignment = Alignment.Center) {
                     Icon(SettingsIonicons.Add, null, tint = theme.filledText, modifier = Modifier.size(24.dp))
                 }
@@ -635,9 +673,16 @@ private fun ProjectDetailList(model: InboxViewModel, modifier: Modifier) = with(
                 openProjectId?.let { id -> projectDetailsItems(model, id, detail) }
                 for (entry in detail?.items.orEmpty()) when (entry) {
                     is DetailSection -> item(key = "section:${entry.id}") {
-                        if (entry.collapsible) CompletedHeading(entry, enabled = !busy && failedAction == null, toggle = model::toggleProjectCompleted)
-                        else SectionTitle(entry.title, entry.count,
-                            Modifier.fillMaxWidth().fade(if (entry.muted) 0.6f else 1f).padding(top = 12.dp, bottom = 8.dp, start = 4.dp), note = entry.flowLabel)
+                        val enabled = !busy && failedAction == null
+                        when {
+                            entry.sectionId != null -> ProjectSectionHeading(entry, enabled, toggle = { toggleProjectSection(entry.sectionId) },
+                                add = if (writable && completable && projectId != null && projectId == openProjectId) {
+                                    { openProjectCapture(projectId, entry.sectionId) }
+                                } else null)
+                            entry.collapsible -> CompletedHeading(entry, enabled, toggle = model::toggleProjectCompleted)
+                            else -> SectionTitle(entry.title, entry.count,
+                                Modifier.fillMaxWidth().fade(if (entry.muted) 0.6f else 1f).padding(top = 12.dp, bottom = 8.dp, start = 4.dp), note = entry.flowLabel)
+                        }
                     }
                     is DetailTask -> item(key = "task:${entry.row.id}") {
                         TaskRowItem(model, entry.row, status = RowStatus.Badge, completable = completable,

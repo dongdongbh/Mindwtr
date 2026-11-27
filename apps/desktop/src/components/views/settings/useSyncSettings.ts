@@ -17,6 +17,7 @@ import { reportSettingsFailure, resolveSettingsFeedback } from './settings-feedb
 import {
     addBreadcrumb,
     CLOCK_SKEW_THRESHOLD_MS,
+    WebdavOriginRejectedError,
     createImportDiagnostics,
     formatActivationMissingAttachments,
     formatImportDiagnostic,
@@ -796,7 +797,9 @@ export const useSyncSettings = ({
                     'settings.syncEncryptionErrorBackendIncompatible',
                     'This WebDAV server does not provide or enforce safe version checks (strong ETags and conditional writes), so Mindwtr cannot safely sync or change encryption. Use a compatible WebDAV provider, File Sync, or Dropbox.',
                 )
-                : resolveText('settings.syncMobile.connectionFailed', 'Connection failed');
+                : error instanceof WebdavOriginRejectedError
+                    ? resolveText('settings.syncMobile.webdavOriginRejected', error.message)
+                    : resolveText('settings.syncMobile.connectionFailed', 'Connection failed');
             void logError(error, { scope: 'sync', step: 'testWebDavConnection' });
             setWebdavTestState('error');
             setSyncError(message);

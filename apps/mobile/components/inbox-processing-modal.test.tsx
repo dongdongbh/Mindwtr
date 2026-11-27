@@ -378,6 +378,7 @@ describe('InboxProcessingModal', () => {
     mockSettings.gtd = { inboxProcessing: {}, taskEditor: undefined };
     mockSettings.ai = {};
     mockSettings.filters = undefined;
+    mockSettings.taxonomy = undefined;
     storeState.tasks = [{ ...baseInboxTask }];
     storeState._allTasks = storeState.tasks;
     storeState.projects = [];
@@ -1522,7 +1523,10 @@ describe('InboxProcessingModal', () => {
     expect(findTextInputsByAccessibilityLabel(root, 'projects.projectName')).toHaveLength(1);
     expect(findTextInputsByAccessibilityLabel(root, 'taskEdit.titleLabel')).toHaveLength(0);
 
+    const capturedTitle = findTextInputByAccessibilityLabel(root, 'projects.projectName').props.value;
+    act(() => findTextInputByAccessibilityLabel(root, 'projects.projectName').props.onChangeText('A different outcome'));
     pressStep(root, '‹ Back');
+    expect(findTextInputByAccessibilityLabel(root, 'taskEdit.titleLabel').props.value).toBe(capturedTitle);
     expect(findTextInputsByAccessibilityLabel(root, 'projects.projectName')).toHaveLength(0);
     expect(findTextInputsByAccessibilityLabel(root, 'taskEdit.titleLabel')).toHaveLength(1);
     pressStep(root, 'process.moreThanOneStepYes');
@@ -1880,6 +1884,46 @@ describe('InboxProcessingModal', () => {
     });
 
     expect(findNodeWithText(root, '#urgent')).toBeTruthy();
+  });
+
+  it('files selected tokens from the full catalog in guided processing', async () => {
+    mockSettings.gtd.taskEditor = { hidden: [] };
+    const saved = (token: string) => ({ token, rev: 1, revBy: 'test', updatedAt: baseInboxTask.updatedAt });
+    const savedTag = '#Unused, "Tag" \\ backlog';
+    mockSettings.taxonomy = { contexts: [saved('@saved context')], tags: [saved(savedTag)] };
+    storeState._allTasks = [...storeState.tasks, {
+      ...baseInboxTask, id: 'archived-task', status: 'archived', contexts: ['@retained context'], tags: ['#retained tag'],
+    }];
+    let tree!: ReturnType<typeof create>;
+    act(() => { tree = create(<InboxProcessingModal visible onClose={vi.fn()} />); });
+    const root = tree.root;
+    revealDeferredOptions(root);
+    const checkbox = (token: string) => root.findAll((node) => node.props.accessibilityLabel === token
+      && node.props.accessibilityRole === 'checkbox' && typeof node.props.onPress === 'function')[0];
+    const openPicker = (label: string) => act(() => {
+      root.findAll((node) => node.props.accessibilityLabel === `${label} · settings.browse`
+        && typeof node.props.onPress === 'function')[0].props.onPress();
+    });
+
+    openPicker('taskEdit.contextsLabel');
+    expect(checkbox('@home').props.accessibilityState.checked).toBe(true);
+    expect(checkbox('@retained context')).toBeTruthy();
+    act(() => checkbox('@home').props.onPress());
+    act(() => checkbox('@saved context').props.onPress());
+    act(() => checkbox('@retained context').props.onPress());
+
+    openPicker('taskEdit.tagsLabel');
+    const search = findTextInputByAccessibilityLabel(root, 'taskEdit.tagsLabel · common.search');
+    act(() => search.props.onChangeText('UNUSED'));
+    expect(checkbox('#retained tag')).toBeUndefined();
+    act(() => checkbox(savedTag).props.onPress());
+    expect(checkbox(savedTag).props.accessibilityState.checked).toBe(true);
+
+    await act(async () => { findPressableWithText(root, 'File it').props.onPress(); });
+    expect(updateTask).toHaveBeenCalledWith('inbox-1', expect.objectContaining({
+      contexts: ['@saved context', '@retained context'], tags: ['#old', savedTag],
+    }));
+    act(() => tree.unmount());
   });
 
   it('suggests existing assignees in the assigned-to field', () => {

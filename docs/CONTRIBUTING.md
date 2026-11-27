@@ -193,7 +193,8 @@ bun run test:e2e
 - Match file-local formatting conventions:
   - desktop/core usually 4 spaces
   - mobile usually 2 spaces
-- Keep code comments concise and only where logic is non-obvious.
+- Do not add explanatory comments, doc comments, docstrings, or commented-out code to project-owned source or configuration files, including YAML manifests. Use clear names and tests to express intent. Put design rationale in engineering docs.
+- Preserve required license and attribution notices, shebangs, and directives used by compilers, type checkers, linters, and test runners. See the [code style guide](development/code-style.md) for exceptions and how to run the **Comment Policy** check locally.
 - Favor accessibility-oriented test queries (`getByRole`, `getByLabelText`).
 - Mobile popups: any transparent-modal popup that contains a `TextInput` must use the shared `useAndroidKeyboardInset` hook so it stays above the Android soft keyboard.
 - Markdown editor changes need regression tests for the historical failure modes (cursor jump on tap, scroll-into-view, keyboard-height padding, toolbar timing) — these have each shipped as production bugs before.
@@ -222,7 +223,7 @@ If you use LLM/coding agents for contributions, follow these rules:
 5. YOU review the output before opening a non-Draft PR.
    Do not request review until you have read and understood every generated change, run relevant tests, and verified behavior on real devices/platforms. You are responsible for the code you submit, not the tool.
 6. Remove verbosity and blathering.
-   Strip filler from code comments, documentation, PR descriptions, and commit messages. All of these — including names — should be concise, clear, and contain useful information, nothing more.
+   Keep names precise and remove filler from documentation, PR descriptions, and commit messages.
 7. Remove and deduplicate redundant code, tests, and explanations.
    Explicitness and clarity are good; verbosity, over-explanation, and redundancy are bad.
 8. Keep security in scope.

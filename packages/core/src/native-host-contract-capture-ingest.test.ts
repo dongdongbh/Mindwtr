@@ -111,6 +111,21 @@ describe('ingestPendingCaptures', () => {
         expect(vi.mocked(queue.port.delete).mock.calls.map(([name]) => name)).not.toContain('timer.json');
     });
 
+    it('reports each stored text capture to the host after its queue file is removed', async () => {
+        const host = await openScreenHost({ data: {}, record: {}, log: [] });
+        const url = 'https://example.org/shared';
+        const queue = fakeQueue({ [`${CAPTURE_ID}.json`]: { id: CAPTURE_ID, title: url, source: 'android-share' } });
+        expect(await host.ingestPendingCaptures({ requestId: requestId(), queue: queue.port, lastApplied: record(), onTextCaptureSaved: 'no' } as never))
+            .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+        const saved = vi.fn((_id: string, _text: string) => {
+            expect(queue.stored.size).toBe(0);
+        });
+        expect(value(await host.ingestPendingCaptures({ requestId: requestId(), queue: queue.port, lastApplied: record(), onTextCaptureSaved: saved })))
+            .toEqual({ ingested: 1 });
+        expect(saved).toHaveBeenCalledExactlyOnceWith(CAPTURE_ID, url);
+        expect(useTaskStore.getState()._allTasks.find((entry) => entry.id === CAPTURE_ID)).toMatchObject({ title: url, attachments: [{ kind: 'link', uri: url }] });
+    });
+
     it('validates the optional audio port before queue access and passes an owned port to shared assembly', async () => {
         const host = await openScreenHost({ data: {}, record: {}, log: [] });
         const queue = fakeQueue({ [`${AUDIO_ID}.json`]: queueItems[`${AUDIO_ID}.json`] });

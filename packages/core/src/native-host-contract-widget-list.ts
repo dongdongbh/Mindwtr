@@ -22,6 +22,7 @@ export type NativeWidgetListView = {
 
     found: boolean;
 
+    contextToken?: string;
     contextsFilterId: string | null;
     focusFilterId: string | null;
 
@@ -87,6 +88,7 @@ export function createWidgetListMethods(deps: WidgetListDeps) {
                     revision,
                     id: input.id,
                     found: Boolean(list),
+                    ...(destination?.startsWith('context:') ? { contextToken: destination.slice('context:'.length) } : {}),
                     contextsFilterId: savedFilter?.view === 'contexts' ? savedFilter.id : null,
                     focusFilterId: savedFilter?.view === 'focus' ? savedFilter.id : null,
                     title: list?.title ?? t('search.noResults'),

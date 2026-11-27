@@ -731,6 +731,27 @@ describe('SyncService testability hooks', () => {
         expect(invoke).toHaveBeenCalledWith('get_sync_backend', undefined);
     });
 
+    it('reports an unreadable saved WebDAV configuration before automatic sync probes the URL', async () => {
+        const fetcher = vi.fn();
+        const invoke = async (command: string) => {
+            if (command === 'get_sync_backend') return 'webdav';
+            if (command === 'get_webdav_config') throw new Error('Credential binding does not match any available secret authority');
+            return undefined;
+        };
+        __syncServiceTestUtils.setDependenciesForTests({
+            isTauriRuntime: () => true,
+            invoke: invoke as <T>(command: string) => Promise<T>,
+            getTauriFetch: async () => fetcher,
+            flushPendingSave: async () => undefined,
+        });
+        (SyncService as any).didMigrate = true;
+
+        const result = await SyncService.performSync();
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('Could not read the saved WebDAV settings');
+        expect(fetcher).not.toHaveBeenCalled();
+    });
+
     it('proves a legacy persisted WebDAV backend before any sync-document IO', async () => {
         localStorage.setItem(SYNC_BACKEND_KEY, 'webdav');
         localStorage.setItem(WEBDAV_URL_KEY, 'https://sync.example.com');
@@ -3262,6 +3283,10 @@ describe('SyncService testability hooks', () => {
         expect(events).not.toContain('publish');
     });
 
+    it('reports a missing WebDAV URL before normalizing the document path', async () => {
+        await expect(SyncService.testWebDavConnection({ url: ' ' })).rejects.toThrow('WebDAV URL not configured');
+    });
+
     it('tests WebDAV connectivity against the normalized data.json URL', async () => {
         const { fetchSpy } = createTestWebdavCapabilityFetch();
         __syncServiceTestUtils.setDependenciesForTests({
@@ -3562,6 +3587,22 @@ describe('SyncService testability hooks', () => {
             password: 'secret',
         })).rejects.toThrow('WebDAV GET failed: invalid JSON');
         expect(fetchSpy).toHaveBeenCalledOnce();
+    });
+
+    it('stops WebDAV verification before sending a request when the stored password cannot be read', async () => {
+        const { fetchSpy } = createTestWebdavCapabilityFetch();
+        __syncServiceTestUtils.setDependenciesForTests({
+            getTauriFetch: async () => fetchSpy as unknown as typeof fetch,
+            invoke: async () => { throw new Error('Credential binding does not match'); },
+            isTauriRuntime: () => true,
+        });
+
+        await expect(SyncService.testWebDavConnection({
+            url: 'https://example.com/webdav',
+            username: 'alice',
+            hasPassword: true,
+        })).rejects.toThrow('Could not read the saved WebDAV password');
+        expect(fetchSpy).not.toHaveBeenCalled();
     });
 
     it('reuses the stored WebDAV password when settings only expose hasPassword', async () => {

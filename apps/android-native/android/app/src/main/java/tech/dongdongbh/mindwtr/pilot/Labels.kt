@@ -34,7 +34,7 @@ val LABEL_KEYS = listOf(
 
     "taskEdit.scheduling", "taskEdit.organization", "taskEdit.details", "taskEdit.editorLayoutHelpLabel", "taskEdit.editorLayoutHelpText",
     "task.destination", "taskEdit.areaLabel", "taskEdit.noAreaOption", "taskEdit.sectionLabel", "taskEdit.noSectionOption",
-    "taskEdit.contextsLabel", "taskEdit.contextsPlaceholder", "taskEdit.tagsLabel", "taskEdit.tagsPlaceholder",
+    "taskEdit.contextsLabel", "taskEdit.contextsPlaceholder", "taskEdit.tagsLabel", "taskEdit.tagsPlaceholder", "settings.browse",
     "taskEdit.energyLevel", "energyLevel.low", "energyLevel.medium", "energyLevel.high",
     "taskEdit.assignedTo", "taskEdit.assignedToPlaceholder", "taskEdit.timeEstimateLabel", "taskEdit.locationLabel",
     "taskEdit.locationPlaceholder", "taskEdit.descriptionPlaceholder", "taskEdit.reviewDateLabel", "calendar.changeTime",
@@ -72,7 +72,7 @@ val LABEL_KEYS = listOf(
     "tab.menu", "settings.syncBadgeSyncing", "settings.syncBadgeHealthy", "settings.syncBadgeWarning",
     "waiting.title", "someday.title", "nav.reference", "nav.history", "taskEdit.moreOptions", "common.search",
     "filters.excluded", "filters.remove", "filters.clear", "filters.active", "filters.contexts", "filters.projects", "filters.timeEstimate",
-    "filters.more", "filters.priority", "bulk.selected", "viewSections.add", "viewSections.nameHint", "viewSections.namePlaceholder", "common.all",
+    "filters.more", "filters.priority", "bulk.selected", "viewSections.add", "viewSections.addTask", "viewSections.nameHint", "viewSections.namePlaceholder", "common.all",
 
     "contexts.title", "trash.title", "nav.review", "projects.title", "tab.review", "nav.contexts", "nav.done", "common.delete", "task.aria.delete",
     "common.noMatches", "review.markReviewed", "review.markReviewedDone", "review.advanceWeek", "task.select", "task.deselect",
@@ -92,6 +92,7 @@ val LABEL_KEYS = listOf(
 
     "projects.calendarTitle", "projects.calendarLink", "projects.calendarReplace", "projects.calendarUnlink", "projects.calendarScheduled",
     "projects.calendarElapsed", "projects.calendarUnavailable", "projects.calendarLastKnown", "projects.calendarHelp", "projects.calendarWindow",
+    "settings.deviceCalendars", "settings.calendarMobile.failedToLoadEvents",
     "projects.calendarEmpty", "projects.calendarLoadFailed", "projects.calendarSaveFailed", "projects.calendarLimit",
     "projects.statusLabel", "projects.projectTypeLabel", "projects.projectTypeHelpLabel", "projects.projectTypeHelpText", "projects.sequentialScope",
     "projects.sequentialAcrossSections", "projects.sequentialWithinSections", "projects.sequentialScopeHelpLabel", "projects.sequentialScopeHelpText",

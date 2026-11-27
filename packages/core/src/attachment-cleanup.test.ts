@@ -799,6 +799,75 @@ describe('runAttachmentCleanupLifecycle', () => {
     const now = '2026-07-14T12:00:00.000Z';
 
     it.each([
+        ['file tombstone', false],
+        ['purged task', true],
+        ['purged project', true],
+    ] as const)('retains the same remote object after local validation refuses a %s', async (owner, hadPendingDelete) => {
+        const cloudKey = 'attachments/shared.pdf';
+        const remoteOnly = { cloudKey: 'attachments/remote-only.pdf' };
+        const previous = { cloudKey, title: 'Shared', attempts: 2, lastErrorAt: now };
+        const attachment: Attachment = {
+            id: 'shared', kind: 'file', title: 'Shared', uri: '/managed/shared.pdf', cloudKey,
+            localStatus: 'available', createdAt: now, updatedAt: now,
+            ...(owner === 'file tombstone' ? { deletedAt: now } : {}),
+        };
+        const entity = { id: 'owner', title: 'Owner', createdAt: now, updatedAt: now, attachments: [attachment],
+            ...(owner === 'file tombstone' ? {} : { purgedAt: now, deletedAt: now }) };
+        const data = buildData();
+        if (owner === 'purged project') data.projects.push({ ...entity, status: 'archived', color: '#2563eb', order: 0, tagIds: [] });
+        else data.tasks.push({ ...entity, status: 'next', tags: [], contexts: [] });
+        data.settings.attachments = { pendingRemoteDeletes: hadPendingDelete ? [previous, remoteOnly] : [remoteOnly] };
+        const deleteLocalAttachment = vi.fn(async () => false);
+        const deleteRemoteAttachment = vi.fn(async () => undefined);
+        const resolveRemoteDeleteAttachment = vi.fn(async () => deleteRemoteAttachment);
+
+        const first = await runAttachmentCleanupLifecycle({
+            appData: data, now: () => now, deleteLocalAttachment, resolveRemoteDeleteAttachment,
+        });
+
+        expect(deleteLocalAttachment).toHaveBeenCalledWith(attachment);
+        expect(deleteRemoteAttachment.mock.calls).toEqual([[expect.objectContaining(remoteOnly)]]);
+        const retained = owner === 'purged project' ? first.appData.projects[0] : first.appData.tasks[0];
+        expect(retained.attachments).toEqual([attachment]);
+        expect(first.processedOrphanedIds.size).toBe(0);
+        expect(first.appData.settings.attachments?.pendingRemoteDeletes).toEqual(hadPendingDelete ? [previous] : undefined);
+        expect(hasFreshAttachmentCleanupWork(first.appData)).toBe(true);
+
+        deleteLocalAttachment.mockResolvedValue(true);
+        deleteRemoteAttachment.mockClear();
+        const retried = await runAttachmentCleanupLifecycle({
+            appData: first.appData, now: () => now, deleteLocalAttachment, resolveRemoteDeleteAttachment,
+        });
+
+        expect(deleteRemoteAttachment.mock.calls).toEqual([[expect.objectContaining({ cloudKey })]]);
+        expect(retried.appData.settings.attachments?.pendingRemoteDeletes).toBeUndefined();
+        expect(hasFreshAttachmentCleanupWork(retried.appData)).toBe(false);
+    });
+
+    it('keeps a queued remote delete pending until its linked local file gets a cleanup turn', async () => {
+        const previous = { cloudKey: 'attachments/second.pdf', attempts: 2, lastErrorAt: now };
+        const data = buildData();
+        const attachments: Attachment[] = ['first', 'second'].map((id) => ({
+            id, kind: 'file', title: id, uri: `/managed/${id}.pdf`, localStatus: 'available',
+            createdAt: now, updatedAt: now, deletedAt: now,
+            ...(id === 'second' ? { cloudKey: previous.cloudKey } : {}),
+        }));
+        data.tasks.push({ id: 'task', title: 'Task', status: 'next', contexts: [], tags: [], createdAt: now, updatedAt: now, attachments });
+        data.settings.attachments = { pendingRemoteDeletes: [previous] };
+        const deleteLocalAttachment = vi.fn(async () => true);
+        const deleteRemoteAttachment = vi.fn(async () => undefined);
+
+        const result = await runAttachmentCleanupLifecycle({
+            appData: data, now: () => now, maxAttachmentTargets: 1, deleteLocalAttachment, deleteRemoteAttachment,
+        });
+
+        expect(deleteLocalAttachment.mock.calls).toEqual([[attachments[0]]]);
+        expect(deleteRemoteAttachment).not.toHaveBeenCalled();
+        expect(result.appData.tasks[0].attachments?.[1]).toEqual(attachments[1]);
+        expect(result.appData.settings.attachments?.pendingRemoteDeletes).toEqual([previous]);
+    });
+
+    it.each([
         ['task', false], ['task', true], ['project', false], ['project', true],
     ] as const)('keeps an iOS data-container alias referenced by a %s (softDeleted=%s)', async (owner, softDeleted) => {
         const container = '/var/mobile/Containers/Data/Application/A1111111-B222-4333-8444-555555555555/';

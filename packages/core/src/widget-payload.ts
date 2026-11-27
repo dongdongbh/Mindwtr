@@ -1,4 +1,6 @@
+import { buildEntityOpenUrl } from './capture-deeplink';
 import type { CaptureDestination } from './capture-destination';
+import { getSavedTaxonomyTokens } from './taxonomy-catalog';
 import { resolveQuickCaptureDefaultAreaId } from './quick-capture-model';
 import { taskMatchesAreaFilterSelection } from './area-filter';
 import { format } from 'date-fns';
@@ -111,6 +113,8 @@ export interface WidgetTaskSection {
     items: WidgetTaskItem[];
 }
 
+type WidgetTaskSectionSource = Omit<WidgetTaskSection, 'items'> & { items: Task[] };
+
 
 export type WidgetColor = `#${string}`;
 
@@ -220,6 +224,8 @@ export interface AndroidTaskPeekLabels {
 }
 
 export type AndroidCaptureDestinationCatalog = {
+    savedContexts?: string[];
+    savedTags?: string[];
     defaultDestination: CaptureDestination;
     areas: { id: string; name: string }[];
     projects: { id: string; title: string; areaId?: string }[];
@@ -233,7 +239,11 @@ export function buildAndroidCaptureDestinationCatalog(data: AppData, language: L
     const projects = data.projects.filter(project => isSelectableProjectForTaskAssignment(project));
     const projectIds = new Set(projects.map(project => project.id));
     const areaId = resolveQuickCaptureDefaultAreaId(data.settings, areas);
+    const savedContexts = getSavedTaxonomyTokens(data.settings, 'context');
+    const savedTags = getSavedTaxonomyTokens(data.settings, 'tag');
     return {
+        ...(savedContexts.length ? { savedContexts } : {}),
+        ...(savedTags.length ? { savedTags } : {}),
         defaultDestination: areaId ? { kind: 'area', id: areaId } : { kind: 'none' },
         areas: areas.map(({ id, name }) => ({ id, name })),
         projects: projects.map(({ id, title, areaId }) => ({ id, title, ...(areaId ? { areaId } : {}) })),
@@ -605,7 +615,7 @@ export function createWidgetPayloadProjection(
             title: task.title,
             statusLabel: tr[`status.${task.status}`] || task.status,
             ...computeDueLabel(task.dueDate, tr, language, dayFirst, startOfToday, endOfToday),
-            openUri: `mindwtr://open?task=${encodeURIComponent(task.id)}`,
+            openUri: buildEntityOpenUrl('task', task.id),
             priorityColor: prioritiesEnabled && task.priority ? getTaskPriorityColors(statusPreset)[task.priority] ?? null : null,
             contextLabel: project?.title ?? area?.name ?? null,
             identityColor: getTaskAccentColor(task, projectById, areaById, statusPreset) ?? null,
@@ -804,25 +814,34 @@ export function createWidgetPayloadProjection(
                     ...(list.showStatus ? { showStatus: true } : {}),
                 });
                 const groupBy = list.groupBy === 'priority' && !prioritiesEnabled ? 'none' : list.groupBy;
-                const groups = groupBy && groupBy !== 'none' ? buildFocusTaskGroups({
-                    groupBy, tasks: list.tasks, projects, areas: data.areas || [],
+                const groupSections = (tasks: Task[], parentTitle?: string): WidgetTaskSectionSource[] => groupBy && groupBy !== 'none' ? buildFocusTaskGroups({
+                    groupBy, tasks, projects, areas: data.areas || [],
                     resolveText: (key, fallback) => tr[key] || fallback,
                     theme: statusPreset ?? undefined,
-                }) : [];
+                }).map((group) => ({
+                    key: group.key,
+                    title: parentTitle ? `${parentTitle} · ${group.label}` : group.label,
+                    detail: String(group.tasks.length),
+                    items: group.tasks,
+                })) : [];
+                const listSections = list.focusSections?.flatMap(({ key, title, items }) => {
+                    const groups = key === 'next' ? groupSections(items, title) : [];
+                    return groups.length ? groups : [{ key, title, items, detail: null }];
+                }) ?? groupSections(list.tasks);
                 let budget = maxItems;
-                const groupedSections: WidgetTaskSection[] = [];
-                for (const group of groups) {
+                const visibleSections: WidgetTaskSection[] = [];
+                for (const section of listSections) {
                     if (budget <= 0) break;
-                    const visible = group.tasks.slice(0, budget);
+                    if (!section.items.length) continue;
+                    const visible = section.items.slice(0, budget);
                     budget -= visible.length;
-                    groupedSections.push({ key: group.key, title: group.label,
-                        detail: String(group.tasks.length), items: visible.map(toListItem) });
+                    visibleSections.push({ ...section, items: visible.map(toListItem) });
                 }
                 listPayloads[selection] = {
                     title: list.title,
-                    items: groups.length ? groupedSections.flatMap((section) => section.items)
+                    items: visibleSections.length ? visibleSections.flatMap((section) => section.items)
                         : list.tasks.slice(0, maxItems).map(toListItem),
-                    ...(groups.length ? { sections: groupedSections } : {}),
+                    ...(visibleSections.length ? { sections: visibleSections } : {}),
                     totalCount: list.tasks.length,
                     openUri,
                 };
@@ -995,7 +1014,7 @@ const buildSnapshotItem = (
         ...(task.startTime ? { startDate: task.startTime } : {}),
         ...(task.projectId ? { projectId: task.projectId } : {}),
         ...(project?.title ? { projectName: project.title } : {}),
-        deepLink: `mindwtr://open?task=${encodeURIComponent(task.id)}`,
+        deepLink: buildEntityOpenUrl('task', task.id),
     };
 };
 

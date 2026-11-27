@@ -340,6 +340,7 @@ export const viOverrides: Record<string, string> = {
         'keybindings.focusSidebar': 'Chuyển tiêu điểm sang khung bên trái',
         'keybindings.focusContent': 'Chuyển tiêu điểm sang khung bên phải',
         'keybindings.goInbox': 'Đến Hộp thư đến',
+        'keybindings.goForward': 'Tiến',
         'keybindings.goNext': 'Đến Hành động tiếp theo',
         'keybindings.goAgenda': 'Đến Tập trung',
         'keybindings.goProjects': 'Đến Dự án',

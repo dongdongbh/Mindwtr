@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import {
+    buildEntityOpenUrl,
     isEntityOpenUrl,
     isOpenFeatureUrl,
     isShortcutCaptureUrl,
@@ -21,6 +22,12 @@ import { loadScreenFixture, openScreenHost, value, type ScreenHost } from './scr
 import { flushPendingSave, resetForTests, useTaskStore } from './store';
 import type { Area, Project, Task } from './types';
 
+
+it.each(['task', 'project', 'area'] as const)('preserves the %s identifier when building and opening a link', (kind) => {
+    const id = '測 /?&%';
+    expect(parseEntityOpenUrl(buildEntityOpenUrl(kind, id))).toEqual({ kind, id });
+    expect(buildEntityOpenUrl(kind, id, 'mindwtr-dev')).toBe(`mindwtr-dev://open?${kind}=%E6%B8%AC%20%2F%3F%26%25`);
+});
 
 const sandbox = vi.hoisted(() => ({ on: false }));
 vi.mock('./sandbox', async (importOriginal) => ({ ...await importOriginal<typeof import('./sandbox')>(), isSandboxMode: () => sandbox.on }));

@@ -37,18 +37,27 @@ describe('TaskEditViewTab', () => {
 
   it('renders a wrapping labelled completion target with busy and persistence Retry states', () => {
     const complete = vi.fn();
+    const updateStatus = vi.fn();
     const props: React.ComponentProps<typeof TaskEditViewTab> = {
       t: (key) => ({ 'review.markDone': 'Mark done', 'common.retry': 'Retry' }[key] ?? key), tc: FALLBACK_THEME_COLORS,
       styles: taskEditStyles, mergedTask: { id: 'task', status: 'next' }, projects: [], sections: [], areas: [],
       prioritiesEnabled: false, timeEstimatesEnabled: false, formatTimeEstimateLabel: String, formatDate: String, formatDueDate: String,
       getRecurrenceRuleValue: () => '', getRecurrenceStrategyValue: () => 'strict', applyChecklistUpdate: vi.fn(),
       visibleAttachments: [], openAttachment: vi.fn(), isImageAttachment: () => false, textDirectionStyle: {}, resolvedDirection: 'rtl', onComplete: complete,
+      onStatusUpdate: updateStatus,
     };
     let tree!: renderer.ReactTestRenderer;
     renderer.act(() => { tree = renderer.create(<TaskEditViewTab {...props} />); });
     const button = () => tree.root.findByProps({ testID: 'task-preview-mark-done' });
     expect(button().props.accessibilityLabel).toBe('Mark done');
-    expect(flattenStyle(button().props.style)).toMatchObject({ minHeight: 44, maxWidth: '100%' });
+    expect(flattenStyle(button().props.style)).toMatchObject({ minHeight: 44, minWidth: 44, maxWidth: '100%' });
+    const statusActions = button().parent!;
+    const statusActionsStyle = flattenStyle(statusActions.props.style);
+    expect(statusActionsStyle).toMatchObject({ flexDirection: 'row', flexWrap: 'wrap' });
+    expect(statusActionsStyle.direction).toBeUndefined();
+    const status = statusActions.findByType(MockTaskStatusBadge);
+    renderer.act(() => { status.props.onUpdate('waiting'); });
+    expect(updateStatus).toHaveBeenCalledWith('waiting');
     renderer.act(() => { button().props.onPress(); }); expect(complete).toHaveBeenCalledOnce();
     renderer.act(() => { tree.update(<TaskEditViewTab {...props} completionPending />); });
     expect(button().props.disabled).toBe(true); expect(button().props.accessibilityState.busy).toBe(true);

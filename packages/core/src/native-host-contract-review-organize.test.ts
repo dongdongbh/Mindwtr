@@ -298,6 +298,18 @@ describe('native host contract: Review rows and Review\'s Organize sheet', () =>
                 .toBe(formatListItemCount(1, 'task', t));
         });
 
+        it('sets priority and assigned person from Review without changing status', async () => {
+            freezeClock();
+            const { host } = await openHost();
+            const statuses = REVIEW_SELECTION.map((id) => task(id).status);
+            const draft: Partial<BulkOrganizeDraft> = { priorityChoice: 'high', personChoice: 'set', delegateWho: 'Review Person' };
+            expect(value(await run(host, {
+                type: 'organizeTasks', taskIds: REVIEW_SELECTION, draft, taskRevisions: revisions(REVIEW_SELECTION),
+            })).changed).toBe(true);
+            expect(REVIEW_SELECTION.map((id) => [task(id).status, task(id).priority, task(id).assignedTo]))
+                .toEqual(statuses.map((status) => [status, 'high', 'Review Person']));
+        });
+
         it('retries a failed Apply exactly, even when the draft\'s project left the dialog since', async () => {
             freezeClock();
             const saveData = vi.fn().mockResolvedValue(undefined);

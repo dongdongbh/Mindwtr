@@ -11,11 +11,13 @@ import {
     type TaskDraftSetter,
     type TimeEstimate,
     createAIProvider,
+    formatTaskTokenInput,
     generateUUID,
     getAIAreaCandidates,
     getTaskCopilotParts,
     keepTaskCopilotSuggestion,
     resolveSuggestedArea,
+    splitTaskTokenInput,
     updateTaskFromLatest,
 } from '@mindwtr/core';
 import { buildAIConfig, buildCopilotConfig, isAIKeyRequired, loadAIKey } from '../../lib/ai-config';
@@ -163,7 +165,7 @@ export function useTaskItemAi({
 
             copilotInputRef.current = signature;
             try {
-                const currentContexts = editContexts.split(',').map((c) => c.trim()).filter(Boolean);
+                const currentContexts = splitTaskTokenInput(editContexts);
                 const provider = createAIProvider(await buildCopilotConfig(settings ?? {}, aiKey, language));
                 if (cancelled) return;
                 const abortController = typeof AbortController === 'function' ? new AbortController() : null;
@@ -309,13 +311,13 @@ export function useTaskItemAi({
         const estimate = parts.find((part) => part.kind === 'timeEstimate')?.value;
         const tags = parts.filter((part) => part.kind === 'tag').map((part) => part.value);
         if (context) {
-            const currentContexts = editContexts.split(',').map((c) => c.trim()).filter(Boolean);
-            setField('contexts', Array.from(new Set([...currentContexts, context])).join(', '));
+            const currentContexts = splitTaskTokenInput(editContexts);
+            setField('contexts', formatTaskTokenInput([...new Set([...currentContexts, context])]));
             setCopilotContext(context);
         }
         if (tags.length) {
-            const currentTags = editTags.split(',').map((t) => t.trim()).filter(Boolean);
-            setField('tags', Array.from(new Set([...currentTags, ...tags])).join(', '));
+            const currentTags = splitTaskTokenInput(editTags);
+            setField('tags', formatTaskTokenInput([...new Set([...currentTags, ...tags])]));
             setCopilotTags((prev) => Array.from(new Set([...prev, ...tags])));
         }
         if (estimate && timeEstimatesEnabled) {
@@ -340,9 +342,9 @@ export function useTaskItemAi({
         if (suggested.title) setField('title', suggested.title);
         if (suggested.timeEstimate && timeEstimatesEnabled) setField('timeEstimate', suggested.timeEstimate);
         if (suggested.context) {
-            const currentContexts = editContexts.split(',').map((c) => c.trim()).filter(Boolean);
+            const currentContexts = splitTaskTokenInput(editContexts);
             const nextContexts = Array.from(new Set([...currentContexts, suggested.context]));
-            setField('contexts', nextContexts.join(', '));
+            setField('contexts', formatTaskTokenInput(nextContexts));
         }
         setClarifyResult(null);
     }, [editContexts, setField, timeEstimatesEnabled]);
@@ -356,7 +358,7 @@ export function useTaskItemAi({
         setAiError(null);
         setAiBreakdownSteps(null);
         try {
-            const currentContexts = editContexts.split(',').map((c) => c.trim()).filter(Boolean);
+            const currentContexts = splitTaskTokenInput(editContexts);
             const response = await provider.clarifyTask({
                 title,
                 contexts: Array.from(new Set([...contextOptions, ...currentContexts])),

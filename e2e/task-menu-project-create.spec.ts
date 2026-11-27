@@ -12,7 +12,7 @@ test('task menu creates a project without assigning the task until Save', async 
     await page.getByText('Plan the garden', { exact: true }).click({ button: 'right' });
     await page.getByRole('menuitem', { name: 'Move to…', exact: true }).click();
     await page.getByRole('button', { name: 'Destination', exact: true }).click();
-    await page.getByRole('textbox', { name: 'Search...', exact: true }).fill('Garden redesign');
+    await page.locator('[data-selector-dropdown]').getByRole('textbox', { name: 'Search...', exact: true }).fill('Garden redesign');
     await page.screenshot({ path: testInfo.outputPath('project-create-option.png') });
     await page.getByRole('option', { name: 'New project: “Garden redesign”', exact: true }).click();
     const storedData = () => page.evaluate(() => JSON.parse(localStorage.getItem('mindwtr-data') ?? '{}'));

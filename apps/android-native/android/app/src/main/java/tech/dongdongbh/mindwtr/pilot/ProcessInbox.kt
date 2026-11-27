@@ -318,6 +318,9 @@ private fun InboxViewModel.CaptureCard(flow: InboxProcessing, locked: Boolean, s
             }
         }
         val titleLabel = capture.getString("titleLabel")
+        if (flow.view.child("project")?.child("conversion") != null) {
+            Text(titleLabel, style = rnText(12, 600), color = c.secondaryText)
+        }
         DraftInput("${flow.taskId}:title", capture.getString("title"), pending, titleLabel, titleLabel, !locked, Modifier.fillMaxWidth().testTag("process-title"),
             rnText(17, 700, 24), singleLine = false) { send(JSONObject().put("type", "set").put("field", "title").put("value", it)) }
         val similar = capture.items("similarTasks")
@@ -402,7 +405,7 @@ private fun StepBody(model: InboxViewModel, flow: InboxProcessing, locked: Boole
     view.child("dateRow")?.let { DateRow(it, locked, send, pickDate) }
     view.child("delegate")?.let { DelegateSection(flow, it, locked, send, pickDate) }
     val project = view.child("project")?.let { @Composable { ProjectSection(flow, it, locked, send, canAnswer) } }
-    val contexts = view.child("contexts")?.let { @Composable { TokenSection(flow, it, locked, send) } }
+    val contexts = view.child("contexts")?.let { @Composable { TokenSection(flow, it, "context", locked, send) } }
     if (view.getBoolean("projectFirst")) { project?.invoke(); contexts?.invoke() } else { contexts?.invoke(); project?.invoke() }
     view.child("somedaySections")?.let { sections ->
         Column(Modifier.padding(top = 18.dp)) {
@@ -680,7 +683,7 @@ private fun InboxViewModel.ProjectSection(flow: InboxProcessing, project: JSONOb
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun TokenSection(flow: InboxProcessing, tokens: JSONObject, locked: Boolean, send: (JSONObject) -> Unit) = Section {
+private fun TokenSection(flow: InboxProcessing, tokens: JSONObject, kind: String, locked: Boolean, send: (JSONObject) -> Unit) = Section {
     val c = LocalTheme.current.colors
     Text(tokens.getString("title"), style = rnText(18, 700), color = c.text, modifier = Modifier.padding(bottom = 6.dp).semantics { heading() })
     for ((labelName, listName) in listOf("selectedContextsLabel" to "selectedContexts", "selectedTagsLabel" to "selectedTags")) {
@@ -712,6 +715,12 @@ private fun TokenSection(flow: InboxProcessing, tokens: JSONObject, locked: Bool
         }
     }
     Suggestions(tokens.items("suggestions"), locked, send)
+    tokens.child("browse")?.let { browse ->
+        TokenBrowsePicker("process-inbox-${flow.taskId}-$kind", tokens.getString("title"), browse.getString("label"),
+            browse.getString("searchLabel"), browse.getString("noMatchesLabel"), tokenBrowseOptions(browse.optJSONArray("options")), !locked) {
+            send(JSONObject().put("type", if (kind == "context") "toggleContext" else "toggleTag").put("value", it.token))
+        }
+    }
     for ((labelName, listName) in listOf("contextSuggestionsLabel" to "contextSuggestions", "tagSuggestionsLabel" to "tagSuggestions")) {
         val label = tokens.text(labelName) ?: continue
         val shape = RoundedCornerShape(12.dp)
@@ -778,5 +787,5 @@ private fun MoreOptions(flow: InboxProcessing, more: JSONObject, locked: Boolean
             }
         }
     }
-    more.child("tags")?.let { TokenSection(flow, it, locked, send) }
+    more.child("tags")?.let { TokenSection(flow, it, "tag", locked, send) }
 }

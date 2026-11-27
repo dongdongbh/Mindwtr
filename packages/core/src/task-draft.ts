@@ -1,4 +1,5 @@
 import { normalizeBulkTaskTokenInput } from './bulk-task-tokens';
+import { formatTaskTokenInput, splitTaskTokenInput } from './task-token-input';
 import {
     hasTimeComponent,
     safeFormatDate,
@@ -206,12 +207,12 @@ const TASK_DRAFT_FIELDS: { [K in TaskDraftField]: FieldSpec<K> } = {
         },
     },
     contexts: {
-        fromTask: (task) => task.contexts?.join(', ') || '',
-        isDirty: (value, task) => trimmedDiffers(value, task.contexts?.join(', ') || ''),
+        fromTask: (task) => formatTaskTokenInput(task.contexts ?? []),
+        isDirty: (value, task) => trimmedDiffers(value, formatTaskTokenInput(task.contexts ?? [])),
     },
     tags: {
-        fromTask: (task) => task.tags?.join(', ') || '',
-        isDirty: (value, task) => trimmedDiffers(value, task.tags?.join(', ') || ''),
+        fromTask: (task) => formatTaskTokenInput(task.tags ?? []),
+        isDirty: (value, task) => trimmedDiffers(value, formatTaskTokenInput(task.tags ?? [])),
     },
     description: { fromTask: (task) => task.description || '' },
     location: { fromTask: (task) => task.location || '' },
@@ -321,7 +322,7 @@ export function resolveTaskDraftTitle(draftTitle: string, originalTitle: string)
 
 
 export function serializeTaskDraftTokens(value: string, field: 'contexts' | 'tags'): string[] {
-    return value.split(',').map((token) => normalizeBulkTaskTokenInput(token, field)).filter(Boolean);
+    return splitTaskTokenInput(value).map((token) => normalizeBulkTaskTokenInput(token, field)).filter(Boolean);
 }
 
 

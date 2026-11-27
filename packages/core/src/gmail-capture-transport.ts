@@ -43,8 +43,9 @@ function htmlText(html: string, DOMParser: GmailHtmlParser): string {
     return visit(document as unknown as Node, 0).replace(/\n{3,}/g, '\n\n').trim();
 }
 
-export function parseGmailMessage(value: unknown, DOMParser: GmailHtmlParser): GmailCaptureBatch['messages'][number] {
+export function parseGmailMessage(value: unknown, DOMParser: GmailHtmlParser): GmailCaptureBatch['messages'][number] | null {
     const message = object(value);
+    const id = identifier(message.id);
     const payload = object(message.payload);
     const headers = Array.isArray(payload.headers) ? payload.headers : [];
     const header = (name: string) => {
@@ -54,13 +55,14 @@ export function parseGmailMessage(value: unknown, DOMParser: GmailHtmlParser): G
     let parts = 0;
     const body = (part: Record<string, unknown>, depth: number): string | null => {
         if (++parts > 256 || depth > 32) return fail('other');
+        if (typeof part.mimeType !== 'string' || !part.mimeType) return fail('other');
         if (typeof part.filename === 'string' && part.filename) return null;
         const partHeaders = Array.isArray(part.headers) ? part.headers.map(object) : [];
         if (partHeaders.some((item) => typeof item.name === 'string' && item.name.toLowerCase() === 'content-disposition'
             && typeof item.value === 'string' && /^attachment(?:\s|;|$)/i.test(item.value.trim()))) return null;
-        const mime = typeof part.mimeType === 'string' ? part.mimeType.toLowerCase() : '';
+        const mime = part.mimeType.toLowerCase();
         if (mime.startsWith('multipart/')) {
-            if (!Array.isArray(part.parts)) return fail('other');
+            if (!Array.isArray(part.parts) || part.parts.length === 0) return fail('other');
             const children = part.parts.map(object);
             if (mime === 'multipart/alternative') {
                 const ordered = [...children.filter((item) => item.mimeType === 'text/plain'), ...children.filter((item) => item.mimeType !== 'text/plain')];
@@ -85,8 +87,8 @@ export function parseGmailMessage(value: unknown, DOMParser: GmailHtmlParser): G
         return mime === 'text/html' ? htmlText(text, DOMParser) : text;
     };
     const text = body(payload, 0);
-    if (text === null) return fail('other');
-    return { id: identifier(message.id), subject: header('subject'), from: header('from'), bodyText: boundedText(text.trim()) };
+    if (text === null) return null;
+    return { id, subject: header('subject'), from: header('from'), bodyText: boundedText(text.trim()) };
 }
 
 export function createGmailCaptureTransport(
@@ -142,6 +144,7 @@ export function createGmailCaptureTransport(
         const listed = result.messages === undefined ? [] : result.messages;
         if (!Array.isArray(listed) || listed.length > 25) return fail('other');
         const messages: GmailCaptureBatch['messages'] = [];
+        let skippedUnsupported = 0;
         for (const item of listed) {
             const id = identifier(object(item).id);
             if (getStore().seen(config.accountId, id)) continue;
@@ -149,13 +152,15 @@ export function createGmailCaptureTransport(
             current(expected);
             if (raw.id !== id || !Array.isArray(raw.labelIds)) return fail('other');
             if (!raw.labelIds.includes(config.labelId)) continue;
-            messages.push(parseGmailMessage(raw, DOMParser));
+            const message = parseGmailMessage(raw, DOMParser);
+            if (message) messages.push(message);
+            else skippedUnsupported += 1;
         }
         const after = await active(expected);
         if (after.accountId !== config.accountId || after.labelId !== config.labelId) return fail('cancelled');
         const nextPage = result.nextPageToken === undefined ? undefined : identifier(result.nextPageToken);
         if (nextPage && nextPage === page) return fail('other');
-        const batch = { batchId: newId(), accountId: config.accountId, messages, hasMore: Boolean(nextPage) };
+        const batch = { batchId: newId(), accountId: config.accountId, messages, hasMore: Boolean(nextPage), skippedUnsupported };
         pending = { batch, generation: expected, label: config.labelId, nextPage };
         return batch;
     };

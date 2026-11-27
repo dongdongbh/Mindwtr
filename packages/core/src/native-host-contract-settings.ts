@@ -114,14 +114,14 @@ type Translate = (key: string) => string;
 
 export function buildNativeGeneralSettingsModel(settings: import('./types').AppSettings, deps: Pick<SettingsDeps,
     't' | 'language' | 'systemLocale' | 'dateFormatting'>, deviceTheme?: string | null,
-appSearch: { supported: boolean; enabled: boolean } = { supported: false, enabled: false }): GeneralSettingsModel {
+appSearch: { supported: boolean; enabled: boolean } = { supported: false, enabled: false }, fetchLinkTitlesRow = false): GeneralSettingsModel {
     const locale = deps.systemLocale() ?? '';
     const sample = createDateFormatter({ ...deps.dateFormatting(), dateFormat: 'system',
         calendarSystem: settings.calendarSystem, timeFormat: settings.timeFormat })(new Date(), 'P');
     return buildGeneralSettingsModel({ settings,
         themeMode: resolveGeneralThemeMode(settings.theme, deviceTheme), language: deps.language(),
         systemLocale: locale, systemWeekStart: getSystemWeekStart(locale), systemDateSample: sample,
-        appSearch, t: deps.t() });
+        appSearch, fetchLinkTitlesRow, t: deps.t() });
 }
 
 export type SettingsDeps = {
@@ -267,6 +267,7 @@ function readGeneralEdit(value: unknown, calendarSystemShown: boolean): GeneralS
             case 'showTaskAge':
             case 'appLock':
             case 'appSearch':
+            case 'fetchLinkTitles':
                 return typeof v === 'boolean';
             default: return false;
         }
@@ -389,9 +390,9 @@ export function createSettingsMethods(deps: SettingsDeps) {
         ...(persistentCapture ? { persistentCapture } : {}),
     });
 
-    const generalModel = (input: { deviceTheme?: string | null; appSearch?: { supported: boolean; enabled: boolean } }) => {
+    const generalModel = (input: { deviceTheme?: string | null; appSearch?: { supported: boolean; enabled: boolean }; fetchLinkTitlesRow?: boolean }) => {
         const state = useTaskStore.getState();
-        return buildNativeGeneralSettingsModel(state.settings, deps, input.deviceTheme, input.appSearch);
+        return buildNativeGeneralSettingsModel(state.settings, deps, input.deviceTheme, input.appSearch, input.fetchLinkTitlesRow === true);
     };
 
 
@@ -728,14 +729,15 @@ export function createSettingsMethods(deps: SettingsDeps) {
         },
 
 
-        getGeneralSettings(input: { deviceTheme?: string | null; appSearch?: { supported: boolean; enabled: boolean } } = {}): NativeHostResult<NativeGeneralSettings> {
+        getGeneralSettings(input: { deviceTheme?: string | null; appSearch?: { supported: boolean; enabled: boolean }; fetchLinkTitlesRow?: boolean } = {}): NativeHostResult<NativeGeneralSettings> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
             if (!isObjectRecord(input)
                 || (input.deviceTheme !== undefined && input.deviceTheme !== null && !isText(input.deviceTheme, 100))
                 || (input.appSearch !== undefined && (!isObjectRecord(input.appSearch)
-                    || typeof input.appSearch.supported !== 'boolean' || typeof input.appSearch.enabled !== 'boolean'))) {
-                return fail('INVALID_INPUT', 'deviceTheme must be text or null, and appSearch { supported, enabled } booleans');
+                    || typeof input.appSearch.supported !== 'boolean' || typeof input.appSearch.enabled !== 'boolean'))
+                || (input.fetchLinkTitlesRow !== undefined && typeof input.fetchLinkTitlesRow !== 'boolean')) {
+                return fail('INVALID_INPUT', 'deviceTheme must be text or null, appSearch { supported, enabled } booleans, and fetchLinkTitlesRow a boolean');
             }
             return {
                 ok: true,

@@ -55,6 +55,8 @@ The native client is a Kotlin and Jetpack Compose app in `apps/android-native`. 
 
 ## Selection mode and Bulk organize
 
+- Bulk organize can set or clear a person or priority independently while keeping each task’s status. Priority requires priorities to be enabled.
+- Bulk organize lists its sections in RN's order: Status, Priority, Time estimate, Project, Area, Person, dates, Contexts, Tags. Every input locks while a change is saving.
 - With Time Estimates enabled, open Contexts › Filters › Time estimate › No estimate. Select tasks › Bulk organize › Time estimate to keep, set or clear their estimates. Setting an estimate removes the task from this filter.
 - Bulk organize status includes Inbox for returning tasks to processing; existing project, notes, tags and dates stay unchanged unless explicitly edited.
 
@@ -66,6 +68,8 @@ The native client is a Kotlin and Jetpack Compose app in `apps/android-native`. 
 
 ## Process Inbox
 
+- During Inbox project conversion, Project name and Next action are separately editable. Back restores the task title from before conversion.
+- In task editing and Inbox processing, open Browse beside Contexts or Tags to search or toggle multiple saved and in-use values. An empty search shows the full list. As in RN, each row shows the value with a check at the end, a selected row is tinted, and No matches is announced.
 - Reach: Inbox › Process Inbox (N). The header switches between Guided and Quick and has Skip and Close.
 - Selectors: `process-inbox`, `process-title`
 - Code: `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/ProcessInbox.kt`
@@ -91,6 +95,7 @@ The native client is a Kotlin and Jetpack Compose app in `apps/android-native`. 
 - Checks: `apps/android-native/scripts/check-capture-device.mjs`, `apps/android-native/scripts/check-keyboard-device.mjs`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/TokenCommitTest.kt`
 - Notes: Several lines ask core's question first. Create tasks writes a recovery snapshot, then one task per line in one write. Close discards the draft, as in RN.
 - Destination shows the contextual project/section, default Area, or None. Explicit choices override title syntax without changing status. Unavailable targets remain visible and prevent saving. Local `@`, `+`, `#` suggestions replace the complete token at the caret, with project choices retaining their IDs.
+- Saving one HTTP(S) URL keeps its link and then looks up the page title, as in RN (#1606). The capture screen and shared links use the same lookup. Save & edit skips the lookup, so the open editor never goes stale. Settings › General › Privacy › Look up page titles turns the requests off.
 
 ## Capture screen
 
@@ -150,7 +155,7 @@ The native client is a Kotlin and Jetpack Compose app in `apps/android-native`. 
 - Typing help: With Settings › Editor typing help on, the description (inline and full screen) pairs `[`, `(` and a backtick typed at a plain caret (Backspace right after the pair appears removes the closer, and a second Backspace removes the opener, as in RN), wraps selected text in the Markdown mark typed over it, continues a list on Enter, turns a URL pasted over selected text into a link, and lists up to six tasks and projects after `[[` (the edited task is left out). Core's `markdownTextChange` and the bundle's `markdownReferences` read do the work. The suggestion card sits above the keyboard, or above the typed line when the space below it is too small; it never covers the typed line. A rewrite lands only if the editor is still open and the text and caret are still the ones it was computed for. The tab highlight follows a swipe as the page passes halfway.
 - Notes: The draft survives rotation and process death. If a save was in flight at a death, the relaunch sends that same save again and closes the editor. Destination lists None, Areas, active Projects, then Someday / Waiting projects under their own heading, preserving existing order within each group and direct project selection. Destination has RN's search field: it filters projects and areas by title, ignoring case and outer spaces.
 
-- View completion: Mark Done in the visible Status card queues pending checklist text before draft Done, then sends one normal owned Save. Long-press Mark Done to choose a completion time and save through the same path. The draft queue and retained save request survive recovery; a refused draft edit cancels queued completion. Repeat taps, draft changes and Close are blocked during completion. A failed save retains the draft and existing Retry; acknowledgement precedes closing. Reference, terminal, Trash, projected and read-only/archived-project previews have no action.
+- View completion: Mark Done sits beside the status in the Status card when both controls fit. It wraps below the status when space is limited. The action queues pending checklist text before draft Done, then sends one normal owned Save. Long-press Mark Done to choose a completion time and save through the same path. The draft queue and retained save request survive recovery; a refused draft edit cancels queued completion. Repeat taps, draft changes and Close are blocked during completion. A failed save retains the draft and existing Retry; acknowledgement precedes closing. Reference, terminal, Trash, projected and read-only/archived-project previews have no action.
 
 ## Task View tab and checklist
 
@@ -315,11 +320,11 @@ The native client is a Kotlin and Jetpack Compose app in `apps/android-native`. 
 
 ## Project details
 
-- Add task keeps the current project open while the capture form is visible.
+- Add Task keeps the current project open while the capture form is visible. Each project section heading collapses or expands its tasks. The folds stay per project after the project closes or the app restarts, in RN's store (`mindwtr:view:group-collapse:all:v1`, axis `project:<id>`). The section's Add button ("Add task to <section>", as in RN) opens capture with that section selected, including when the section is folded or empty. Archived projects allow folding and hide Add Task.
 
 - Reach: Projects › a project › Details. It holds status, area, dates (Review date), a repeat interval (Repeat every N days, weeks, months or years after completion, with Save), scope (Sequential, Parallel), notes with Preview, tags, sections, and attachments. The ⋯ sheet has Duplicate, Archive, Convert to section, and Delete.
 - Shortcuts: Link `mindwtr-native-dev:///open?project=<id>`.
-- Selectors: `project-title-input`, `project-details-toggle`, `project-details-status`, `project-area-sheet`, `project-notes-input`, `project-notes-preview`, `project-tag-input`, `project-section-manager`, `project-section-title-input`, `project-details-attachments`, `project-convert-sheet`, `project-delete-button`, `project-repeat-after-count`, `project-repeat-after-unit`, `project-repeat-after-save`, `project-repeat-error`
+- Selectors: `project-title-input`, `project-details-toggle`, `project-details-status`, `project-area-sheet`, `project-notes-input`, `project-notes-preview`, `project-tag-input`, `project-section-manager`, `project-section-title-input`, `project-section-heading-`, `project-section-add-`, `project-details-attachments`, `project-convert-sheet`, `project-delete-button`, `project-repeat-after-count`, `project-repeat-after-unit`, `project-repeat-after-save`, `project-repeat-error`
 - Code: `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/ProjectDetails.kt`, `packages/core/src/native-host-contract-project-edit.ts`, `packages/core/src/store-projects/project-actions.ts`
 - Checks: `apps/android-native/scripts/check-project-details-device.mjs`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/ProjectDetailsTest.kt`, `apps/android-native/bundle/host-project-repeat.test.ts`, `packages/core/src/native-host-contract-project-lifecycle.test.ts`
 - Notes: Typing help follows RN: inline notes only continue lists; full-screen notes also pair `[`, `(` and a backtick (Backspace right after the pair appears removes the closer first), wrap a selection and link a pasted URL; both list `[[` task and project suggestions in a card that never covers the typed line. Preview shows the typed notes and stores nothing. Review date stores the picked hour and minute with seconds at 0. Completing a repeating project (⋯ › Complete, or Weekly Review) archives it and saves one next run that starts the interval later, as in RN; a replay saves no second run. Each unit option has the selector `project-repeat-after-unit-` plus the unit (day, week, month, year). Saving a repeat interval is refused while an active task in the project repeats.
@@ -339,6 +344,7 @@ The native client is a Kotlin and Jetpack Compose app in `apps/android-native`. 
 - Code: `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/Attachments.kt`, `apps/android-native/bundle/host-attachments.ts`
 - Checks: `apps/android-native/scripts/check-attachments-device.mjs`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/DraftAttachmentsTest.kt`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/AttachmentLogTest.kt`
 - Notes: Files are copied into the app and named by their IDs. Remove soft-deletes the attachment (it sets deletedAt).
+- A bare URL added in the task editor gets its page title as the link label after Save, unless Look up page titles is off (#1606).
 
 ## Missing attachment files
 
@@ -366,9 +372,11 @@ The native client is a Kotlin and Jetpack Compose app in `apps/android-native`. 
 
 ## Home-screen widgets and Quick Settings tile
 
+- Android Tasks widget: select a context directly, then tap the header to open Contexts with that context selected.
+
 - Notes: Queued text/audio captures use the configured default area at ingestion; explicit area/project choices take precedence.
 - Reach: Home screen › Widgets › Mindwtr (Tasks, Compact, Quick capture). Quick Settings › the Mindwtr capture tile (RN's tile class).
-- Shortcuts: Tap a widget row's ring to complete it. The widget header opens the app or a widget list.
+- Shortcuts: Tap a widget row's ring to complete it. The widget header opens the app or a widget list. Tap the Tasks widget's arrow to switch lists or change **Group by** for the current list. Today keeps its built-in sections.
 - Code: `apps/android-native/android/widget/src/main/java/tech/dongdongbh/mindwtr/androidwidget/CaptureSyncHeadlessService.kt`, `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/core/HostWidgets.kt`, `apps/android-native/bundle/host-widgets.ts`, `apps/android-native/scripts/build-widgets.mjs`, `apps/mobile/modules/android-widget`
 - Checks: `apps/android-native/scripts/check-widgets-device.mjs`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/core/WidgetRefreshGateTest.kt`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/core/WidgetAudioDrainTest.kt`, `apps/android-native/android/widget/src/test/java/tech/dongdongbh/mindwtr/androidwidget/CaptureSyncHeadlessServiceTest.kt`
 - Notes: The widget chooser requests fresh published options on open and updates them without clearing search or pending choices. The built-in compact list is named Today; saved Focus filters use the shared Focus task sections.
@@ -380,8 +388,9 @@ The native client is a Kotlin and Jetpack Compose app in `apps/android-native`. 
 - Shortcuts: Link `mindwtr-native-dev:///widget-list`.
 - Selectors: `swipe-done`, `swipe-focus`
 - Code: `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/WidgetListScreen.kt`, `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/MenuModel.kt`
-- Checks: `apps/android-native/scripts/check-widget-list-device.mjs`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/WidgetContextsFilterTest.kt`
+- Checks: `apps/android-native/scripts/check-widget-list-device.mjs`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/WidgetContextsFilterTest.kt`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/WidgetSavedListTest.kt`, `apps/android-native/bundle/host-android-linktitle-widget.test.ts`
 - Notes: A saved filter that is gone shows "No results" with no rows. A saved Contexts filter link opens the Contexts screen with that filter selected and editable, as in RN (#1485).
+- A saved Focus filter link opens Focus with that filter, but the Today widget keeps the main Focus filter. Leaving Focus, tapping the Focus tab, or opening the Today widget's Focus link brings back the main Focus filter (#1485).
 
 ## Automation capture
 
@@ -394,7 +403,8 @@ The native client is a Kotlin and Jetpack Compose app in `apps/android-native`. 
 
 ## Settings and General
 
-- Reach: Menu › Settings. The menu has a search field and General, GTD, Manage, Data, Notifications, Sync, Advanced, and About. General has Theme, Language, Week starts on, the quick-access view, and App lock.
+- Reach: Menu › Settings. The menu has a search field and General, GTD, Manage, Data, Notifications, Sync, Advanced, and About. General has Theme, Language, Week starts on, the quick-access view, App lock, and Look up page titles.
+- Tasks and Compact widget settings: choose a transparent text mode and adjust Background opacity from 0% to 100% per widget.
 - Notes: E-Ink uses monochrome identity accents and readable review-state labels on a light fill. Menu and Settings sync indicators use refresh/check/warning glyphs with translated accessible status labels. Stored colors and picker swatches stay unchanged. Android widgets share RN's per-widget foreground handling for transparent text modes.
 - Selectors: `settings-search`, `settings-picker`, `settings-field-sheet`
 - Code: `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/SettingsScreen.kt`, `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/SettingsModel.kt`, `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/Labels.kt`
@@ -575,7 +585,7 @@ The native client is a Kotlin and Jetpack Compose app in `apps/android-native`. 
 - Selectors: `project-calendar-reference`, `project-calendar-link`, `project-calendar-unlink`, `project-calendar-search`, `project-calendar-cancel`, `project-calendar-title`, `project-calendar-date`, `project-calendar-status`, `project-calendar-picker-status`, `project-calendar-save-failed`; each picker row is `project-calendar-event-` plus its index
 - Code: `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/ProjectDetails.kt`, `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/core/CoreHost.kt`, `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/core/WriteJournal.kt`, `packages/core/src/native-host-contract-project-calendar-reference.ts`
 - Checks: `packages/core/src/native-host-contract-project-calendar-reference.test.ts`, `apps/android-native/bundle/host-project-calendar-reference.test.ts`, `apps/android-native/android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/core/WriteJournalTest.kt`, `apps/android-native/scripts/check-project-calendar-device.mjs` (phone: link from a local ICS stub, the stored event at once after a restart, "start – end", unlink)
-- Notes: One read-only ICS event reference belongs to the Project. Linking creates no task and changes no calendar event. Ambiguous identities and incomplete feed reads offer no candidates; unavailable feeds show last-known details. Opening a Project reads the stored link first with `summary: true`, which never downloads feeds. Feeds download only when a link exists (to refresh it) or the picker is open, on core's own `projectCalendar` feed slot, so the Project never cancels a Calendar-screen load. Dates show "start – end"; an all-day end moves back one day. Archived Projects are read-only. Explicit unlink persists a null marker. Native writes freeze the selected candidate and Project snapshot before journaling, retain exact retries, and acknowledge only after durable storage.
+- Notes: One read-only ICS event reference belongs to the Project. Linking creates no task and changes no calendar event. If only the device calendar read fails, the picker reports that source and still offers identifiable events from successfully loaded subscriptions. Ambiguous identities and unqualified incomplete reads yield no candidates. Unavailable feeds show last-known details. Opening a Project reads the stored link first with `summary: true`, which never downloads feeds. Feeds download only when a link exists (to refresh it) or the picker is open, on core's own `projectCalendar` feed slot, so the Project never cancels a Calendar-screen load. Dates show "start – end"; an all-day end moves back one day. Archived Projects are read-only. Explicit unlink persists a null marker. Native writes freeze the selected candidate and Project snapshot before journaling, retain exact retries, and acknowledge only after durable storage.
 
 ## Date-only task reminders (#1570)
 

@@ -931,7 +931,9 @@ for (const [file, opener] of [['TaskRowView.kt', /private fun DatesSheet[\s\S]{0
     ['TaskRowView.kt', /fun StatusMenu[\s\S]{0,600}?Box\(Modifier\.fillMaxSize\(\)\.windowScrim\(theme\.menuScrim\)/],
     ['TaskEditor.kt', /internal fun PickerDialog[\s\S]{0,300}?Box\(Modifier\.fillMaxSize\(\)\.windowScrim\(theme\.pickerScrim\)/],
     ['MenuWidgets.kt', /fun ChoiceModal[\s\S]{0,300}?Box\(Modifier\.fillMaxSize\(\)\.windowScrim\(theme\.pickerScrim\)/],
-    ['WeeklyReviewScreen.kt', /fun WeeklyProjectCompletePrompt[\s\S]{0,400}?Box\(Modifier\.fillMaxSize\(\)\.windowScrim\(theme\.promptScrim\)/]]) {
+    ['WeeklyReviewScreen.kt', /fun WeeklyProjectCompletePrompt[\s\S]{0,400}?Box\(Modifier\.fillMaxSize\(\)\.windowScrim\(theme\.promptScrim\)/],
+    ['BulkBar.kt', /fun OrganizeDialog[\s\S]{0,400}?BoxWithConstraints\(Modifier\.fillMaxSize\(\)\.windowScrim\(theme\.pickerScrim\)/],
+    ['BulkBar.kt', /private fun OrganizePicker[\s\S]{0,400}?Box\(Modifier\.fillMaxSize\(\)\.windowScrim\(theme\.pickerScrim\)/]]) {
     assert.match(source(file), opener, `${file}: the scrim dims the whole window and centers the card on it, as RN's Modal does`);
 }
 assert.match(rowUi, /Box\(if \(offset\.value != 0f\) Modifier\.clipToBounds\(\) else Modifier\) \{/, 'an open tray clips the moved row at the row bounds, as RN\'s Swipeable does');
@@ -2010,9 +2012,15 @@ assert.match(editorUi, /clickable\(enabled = !busy && !failed && editor\.preview
 
 assert.match(coreHost, /fun focus\(limit: Int, controls: String = "", controlEdit: String = "", folds: String = ""\): JSONObject =\s*callAsync\("focus", limit, controls, controlEdit, folds\)/);
 assert.match(coreHost, /fun focusWindow\(key: String, offset: Int, limit: Int, revision: String, controls: String = "", folds: String = ""\): JSONObject =\s*callAsync\("focusWindow", key, offset, limit, revision, controls, folds\)/);
-assert.match(hostEntry, /focus\(limit: number, controls = '', controlEdit = '', folds = ''\): string \{\s*return submit\(async \(\) => \{\s*requireSaved\(\);\s*const focus = unwrap\(contract\.getFocus\(\{ limit, \.\.\.\(controls \? \{ controls: JSON\.parse\(controls\) \} : \{\}\), \.\.\.\(controlEdit \? \{ controlEdit: JSON\.parse\(controlEdit\) \} : \{\}\),\s*\.\.\.\(folds \? \{ collapsedGroupIds: JSON\.parse\(folds\) \} : \{\}\) \}\)\);/);
+assert.match(hostEntry, /focus\(limit: number, controls = '', controlEdit = '', folds = ''\): string \{\s*return submit\(async \(\) => \{\s*const \{ todayWidgetFilter, \.\.\.edit \} = controlEdit \? JSON\.parse\(controlEdit\) : \{\};\s*if \(todayWidgetFilter === 'hold' \|\| todayWidgetFilter === 'release'\) todayWidgetFilterHeld = todayWidgetFilter === 'hold';\s*requireSaved\(\);\s*const focus = unwrap\(contract\.getFocus\(\{ limit, \.\.\.\(controls \? \{ controls: JSON\.parse\(controls\) \} : \{\}\), \.\.\.\(Object\.keys\(edit\)\.length \? \{ controlEdit: edit \} : \{\}\),\s*\.\.\.\(folds \? \{ collapsedGroupIds: JSON\.parse\(folds\) \} : \{\}\) \}\)\);\s*cacheIOSFocusWidgetFilter\(focus\);\s*if \(!todayWidgetFilterHeld\) widgets\?\.focusFilter\(focus\.controls\?\.widgetFilter\);/);
 assert.match(hostEntry, /focusWindow\(key: string, offset: number, limit: number, revision: string, controls = '', folds = ''\): string \{\s*return submit\(async \(\) => \{\s*requireSaved\(\);\s*return unwrap\(contract\.getFocusSectionWindow\(\{ key: key as FocusTaskSectionKey, offset, limit, revision, \.\.\.\(controls \? \{ controls: JSON\.parse\(controls\) \} : \{\}\),\s*\.\.\.\(folds \? \{ collapsedGroupIds: JSON\.parse\(folds\) \} : \{\}\) \}\)\);/);
 assert.equal(model.match(/runtime\.focus\(/g).length, 1);
+assert.match(menuModel, /private fun openWidgetFocusFilter\(id: String\) \{\s+toTabs\(\)\s+shell\.show\(Screen\.Focus\)\s+focusControls\.openWidgetSavedList\(id\)/, 'a widget saved list holds the Today widget filter');
+assert.match(menuModel, /event\.optString\("type"\) == "linkTitle"\) shell\.ui \{ whenIdle \{ shell\.refresh\(\) \} \}[\s\S]{0,200}ProcessCoreHost\.listenSync\(linkTitleListener\)\s+shell\.addCloseable \{ ProcessCoreHost\.unlistenSync\(linkTitleListener\) \}/, 'a looked-up page title refreshes the shown lists');
+assert.match(focusModelKt, /snapshotFlow \{ widgetSavedListShown\(shell\.screen, menu\.screen\) \}\.first \{ !it \}\s+menu\.whenIdle \{ widgetSavedList\.end\(\)\?\.let\(::returnToMainControls\) \}/, 'leaving Focus ends the widget saved list once the hold read is done');
+assert.match(focusModelKt, /WidgetSavedList\(\{ saved\.get<String>\(MAIN_CONTROLS\) \},[\s\S]{0,200}\{ shell\.fresh\(shell\.issue\(\), Part\.Focus\) \}/, 'ending a widget saved list retires older Focus replies');
+assert.match(code(source('EntryPoints.kt')), /route == "\/focus" -> \{\s+menu\.toTabs\(\)\s+menu\.focusControls\.openMainFocus\(\)\s+show\(Screen\.Focus\)/, 'the Today widget\'s Focus link opens the main Focus controls');
+assert.match(code(source('MainActivity.kt')), /rnTabPress\(active\) \{ menu\.closeSheet\(\); if \(tab == Screen\.Focus\) menu\.focusControls\.openMainFocus\(\); show\(tab\) \}/, 'the Focus tab opens the main Focus controls');
 assert.equal(model.match(/runtime\.focusWindow\(/g).length, 1);
 assert.match(model, /FocusView\.parse\(runtime\.focus\(PAGE, controls, edit, folds\)\)/, 'every Focus read sends the control state and the folds');
 assert.match(model, /view\.append\(runtime\.focusWindow\(key, loaded\.rows\.size, PAGE, view\.revision, state, folds\)\)/, 'later windows go with the state core answered');
@@ -2454,7 +2462,11 @@ assert.equal(model.match(/runtime\.projects\(projectTagFilter\)/g).length, 2, 'r
 
 
 assert.equal(model.match(/projectWindow\(runtime, /g).length, 3, 'the first window, the next, and a filter edit\'s first window');
-assert.match(model, /runtime\.menuRead\("projectDetailFilterView", JSONObject\(\)\.put\("projectId", id\)[\s\S]{0,200}\.put\("showCompleted", projectShowCompleted\)\.put\("completedCollapsed", projectCompletedCollapsed\)\s+\.put\("filters", projectDetails\.listFilterState\)\.put\("filterSheetOpen", projectDetails\.listFilterSheet != null\)/);
+assert.match(model, /runtime\.menuRead\("projectDetailFilterView", JSONObject\(\)\.put\("projectId", id\)[\s\S]{0,200}\.put\("showCompleted", projectShowCompleted\)\.put\("completedCollapsed", projectCompletedCollapsed\)\s+\.put\("collapsedSectionIds", projectSectionFolds\(prefs, id\)\)\s+\.put\("filters", projectDetails\.listFilterState\)\.put\("filterSheetOpen", projectDetails\.listFilterSheet != null\)/);
+assert.match(model, /GroupCollapse\.axis\(prefs, "all", "project:\$projectId", 200\)/);
+assert.match(model, /fun toggleProjectSection\(sectionId: String\) \{\s+toggleProjectSectionFold\(prefs, openProjectId \?: return, sectionId\)\s+refreshProjects\(\)/);
+assert.match(model, /GroupCollapse\.toggle\(prefs, "all", "project:\$projectId", sectionId\)/);
+assert.doesNotMatch(model, /collapsedProjectSectionIds/);
 assert.match(source('ViewState.kt'), /const val PROJECT_SHOW_COMPLETED_KEY = "mindwtr:view:project-detail:show-completed:v1"/);
 assert.match(model, /prefs\.edit\(\)\.putString\(PROJECT_SHOW_COMPLETED_KEY, on\.toString\(\)\)\.apply\(\)/);
 assert.equal([activity, owner, editorUi, focusUi, projectsUi].join('\n').match(/\.projects\(\)|projectDetail\(/g), null);
@@ -2486,7 +2498,7 @@ assert.match(model, /if \(id != openProjectId\) return\s+if \(detail == null\) k
 assert.match(model, /if \(failure\.message\?\.startsWith\("TASK_NOT_FOUND"\) != true\) throw failure\s+null/);
 
 assert.match(projectsUi, /LaunchedEffect\(owner\) \{\s*owner\.repeatOnLifecycle\(Lifecycle\.State\.RESUMED\) \{ model\.refreshProjects\(\) \}/);
-assert.equal(code([activity, model, projectsUi].join('\n')).match(/(?<!fun )refreshProjects\(\)/g).length, 7, 'the lifecycle loop, the boot\'s deferred read (first content, or the tab chosen while the boot ran), RN\'s Show completed and Completed pile (b4a), a row the clock changes (#1360), and a Tag filter choice (gap 32)');
+assert.equal(code([activity, model, projectsUi].join('\n')).match(/(?<!fun )refreshProjects\(\)/g).length, 8, 'section collapse, the lifecycle loop, the boot\'s deferred read (first content, or the tab chosen while the boot ran), RN\'s Show completed and Completed pile (b4a), a row the clock changes (#1360), and a Tag filter choice (gap 32)');
 assert.match(hostEntry, /projectList\(tagFilter = '__all__'\): string \{\s+return submit\(async \(\) => \{\s+requireSaved\(\);\s+return unwrap\(contract\.getFilteredProjects\(\{ tagFilter, moves: true \}\)\);/,
     'the Projects list asks core to match the Tag filter (RN buildProjectGroups), with the moves');
 assert.match(projectsUi, /val heading = if \(active\) "\$\{t\("projects\.tagFilter"\)\}: \$\{projectTagLabel\(projectTagFilter\)\}" else t\("projects\.tagFilter"\)\s+val action = t\(if \(projectTagFilterOpen\) "filters\.hide" else "filters\.show"\)/,
@@ -2620,7 +2632,8 @@ assert.match(coreHost, /fun createQuickCaptureSnapshot\(snapshots: File, protect
 for (const read of ['captureOpen(): string', 'captureView(json: string): string', 'captureEdit(json: string): string']) {
     assert.match(hostEntry, new RegExp(`${read.replace(/[()]/g, '\\$&')} \\{\\s*return submit\\(async \\(\\) => \\{\\s*requireSaved\\(\\);`), `${read} waits for an owed save`);
 }
-for (const [method, operation, call] of [['captureSubmit', 'quickCapture', 'submitQuickCapture'], ['captureLines', 'quickCaptureLines', 'submitQuickCaptureLines'],
+assert.match(hostEntry, /captureSubmit\(json: string\): string \{\s*return submit\(async \(\) => \{\s*const input = JSON\.parse\(json\);\s*const result = taskResult\('quickCapture', await contract\.submitQuickCapture\(input\)\);\s*if \(result\.kind === 'saved' && input\.openAfterSave !== true\) enrichAndroidCaptureTitle\(result\.taskId, input\.text\);\s*return result;/);
+for (const [method, operation, call] of [['captureLines', 'quickCaptureLines', 'submitQuickCaptureLines'],
     ['capturePicker', 'quickCapturePicker', 'submitQuickCapturePickerQuery']]) {
     assert.match(hostEntry, new RegExp(`${method}\\(json: string\\): string \\{\\s*return submit\\(async \\(\\) => taskResult\\('${operation}', await contract\\.${call}\\(JSON\\.parse\\(json\\)\\)\\)\\);`));
 }
@@ -3288,7 +3301,8 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
         assert.match(hostEntry, new RegExp(`^\\s+${name}: \\(input\\) => contract\\.${method}\\(input\\),$`, 'm'), `menuRead ${name} is core's ${method}`);
     }
 
-    assert.match(hostEntry, /^\s+generalSettings: \(input\) => contract\.getGeneralSettings\(nativeAppSearch\n\s+\? \{ \.\.\.\(input as Parameters<typeof contract\.getGeneralSettings>\[0\]\), appSearch: nativeAppSearch\.device\(\) \} : input\),$/m);
+    assert.match(hostEntry, /^\s+generalSettings: \(input\) => contract\.getGeneralSettings\(\{ \.\.\.\(input as Parameters<typeof contract\.getGeneralSettings>\[0\]\),\n\s+\.\.\.\(nativeAppSearch \? \{ appSearch: nativeAppSearch\.device\(\) \} : \{\}\),\n\s+\.\.\.\(globalThis\.__mindwtrHostPlatform === 'android' \? \{ fetchLinkTitlesRow: true \} : \{\}\) \}\),$/m);
+    assert.match(code(settingsUi), /privacy\.optJSONObject\("appLockRelockDelay"\)[^\n]*\n\s+privacy\.optJSONObject\("fetchLinkTitles"\)\?\.let \{ ToggleRow\(model, it, true, props = theme\.generalSwitch\) \{ edit -> settings\.general\(edit\) \} \}\n\s+privacy\.optJSONObject\("appSearch"\)/, 'Look up page titles sits between App lock and System search, as in RN');
     for (const [name, method] of [['generalSetting', 'setGeneralSetting'], ['gtdSetting', 'setGtdSetting'], ['manageEditor', 'saveManageEditor'],
         ['manageDelete', 'deleteManageItem'], ['somedayRename', 'renameSomedaySection'], ['somedayReorder', 'reorderSomedaySections'], ['somedayDelete', 'deleteSomedaySection']]) {
         assert.match(hostEntry, new RegExp(`^\\s+${name}: \\(input\\) => contract\\.${method}\\(input\\),$`, 'm'), `menuCommand ${name} is core's ${method}`);
@@ -4082,7 +4096,7 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     assert.match(graphic, /offset\(x = if \(on\) 10\.dp else \(-10\)\.dp\)\.size\(20\.dp\)/);
 
     const settingsUiKt = code(source('SettingsScreen.kt'));
-    assert.equal(settingsUiKt.match(/theme\.generalSwitch/g)?.length, 4, 'General\'s three switches and the Sandbox page\'s Show task age, which is General\'s own setting');
+    assert.equal(settingsUiKt.match(/theme\.generalSwitch/g)?.length, 5, 'General\'s four switches and the Sandbox page\'s Show task age, which is General\'s own setting');
     assert.match(settingsUiKt, /props: RnSwitchProps = LocalTheme\.current\.settingsSwitch/);
     assert.match(code(captureUi), /RnSwitch\(on, enabled = !locked, label = label, props = theme\.captureSwitch\)/);
     assert.match(code(menuUi), /RnSwitchGraphic\(on, true, LocalTheme\.current\.referenceSwitch\)/);
@@ -4142,8 +4156,9 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
         ['captureModalDiscard', 'discardCaptureModal']]) {
         assert.match(hostEntry, new RegExp(`^\\s+${name}: \\(input\\) => contract\\.${call}\\(input\\),$`, 'm'), `${name} is a Menu read`);
     }
+    assert.match(hostEntry, /captureModalSubmit\(json: string\): string \{\s*return submit\(async \(\) => \{\s*const input = JSON\.parse\(json\);\s*const result = taskResult\('captureModal', await contract\.submitCaptureModal\(input\)\);\s*if \(result\.kind === 'saved' && input\.openAfterSave !== true\) enrichAndroidCaptureTitle\(result\.taskId, input\.draft\.text\);\s*return result;/);
     for (const [method, operation, call] of [['captureModalSubmit', 'captureModal', 'submitCaptureModal'], ['captureModalLines', 'captureModalLines', 'submitCaptureModalLines']]) {
-        assert.match(hostEntry, new RegExp(`${method}\\(json: string\\): string \\{\\s*return submit\\(async \\(\\) => taskResult\\('${operation}', await contract\\.${call}\\(JSON\\.parse\\(json\\)\\)\\)\\);`));
+        if (method === 'captureModalLines') assert.match(hostEntry, new RegExp(`${method}\\(json: string\\): string \\{\\s*return submit\\(async \\(\\) => taskResult\\('${operation}', await contract\\.${call}\\(JSON\\.parse\\(json\\)\\)\\)\\);`));
         assert.match(coreHost, new RegExp(`fun ${call}\\(json: String\\): JSONObject = callAsync\\("${method}", json\\)`), `CoreHost.${call} reaches ${method}`);
         assert.match(modalKt, new RegExp(`runtime\\.${call}\\(request\\)`));
     }
@@ -4290,7 +4305,7 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     const pendingTs = readFileSync(resolve(app, '../../packages/core/src/pending-captures.ts'), 'utf8');
     assert.equal(/const val DIRECTORY = "([^"]+)"/.exec(rnWidget('PendingCaptureWriter.kt'))[1], /export const PENDING_CAPTURES_DIRECTORY = '([^']+)'/.exec(pendingTs)[1]);
     assert.match(hostEntry, /const QUEUE = `files\/\$\{PENDING_CAPTURES_DIRECTORY\}`;/);
-    assert.match(hostEntry, /ingest\(requestId: string\): string \{\s+return submit\(async \(\) => taskResult\('ingest', await contract\.ingestPendingCaptures\(\{ requestId, queue: pendingCaptureQueue, lastApplied: lastAppliedRecord \}\)\)\);/);
+    assert.match(hostEntry, /ingest\(requestId: string\): string \{\s+return submit\(async \(\) => taskResult\('ingest', await contract\.ingestPendingCaptures\(\{ requestId, queue: pendingCaptureQueue, lastApplied: lastAppliedRecord,\s+onTextCaptureSaved: enrichAndroidCaptureTitle \}\)\)\);/);
 
     const settingsModel = source('SettingsModel.kt');
     assert.match(settingsModel, /input\.put\("captureIntent", JSONObject\(\)\.put\("enabled", it\.getOrNull\(\)\?\.enabled \?: JSONObject\.NULL\)\)/);
@@ -5167,7 +5182,8 @@ export function setSha256HexProvider() {
 const hostSyncTs = readFileSync(resolve(app, 'bundle/host-sync.ts'), 'utf8') + readFileSync(resolve(app, 'bundle/host-attachments.ts'), 'utf8')
     + readFileSync(resolve(app, 'bundle/host-reminders.ts'), 'utf8') + readFileSync(resolve(app, 'bundle/host-widgets.ts'), 'utf8')
     + readFileSync(resolve(app, 'bundle/host-calendar.ts'), 'utf8') + readFileSync(resolve(app, 'bundle/host-gmail.ts'), 'utf8')
-    + readFileSync(resolve(app, 'bundle/host-widget-audio.ts'), 'utf8') + readFileSync(resolve(app, 'bundle/host-voice.ts'), 'utf8');
+    + readFileSync(resolve(app, 'bundle/host-widget-audio.ts'), 'utf8') + readFileSync(resolve(app, 'bundle/host-voice.ts'), 'utf8')
+    + readFileSync(resolve(app, 'bundle/host-link-title.ts'), 'utf8');
 const syncOnly = [...new Set([...hostSyncTs.matchAll(/^import \{([\s\S]*?)\} from '@mindwtr\/core';/gm)].flatMap((m) => [...m[1].matchAll(/^\s+(\w+),$/gm)].map((n) => n[1])))]
     .filter((name) => !new RegExp(`export (?:async )?(?:function|const|class) ${name}\\b|export \\{[^}]*\\b${name}\\b`).test(fakeCore));
 assert(syncOnly.includes('createMobileSyncService') && syncOnly.includes('createMobileSyncTriggers'), 'host-sync.ts\'s core imports parsed');
@@ -10279,8 +10295,8 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     assert.match(source('StartupPrompts.kt'), /shell\.menu\.whenIdle \{ shell\.menu\.openProjects\(projectId\) \}/);
 
 
-    assert.match(header, /\{ openProjectId\?\.let\(::openProjectCapture\) \}[\s\S]{0,200}testTag\("project-add-task-button"\)/);
-    assert.match(source('InboxViewModel.kt'), /fun openProjectCapture\(projectId: String\) \{[\s\S]{0,200}put\("initialProps", JSONObject\(\)\.put\("projectId", projectId\)\.put\("status", "next"\)\.toString\(\)\)\s+\.put\("returnTo", "\/projects-screen\?projectId=\$\{android\.net\.Uri\.encode\(projectId\)\}"\)[\s\S]{0,300}ui \{ captureModal\.opened\(params, reply\) \}/);
+    assert.match(header, /\{ openProjectId\?\.let \{ openProjectCapture\(it\) \} \}[\s\S]{0,200}testTag\("project-add-task-button"\)/);
+    assert.match(source('InboxViewModel.kt'), /fun openProjectCapture\(projectId: String, sectionId: String\? = null\) \{[\s\S]{0,200}val initialProps = JSONObject\(\)\.put\("projectId", projectId\)\.put\("status", "next"\)\.put\("sectionId", sectionId\)\s+val params = JSONObject\(\)\.put\("initialProps", initialProps\.toString\(\)\)\s+\.put\("returnTo", "\/projects-screen\?projectId=\$\{android\.net\.Uri\.encode\(projectId\)\}"\)[\s\S]{0,300}ui \{ captureModal\.opened\(params, reply\) \}/);
     assert.match(source('CaptureModalModel.kt'), /private fun end\(close: JSONObject, leave: Boolean = true\) \{\s+keep\(null\)\s+inFlight = null\s+close\.menuText\("returnToProjectId"\)\?\.let \{ id -> shell\.menu\.whenIdle \{ shell\.openProject\(id\) \} \}/);
 
     assert.doesNotMatch(source('CaptureScreen.kt') + source('InboxViewModel.kt'), /presetPatch|withPreset|val preset: JSONObject/);
@@ -10291,7 +10307,7 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     const header = source('ProjectsScreen.kt'), details = source('ProjectDetails.kt');
     assert.match(header, /\{ projectDetails\.openViewOptions\(\) \}[\s\S]{0,200}testTag\("project-task-view-options-button"\)/);
     assert.match(header, /val active = projectShowCompleted \|\| projectDetails\.customSort/);
-    assert.match(header, /if \(entry\.collapsible\) CompletedHeading\(entry, enabled = !busy && failedAction == null, toggle = model::toggleProjectCompleted\)/);
+    assert.match(header, /val enabled = !busy && failedAction == null[\s\S]{0,600}entry\.collapsible -> CompletedHeading\(entry, enabled, toggle = model::toggleProjectCompleted\)/);
     assert.match(details, /"project-view-sort-option"[\s\S]{0,600}"project-view-completed-option"/);
     assert.match(details, /edit\(projectId, "sort", answer = \{ readSort\(\) \}\) \{ put\("sortBy", sortBy\) \}/);
     assert.match(hostEntry, /projectTaskSortOptions: \(input\) => contract\.getProjectTaskSortOptions\(input\)/);
@@ -10626,7 +10642,7 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     assert.match(coreHost, /fun ingestPendingAudio\(\): JSONObject = callLong\("ingestAudio"\)/);
     assert.match(hostEntry, /ingestAudio\(\): string \{\s*return submit\(async \(\) => \{\s*if \(!widgetAudioPort\) return \{ ingested: 0 \};\s*const result = unwrap\(await contract\.ingestPendingAudio\(\{ queue: pendingCaptureQueue, lastApplied: lastAppliedRecord, audio: widgetAudioPort \}\)\);/);
 
-    assert.match(hostEntry, /contract\.ingestPendingCaptures\(\{ requestId, queue: pendingCaptureQueue, lastApplied: lastAppliedRecord \}\)/);
+    assert.match(hostEntry, /contract\.ingestPendingCaptures\(\{ requestId, queue: pendingCaptureQueue, lastApplied: lastAppliedRecord,\s+onTextCaptureSaved: enrichAndroidCaptureTitle \}\)/);
     assert.match(processHost, /syncHost = runtime\s*network\.start\(\)\s*drainAudio\(app, runtime, SystemClock\.uptimeMillis\(\)\)/);
     assert.match(processHost, /if \(state == "active"\) application\?\.let \{ drainAudio\(it, runtime, resumedAt, quietSince = resumedAt\) \{ appState != "active" \} \}/);
 
@@ -10716,6 +10732,68 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     assert.match(activity, /val label = t\(if \(model\.voice\.defaultAudio\) "quickAdd\.audioCaptureLabel" else "nav\.addTask"\)/);
     assert.match(activity, /if \(event == Lifecycle\.Event\.ON_STOP && !isChangingConfigurations\) \{ VoiceCapture\.recorder\?\.leave\(\); model\.voice\.left\(\) \}/);
     assert.match(source('EntryPoints.kt'), /openedCapture\(it, capture\.getString\("text"\), AutoRecord\.forCaptureLink\(url\)\)/);
+}
+{
+    const firstAt = (text, needles) => needles.map((needle) => text.indexOf(needle)).every((at) => at >= 0)
+        ? needles.map((needle, rank) => [text.indexOf(needle), rank]).sort(([a], [b]) => a - b).map(([, rank]) => rank) : null;
+    const sections = ['status', 'priority', 'estimate', 'project', 'area', 'person', 'dates', 'contexts', 'tags'];
+    const rnOrganize = readFileSync(resolve(app, '../mobile/components/task-list/TaskListBulkOrganizeModal.tsx'), 'utf8');
+    const rnOrder = firstAt(rnOrganize, ['{dialog.statusLabel}', '{priority.label}', '{estimate.label}', '{dialog.project.label}',
+        '{dialog.area.label}', '{person.label}', 'dialog.dates.map', '{dialog.contexts.label}', '{dialog.tags.label}']);
+    const organizeUi = code(bulkUi.slice(bulkUi.indexOf('fun OrganizeDialog(')));
+    const nativeOrder = firstAt(organizeUi, ['organize.getString("statusLabel")', 'organize.optJSONObject("priority")', 'organize.optJSONObject("estimate")',
+        'listOf("project", "area")', 'listOf("project", "area")', 'organize.optJSONObject("person")', 'organize.menuObjects("dates")',
+        'listOf("contexts", "tags")', 'listOf("contexts", "tags")']);
+    assert.deepEqual(rnOrder?.map((rank) => sections[rank]), sections, 'RN Bulk Organize keeps its section order');
+    assert.deepEqual(nativeOrder?.map((rank) => sections[rank]), sections, 'native Bulk Organize lists its sections in RN order');
+    assert.match(organizeUi, /ModalInput\(open\.optString\("typed:\$name", tokens\.getString\("value"\)\), tokens\.getString\("placeholder"\), tokens\.getString\("label"\), enabled = !locked\)/,
+        'Contexts and Tags lock with the rest of the dialog');
+
+    const browse = code(source('TokenBrowsePicker.kt'));
+    assert.doesNotMatch(browse, /Checkbox\(|OutlinedTextField/, 'Browse rows have no Material checkbox and the search box has no floating label, like RN');
+    assert.match(browse, /\.background\(if \(option\.selected\) colors\.filterBg else colors\.cardBg\)/, 'a selected Browse row is tinted filterBg');
+    assert.match(browse, /Text\(option\.token, style = rnText\(14, 400\), color = colors\.text, modifier = Modifier\.weight\(1f\)\)\s+if \(option\.selected\) Icon\(Lucide\.Check, contentDescription = null, tint = colors\.tint, modifier = Modifier\.size\(18\.dp\)\)/,
+        'the token comes first and a trailing check marks the selected row');
+    assert.match(browse, /if \(query\.isEmpty\(\)\) Text\(searchLabel, style = rnText\(14, 400\), color = colors\.secondaryText\)/, 'Search is a placeholder');
+    assert.match(browse, /Text\(noMatchesLabel,[^\n]*\n[^\n]*\n\s+\.semantics \{ liveRegion = LiveRegionMode\.Polite \}\)/, 'No matches is a polite live region');
+
+    const heading = code(projectsUi.slice(projectsUi.indexOf('private fun ProjectSectionHeading('), projectsUi.indexOf('private fun projectTagLabel(')));
+    assert.match(heading, /val addLabel = t\("viewSections\.addTask"\)\.replace\("\{section\}", entry\.title\)/, 'the section Add button reads RN\'s "Add task to {section}"');
+    assert.match(labelsKt, /"viewSections\.addTask"/);
+    assert.match(heading, /Text\(entry\.title\.uppercase\(\), style = rnText\(13, 700, letterSpacing = 0\.6f\), color = if \(entry\.muted\) colors\.secondaryText else colors\.text,/,
+        'the section title uses RN\'s 13 pt text color');
+    assert.match(heading, /Text\("\$\{entry\.count\}", style = rnText\(11, 600\), color = colors\.secondaryText\)/, 'the count is bare, like RN');
+    assert.match(heading, /Icon\(Lucide\.PlusPlain, null,/, 'RN\'s Plus icon');
+    console.log('Browse rows, Bulk Organize order and the project section heading match RN');
+}
+{
+    const rnChips = readFileSync(resolve(app, '../mobile/components/QuickDateChips.tsx'), 'utf8');
+    const rnBulkDate = readFileSync(resolve(app, '../mobile/components/task-list/TaskListBulkDateField.tsx'), 'utf8');
+    assert.match(rnChips, /chip: \{[^}]*flexBasis: 92,\s+flexGrow: 1,\s+flexShrink: 1,\s+paddingHorizontal: 10,\s+paddingVertical: 7,/, 'RN quick date chips grow to share the row');
+    assert.match(rnChips, /content: \{[^}]*gap: 6,\s+paddingRight: 4,/);
+    assert.match(rnBulkDate, /presets=\{\['today', 'tomorrow'\]\}/, 'RN Bulk organize offers two quick dates, so they always fit one row');
+    const rnListStyles = readFileSync(resolve(app, '../mobile/components/task-list/task-list.styles.ts'), 'utf8');
+    assert.match(rnListStyles, /bulkOrganizeCard: \{[^}]*maxHeight: '86%',/);
+    assert.match(rnListStyles, /modalOverlay: \{[^}]*justifyContent: 'center',[^}]*padding: 20,/, 'RN centers Bulk organize in a 20 dp padded overlay');
+    assert.match(code(bulkUi.slice(bulkUi.indexOf('fun OrganizeDialog('))), /Column\(Modifier\.widthIn\(max = 440\.dp\)\.fillMaxWidth\(\)\.heightIn\(max = maxHeight \* 0\.86f\)/,
+        'Bulk organize caps the card at 86% of the padded overlay, like RN\'s maxHeight, not of the whole screen');
+    const dateField = code(bulkUi.slice(bulkUi.indexOf('private fun DateField('), bulkUi.indexOf('private fun OrganizePicker(')));
+    assert.match(dateField, /Row\(Modifier\.padding\(end = 4\.dp\), horizontalArrangement = Arrangement\.spacedBy\(6\.dp\)\) \{\s+for \(chip in date\.menuObjects\("quickDates"\)\)/,
+        'Bulk organize quick dates share one row with RN\'s 6 dp gap');
+    assert.match(dateField, /Box\(Modifier\.weight\(1f\)\.widthIn\(min = 44\.dp\)\.heightIn\(min = 44\.dp\)/, 'each quick date chip takes an equal share of the row, like RN\'s flexGrow');
+    assert.match(dateField, /\.padding\(horizontal = 10\.dp, vertical = 7\.dp\)/);
+    assert.match(dateField, /Text\(chip\.getString\("label"\), style = rnText\(12, 600\)\.compact\(\), color = if \(on\) c\.onTint else c\.secondaryText, textAlign = TextAlign\.Center, maxLines = 2\)/,
+        'quick date labels are centered RN CompactText in secondaryText');
+
+    const rnTabs = readFileSync(resolve(app, '../mobile/components/task-edit/TaskEditTabs.tsx'), 'utf8');
+    assert.match(rnTabs, /width: containerWidth \/ 2,[\s\S]{0,300}?outputRange: \[0, containerWidth \/ 2\]/, 'RN sizes the editor tab indicator from the pager width, not the track');
+    assert.match(rnTabs, /modeTabs: \{[^}]*paddingHorizontal: 16,/);
+    const tabs = code(source('TaskView.kt').slice(source('TaskView.kt').indexOf('fun EditorTabs('), source('TaskView.kt').indexOf('fun TaskViewTab(')));
+    assert.match(tabs, /BoxWithConstraints\(Modifier\.fillMaxWidth\(\)\.background\(c\.cardBg\)\.rnBorderBottom\(c\.border\)\) \{\s+val indicatorWidth = maxWidth \/ 2/,
+        'the editor tab indicator is half the editor width, like RN\'s containerWidth / 2');
+    assert.match(tabs, /offset\(x = indicatorOffset\)\.width\(indicatorWidth\)\.clip\(shape\)\.background\(c\.tint\)/, 'one sliding indicator, clipped by the track');
+    assert.doesNotMatch(tabs, /background\(if \(open\) c\.tint/, 'tabs do not paint their own half of the track');
+    console.log('Bulk organize centers on the window, its quick dates share the row, and the editor tab indicator matches RN');
 }
 {
     const { hostGateGaps } = await import('../../ios-native/scripts/check-host-gates.mjs');

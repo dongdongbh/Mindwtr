@@ -667,6 +667,34 @@ describe('native host contract: Settings', () => {
         expect(writes).toHaveLength(2);
     });
 
+    it('shows Look up page titles only to a host that asks for it and writes the device preference', async () => {
+        freezeClock();
+        await seed({ data: 'none', settings: 'stored' });
+        const host = await openHost();
+        expect(Object.keys(value(host.getGeneralSettings()).privacy)).toEqual(['title', 'appLock', 'appLockRelockDelay', 'appSearch']);
+        expect(Object.keys(value(host.getGeneralSettings({ deviceTheme: 'dark', fetchLinkTitlesRow: false })).privacy))
+            .toEqual(['title', 'appLock', 'appLockRelockDelay', 'appSearch']);
+        expect(host.getGeneralSettings({ fetchLinkTitlesRow: 'yes' as never }).ok).toBe(false);
+
+        const row = () => value(host.getGeneralSettings({ fetchLinkTitlesRow: true })).privacy.fetchLinkTitles!;
+        expect(Object.keys(value(host.getGeneralSettings({ fetchLinkTitlesRow: true })).privacy))
+            .toEqual(['title', 'appLock', 'appLockRelockDelay', 'fetchLinkTitles', 'appSearch']);
+        expect(row()).toEqual({
+            label: 'Look up page titles',
+            description: 'Contact the linked website to name saved links on this device.',
+            value: true,
+            edit: { type: 'fetchLinkTitles', value: false },
+        });
+        expect(value(await host.setGeneralSetting({ requestId: generateUUID(), edit: { type: 'fetchLinkTitles', value: true } })))
+            .toEqual({ changed: false, deviceWrites: [] });
+        expect(value(await host.setGeneralSetting({ requestId: generateUUID(), edit: row().edit })))
+            .toEqual({ changed: true, deviceWrites: [] });
+        expect(writes).toEqual([['updateSettings', { fetchLinkTitles: false }]]);
+        expect(useTaskStore.getState().settings.fetchLinkTitles).toBe(false);
+        expect(row()).toMatchObject({ value: false, edit: { type: 'fetchLinkTitles', value: true } });
+        expect((await host.setGeneralSetting({ requestId: generateUUID(), edit: { type: 'fetchLinkTitles', value: 'off' } as never })).ok).toBe(false);
+    });
+
     it('writes nothing for a new area named like a live area, whatever its color', async () => {
         freezeClock();
         await seed({ data: 'manage', settings: 'manage' });

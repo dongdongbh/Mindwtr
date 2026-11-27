@@ -17,6 +17,7 @@ export type GmailCaptureBatch = {
     accountId: string;
     messages: Array<{ id: string; subject: string; from: string; bodyText: string }>;
     hasMore: boolean;
+    skippedUnsupported?: number;
 };
 export type GmailCaptureTransport = {
     status: () => Promise<GmailCaptureConfig>;
@@ -87,7 +88,7 @@ type GmailCaptureControllerOptions = {
     commit?: (batchId: string) => Promise<void>;
     addTasks: (items: Array<{ title: string; initialProps?: Partial<Task>; captureId: string }>) => Promise<{ success: boolean; error?: string }>;
     flushPendingSave: () => Promise<void>;
-    logInfo?: (message: string, extra?: Record<string, string>) => void;
+    logInfo?: (message: string, extra?: Record<string, string>, force?: boolean) => void;
     onStatusChange?: (status: GmailCaptureStatus) => void;
     now?: () => Date;
     setTimer?: typeof setTimeout;
@@ -214,6 +215,11 @@ export function createGmailCaptureRuntime(transport: GmailCaptureTransport) {
                     if (!saved || !isCurrent()) return;
                     await commit(batch.batchId);
                     if (!isCurrent()) return;
+                    if (batch.skippedUnsupported) {
+                        options.logInfo?.('Gmail capture advanced past unsupported messages', {
+                            releaseCheck: 'v1.3.10/gmail-unsupported-mime', count: String(batch.skippedUnsupported),
+                        }, true);
+                    }
                     imported += batch.messages.length;
                     if (batch.messages.length > 0) {
                         options.logInfo?.('Gmail capture imported messages', {

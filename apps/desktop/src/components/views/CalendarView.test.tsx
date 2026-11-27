@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Area, Project, Section, Task } from '@mindwtr/core';
 
 import { LanguageProvider } from '../../contexts/language-context';
+import * as systemLocaleModule from '../../lib/system-locale';
 import { useUiStore } from '../../store/ui-store';
 import { CalendarView } from './CalendarView';
 import { combineDateAndTime, DESKTOP_HOUR_HEIGHT } from './calendar/calendar-primitives';
@@ -220,6 +221,16 @@ describe('CalendarView', () => {
 
     afterEach(() => {
         vi.useRealTimers();
+    });
+
+    it('uses getSystemDefaultLocale for calendar locale when dateFormat is system', () => {
+        const spy = vi.spyOn(systemLocaleModule, 'getSystemDefaultLocale').mockReturnValue('fr-FR');
+        try {
+            renderCalendar();
+            expect(screen.getByRole('button', { name: 'avril 2026' })).toBeInTheDocument();
+        } finally {
+            spy.mockRestore();
+        }
     });
 
     it('renders the today marker with explicit primary contrast tokens', async () => {

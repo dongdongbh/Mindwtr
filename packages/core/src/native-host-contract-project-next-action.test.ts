@@ -121,6 +121,7 @@ describe('Reference prompt Complete project of a repeating Project', () => {
         const ios = await openSqliteHost(repeating());
         try { const proof = await origin(ios);
             const options = value(await ios.host.getReferenceProjectNextActionOptions({ origin: proof, params: { offset: 0, revision: null } }))!;
+            expect(options.completeProject).toBeNull();
             const request = { requestId: WRITE, origin: options.origin, promptRevision: options.promptRevision, action: 'completeProject' as const };
             expect(await ios.host.prepareReferenceProjectNextAction({ request, origin: proof } as never))
                 .toEqual({ ok: false, error: { code: 'INVALID_INPUT', message: 'Complete repeating projects in Mindwtr for desktop' } });

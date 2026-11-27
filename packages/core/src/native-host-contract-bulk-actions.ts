@@ -7,6 +7,7 @@ import { tFallback } from './i18n';
 import { logInfo } from './logger';
 import { isStatusListTaskReadOnly } from './menu-views-model';
 import { buildReviewShareText } from './review-views-model';
+import { getPersonOptionNames } from './people';
 import { NATIVE_HOST_CONTRACT_VERSION, NATIVE_HOST_MAX_WINDOW, type NativeHostResult, type NativeListActionResult, type NativeListToast, type NativeProjectDetailFilterView } from './native-host-contract';
 import type { createInboxViewMethods } from './native-host-contract-inbox-view';
 import {
@@ -42,6 +43,8 @@ import {
     BULK_ORGANIZE_KEEP,
     BULK_ORGANIZE_NONE,
     BULK_ORGANIZE_STATUS_OPTIONS,
+    isBulkOrganizePersonValid,
+    isBulkOrganizePriorityChoice,
     buildBulkOrganizeDateFieldModel,
     buildBulkOrganizeDialogModel,
     buildBulkOrganizeInput,
@@ -114,11 +117,10 @@ export type NativeBulkPicker = {
     submit: { edit: BulkOrganizeDraftEdit } | { create: string } | null;
 };
 
-export type NativeBulkOrganizeView = Omit<BulkOrganizeDialogModel, 'statuses' | 'dates' | 'waitingFor' | 'contexts' | 'tags'> & {
+export type NativeBulkOrganizeView = Omit<BulkOrganizeDialogModel, 'statuses' | 'dates' | 'contexts' | 'tags'> & {
 
     draft: BulkOrganizeDraft;
     statuses: (BulkOrganizeDialogModel['statuses'][number] & { edit: BulkOrganizeDraftEdit })[];
-    waitingFor: (NonNullable<BulkOrganizeDialogModel['waitingFor']> & { value: string }) | null;
     dates: (Omit<BulkOrganizeDateFieldModel, 'quickDates'> & {
         field: BulkOrganizeDialogModel['dates'][number]['field'];
         quickDates: (BulkOrganizeDateFieldModel['quickDates'][number] & { edit: BulkOrganizeDraftEdit })[];
@@ -196,7 +198,7 @@ const TEXT_LIMITS: Record<BulkOrganizeTextField, number> = {
     contexts: 2000, tags: 2000, startDate: 10, dueDate: 10, reviewDate: 10, delegateWho: 500, estimateText: 100,
 };
 const REQUIRED_DRAFT_KEYS = Object.keys(EMPTY_BULK_ORGANIZE_DRAFT);
-const DRAFT_KEYS = new Set([...REQUIRED_DRAFT_KEYS, 'estimateChoice', 'estimateText']);
+const DRAFT_KEYS = new Set([...REQUIRED_DRAFT_KEYS, 'estimateChoice', 'estimateText', 'priorityChoice', 'personChoice']);
 const PARAM_ONLY_KEYS = ['filterEdit', 'offset', 'limit', 'revision'];
 const REVIEW_PARAMS = ['scope', 'expandedAreaIds', 'expandedProjectIds', 'expandedLaterProjectIds'];
 const CONTEXTS_PARAMS = ['tokens', 'matchMode', 'searchQuery', 'filters', 'savedFilterId', 'preservedCriteria', 'sortOverride'];
@@ -222,6 +224,9 @@ export const readBulkOrganizeDraftShape = (value: unknown, requireComplete = fal
     const valid = (draft.status === BULK_ORGANIZE_KEEP || BULK_ORGANIZE_STATUS_OPTIONS.includes(draft.status))
         && isText(draft.projectChoice, 200) && isText(draft.areaChoice, 200)
         && (draft.estimateChoice === undefined || isText(draft.estimateChoice, 100))
+        && (draft.priorityChoice === undefined || isBulkOrganizePriorityChoice(draft.priorityChoice))
+        && (draft.personChoice === undefined || draft.personChoice === BULK_ORGANIZE_KEEP
+            || draft.personChoice === BULK_ORGANIZE_NONE || draft.personChoice === 'set')
         && (Object.keys(TEXT_LIMITS) as BulkOrganizeTextField[]).every((field) => (
             (field === 'estimateText' && draft[field] === undefined) || isText(draft[field], TEXT_LIMITS[field])
         ));
@@ -244,6 +249,11 @@ const readDraft = (value: unknown): BulkOrganizeDraft | null => {
 const readEdit = (value: unknown): BulkOrganizeDraftEdit | null => {
     if (!isObjectRecord(value)) return null;
     switch (value.type) {
+        case 'setPriority':
+            return isBulkOrganizePriorityChoice(value.value) ? { type: 'setPriority', value: value.value } : null;
+        case 'setPerson':
+            return value.value === BULK_ORGANIZE_KEEP || value.value === BULK_ORGANIZE_NONE
+                ? { type: 'setPerson', value: value.value } : null;
         case 'setStatus':
         case 'setProject':
         case 'setArea':
@@ -267,9 +277,10 @@ export function buildNativeBulkOrganizeView(
     if (!draft) return null;
     const state = useTaskStore.getState();
     const { t, formatDate } = context;
+    const { priorities, timeEstimates } = resolveFeatureFlags(state.settings);
     const dialog = buildBulkOrganizeDialogModel({
         draft, projects: getBulkOrganizeProjectOptions(state.projects), areas: getBulkOrganizeAreaOptions(state.areas), selectedCount: context.selectedCount, t,
-        timeEstimatesEnabled: resolveFeatureFlags(state.settings).timeEstimates,
+        timeEstimatesEnabled: timeEstimates, prioritiesEnabled: priorities, personNames: getPersonOptionNames(state.people, state.tasks),
     });
     const now = new Date();
     return {
@@ -277,7 +288,6 @@ export function buildNativeBulkOrganizeView(
         canApply: dialog.canApply && hasValidBulkOrganizeDates(draft),
         draft,
         statuses: dialog.statuses.map((status) => ({ ...status, edit: { type: 'setStatus', value: status.value } })),
-        waitingFor: dialog.waitingFor ? { ...dialog.waitingFor, value: draft.delegateWho } : null,
         dates: dialog.dates.map(({ field, label }) => {
             const model = buildBulkOrganizeDateFieldModel({ label, value: draft[field], now, t, formatDate });
             return {
@@ -340,12 +350,12 @@ export function buildNativeRemoveTagPicker(tags: readonly string[], query: strin
 
 export function readBulkOrganizeApply(value: unknown): NativeHostResult<BulkOrganizeTaskUpdateInput> {
     const draft = readDraft(value);
-    const estimatesEnabled = resolveFeatureFlags(useTaskStore.getState().settings).timeEstimates;
-    if (!draft || !hasValidBulkOrganizeDates(draft) || (estimatesEnabled && !isBulkOrganizeEstimateValid(draft))) {
+    const { priorities, timeEstimates } = resolveFeatureFlags(useTaskStore.getState().settings);
+    if (!draft || !hasValidBulkOrganizeDates(draft) || (timeEstimates && !isBulkOrganizeEstimateValid(draft))) {
         return fail('INVALID_INPUT', 'A Bulk organize draft with choices the dialog offers is required');
     }
-    if (draft.status === 'waiting' && !draft.delegateWho.trim()) return fail('INVALID_INPUT', 'Waiting needs the person these tasks wait for');
-    return { ok: true, value: buildBulkOrganizeInput(draft, estimatesEnabled) };
+    if (!isBulkOrganizePersonValid(draft)) return fail('INVALID_INPUT', 'Waiting needs the person these tasks wait for');
+    return { ok: true, value: buildBulkOrganizeInput(draft, timeEstimates, priorities) };
 }
 
 export function createBulkActionMethods(deps: BulkActionDeps) {

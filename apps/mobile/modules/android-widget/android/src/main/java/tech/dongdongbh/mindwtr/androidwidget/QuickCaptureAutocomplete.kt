@@ -2,13 +2,13 @@ package tech.dongdongbh.mindwtr.androidwidget
 
 internal object QuickCaptureAutocomplete {
   data class Token(val prefix: Char, val start: Int, val end: Int, val query: String)
-  data class Choice(val label: String, val token: String, val projectId: String? = null)
+  data class Choice(val label: String, val token: String, val destination: WidgetPayload.CaptureDestination? = null)
 
   fun tokenAt(text: String, caret: Int): Token? {
     if (caret !in 0..text.length) return null
     var index = 0
     while (index < text.length) {
-      if (text[index] !in "@#+" || (index > 0 && !text[index - 1].isWhitespace())) {
+      if (text[index] !in "@#+!" || (index > 0 && !text[index - 1].isWhitespace())) {
         index++
         continue
       }
@@ -52,7 +52,7 @@ internal object QuickCaptureAutocomplete {
   }
 
   fun replace(text: String, token: Token, choice: Choice): Pair<String, Int> {
-    if (choice.projectId == null) return QuickCaptureActivity.insertToken(text, token.start, token.end, choice.token)
+    if (choice.destination == null) return QuickCaptureActivity.insertToken(text, token.start, token.end, choice.token)
     val before = text.substring(0, token.start)
     val after = text.substring(token.end)
     val suffix = if (before.isEmpty() || before.last().isWhitespace()) after.trimStart() else after

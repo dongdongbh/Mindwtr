@@ -1045,6 +1045,37 @@ describe('InboxProcessor', () => {
         });
     });
 
+    it.each(['guided', 'quick'])('files %s Inbox items with tokens selected from the full saved catalog', async (mode) => {
+        const savedTag = '#Research, "Planning" \\ backlog';
+        const savedTokens = ['@saved context', '@spare context', savedTag].map((token) => ({ token, rev: 1, revBy: 'test', updatedAt: nowIso }));
+        const { getByRole, getByText, updateTask } = renderInboxProcessor({
+            settings: { gtd: { taskEditor: { hidden: [] } }, taxonomy: { contexts: savedTokens.slice(0, 2), tags: savedTokens.slice(2) } },
+            tasks: [{ ...inboxTask, contexts: ['@old context'] }],
+        });
+        fireEvent.click(getByRole('button', { name: /process\.btn/i }));
+        if (mode === 'quick') {
+            fireEvent.click(getByRole('button', { name: 'process.modeQuick' }));
+        } else {
+            for (const label of ['process.refineNext', 'process.yesActionable', 'process.moreThanOneStepNo', 'process.takesLonger', 'process.doIt']) {
+                fireEvent.click(getByText(label));
+            }
+        }
+
+        fireEvent.click(getByRole('button', { name: 'taskEdit.contextsLabel · settings.browse' }));
+        expect(getByRole('checkbox', { name: '@old context' })).toBeChecked();
+        fireEvent.click(getByRole('checkbox', { name: '@old context' }));
+        fireEvent.click(getByRole('checkbox', { name: '@saved context' }));
+        fireEvent.click(getByRole('checkbox', { name: '@spare context' }));
+        fireEvent.click(getByRole('button', { name: 'taskEdit.tagsLabel · settings.browse' }));
+        fireEvent.click(getByRole('checkbox', { name: savedTag }));
+        fireEvent.click(getByRole('button', { name: /process\.next/ }));
+        if (mode === 'guided') fireEvent.click(getByRole('button', { name: /process\.noProject/ }));
+
+        await waitFor(() => expect(updateTask).toHaveBeenCalledWith('task-1', expect.objectContaining({
+            contexts: ['@saved context', '@spare context'], tags: [savedTag], status: 'next',
+        })));
+    });
+
     it('prefills quick mode scheduling fields with the configured default time', async () => {
         const { getByRole, getByLabelText, updateTask } = renderInboxProcessor({
             gtd: {

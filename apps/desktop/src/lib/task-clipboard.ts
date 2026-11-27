@@ -1,4 +1,4 @@
-import { translateWithFallback, type Task } from '@mindwtr/core';
+import { buildEntityOpenUrl, translateWithFallback, type Task } from '@mindwtr/core';
 import { useUiStore } from '../store/ui-store';
 import { logInfo, logWarn } from './app-log';
 
@@ -54,7 +54,7 @@ export async function copyTaskReference(
     input?: TaskClipboardInput,
 ): Promise<void> {
     await writeTaskClipboard(
-        kind === 'link' ? `mindwtr://open?task=${encodeURIComponent(taskId)}` : taskId,
+        kind === 'link' ? buildEntityOpenUrl('task', taskId) : taskId,
         t,
         translateWithFallback(t, 'list.taskCopied', 'Task copied to clipboard'),
         'menu',

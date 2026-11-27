@@ -19,7 +19,7 @@ class QuickCaptureAutocompleteTest {
     assertEquals('+', token.prefix)
     assertEquals("週末 p", token.query)
     val result = QuickCaptureAutocomplete.replace(text, token,
-      QuickCaptureAutocomplete.Choice("週末 plan", "+\"週末 plan\"", "project-a"))
+      QuickCaptureAutocomplete.Choice("週末 plan", "+\"週末 plan\"", WidgetPayload.CaptureDestination("project", "project-a")))
     assertEquals("Read tonight", result.first)
     assertEquals("Read ".length, result.second)
   }

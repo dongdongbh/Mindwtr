@@ -6,7 +6,7 @@ import { INCUBATE_ICON as IncubateIcon, START_LATER_ICON as StartLaterIcon, TASK
 const SomedayIcon = TASK_STATUS_ICONS.someday;
 const ReferenceIcon = TASK_STATUS_ICONS.reference;
 const NextIcon = TASK_STATUS_ICONS.next;
-import { getProjectAccentColor, DEFAULT_PROJECT_COLOR, filterProjectsBySelectedArea, formatTimeEstimateLabel, safeFormatDate, safeParseDate, setTaskViewSectionId, tFallback, type AppData, type Area, type Project, type Task, type TaskDraft, type TaskDraftSetter, type TaskPriority, type TimeEstimate,
+import { getProjectAccentColor, DEFAULT_PROJECT_COLOR, filterProjectsBySelectedArea, formatTaskTokenInput, formatTimeEstimateLabel, safeFormatDate, safeParseDate, setTaskViewSectionId, tFallback, type AppData, type Area, type Project, type Task, type TaskDraft, type TaskDraftSetter, type TaskPriority, type TimeEstimate,
     numericTextCollator,
 } from '@mindwtr/core';
 
@@ -30,6 +30,7 @@ import { TaskEditorAiPanels } from './Task/TaskEditorAiPanels';
 import { useTaskItemAi } from './Task/useTaskItemAi';
 import { useLanguage } from '../contexts/language-context';
 import { TokenAutocompleteInput } from './Task/TokenAutocompleteInput';
+import { TokenPicker } from './Task/TokenPicker';
 import { AutocompleteTextInput } from './ui/AutocompleteTextInput';
 import { AreaSelector } from './ui/AreaSelector';
 import { ProjectSelector } from './ui/ProjectSelector';
@@ -98,6 +99,8 @@ export type InboxProcessingWizardProps = {
     toggleContext: (ctx: string) => void;
     toggleTag: (tag: string) => void;
     handleConfirmContexts: () => void;
+    projectName: string;
+    setProjectName: (value: string) => void;
     convertToProject: boolean;
     setConvertToProject: (value: boolean) => void;
     setNextActionDraft: (value: string) => void;
@@ -176,6 +179,8 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
     toggleContext,
     toggleTag,
     handleConfirmContexts,
+    projectName,
+    setProjectName,
     convertToProject,
     setConvertToProject,
     setNextActionDraft,
@@ -524,8 +529,8 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
                             </label>
                             <input
                                 ref={titleInputRef}
-                                value={processingTitle}
-                                onChange={(e) => setProcessingTitle(e.target.value)}
+                                value={convertToProject ? projectName : processingTitle}
+                                onChange={(e) => (convertToProject ? setProjectName : setProcessingTitle)(e.target.value)}
                                 className="w-full bg-muted/50 border border-border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/40 focus:outline-none"
                             />
                         </div>
@@ -969,7 +974,8 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
                                     onChange={setCustomContext}
                                     suggestions={[...suggestedContexts, ...allContexts]}
                                     prefix="@"
-                                    onAcceptToken={(token) => addCustomContext(token)}
+                                    quotedTokens
+                                    onAcceptToken={(token) => addCustomContext(formatTaskTokenInput([token]))}
                                     className="flex-1 bg-muted border border-border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary"
                                     onKeyDown={(e) => {
                                         if (e.key === 'Enter') {
@@ -985,6 +991,7 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
                                     +
                                 </button>
                             </div>
+                            <TokenPicker t={t} label={t('taskEdit.contextsLabel')} tokens={allContexts} selected={selectedContexts} onToggle={toggleContext} />
 
                             {suggestedContexts.length > 0 && (
                                 <div className="space-y-2">
@@ -1021,7 +1028,8 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
                                     onChange={setCustomTag}
                                     suggestions={[...suggestedTags, ...allTags]}
                                     prefix="#"
-                                    onAcceptToken={(token) => addCustomTag(token)}
+                                    quotedTokens
+                                    onAcceptToken={(token) => addCustomTag(formatTaskTokenInput([token]))}
                                     className="flex-1 bg-muted border border-border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary"
                                     onKeyDown={(e) => {
                                         if (e.key === 'Enter') {
@@ -1037,6 +1045,7 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
                                     +
                                 </button>
                             </div>
+                            <TokenPicker t={t} label={t('taskEdit.tagsLabel')} tokens={allTags} selected={selectedTags} onToggle={toggleTag} />
                             {suggestedTags.length > 0 && (
                                 <div className="flex flex-wrap gap-2 justify-center">
                                     {suggestedTags.map(tag => (
@@ -1197,10 +1206,6 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
                         <button
                             type="button"
                             onClick={() => {
-                                if (!convertToProject) {
-                                    setNextActionDraft('');
-                                    setExtraActionDrafts([]);
-                                }
                                 setDestinationRevision((revision) => revision + 1);
                                 setConvertToProject(!convertToProject);
                             }}
@@ -1233,6 +1238,14 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
                                     />
                                 </div>
                             ) : null}
+                            <label className="block space-y-1">
+                                <span className="text-xs text-muted-foreground font-medium">{t('projects.projectName')}</span>
+                                <input
+                                    value={projectName}
+                                    onChange={(event) => setProjectName(event.target.value)}
+                                    className="w-full bg-card border border-border rounded-lg py-2 px-3 text-sm focus:ring-2 focus:ring-primary"
+                                />
+                            </label>
                             <InboxNextActionDrafts
                                 t={t}
                                 nextActionDraft={nextActionDraft}
@@ -1243,6 +1256,7 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
                             />
                             <button
                                 type="button"
+                                disabled={!projectName.trim() || !nextActionDraft.trim()}
                                 onClick={handleConvertToProject}
                                 className="w-full py-3 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90"
                             >

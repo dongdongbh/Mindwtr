@@ -47,6 +47,16 @@ describe('task-draft', () => {
         expect(isTaskDraftDirty(recovered.draft, task)).toBe(false);
     });
 
+    it('round-trips exact token names and still accepts ordinary comma-separated typing', () => {
+        const tags = ['#Client', '#client', '#Research, "Planning" \\ backlog', '#Area #Task'];
+        const task = { ...baseTask, tags };
+        const draft = createTaskDraft(task);
+        expect(isTaskDraftDirty(draft, task)).toBe(false);
+        expect(taskDraftToUpdatePatch(draft, task)?.tags).toEqual(tags);
+        const typed = setTaskDraftField(draft, 'tags', `${draft.tags}, sprint, #follow-up`);
+        expect(taskDraftToUpdatePatch(typed, task)?.tags).toEqual([...tags, '#sprint', '#follow-up']);
+    });
+
     it.each([
         ['absolute Z', '2026-10-05T15:00:00.000Z', '2026-10-05T11:00', true],
         ['absolute offset', '2026-10-05T17:00:00+02:00', '2026-10-05T11:00', true],

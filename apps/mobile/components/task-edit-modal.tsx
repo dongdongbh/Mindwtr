@@ -12,8 +12,8 @@ import { Task,
     type TaskStatus,
     buildTaskEditorMonthlyCustomRRule,
     getTaskEditorMonthlyCustom,
-    getRetainedTaskContexts,
-    getSavedTaxonomyTokens,
+    getTaskTokenCatalog,
+    formatTaskTokenInput,
     isTaskEditorTimeSpentEnabled,
     getTaskEditorBackdatedCompletionStart,
     resolveAutoTextDirection,
@@ -257,9 +257,10 @@ function TaskEditModalInner({
             && allTasks.some((savedTask) => savedTask.id === task.id) ? task.id : undefined,
         [allTasks, task],
     );
-    const contextHistory = useMemo(
-        () => Array.from(new Set([...getRetainedTaskContexts(allTasks), ...getSavedTaxonomyTokens(settings, 'context')])),
-        [allTasks, settings],
+    const taxonomy = settings.taxonomy;
+    const tokenCatalog = useMemo(
+        () => getTaskTokenCatalog(allTasks, taxonomy),
+        [allTasks, taxonomy],
     );
     const { t, language } = useLanguage();
 
@@ -487,6 +488,8 @@ function TaskEditModalInner({
     }, [canCompletePreview, draftLifecycle]);
 
     const {
+        contextSuggestionPool,
+        tagSuggestionPool,
         contextTokenSuggestions,
         tagTokenSuggestions,
         frequentContextSuggestions,
@@ -498,8 +501,8 @@ function TaskEditModalInner({
         editedTags: draftTags,
         contextInputDraft,
         tagInputDraft,
-        contextHistory,
-        allTags,
+        contextHistory: tokenCatalog.contexts,
+        allTags: tokenCatalog.tags,
         contextTokenUsage,
         tagTokenUsage,
     });
@@ -812,11 +815,11 @@ function TaskEditModalInner({
 
     const updateContextInput = useCallback((text: string) => {
         setContextInputDraft(text);
-        setDraftField('contexts', parseTokenList(text, '@').join(', '));
+        setDraftField('contexts', formatTaskTokenInput(parseTokenList(text, '@')));
     }, [setContextInputDraft, setDraftField]);
     const updateTagInput = useCallback((text: string) => {
         setTagInputDraft(text);
-        setDraftField('tags', parseTokenList(text, '#').join(', '));
+        setDraftField('tags', formatTaskTokenInput(parseTokenList(text, '#')));
     }, [setDraftField, setTagInputDraft]);
     const applyContextSuggestion = useCallback((token: string) => {
         updateContextInput(replaceTrailingToken(contextInputDraft, token));
@@ -883,11 +886,11 @@ function TaskEditModalInner({
     }, [tagInputDraft, updateTagInput]);
     const commitContextDraft = useCallback(() => {
         setIsContextInputFocused(false);
-        updateContextInput(parseTokenList(contextInputDraft, '@').join(', '));
+        updateContextInput(formatTaskTokenInput(parseTokenList(contextInputDraft, '@')));
     }, [contextInputDraft, setIsContextInputFocused, updateContextInput]);
     const commitTagDraft = useCallback(() => {
         setIsTagInputFocused(false);
-        updateTagInput(parseTokenList(tagInputDraft, '#').join(', '));
+        updateTagInput(formatTaskTokenInput(parseTokenList(tagInputDraft, '#')));
     }, [setIsTagInputFocused, tagInputDraft, updateTagInput]);
 
     const {
@@ -981,6 +984,7 @@ function TaskEditModalInner({
         commitTagDraft,
         checklist: taskEditDraft?.checklist,
         contextInputDraft,
+        contextSuggestionPool,
         contextTokenSuggestions,
         createAssignedToPerson,
         customWeekdays,
@@ -1048,6 +1052,7 @@ function TaskEditModalInner({
         showDescriptionPreview,
         styles,
         tagInputDraft,
+        tagSuggestionPool,
         tagTokenSuggestions,
         task,
         t,
@@ -1075,6 +1080,7 @@ function TaskEditModalInner({
         commitTagDraft,
         taskEditDraft?.checklist,
         contextInputDraft,
+        contextSuggestionPool,
         contextTokenSuggestions,
         createAssignedToPerson,
         customWeekdays,
@@ -1140,6 +1146,7 @@ function TaskEditModalInner({
         showDatePicker,
         showDescriptionPreview,
         tagInputDraft,
+        tagSuggestionPool,
         tagTokenSuggestions,
         task,
         t,

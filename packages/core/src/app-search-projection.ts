@@ -1,3 +1,4 @@
+import { buildEntityOpenUrl } from './capture-deeplink';
 import type { Area, Project, Task } from './types';
 import { isTaskVisible } from './store-helpers';
 
@@ -44,7 +45,7 @@ export function buildTaskDoc(task: Task, scheme = 'mindwtr'): AppSearchDoc | nul
         status: task.status,
         ...(task.dueDate ? { dueDate: task.dueDate } : {}),
         ...(task.projectId ? { parentId: task.projectId } : task.areaId ? { parentId: task.areaId } : {}),
-        deepLink: `${scheme}://open?task=${encodeURIComponent(task.id)}`,
+        deepLink: buildEntityOpenUrl('task', task.id, scheme),
     };
 }
 
@@ -56,7 +57,7 @@ export function buildProjectDoc(project: Project, scheme = 'mindwtr'): AppSearch
         title: project.title,
         status: project.status,
         ...(project.areaId ? { parentId: project.areaId } : {}),
-        deepLink: `${scheme}://open?project=${encodeURIComponent(project.id)}`,
+        deepLink: buildEntityOpenUrl('project', project.id, scheme),
     };
 }
 
@@ -66,7 +67,7 @@ export function buildAreaDoc(area: Area, scheme = 'mindwtr'): AppSearchDoc | nul
         id: appSearchDocId('area', area.id),
         kind: 'area',
         title: area.name,
-        deepLink: `${scheme}://open?area=${encodeURIComponent(area.id)}`,
+        deepLink: buildEntityOpenUrl('area', area.id, scheme),
     };
 }
 

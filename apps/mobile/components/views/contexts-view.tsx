@@ -82,7 +82,7 @@ type BulkTokenPickerState = {
   action: 'add' | 'remove';
 } | null;
 
-export function ContextsView({ initialSavedFilterId }: { initialSavedFilterId?: string } = {}) {
+export function ContextsView({ initialSavedFilterId, initialContext }: { initialSavedFilterId?: string; initialContext?: string } = {}) {
   const {
     tasks,
     projects,
@@ -111,7 +111,7 @@ export function ContextsView({ initialSavedFilterId }: { initialSavedFilterId?: 
   const { isDark } = useTheme();
   const { t } = useLanguage();
   const { token } = useLocalSearchParams<{ token?: string | string[] }>();
-  const [selectedContexts, setSelectedContexts] = useState<string[]>([]);
+  const [selectedContexts, setSelectedContexts] = useState<string[]>(() => initialContext ? [initialContext] : []);
   const [matchMode, setMatchMode] = useState<ContextOrTagMatchMode>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [editingTask, setEditingTask] = useState<Task | null>(null);

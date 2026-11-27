@@ -50,6 +50,26 @@
         </LinearLayout>
     </LinearLayout>
 
+    <LinearLayout
+        android:id="@+id/mindwtr_widget_opacity_row"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/mindwtr_widget_opacity_label"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:labelFor="@id/mindwtr_widget_opacity" />
+
+        <SeekBar
+            android:id="@+id/mindwtr_widget_opacity"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:max="100" />
+    </LinearLayout>
+
     <EditText
         android:id="@+id/mindwtr_widget_configure_search"
         android:layout_width="match_parent"

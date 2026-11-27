@@ -1529,6 +1529,7 @@ describe('TaskItem', () => {
     });
 
     it('shows due date metadata when compact details are enabled', () => {
+        const formatting = core.getDateFormattingConfig();
         configureDateFormatting({ language: 'en', dateFormat: 'mdy', systemLocale: 'en-US' });
         const taskWithDueDate: Task = {
             ...mockTask,
@@ -1540,7 +1541,36 @@ describe('TaskItem', () => {
                 <TaskItem task={taskWithDueDate} compactMetaEnabled />
             </LanguageProvider>
         );
-        expect(getByText(safeFormatDate('2026-03-20', 'P'))).toBeInTheDocument();
+        try {
+            expect(getByText(safeFormatDate('2026-03-20', 'P'))).toBeInTheDocument();
+        } finally {
+            configureDateFormatting(formatting);
+        }
+    });
+
+    it('formats task dates using the active system short-date pattern', () => {
+        const formatting = core.getDateFormattingConfig();
+        configureDateFormatting({
+            language: 'en',
+            dateFormat: 'system',
+            systemLocale: 'en-US',
+            systemDateFormat: 'dd-MM-yyyy',
+        });
+        const taskWithDueDate: Task = {
+            ...mockTask,
+            id: 'task-with-system-due-date',
+            dueDate: '2026-11-23',
+        };
+        const { getByText } = render(
+            <LanguageProvider>
+                <TaskItem task={taskWithDueDate} compactMetaEnabled />
+            </LanguageProvider>
+        );
+        try {
+            expect(getByText('23-11-2026')).toBeInTheDocument();
+        } finally {
+            configureDateFormatting(formatting);
+        }
     });
 
     it('opens the task quick actions menu on right-click', async () => {

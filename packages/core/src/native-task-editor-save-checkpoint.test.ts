@@ -84,7 +84,7 @@ describe('real native ordinary Save checkpoint correspondence (pure, unbound)', 
     });
     it('accounts for combined actual ordinary editor fields, schedule/recurrence and associations', () => {
         const { input } = fixture({ title: 'Edited', description: 'Notes\nTwo', location: 'Office', timeEstimate: 'custom:45',
-            contexts: '@home @office', tags: '#one #two', assignedTo: 'Literal Person', timeSpentMinutes: 12,
+            contexts: '@home, @office', tags: '#one, #two', assignedTo: 'Literal Person', timeSpentMinutes: 12,
             projectId: 'project', areaId: 'area', sectionId: 'section', dueDate: '2026-10-06',
             relativeStartOffset: { amount: -2, unit: 'day' }, recurrence: 'weekly', recurrenceRRule: 'FREQ=WEEKLY;INTERVAL=2;COUNT=4',
             recurrenceStrategy: 'strict', showFutureRecurrence: true, priority: 'high', energyLevel: 'low' }, initial(), ['contexts', 'tags', 'assignedTo']);
@@ -181,6 +181,14 @@ describe('real native ordinary Save checkpoint correspondence (pure, unbound)', 
         ready(fixture({ contexts: '@changed' }, initial(), ['contexts']).input);
         refused(fixture({ contexts: 'changed changed' }, initial(), ['contexts']).input);
         ready(fixture({ assignedTo: '  Literal, @name!  ' }, initial(), ['assignedTo']).input);
+    });
+    it.each([['contexts', '@'], ['tags', '#']] as const)('accepts current and legacy spellings of an edited %s token', (field, prefix) => {
+        const legacy = `${prefix}one ${prefix}two`;
+        for (const value of [legacy, `"${legacy}"`, `"${prefix}one, two"`]) {
+            const { input } = fixture({ [field]: value }, initial(), [field]);
+            ready(input);
+            refused(changePayload(input, (payload) => { payload.raw.tokenResolved[field] = `${prefix}other`; }));
+        }
     });
     it.each(['contexts', 'tags'] as const)('refuses long noncanonical marked %s at every bounded display length', (field) => {
         const text = 'raw duplicate '.repeat(160); expect(text.length).toBeGreaterThan(2000);

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { buildWidgetPayload } from './widget-payload';
+import { buildAndroidWidgetPublication, buildWidgetPayload, createWidgetPayloadProjection, iosWidgetProjectionOptions } from './widget-payload';
 import { loadTranslations } from './i18n/i18n-loader';
 import type { AppData, Task } from './types';
 
@@ -44,7 +44,42 @@ describe('saved Focus widget scope', () => {
             focusFilter: { criteria: { contexts: ['@person'] }, sortBy: 'default' } });
         expect(payload.lists['filter:without-person'].items.map(({ id }) => id))
             .toEqual(['today', 'due', 'review', 'available', 'upcoming']);
+        expect(payload.lists['filter:without-person'].sections?.map(({ title }) => title))
+            .toEqual(["Today's Focus", 'Today', 'Review Due', 'Next Actions', 'Upcoming']);
         expect(payload.lists['filter:without-person'].totalCount).toBe(5);
+    });
+
+    it('groups only Next Actions and keeps the widget task budget across sections', () => {
+        const source = data();
+        source.settings.savedFilters![0].groupBy = 'context';
+        for (const task of source.tasks) {
+            if (!task.contexts?.length) task.contexts = ['@desk'];
+        }
+        source.tasks.push(task('shared', { contexts: ['@desk', '@home'] }));
+
+        const selection = 'filter:without-person';
+        const list = buildAndroidWidgetPublication(source, 'en', { listSelections: [selection] }).lists[selection];
+        expect(list.sections?.map(({ title, detail, items }) => [title, detail, items.map(({ id }) => id)])).toEqual([
+            ["Today's Focus", null, ['today']],
+            ['Today', null, ['due']],
+            ['Review Due', null, ['review']],
+            ['Next Actions · @desk', '2', ['available', 'shared']],
+            ['Next Actions · @home', '1', ['shared']],
+            ['Upcoming', null, ['upcoming']],
+        ]);
+        expect(list.totalCount).toBe(6);
+        const ios = createWidgetPayloadProjection(source, 'en', iosWidgetProjectionOptions({})).build(13);
+        expect(ios.lists[selection]).toEqual(list);
+
+        const limited = buildWidgetPayload(source, 'en', { maxItems: 4, listIds: [selection] }).lists[selection];
+        expect(limited.items.map(({ id }) => id)).toEqual(['today', 'due', 'review', 'available']);
+        expect(limited.sections?.at(-1)?.detail).toBe('2');
+        expect(limited.totalCount).toBe(6);
+
+        const ungrouped = 'group:none:filter%3Awithout-person';
+        const override = buildWidgetPayload(source, 'en', { maxItems: 50, listIds: [ungrouped] }).lists[ungrouped];
+        expect(override.sections?.map(({ title }) => title))
+            .toEqual(["Today's Focus", 'Today', 'Review Due', 'Next Actions', 'Upcoming']);
     });
 
     it('retains explicit mixed-status Context filters', () => {

@@ -4,7 +4,7 @@ import { buildContextsFilterModel, CONTEXTS_FILTER_STATUSES, getContextsSaveCrit
 import { isGettingStartedProject } from './getting-started-seed';
 import { nativeTaskRowSwipeActions, type NativeTaskRowSwipeActionsInput } from './native-host-contract-row-swipe';
 import { createProjectTasksMoveMethods } from './native-host-contract-project-bulk-status';
-import { nativeProjectTaskSources, nativeProjectTaskModel, nativeProjectFilterVisibility } from './native-host-project-task-list';
+import { isProjectSectionIdList, nativeProjectTaskSources, nativeProjectTaskModel, nativeProjectFilterVisibility } from './native-host-project-task-list';
 import { getFocusHiddenByAreaLabel } from './focus-controls';
 import { getPomodoroTaskChoices } from './pomodoro';
 import { createReferenceProjectNextActionMethods } from './native-host-contract-project-next-action';
@@ -30,8 +30,8 @@ import { isCustomTimeEstimate, TIME_ESTIMATE_OPTIONS } from './calendar-scheduli
 import { isRecurrenceRule, parseRRuleString } from './recurrence';
 import { createTaskDraft, isTaskDraftDateInputBaseline, resolveTaskDraftTitle, serializeTaskDraftTokens, TASK_DRAFT_FIELD_KEYS, type TaskDraft, type TaskDraftField } from './task-draft';
 import { getTaskReminderPolicy, normalizeTaskReminderPolicy } from './task-reminder-policy';
-import { getRetainedTaskContexts, getUsedTaskTokens } from './task-token-usage';
-import { getSavedTaxonomyTokens } from './taxonomy-catalog';
+import { getTaskTokenCatalog, getUsedTaskTokens } from './task-token-usage';
+import { formatTaskTokenInput } from './task-token-input';
 import type { AppSettings, FilterCriteria } from './types';
 import {
     applyTaskDraftPatch,
@@ -645,6 +645,7 @@ export type NativeProjectDetail = {
 
     projectRevision: string;
     readOnly: boolean;
+    completionBlocked?: true;
     metadata: ProjectDetailsMetadata;
 
     gettingStarted?: NativeGettingStartedActions;
@@ -662,11 +663,13 @@ export type NativeProjectDetailView = Omit<NativeProjectDetail, 'items'> & {
         type: 'section'; id: string; title: string; count: number; muted: boolean;
         collapsible: boolean; collapsed: boolean;
 
+        sectionId?: string;
         flowLabel?: string;
     })[];
     controls: {
         showCompleted: boolean;
         completedCollapsed: boolean;
+        collapsedSectionIds?: string[];
         canToggleCompleted: boolean;
         groupCompletedTasksLast: boolean;
         hasReorderTargets: boolean;
@@ -1150,13 +1153,12 @@ export function createNativeHostContract(options: {
     let cachedFilteredProjects: NativeFilteredProjectsView | null = null;
     let cachedProjectDetailKey = '';
     let cachedProjectDetail: ProjectDetailCache | null = null;
-    let cachedContextHistory: { tasks: Task[]; taxonomy: AppSettings['taxonomy']; tokens: string[] } | null = null;
+    let cachedTokenCatalog: { tasks: Task[]; taxonomy: AppSettings['taxonomy']; tokens: ReturnType<typeof getTaskTokenCatalog> } | null = null;
     let cachedMarkdownLookup: { tasks: Task[]; projects: Project[]; lookup: ReturnType<typeof createMarkdownLinkLookup> } | null = null;
-    const retainedContexts = (tasks: Task[]): string[] => {
-        const { taxonomy } = useTaskStore.getState().settings;
-        if (cachedContextHistory?.tasks === tasks && cachedContextHistory.taxonomy === taxonomy) return cachedContextHistory.tokens;
-        const tokens = [...new Set([...getRetainedTaskContexts(tasks), ...getSavedTaxonomyTokens({ taxonomy }, 'context')])];
-        cachedContextHistory = { tasks, taxonomy, tokens };
+    const retainedTokenCatalog = (tasks: Task[], taxonomy: AppSettings['taxonomy']) => {
+        if (cachedTokenCatalog?.tasks === tasks && cachedTokenCatalog.taxonomy === taxonomy) return cachedTokenCatalog.tokens;
+        const tokens = getTaskTokenCatalog(tasks, taxonomy);
+        cachedTokenCatalog = { tasks, taxonomy, tokens };
         return tokens;
     };
     let cachedProjectNotesKey = '';
@@ -1475,6 +1477,9 @@ export function createNativeHostContract(options: {
     };
 
 
+    const canCompleteProject = (project: Pick<Project, 'repeatAfterCount'>) =>
+        !project.repeatAfterCount || options.repeatingProjectCompletion === true;
+
     const projectTaskSources = (projectId: string, showCompleted: boolean) => {
         const state = useTaskStore.getState();
         const data = { tasks: state._allTasks, projects: state._allProjects, sections: state._allSections,
@@ -1484,14 +1489,14 @@ export function createNativeHostContract(options: {
     };
 
     const projectDetail = (projectId: string, currentRevision: string, showCompleted = false, completedCollapsed = false,
-        filter?: { resolved: ResolvedListFilter; sheetOpen: boolean }): ProjectDetailCache | null => {
+        filter?: { resolved: ResolvedListFilter; sheetOpen: boolean; collapsedSectionIds?: string[] }): ProjectDetailCache | null => {
         const key = JSON.stringify([currentRevision, projectId, showCompleted, completedCollapsed, filter?.resolved.state, filter?.sheetOpen]);
         if (cachedProjectDetailKey === key && cachedProjectDetail) return cachedProjectDetail;
         const sources = projectTaskSources(projectId, showCompleted);
         if (!sources) return null;
         const { state, project, options, projectTasks } = sources;
         const projectSortBy = resolveTaskSortByForFeatures(project.taskSortBy ?? 'default', state.settings);
-        const model = nativeProjectTaskModel(sources.data, sources, completedCollapsed, filter?.resolved, translate);
+        const model = nativeProjectTaskModel(sources.data, sources, completedCollapsed, filter?.resolved, translate, filter?.collapsedSectionIds);
         const area = state.areas.find((candidate) => candidate.id === project.areaId);
         cachedProjectDetail = {
             readOnly: options.readOnly,
@@ -1502,9 +1507,9 @@ export function createNativeHostContract(options: {
                 guide: { label: translate('onboarding.readGuide'), url: getDocsGuideUrl('start/getting-started', language, 'basic-workflow') },
             } : null,
             groupCompletedTasksLast: options.groupCompletedTasksLast,
-            hasReorderTargets: model.sections.length > 1 || model.items.some((item) => item.type === 'task'
-                    && item.task.status !== 'reference'
-                    && !(options.groupCompletedTasksLast && item.task.status === 'done')),
+            hasReorderTargets: model.sections.length > 1 || model.items.some((item) => item.type === 'section'
+                ? item.collapsed && !item.synthetic && item.count > 0
+                : item.task.status !== 'reference' && !(options.groupCompletedTasksLast && item.task.status === 'done')),
             metadata: getProjectDetailsPresentation(project, {
                 isArchivedProject: project.status === 'archived',
                 areaName: area?.name || tFallback(translate, 'projects.noArea', 'No Area'),
@@ -1524,7 +1529,7 @@ export function createNativeHostContract(options: {
 
     const readProjectDetail = (
         projectId: string, offset: number, limit: number, currentRevision: string, now: Date,
-        showCompleted = false, completedCollapsed = false, filter?: { resolved: ResolvedListFilter; sheetOpen: boolean },
+        showCompleted = false, completedCollapsed = false, filter?: { resolved: ResolvedListFilter; sheetOpen: boolean; collapsedSectionIds?: string[] },
     ): NativeHostResult<{ value: NativeProjectDetail; cache: ProjectDetailCache }> => {
         const detail = projectDetail(projectId, currentRevision, showCompleted, completedCollapsed, filter);
         if (!detail) return fail('TASK_NOT_FOUND', 'Project not found');
@@ -1539,6 +1544,7 @@ export function createNativeHostContract(options: {
                 projectId,
                 projectRevision: revisionOf(savedProject),
                 readOnly: detail.readOnly,
+                ...(!detail.readOnly && !canCompleteProject(savedProject) ? { completionBlocked: true } : {}),
                 metadata: detail.metadata,
 
                 ...(detail.gettingStarted ? { gettingStarted: detail.gettingStarted } : {}),
@@ -1564,7 +1570,7 @@ export function createNativeHostContract(options: {
 
     const projectDetailView = (
         value: NativeProjectDetail, cache: ProjectDetailCache, offset: number,
-        showCompleted: boolean, completedCollapsed: boolean,
+        showCompleted: boolean, completedCollapsed: boolean, collapsedSectionIds?: string[],
     ): NativeProjectDetailView => ({
         ...value,
         items: value.items.map((item, index) => {
@@ -1572,11 +1578,13 @@ export function createNativeHostContract(options: {
             const source = cache.items[offset + index];
             return { ...item, collapsible: source.type === 'section' && source.collapsible === true,
                 collapsed: source.type === 'section' && source.collapsed === true,
+                ...(collapsedSectionIds !== undefined && source.type === 'section' && !source.synthetic ? { sectionId: source.id } : {}),
                 ...(source.type === 'section' && source.flowLabel ? { flowLabel: source.flowLabel } : {}) };
         }),
         controls: {
             showCompleted,
             completedCollapsed,
+            ...(collapsedSectionIds === undefined ? {} : { collapsedSectionIds }),
             canToggleCompleted: !cache.readOnly,
             groupCompletedTasksLast: cache.groupCompletedTasksLast,
             hasReorderTargets: cache.hasReorderTargets,
@@ -1588,7 +1596,7 @@ export function createNativeHostContract(options: {
 
     const projectFilterData = (
         projectId: string, showCompleted: boolean, completedCollapsed: boolean,
-        filters: ListFilterState, filterEdit: ListFilterEdit | undefined, sheetOpen: boolean, now: Date,
+        filters: ListFilterState, filterEdit: ListFilterEdit | undefined, sheetOpen: boolean, now: Date, collapsedSectionIds?: string[],
     ) => {
         const sources = projectTaskSources(projectId, showCompleted);
         if (!sources) return null;
@@ -1607,6 +1615,7 @@ export function createNativeHostContract(options: {
         const tokens = tokenOptions(options, resolved.state);
         const viewRevision = JSON.stringify([
             projectId, showCompleted, completedCollapsed, resolved.state, sheetOpen, revision(), displayRevision(now),
+            ...(collapsedSectionIds === undefined ? [] : [collapsedSectionIds]),
         ]);
         return { resolved, options, tokens, viewRevision };
     };
@@ -1799,6 +1808,7 @@ export function createNativeHostContract(options: {
     const inboxProcessingMethods = createInboxProcessingMethods({
         readiness, save, receipts, t: () => translate, formatDate: () => createDateFormatter(dateFormatting()),
         revision: (now) => `${revision()}:${displayRevision(now)}`, groupDeferredProjects: options.projectPickerGroups === true,
+        retainedTokenCatalog,
     });
 
     const taskChecklistMethods = createTaskChecklistSaveMethods({ readiness, save, receipts, language: () => language,
@@ -1824,8 +1834,7 @@ export function createNativeHostContract(options: {
         ...taskChecklistMethods,
         ...createNativeWidgetCompletionMethods({ readiness, save, receipts, language: () => language,
             validateField: (field, value) => DRAFT_VALUE_CHECKS[field](value), isReadOnly: isInArchivedProject }),
-        ...createReferenceProjectNextActionMethods({ readiness, save, t: () => translate, originMethods: taskChecklistMethods,
-            repeatingProjectCompletion: options.repeatingProjectCompletion === true }),
+        ...createReferenceProjectNextActionMethods({ readiness, save, t: () => translate, originMethods: taskChecklistMethods, canCompleteProject }),
         ...createTaskPromotionMethods({ readiness, save, isReadOnly: isInArchivedProject, t: () => translate }),
 
         ...createTaskToSectionMethods({ readiness, receipts, isReadOnly: isInArchivedProject }),
@@ -1857,6 +1866,7 @@ export function createNativeHostContract(options: {
         ...createReviewViewMethods({
             readiness,
             save,
+            canCompleteProject,
             t: () => translate,
             formatDate: () => createDateFormatter(dateFormatting()),
             revision: (now) => `${revision()}:${displayRevision(now)}`,
@@ -2089,7 +2099,7 @@ export function createNativeHostContract(options: {
         ...createProjectDeleteMethods({ readiness, save, t: () => translate }),
         ...createProjectDuplicateMethods({ readiness, save, t: () => translate }),
         ...createProjectToSectionMethods({ readiness, save, t: () => translate }),
-        ...createProjectLifecycleMethods({ readiness, save, repeatingProjectCompletion: options.repeatingProjectCompletion === true }),
+        ...createProjectLifecycleMethods({ readiness, save, canCompleteProject }),
         ...createArchivedTaskRestoreMethods({ readiness, save }),
         ...createArchivedTasksRestoreMethods({ readiness, save }),
         ...createReferenceTasksMoveMethods({ readiness, save }),
@@ -2710,19 +2720,20 @@ export function createNativeHostContract(options: {
         getProjectDetailFilterView(input: {
             projectId: string; offset: number; limit: number; revision?: string;
             showCompleted: boolean; completedCollapsed: boolean; filters: Partial<ListFilterState>;
-            filterEdit?: ListFilterEdit; filterSheetOpen?: boolean;
+            filterEdit?: ListFilterEdit; filterSheetOpen?: boolean; collapsedSectionIds?: string[];
         }): NativeHostResult<NativeProjectDetailFilterView> {
             const ready = readiness();
             if (!ready.ok) return ready;
             if (!isObjectRecord(input) || !isNativeJsonWithinBytes(input)
                 || !['projectId', 'offset', 'limit', 'showCompleted', 'completedCollapsed', 'filters'].every((key) => Object.prototype.hasOwnProperty.call(input, key))
-                || Object.keys(input).some((key) => !['projectId', 'offset', 'limit', 'revision', 'showCompleted', 'completedCollapsed', 'filters', 'filterEdit', 'filterSheetOpen'].includes(key))
+                || Object.keys(input).some((key) => !['projectId', 'offset', 'limit', 'revision', 'showCompleted', 'completedCollapsed', 'filters', 'filterEdit', 'filterSheetOpen', 'collapsedSectionIds'].includes(key))
                 || typeof input.projectId !== 'string' || !input.projectId.trim() || input.projectId.length > 500
                 || !Number.isSafeInteger(input.offset) || input.offset < 0
                 || !Number.isSafeInteger(input.limit) || input.limit < 1 || input.limit > NATIVE_HOST_MAX_WINDOW
                 || (input.offset > 0 && typeof input.revision !== 'string')
                 || (input.revision !== undefined && typeof input.revision !== 'string')
                 || typeof input.showCompleted !== 'boolean' || typeof input.completedCollapsed !== 'boolean'
+                || (input.collapsedSectionIds !== undefined && !isProjectSectionIdList(input.collapsedSectionIds))
                 || (input.filterSheetOpen !== undefined && typeof input.filterSheetOpen !== 'boolean')
                 || !isObjectRecord(input.filters)) {
                 return fail('INVALID_INPUT', 'A bounded Project filter view and revision for later pages are required');
@@ -2735,17 +2746,18 @@ export function createNativeHostContract(options: {
             }
             const now = new Date();
             const sheetOpen = input.filterSheetOpen === true;
+            const collapsedSectionIds = input.collapsedSectionIds === undefined ? undefined : [...new Set(input.collapsedSectionIds)].sort();
             const data = projectFilterData(input.projectId, input.showCompleted, input.completedCollapsed,
-                filters, input.filterEdit, sheetOpen, now);
+                filters, input.filterEdit, sheetOpen, now, collapsedSectionIds);
             if (!data) return fail('TASK_NOT_FOUND', 'Project not found');
             if (input.revision !== undefined && input.revision !== data.viewRevision) {
                 return fail('STALE_REVISION', 'Project filters changed; restart paging from offset zero');
             }
             const result = readProjectDetail(input.projectId, input.offset, input.limit, data.viewRevision, now,
-                input.showCompleted, input.completedCollapsed, { resolved: data.resolved, sheetOpen });
+                input.showCompleted, input.completedCollapsed, { resolved: data.resolved, sheetOpen, collapsedSectionIds });
             if (!result.ok) return result;
             const view = projectDetailView(result.value.value, result.value.cache, input.offset,
-                input.showCompleted, input.completedCollapsed);
+                input.showCompleted, input.completedCollapsed, collapsedSectionIds);
             const chips: NativeListChip[] = data.resolved.chips.map((chip) => ({
                 id: chip.id, label: chip.label, excluded: chip.excluded, action: { filterEdit: chip.edit },
             }));
@@ -3235,13 +3247,14 @@ export function createNativeHostContract(options: {
             const task = state._tasksById.get(input.id);
             if (!task || task.deletedAt) return fail('TASK_NOT_FOUND', 'Task not found');
             const derived = state.getDerivedState();
+            const tokenCatalog = retainedTokenCatalog(state._allTasks, state.settings.taxonomy);
             return {
                 ok: true,
                 value: getTaskEditorSuggestions({
                     field: input.field,
                     text: input.query,
                     limit: input.limit,
-                    knownTokens: input.field === 'tags' ? derived.allTags : retainedContexts(state._allTasks),
+                    knownTokens: input.field === 'tags' ? tokenCatalog.tags : tokenCatalog.contexts,
                     usage: input.field === 'tags' ? derived.tagTokenUsage : derived.contextTokenUsage,
                     people: state.people,
                     tasks: state.tasks,
@@ -3354,7 +3367,7 @@ export function createNativeHostContract(options: {
 
                     const isTokenField = field === 'contexts' || field === 'tags';
                     const nextValue = field === 'title' ? nextTitle
-                        : isTokenField ? serializeTaskDraftTokens(patch[field] as string, field).join(', ')
+                        : isTokenField ? formatTaskTokenInput(serializeTaskDraftTokens(patch[field] as string, field))
                             : patch[field];
                     const matches = isSameDraftValue(current[field], nextValue);
                     if (isTokenField && matches && !isSameDraftValue(patch[field], nextValue)) {
@@ -3707,6 +3720,7 @@ type InboxProcessingDeps = {
     t: () => (key: string) => string;
     formatDate: () => DateFormatter;
     groupDeferredProjects: boolean;
+    retainedTokenCatalog: typeof getTaskTokenCatalog;
 };
 
 type InboxProcessingEntry = {
@@ -3886,6 +3900,7 @@ function createInboxProcessingMethods(deps: InboxProcessingDeps) {
                 plan,
                 settings: state.settings,
                 tasks: state.tasks,
+                tokenCatalog: deps.retainedTokenCatalog(state._allTasks, state.settings.taxonomy),
                 projects: state.projects,
                 sections: state.sections,
                 areas: state.areas,
@@ -4166,10 +4181,7 @@ function createInboxProcessingMethods(deps: InboxProcessingDeps) {
                 entry.session = advanceProcessInboxSession(entry.session, queue);
                 if (!openCurrent(entry, queue)) entry.ended = true;
             } else if (inboxTaskRevision(latest) !== entry.taskRevision) {
-                const previous = entry.draft;
-                entry.draft = { ...createProcessInboxDraft(latest, processInboxDefaultAreaId()), delegateWho: previous.delegateWho,
-                    followUp: previous.followUp, convertToProject: previous.convertToProject,
-                    nextAction: previous.nextAction, extraActions: previous.extraActions };
+                entry.draft = reloadProcessInboxDraft(entry.draft, latest, processInboxDefaultAreaId());
                 entry.taskRevision = inboxTaskRevision(latest);
             }
             return { ok: true, value: result(entry, null, null) };

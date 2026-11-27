@@ -1,13 +1,14 @@
 import { act, fireEvent, render, waitFor } from '@testing-library/react';
 import { beforeEach, describe, it, expect, vi } from 'vitest';
-import { useTaskStore } from '@mindwtr/core';
+import { configureDateFormatting, getDateFormattingConfig, useTaskStore } from '@mindwtr/core';
 import App from './App';
 import { LanguageProvider } from './contexts/language-context';
 import { dispatchDesktopOnboardingEvent } from './lib/desktop-onboarding-events';
+import { loadWindowsRegionalDate } from './lib/system-locale';
+import * as tauriInvoke from './lib/tauri-invoke';
 import { useUiStore } from './store/ui-store';
 import * as runtime from './lib/runtime';
 import * as tauriEvent from '@tauri-apps/api/event';
-import { setNativeInvokeTransport } from './lib/tauri-invoke';
 
 vi.mock('@tauri-apps/api/event', { spy: true });
 
@@ -53,6 +54,7 @@ describe('App', () => {
         useUiStore.setState((state) => ({
             ...state,
             projectView: { selectedProjectId: null },
+            hiddenSidebarViews: [],
             toasts: [],
         }));
     });
@@ -60,6 +62,13 @@ describe('App', () => {
     it('renders Focus by default', () => {
         const { getByRole } = renderWithProviders(<App />);
         expect(getByRole('heading', { name: 'Focus' })).toBeInTheDocument();
+    });
+
+    it('opens Inbox on the first render when Focus is hidden', () => {
+        useUiStore.setState({ hiddenSidebarViews: ['agenda'] });
+        const { queryByRole } = renderWithProviders(<App />);
+        expect(queryByRole('heading', { name: 'Focus' })).toBeNull();
+        expect(window.location.search).toBe('?view=inbox');
     });
 
     it('renders Sidebar navigation', () => {
@@ -76,7 +85,7 @@ describe('App', () => {
             }
             return () => {};
         });
-        setNativeInvokeTransport(async (command) => {
+        tauriInvoke.setNativeInvokeTransport(async (command) => {
             if (command === 'list_system_fonts') return [] as never;
             throw new Error(`Unexpected native command: ${command}`);
         });
@@ -87,7 +96,7 @@ describe('App', () => {
             await waitFor(() => expect(getByRole('button', { name: 'Settings' })).toHaveAttribute('aria-current', 'page'));
         } finally {
             unmount();
-            setNativeInvokeTransport(null);
+            tauriInvoke.setNativeInvokeTransport(null);
             eventSpy.mockRestore();
             runtimeSpy.mockRestore();
         }
@@ -193,5 +202,72 @@ describe('App', () => {
             expect(queryByRole('dialog', { name: /welcome to mindwtr/i })).not.toBeInTheDocument();
         });
         expect(window.localStorage.getItem('mindwtr:desktop:first-run-onboarding:v1')).not.toBe('dismissed');
+    });
+
+    it('applies system regional date formatting to rendered tasks on mount and when dateFormat changes', async () => {
+        const previousFormatting = getDateFormattingConfig();
+        const previousShowDetails = useUiStore.getState().listOptions.showDetails;
+        const invokeSpy = vi.spyOn(tauriInvoke, 'invokeNative').mockResolvedValueOnce(['en-US', 'dd-MM-yyyy']);
+        await loadWindowsRegionalDate();
+        configureDateFormatting({ language: 'en', dateFormat: 'mdy', systemLocale: 'en-US' });
+        window.history.replaceState(null, '', '?view=agenda');
+        const task = {
+            id: 'regional-date-task',
+            title: 'Regional format task',
+            status: 'next' as const,
+            isFocusedToday: true,
+            tags: [],
+            contexts: [],
+            dueDate: '2027-11-23',
+            createdAt: '2026-01-01T00:00:00.000Z',
+            updatedAt: '2026-01-01T00:00:00.000Z',
+        };
+        useTaskStore.setState((state) => ({
+            ...state,
+            tasks: [task],
+            _allTasks: [task],
+            _tasksById: new Map([[task.id, task]]),
+            settings: { dateFormat: 'system' },
+        }));
+        useUiStore.setState((state) => ({
+            ...state,
+            listOptions: { ...state.listOptions, showDetails: true },
+        }));
+
+        try {
+            const { getByText } = renderWithProviders(<App />);
+            await waitFor(() => {
+                expect(getByText('23-11-2027')).toBeInTheDocument();
+            });
+
+            act(() => {
+                useTaskStore.setState((state) => ({
+                    ...state,
+                    settings: { ...state.settings, dateFormat: 'mdy' },
+                }));
+            });
+            await waitFor(() => {
+                expect(getByText('11/23/2027')).toBeInTheDocument();
+            });
+
+            act(() => {
+                useTaskStore.setState((state) => ({
+                    ...state,
+                    settings: { ...state.settings, dateFormat: 'system' },
+                }));
+            });
+            await waitFor(() => {
+                expect(getByText('23-11-2027')).toBeInTheDocument();
+            });
+        } finally {
+            invokeSpy.mockResolvedValueOnce(null);
+            await loadWindowsRegionalDate();
+            invokeSpy.mockRestore();
+            useUiStore.setState((state) => ({
+                ...state,
+                listOptions: { ...state.listOptions, showDetails: previousShowDetails },
+            }));
+            configureDateFormatting(previousFormatting);
+        }
     });
 });

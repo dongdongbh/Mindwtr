@@ -179,6 +179,28 @@ class WidgetBackgroundTest {
     assertEquals(View.GONE, dropdown.findViewById<View>(R.id.mindwtr_widget_configure_background_row).visibility)
   }
 
+  @Test fun settingsSaveBackgroundOpacityWithoutDimmingTheForeground() {
+    for ((id, kind) in listOf(88 to WidgetKind.TASKS, 89 to WidgetKind.COMPACT)) {
+      bind(id, if (kind == WidgetKind.TASKS) TasksWidgetProvider::class.java.name else CompactWidgetProvider::class.java.name)
+      val activity = configure(id)
+      activity.findViewById<Spinner>(R.id.mindwtr_widget_configure_background).setSelection(1)
+      shadowOf(android.os.Looper.getMainLooper()).idle()
+      val bar = activity.findViewById<android.widget.SeekBar>(R.id.mindwtr_widget_opacity)
+      assertEquals(0, bar.progress)
+      assertEquals(View.VISIBLE, activity.findViewById<View>(R.id.mindwtr_widget_opacity_row).visibility)
+      bar.progress = 50
+      activity.findViewById<Button>(R.id.mindwtr_widget_configure_ok).performClick()
+      val widget = shadowOf(manager).getViewFor(id)
+      val surface = widget.findViewById<ImageView>(R.id.mindwtr_widget_surface)
+      assertEquals(View.VISIBLE, surface.visibility)
+      assertEquals(128, surface.imageAlpha)
+      assertEquals(1f, widget.findViewById<View>(R.id.mindwtr_widget_title).alpha, 0f)
+      assertEquals(50, configure(id).findViewById<android.widget.SeekBar>(R.id.mindwtr_widget_opacity).progress)
+      WidgetListStore.remove(context, intArrayOf(id))
+      assertEquals(0, WidgetListStore.backgroundOpacity(context, id))
+    }
+  }
+
   @Test fun quickCaptureWidgetsHaveNoSettings() {
     bind(68, QuickCaptureWidgetProvider::class.java.name)
     assertTrue(configure(68).isFinishing)

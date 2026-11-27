@@ -202,6 +202,41 @@ class QuickCaptureDestinationTest {
     host.pause().stop().destroy()
   }
 
+  @Test fun typingFindsASavedTagOutsideTheInitialEightWhileTheKeyboardComposes() {
+    val tags = org.json.JSONArray((1..9).map { "#tag$it" } + "#watchlist")
+    WidgetPayloadStore.write(context, JSONObject().put("captureDestinations",
+      captureDestinationCatalog().put("savedTags", tags)).toString())
+    val host = controller().setup()
+    val activity = host.get()
+    val input = activity.findViewById<QuickCaptureInput>(R.id.mindwtr_quick_capture_input)
+    input.setText("Watch #wa")
+    input.setSelection(input.length())
+    BaseInputConnection.setComposingSpans(input.text!!)
+    shadowOf(android.os.Looper.getMainLooper()).idle()
+    val choices = activity.findViewById<LinearLayout>(R.id.mindwtr_quick_capture_autocomplete)
+    assertEquals(1, choices.childCount)
+    choices.getChildAt(0).performClick()
+    assertEquals("Watch #watchlist", input.text.toString().trimEnd())
+    assertTrue(queue.listFiles().isNullOrEmpty())
+    host.pause().stop().destroy()
+  }
+
+  @Test fun areaAutocompleteSavesTheChosenAreaById() {
+    publish()
+    val host = controller().setup()
+    val activity = host.get()
+    val input = activity.findViewById<QuickCaptureInput>(R.id.mindwtr_quick_capture_input)
+    input.setText("Plan !wo")
+    input.setSelection(input.length())
+    shadowOf(android.os.Looper.getMainLooper()).idle()
+    val choices = activity.findViewById<LinearLayout>(R.id.mindwtr_quick_capture_autocomplete)
+    assertEquals(1, choices.childCount)
+    choices.getChildAt(0).performClick()
+    activity.findViewById<Button>(R.id.mindwtr_quick_capture_save).performClick()
+    assertEquals("work", saved().getJSONObject("destination").getString("id"))
+    host.pause().stop().destroy()
+  }
+
   @Test fun projectAutocompleteAtTheCaretSelectsAnIdentityWithoutCreatingAnotherProject() {
     publish()
     val host = controller().setup()

@@ -3,8 +3,10 @@ import { ContextualHelp } from '../ContextualHelp';
 import { ArrowRight, Check, FolderPlus, HelpCircle, Layers, MapPin, Rows3, Trash2 } from 'lucide-react';
 import {
     buildTaskMovePatch,
+    formatTaskTokenInput,
     resolveAutoTextDirection,
     setTaskViewSectionId,
+    splitTaskTokenInput,
     tFallback,
     type Area,
     type Project,
@@ -90,14 +92,11 @@ interface TaskItemEditorProps {
 function appendCommaToken(value: string, token: string): string {
     const normalizedToken = token.trim();
     if (!normalizedToken) return value;
-    const tokens = value
-        .split(',')
-        .map((item) => item.trim())
-        .filter(Boolean);
+    const tokens = splitTaskTokenInput(value);
     if (tokens.some((item) => item.toLowerCase() === normalizedToken.toLowerCase())) {
-        return tokens.join(', ');
+        return formatTaskTokenInput(tokens);
     }
-    return [...tokens, normalizedToken].join(', ');
+    return formatTaskTokenInput([...tokens, normalizedToken]);
 }
 
 function ensureTokenPrefix(value: string, prefix: '@' | '#'): string {

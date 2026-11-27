@@ -1394,33 +1394,55 @@ struct TaskViewSheet: View {
         NSLog("Native iOS editor requested input dismissal releaseCheck=v1.3.3/native-ios-editor-input-end")
     }
 
+    @ViewBuilder private func previewStatus(_ item: CoreObject) -> some View {
+        let status = VStack(alignment: .leading, spacing: 6) {
+            label(item.text("label"))
+            Text(item.text("value")).rnFont(14, .semibold)
+                .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("task-preview-status-value")
+        }
+        let completeLabel = item.text("completeLabel")
+        if completeLabel.isEmpty {
+            status
+        } else {
+            let complete = Button {
+                endEditingBeforeAction()
+                Task { await model.completeTaskFromPreview() }
+            } label: {
+                Text(completeLabel).rnFont(14, .semibold)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 14).frame(minWidth: 44, minHeight: 44)
+                    .overlay(RoundedRectangle(cornerRadius: 10).stroke(palette.tint, lineWidth: 1))
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain).foregroundStyle(palette.tint)
+            .disabled(frozen || modalPresented || discardConfirm || !model.taskPreviewCompletionEnabled)
+            .accessibilityIdentifier("task-preview-mark-done")
+
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 12) { status; complete }
+                VStack(alignment: .leading, spacing: 8) { status; complete }
+            }
+        }
+    }
+
     @ViewBuilder private func row(_ item: CoreObject) -> some View {
         let sourceID = value.text("id"), revision = value.text("revision")
         switch item.text("type") {
         case "title", "status", "field":
             let content = VStack(alignment: .leading, spacing: 6) {
-                label(item.text("label"))
-                if item.text("type") == "title" {
-                    Text(item.text("value")).rnFont(17, .bold)
-                        .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
-                        .accessibilityIdentifier("task-view-task-title")
+                if item.text("type") == "status" {
+                    previewStatus(item)
                 } else {
-                    Text(item.text("value")).rnFont(14, .semibold)
-                        .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
-                }
-                if item.text("type") == "status", !item.text("completeLabel").isEmpty {
-                    Button {
-                        endEditingBeforeAction()
-                        Task { await model.completeTaskFromPreview() }
-                    } label: {
-                        Text(item.text("completeLabel")).rnFont(14, .semibold)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .frame(minHeight: 44).padding(.horizontal, 14)
-                            .overlay(RoundedRectangle(cornerRadius: 10).stroke(palette.tint, lineWidth: 1))
+                    label(item.text("label"))
+                    if item.text("type") == "title" {
+                        Text(item.text("value")).rnFont(17, .bold)
+                            .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                            .accessibilityIdentifier("task-view-task-title")
+                    } else {
+                        Text(item.text("value")).rnFont(14, .semibold)
+                            .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                     }
-                    .buttonStyle(.plain).foregroundStyle(palette.tint)
-                    .disabled(frozen || modalPresented || discardConfirm || !model.taskPreviewCompletionEnabled)
-                    .accessibilityIdentifier("task-preview-mark-done")
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading).padding(12)
@@ -3392,6 +3414,82 @@ private struct TaskMonthlyCustomDialog: View {
     }
 }
 
+struct TokenBrowsePicker: View {
+    let palette: AppPalette
+    let id: String
+    let fieldLabel: String
+    let browseLabel: String
+    let searchLabel: String
+    let noMatchesLabel: String
+    let options: [CoreObject]
+    let enabled: Bool
+    let onToggle: (String) -> Void
+    @State private var expanded = false
+    @State private var query = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Button {
+                expanded.toggle()
+                query = ""
+            } label: {
+                Label(browseLabel, systemImage: expanded ? "chevron.up" : "chevron.down")
+                    .rnFont(14, .medium)
+                    .frame(minHeight: 44)
+                    .padding(.horizontal, 8)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(palette.tint)
+            .accessibilityLabel(fieldLabel + " · " + browseLabel)
+            .accessibilityIdentifier(id + "-browse")
+
+            if expanded {
+                let search = query.trimmingCharacters(in: .whitespacesAndNewlines)
+                let visible = options.filter { search.isEmpty || $0.text("token").localizedCaseInsensitiveContains(search) }
+                VStack(alignment: .leading, spacing: 4) {
+                    TextField(searchLabel, text: $query)
+                        .rnFont(15).textInputAutocapitalization(.never).autocorrectionDisabled()
+                        .padding(.horizontal, 10).frame(minHeight: 44)
+                        .background(palette.input, in: RoundedRectangle(cornerRadius: 8))
+                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(palette.border, lineWidth: 1))
+                        .accessibilityLabel(fieldLabel + " · " + searchLabel)
+                        .accessibilityIdentifier(id + "-browse-search")
+
+                    if visible.isEmpty {
+                        Text(noMatchesLabel).rnFont(13).foregroundStyle(palette.secondary).padding(8)
+                    } else {
+                        ScrollView {
+                            LazyVStack(spacing: 0) {
+                                ForEach(visible.indices, id: \.self) { index in
+                                    let option = visible[index]
+                                    let token = option.text("token")
+                                    let selected = option.flag("selected")
+                                    Button { onToggle(token) } label: {
+                                        HStack(spacing: 8) {
+                                            Image(systemName: selected ? "checkmark.square.fill" : "square")
+                                                .foregroundStyle(selected ? palette.tint : palette.secondary)
+                                                .accessibilityHidden(true)
+                                            Text(token).rnFont(14).frame(maxWidth: .infinity, alignment: .leading)
+                                        }
+                                        .padding(.horizontal, 8).padding(.vertical, 4)
+                                        .frame(minHeight: 44).contentShape(Rectangle())
+                                    }
+                                    .buttonStyle(.plain).foregroundStyle(palette.text).disabled(!enabled)
+                                    .accessibilityAddTraits(selected ? .isSelected : [])
+                                }
+                            }
+                        }
+                        .frame(maxHeight: 220)
+                    }
+                }
+                .padding(8).background(palette.card, in: RoundedRectangle(cornerRadius: 10))
+                .overlay(RoundedRectangle(cornerRadius: 10).stroke(palette.border, lineWidth: 1))
+            }
+        }
+    }
+}
+
 private struct TaskTokenField: View {
     let model: CoreModel
     let palette: AppPalette
@@ -3425,6 +3523,13 @@ private struct TaskTokenField: View {
                 }
                 .accessibilityLabel(label).accessibilityHint(placeholder)
                 .accessibilityIdentifier("task-editor-" + field)
+            if field != "assignedTo" {
+                TokenBrowsePicker(palette: palette, id: "task-editor-" + field, fieldLabel: label,
+                                  browseLabel: model.label("settings.browse"), searchLabel: model.label("common.search"),
+                                  noMatchesLabel: model.label("common.noMatches"), options: suggestions.objects("browse"), enabled: current) {
+                    model.toggleTaskBrowseToken(field, token: $0)
+                }
+            }
             if current && (!suggestions.objects("matches").isEmpty || field == "assignedTo" && model.taskPersonCreateCanSubmit) {
                 let matches = suggestions.objects("matches")
                 VStack(spacing: 0) {

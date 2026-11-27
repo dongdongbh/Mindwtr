@@ -1,6 +1,6 @@
 import { useTaskDeepLink } from './hooks/use-task-deep-link';
 import { CalendarOpenTaskModal } from './components/views/calendar/CalendarModals';
-import { useEffect, useState, useRef, useTransition, useCallback, useMemo, Suspense, lazy } from 'react';
+import { useEffect, useLayoutEffect, useState, useRef, useTransition, useCallback, useMemo, Suspense, lazy } from 'react';
 import { StartupReadyProbe } from './components/StartupReadyProbe';
 import { RendererNavigationProbe } from './components/RendererNavigationProbe';
 import { beginRendererNavigation, type RendererNavigationTrace } from './lib/renderer-navigation-diagnostics';
@@ -23,7 +23,6 @@ import {
     APP_ANNOUNCEMENT_DISMISSED_VALUE,
     DONATION_PROMPT_ANNOUNCEMENT,
     addBreadcrumb,
-    configureDateFormatting,
     createAutoSyncController,
     flushPendingSave,
     getAnnouncementDismissalStorageKey,
@@ -35,7 +34,6 @@ import {
     recordUpdateReminderChecked,
     recordUpdateReminderDismissed,
     recordUpdateReminderShown,
-    setHostSystemLocale,
     shouldShowAppAnnouncement,
     shouldShowDonationPrompt,
     withSupportPromptShown,
@@ -77,12 +75,13 @@ import { migratePortableAttachments } from './lib/portable-migration';
 import { logDesktopStartupContext } from './lib/startup-context';
 import * as LocalDataWatcher from './lib/local-data-watcher';
 import { invokeNative } from './lib/tauri-invoke';
-import { getSystemDefaultLocale, getSystemShortDatePattern } from './lib/system-locale';
+import { syncDesktopDateFormatting } from './lib/system-locale';
 import { getInstallSourceOrFallback, isFlatpakRuntime, isLinuxRuntime, isTauriRuntime } from './lib/runtime';
 import { useDesktopShellSync } from './lib/desktop-shell-sync';
 import { useAppLockStore } from './lib/app-lock';
 import { reportError as reportAppError } from './lib/report-error';
 import { syncNativeProxyUrl } from './lib/tauri-http';
+import { resolveDesktopStartupView } from './lib/sidebar-views';
 import { persistLastView, readRestorableLastView } from './lib/session-restore';
 import { readViewFromUrl, writeViewToUrl } from './lib/view-url-params';
 import { logError, logInfo } from './lib/app-log';
@@ -132,6 +131,8 @@ import { hideMainWindowToTray } from './lib/hide-to-tray';
 import { useConfirmDialog } from './hooks/useConfirmDialog';
 import { useArchiveRetentionRunner } from './hooks/useArchiveRetentionRunner';
 import { subscribeNavigateEvent } from './lib/navigation-events';
+import { DesktopNavigationHistory, readDestination, type NavigationDirection, type NavigationInput } from './lib/navigation-history';
+import { dispatchContextsViewSelection, type ContextsViewSelection } from './lib/contexts-view-state';
 import { shouldOpenDesktopFirstRunOnboarding, subscribeDesktopOnboardingEvent } from './lib/desktop-onboarding-events';
 import { QUICK_ADD_SAVED_EVENT, type QuickAddSavedEvent } from './lib/quick-add-saved-event';
 import { enrichDesktopCapturedLinkTitle } from './lib/link-title';
@@ -167,7 +168,7 @@ const SettingsView = lazy(wrapSettingsOpenImport(
     () => import('./components/views/SettingsView').then((m) => ({ default: m.SettingsView }))
 ));
 
-const DEFAULT_DESKTOP_VIEW = 'agenda';
+
 const DESKTOP_ONBOARDING_STORAGE_KEY = 'mindwtr:desktop:first-run-onboarding:v1';
 const DONATION_PROMPT_ENABLED = (
     import.meta.env.VITE_DONATION_PROMPT_ENABLED === '1'
@@ -279,9 +280,19 @@ function App() {
     });
 
 
-    const [viewFromUrl] = useState(() => readViewFromUrl());
-    const [currentView, setCurrentView] = useState(viewFromUrl ?? restoredLastView?.view ?? DEFAULT_DESKTOP_VIEW);
-    const [activeView, setActiveView] = useState(viewFromUrl ?? restoredLastView?.view ?? DEFAULT_DESKTOP_VIEW);
+    const hiddenSidebarViews = useUiStore((state) => state.hiddenSidebarViews);
+    const [startupView] = useState(() => resolveDesktopStartupView(
+        readViewFromUrl(), restoredLastView?.view, hiddenSidebarViews,
+    ));
+    const [currentView, setCurrentView] = useState(startupView);
+    const [activeView, setActiveView] = useState(startupView);
+    const [navigationHistory] = useState(() => {
+        const destination = readDestination(currentView);
+        if (destination.kind === 'project' && restoredLastView?.view === 'projects' && restoredLastView.projectId) {
+            destination.projectId = restoredLastView.projectId;
+        }
+        return new DesktopNavigationHistory(destination);
+    });
     const [navigationTrace, setNavigationTrace] = useState<RendererNavigationTrace | null>(null);
 
 
@@ -329,7 +340,7 @@ function App() {
 
     const showToast = useUiStore((state) => state.showToast);
     const { requestConfirmation, confirmModal } = useConfirmDialog();
-    const { t, language, setLanguage } = useLanguage();
+    const { t, language, setLanguage, refreshRegionalFormats } = useLanguage();
 
 
     usePomodoroAlerts();
@@ -709,18 +720,16 @@ function App() {
         addBreadcrumb(next);
     }, [currentView]);
 
-    useEffect(() => {
-        const systemLocale = getSystemDefaultLocale();
-        setHostSystemLocale(systemLocale || null);
-        configureDateFormatting({
+    useLayoutEffect(() => {
+        if (syncDesktopDateFormatting({
             language: settingsLanguage || language,
             dateFormat: settingsDateFormat,
             calendarSystem: settingsCalendarSystem,
             timeFormat: settingsTimeFormat,
-            systemDateFormat: getSystemShortDatePattern(),
-            systemLocale,
-        });
-    }, [language, settingsCalendarSystem, settingsDateFormat, settingsLanguage, settingsTimeFormat]);
+        })) {
+            refreshRegionalFormats?.();
+        }
+    }, [language, refreshRegionalFormats, settingsCalendarSystem, settingsDateFormat, settingsLanguage, settingsTimeFormat]);
 
     const translateOrFallback = useCallback((key: string, fallback: string) => {
         return translateWithFallback(t, key, fallback);
@@ -1041,8 +1050,8 @@ function App() {
         const controller = createGmailCaptureController({
             addTasks: (items) => useTaskStore.getState().addTasks(items),
             flushPendingSave,
-            logInfo: (message, extra) => {
-                void logInfo(message, { scope: 'gmail-capture', extra });
+            logInfo: (message, extra, force) => {
+                void logInfo(message, { scope: 'gmail-capture', extra, force });
             },
         });
         registerGmailCaptureController(controller);
@@ -1255,7 +1264,8 @@ function App() {
     }, [sandboxMode]);
 
 
-    const renderedView = activeView === 'timeline' && !timelineEnabled ? DEFAULT_DESKTOP_VIEW : activeView;
+    const fallbackView = resolveDesktopStartupView(null, undefined, hiddenSidebarViews);
+    const renderedView = activeView === 'timeline' && !timelineEnabled ? fallbackView : activeView;
 
     const renderView = () => {
         if (renderedView.startsWith('savedSearch:')) {
@@ -1297,7 +1307,7 @@ function App() {
             case 'projects':
                 return <ProjectsView />;
             case 'contexts':
-                return <ContextsView />;
+                return <ContextsView onSelectionChange={recordContextSelection} />;
             case 'review':
                 return <ReviewView />;
             case 'settings':
@@ -1315,32 +1325,66 @@ function App() {
         }
     };
 
+    const applyViewChange = useCallback((nextView: string) => {
+        const trace = beginRendererNavigation(nextView);
+        if (nextView !== 'settings') {
+            setSettingsInitialPage(undefined);
+            setSettingsOnboardingHintPage(undefined);
+        }
+        if (!sandboxMode) {
+            persistLastView(nextView, useUiStore.getState().projectView.selectedProjectId);
+        }
+        writeViewToUrl(nextView);
+        setCurrentView(nextView);
+        if (nextView === 'settings') {
+            beginSettingsOpenTrace('handleViewChange');
+        }
+
+        startTransition(() => {
+            setActiveView(nextView);
+            setNavigationTrace(trace);
+        });
+    }, [sandboxMode, startTransition]);
+
     const handleViewChange = useCallback((view: string) => {
         const nextView = view === 'obsidian' && !useObsidianStore.getState().config.enabled ? 'settings' : view;
         const changeView = () => {
-            const trace = beginRendererNavigation(nextView);
-            if (nextView !== 'settings') {
-                setSettingsInitialPage(undefined);
-                setSettingsOnboardingHintPage(undefined);
+            if (nextView !== 'contexts' || navigationHistory.current.view !== 'contexts') {
+                navigationHistory.record(readDestination(nextView));
             }
-            if (!sandboxMode) {
-                persistLastView(nextView, useUiStore.getState().projectView.selectedProjectId);
-            }
-            writeViewToUrl(nextView);
-            setCurrentView(nextView);
-            if (nextView === 'settings') {
-                beginSettingsOpenTrace('handleViewChange');
-            }
-
-
-            startTransition(() => {
-                setActiveView(nextView);
-                setNavigationTrace(trace);
-            });
+            applyViewChange(nextView);
         };
-        if (nextView === currentView) changeView();
+        if (nextView === navigationHistory.current.view) changeView();
         else runAfterTaskEditExit(changeView);
-    }, [currentView, sandboxMode, startTransition]);
+    }, [applyViewChange, navigationHistory]);
+
+    const recordContextSelection = useCallback((selection: ContextsViewSelection) => {
+        if (navigationHistory.current.view === 'contexts') {
+            navigationHistory.record({ kind: 'contexts', view: 'contexts', selection });
+        }
+    }, [navigationHistory]);
+
+    const handleNavigateHistory = useCallback((direction: NavigationDirection, input: NavigationInput) => {
+        runAfterTaskEditExit(() => {
+            const destination = navigationHistory.move(direction);
+            if (!destination) return;
+            if (destination.kind === 'project') {
+                useUiStore.getState().setProjectView({ selectedProjectId: destination.projectId });
+            } else if (destination.kind === 'contexts') {
+                dispatchContextsViewSelection(destination.selection);
+            }
+            applyViewChange(destination.view);
+            void logInfo('Desktop navigation history replayed', {
+                scope: 'navigation',
+                force: true,
+                extra: {
+                    releaseCheck: 'v1.3.10/desktop-navigation-history',
+                    direction: direction === -1 ? 'back' : 'forward',
+                    source: input,
+                },
+            });
+        });
+    }, [applyViewChange, navigationHistory]);
 
 
     useEffect(() => {
@@ -1390,8 +1434,8 @@ function App() {
         if (currentView !== 'timeline' && activeView !== 'timeline') return;
 
 
-        handleViewChange(DEFAULT_DESKTOP_VIEW);
-    }, [activeView, currentView, handleViewChange, isLoading, timelineEnabled, viewSettingsHydrated]);
+        handleViewChange(fallbackView);
+    }, [activeView, currentView, fallbackView, handleViewChange, isLoading, timelineEnabled, viewSettingsHydrated]);
 
     useEffect(() => {
         if (isObsidianEnabled || currentView !== 'obsidian') return;
@@ -1404,6 +1448,13 @@ function App() {
         useUiStore.getState().setProjectView({ selectedProjectId: restoredLastView.projectId });
     }, []);
 
+    useEffect(() => useUiStore.subscribe((state, previous) => {
+        if (navigationHistory.current.view !== 'projects') return;
+        const { selectedProjectId } = state.projectView;
+        if (selectedProjectId !== previous.projectView.selectedProjectId) {
+            navigationHistory.record({ kind: 'project', view: 'projects', projectId: selectedProjectId });
+        }
+    }), [navigationHistory]);
 
     useEffect(() => {
         if (sandboxMode) return;
@@ -1768,7 +1819,7 @@ function App() {
 
     return (
         <ErrorBoundary>
-            <KeybindingProvider currentView={currentView} onNavigate={handleViewChange}>
+            <KeybindingProvider currentView={currentView} onNavigate={handleViewChange} onNavigateHistory={handleNavigateHistory}>
                 <Layout
                     currentView={currentView}
                     contentView={renderedView}

@@ -218,7 +218,7 @@ object WidgetRenderer {
     bindCompactChrome(context, views, appWidgetId, payload)
     views.setTextViewText(R.id.mindwtr_widget_capture_label, payload.quickCapture.title)
     val stats = bindCollection(context, views, appWidgetId, WidgetKind.COMPACT, payload)
-    hideSurfacesIfTransparent(context, views, appWidgetId, WidgetKind.COMPACT)
+    applyBackgroundOpacity(context, views, appWidgetId, WidgetKind.COMPACT)
     palette?.let {
       views.setInt(R.id.mindwtr_widget_surface, "setColorFilter", it.background)
       views.setTextColor(R.id.mindwtr_widget_title, it.text)
@@ -243,7 +243,7 @@ object WidgetRenderer {
     bindTasksChrome(context, views, appWidgetId, payload, listId)
 
     val stats = bindCollection(context, views, appWidgetId, WidgetKind.TASKS, payload)
-    hideSurfacesIfTransparent(context, views, appWidgetId, WidgetKind.TASKS)
+    applyBackgroundOpacity(context, views, appWidgetId, WidgetKind.TASKS)
 
     palette?.let {
       val theme = tasksTheme(it)
@@ -270,9 +270,13 @@ object WidgetRenderer {
   internal fun palette(context: Context, appWidgetId: Int, payload: WidgetPayload): WidgetPayload.Palette? =
     WidgetListStore.background(context, appWidgetId).textPalette ?: payload.resolvedPalette(context)
 
-  private fun hideSurfacesIfTransparent(context: Context, views: RemoteViews, appWidgetId: Int, kind: WidgetKind) {
-    if (!WidgetListStore.background(context, appWidgetId).isTransparent) return
-    for (id in backgroundSurfaces(kind)) views.setViewVisibility(id, View.GONE)
+  private fun applyBackgroundOpacity(context: Context, views: RemoteViews, appWidgetId: Int, kind: WidgetKind) {
+    val opacity = if (WidgetListStore.background(context, appWidgetId).isTransparent) WidgetListStore.backgroundOpacity(context, appWidgetId) else 100
+    for (id in backgroundSurfaces(kind)) {
+      val visible = opacity > 0 && (id != R.id.mindwtr_widget_band || opacity == 100)
+      views.setViewVisibility(id, if (visible) View.VISIBLE else View.GONE)
+      views.setInt(id, "setImageAlpha", (opacity * 255 + 50) / 100)
+    }
   }
 
   internal fun usesDirectCollections(sdkInt: Int): Boolean = sdkInt >= 31

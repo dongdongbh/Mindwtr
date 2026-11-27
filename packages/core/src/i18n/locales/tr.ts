@@ -288,6 +288,7 @@ export const trOverrides: Record<string, string> = {
         'keybindings.focusSidebar': 'Odağı bir panel sola taşı',
         'keybindings.focusContent': 'Odağı bir panel sağa taşı',
         'keybindings.goInbox': 'Gelen Kutusu\'na git',
+        'keybindings.goForward': 'İleri',
         'keybindings.goNext': 'Sonraki İşlemlere Git',
         'keybindings.goAgenda': 'Odak\'a git',
         'keybindings.goProjects': 'Projelere Git',

@@ -22,7 +22,20 @@ final class FoundationUITests: XCTestCase {
         boardTap(app, "task-mode-view")
         let complete = app.buttons["task-preview-mark-done"]
         boardEnabled(complete)
-        XCTAssertGreaterThanOrEqual(complete.frame.height, 44)
+        let status = app.staticTexts["task-preview-status-value"]
+        XCTAssertTrue(status.exists)
+        let statusFrame = status.frame
+        let completionFrame = complete.frame
+        let statusCenter = CGPoint(x: statusFrame.midX, y: statusFrame.midY)
+        let completionCenter = CGPoint(x: completionFrame.midX, y: completionFrame.midY)
+        XCTAssertFalse(completionFrame.contains(statusCenter))
+        XCTAssertFalse(statusFrame.contains(completionCenter))
+        if !largest {
+            XCTAssertLessThan(statusCenter.x, completionFrame.minX)
+            XCTAssertTrue((completionFrame.minY...completionFrame.maxY).contains(statusCenter.y))
+        }
+        XCTAssertGreaterThanOrEqual(completionFrame.width, 44)
+        XCTAssertGreaterThanOrEqual(completionFrame.height, 44)
         let picture = XCTAttachment(screenshot: app.screenshot()); picture.name = "Preview Mark Done"; picture.lifetime = .keepAlways; add(picture)
         complete.tap()
         XCTAssertTrue(complete.waitForNonExistence(timeout: 40))

@@ -705,7 +705,7 @@ export function AgendaView() {
                     .map((task) => [task.id, safeFormatDate(task.startTime, 'p')]),
             ),
         };
-    }, [areaById, baseActiveTasks, effectiveFilterCriteria, futureStartTick, globalFocusedTasks, localDayKey, matchesSearchQuery, projectMap, projects, resolvedAreaFilter]);
+    }, [areaById, baseActiveTasks, effectiveFilterCriteria, futureStartTick, globalFocusedTasks, localDayKey, matchesSearchQuery, projectMap, projects, resolvedAreaFilter, t]);
 
     const focusHiddenByAreaLabel = getFocusHiddenByAreaLabel(focusPools.selection, t);
     useEffect(() => {

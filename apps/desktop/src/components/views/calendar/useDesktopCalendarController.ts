@@ -49,6 +49,7 @@ import { reportError } from '../../../lib/report-error';
 import { useUiStore } from '../../../store/ui-store';
 import { getTaskAccentColor as resolveTaskAccentColor } from '../../../lib/task-accent-color';
 import { resolveCalendarLocale } from '../calendar-locale';
+import { getSystemDefaultLocale } from '../../../lib/system-locale';
 import {
     DESKTOP_DAY_END_HOUR,
     DESKTOP_DAY_START_HOUR,
@@ -144,7 +145,7 @@ export function useDesktopCalendarController() {
         [settings?.filters, areas],
     );
     const weekStartsOn = getWeekStartsOnIndex(settings?.weekStart);
-    const systemLocale = typeof Intl !== 'undefined' ? Intl.DateTimeFormat().resolvedOptions().locale : undefined;
+    const systemLocale = getSystemDefaultLocale();
     const calendarSystem = resolveCalendarSystemSetting(settings?.calendarSystem, {
         language,
         systemLocale,

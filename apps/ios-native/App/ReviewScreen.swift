@@ -616,7 +616,7 @@ struct ReviewGuideScreen: View {
                         Task { await model.openWeeklyReviewProjectTask(item.text("id")) }
                     }
                 }
-                if item.flag("expanded"), content.text("step") == "projects" {
+                if item.flag("expanded"), content.text("step") == "projects", !item.flag("completionBlocked") {
                     ReviewAction(title: model.label("projects.complete"), enabled: { model.reviewActionsEnabled },
                         palette: palette, id: "review-project-complete-" + item.text("id")) {
                         Task { await model.requestWeeklyReviewProjectCompletion(item.text("id")) }

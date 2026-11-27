@@ -55,7 +55,8 @@ export type GeneralSettingsEdit =
     | { type: 'calendarSystem'; value: 'gregorian' | 'jalali' }
     | { type: 'timeFormat'; value: TimeFormatSetting }
 
-    | { type: 'appSearch'; value: boolean };
+    | { type: 'appSearch'; value: boolean }
+    | { type: 'fetchLinkTitles'; value: boolean };
 
 
 export function buildGeneralSettingsUpdate(settings: AppSettings, edit: GeneralSettingsEdit): Partial<AppSettings> | null {
@@ -82,6 +83,8 @@ export function buildGeneralSettingsUpdate(settings: AppSettings, edit: GeneralS
             return { timeFormat: edit.value };
         case 'appSearch':
             return null;
+        case 'fetchLinkTitles':
+            return { fetchLinkTitles: edit.value };
     }
 }
 
@@ -99,6 +102,7 @@ export function isGeneralSettingStored(settings: AppSettings, edit: GeneralSetti
         case 'calendarSystem': return settings.calendarSystem === edit.value;
         case 'timeFormat': return settings.timeFormat === edit.value;
         case 'appSearch': return true;
+        case 'fetchLinkTitles': return (settings.fetchLinkTitles !== false) === edit.value;
     }
 }
 
@@ -176,6 +180,8 @@ export type GeneralSettingsModel = {
 
         appLockRelockDelay: GeneralSettingsPicker<MobileAppLockRelockDelayMinutes> | null;
 
+        fetchLinkTitles?: GeneralSettingsToggle;
+
         appSearch: GeneralSettingsToggle | null;
     };
     language: GeneralSettingsPicker<Language> & { title: string; description: string };
@@ -204,6 +210,7 @@ export function buildGeneralSettingsModel(input: {
 
     systemDateSample: string;
     appSearch: { supported: boolean; enabled: boolean };
+    fetchLinkTitlesRow?: boolean;
     t: Translate;
 }): GeneralSettingsModel {
     const { settings, themeMode, language, systemLocale, t } = input;
@@ -218,6 +225,7 @@ export function buildGeneralSettingsModel(input: {
     const showTaskAge = settings.appearance?.showTaskAge === true;
     const quickAccessView = resolveMobileQuickAccessView(settings.appearance?.mobileQuickAccessView);
     const appLockEnabled = settings.security?.mobileAppLockEnabled === true;
+    const fetchLinkTitles = settings.fetchLinkTitles !== false;
     const relockDelay = resolveMobileAppLockRelockDelayMinutes(settings.security?.mobileAppLockRelockDelayMinutes);
     const relockDelayOptions = MOBILE_APP_LOCK_RELOCK_DELAY_OPTIONS.map((value) => option(
         value,
@@ -332,6 +340,12 @@ export function buildGeneralSettingsModel(input: {
                 pickerTitle: tr('settings.mobile.appLockRelock'),
                 options: relockDelayOptions,
             } : null,
+            ...(input.fetchLinkTitlesRow ? { fetchLinkTitles: {
+                label: tr('settings.fetchLinkTitles'),
+                description: tr('settings.fetchLinkTitlesHint'),
+                value: fetchLinkTitles,
+                edit: { type: 'fetchLinkTitles', value: !fetchLinkTitles },
+            } } : {}),
             appSearch: input.appSearch.supported ? {
                 label: tr('settings.appSearchLabel'),
                 description: tr('settings.appSearchDesc'),

@@ -2,6 +2,7 @@ import { safeParseDate, type DateFormatter } from './date';
 import type { NativeHostResult } from './native-host-contract';
 import type { NativeCalendarFeed } from './native-host-contract-calendar';
 import { taskEditValuesEqual as same } from './json-value-equality';
+import { logInfo } from './logger';
 import { detach, exact, iso, record, validProject } from './native-host-contract-project-shared';
 import { isNativeJsonWithinBytes } from './native-host-contract-task-view';
 import { ensureDeviceId } from './store-helpers';
@@ -38,6 +39,9 @@ const token = (project: Project): NativeProjectCalendarReferenceToken => ({ titl
     revBy: project.revBy ?? null, updatedAt: project.updatedAt });
 const result = (request: NativeProjectCalendarReferenceRequest): NativeProjectCalendarReferenceResult =>
     ({ id: request.projectId, value: request.value });
+const referenceFeed = (feed: NativeHostResult<NativeCalendarFeed>) =>
+    feed.ok && feed.value.status === 'ready' && (feed.value.warning === undefined || feed.value.warningScope === 'device')
+        ? feed.value : null;
 const fail = (code: 'INVALID_INPUT' | 'STALE_REVISION' | 'SAVE_FAILED', message: string): NativeHostResult<never> =>
     ({ ok: false, error: { code, message } });
 const validToken = (value: unknown): value is NativeProjectCalendarReferenceToken => record(value)
@@ -116,9 +120,10 @@ export function createProjectCalendarReferenceMethods(deps: {
                 && picker.subscriptions === source && same(picker.expected, expected) && Date.now() - picker.at <= 300_000)
                 return response(picker, input.query);
             const feed = await deps.load({ slot: 'projectCalendar', start: now.toISOString(), end: new Date(now.getTime() + 90 * 86_400_000).toISOString() });
-            const available = feed.ok && feed.value.status === 'ready' && feed.value.warning === undefined;
-            const candidates = feed.ok && feed.value.status === 'ready' && feed.value.warning === undefined
-                ? getProjectCalendarReferenceCandidates(feed.value.events, state.settings.externalCalendars ?? [], now) : [];
+            const candidateFeed = referenceFeed(feed);
+            const available = candidateFeed !== null && candidateFeed.warning === undefined;
+            const candidates = candidateFeed ? getProjectCalendarReferenceCandidates(candidateFeed.events, candidateFeed.calendars, now) : [];
+            let usedPartialFeed = candidateFeed?.warningScope === 'device' && candidates.length > 0;
             let status: 'scheduled' | 'elapsed' | 'unavailable' = 'unavailable';
             let current = project.calendarReference ?? null;
             let superseded = !feed.ok && feed.error.code === 'STALE_REVISION';
@@ -130,17 +135,29 @@ export function createProjectCalendarReferenceMethods(deps: {
                         end: new Date(Math.max(starts + 86_400_000, ends + 86_400_000)).toISOString() });
                     superseded ||= !linked.ok && linked.error.code === 'STALE_REVISION';
                 }
-                const resolved = resolveProjectCalendarReference(current, linked.ok && linked.value.status === 'ready' && linked.value.warning === undefined ? linked.value.events : [],
-                    linked.ok && linked.value.status === 'ready' && linked.value.warning === undefined, now);
+                const linkedFeed = referenceFeed(linked);
+                const resolved = resolveProjectCalendarReference(current, linkedFeed?.events ?? [], linkedFeed !== null, now);
                 status = resolved.status;
-                if (resolved.event) current = createProjectCalendarReference(resolved.event, state.settings.externalCalendars ?? []) ?? current;
+                if (resolved.event && linkedFeed) {
+                    current = createProjectCalendarReference(resolved.event, linkedFeed.calendars) ?? current;
+                    usedPartialFeed ||= linkedFeed.warningScope === 'device';
+                }
             }
             const fresh = useTaskStore.getState()._projectsById.get(input.projectId);
             if (getStorageAdapter() !== adapter || subscriptions() !== source || !fresh || !sameProjectSqliteRow(project, fresh))
                 return fail('STALE_REVISION', 'Project or calendars changed while loading');
             const loaded: Picker = { id: generateUUID(), projectId: project.id, adapter, subscriptions: source, expected, candidates,
                 at: Date.now(), status, current, available };
-            if (!superseded) picker = loaded;
+            if (!superseded) {
+                picker = loaded;
+                if (usedPartialFeed) {
+                    try {
+                        logInfo('Native project calendar kept subscription events', {
+                            scope: 'calendar', context: { releaseCheck: 'v1.3.10/native-project-calendar-partial' }, force: true,
+                        });
+                    } catch { }
+                }
+            }
             return response(loaded, input.query ?? '');
         },
         probeProjectCalendarReferenceOutcome(input: NativeProjectCalendarReferenceRequest): NativeHostResult<NativeProjectCalendarReferenceResult> {

@@ -1,6 +1,6 @@
 import { isUpNoteHref, showExternalLinkFailure } from '../../lib/external-link';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Attachment, DEFAULT_PROJECT_COLOR, areDraftAttachmentsDirty, buildTaskUpdatesFromSpeechResult, enrichAttachmentLinkTitle, findSelectableProjectByTitleAndArea, generateUUID, getBareHttpUrl, isSandboxMode, normalizeLinkAttachmentInput, parseAttachmentLinkBatch, planAttachmentDraftSettlement, translateWithFallback, updateTaskFromLatest, useTaskStore, type Task } from '@mindwtr/core';
+import { Attachment, DEFAULT_PROJECT_COLOR, areDraftAttachmentsDirty, buildTaskUpdatesFromSpeechResult, enrichAttachmentLinkTitle, findLiveAttachmentResourceReferences, findSelectableProjectByTitleAndArea, generateUUID, getBareHttpUrl, isAttachmentLocalResourceReferenced, isSandboxMode, normalizeAttachmentCleanupUri, normalizeLinkAttachmentInput, parseAttachmentLinkBatch, planAttachmentDraftSettlement, translateWithFallback, updateTaskFromLatest, useTaskStore, type Task } from '@mindwtr/core';
 import { dataDir } from '@tauri-apps/api/path';
 import { BaseDirectory, readFile, readTextFile } from '@tauri-apps/plugin-fs';
 import { importDroppedFileAttachment, importPickedFileAttachment, pickFolderLinkAttachment } from '../../lib/attachment-import';
@@ -33,6 +33,9 @@ type UseTaskItemAttachmentsProps = {
     t: (key: string) => string;
 };
 
+const attachmentFileIdentity = (attachment: Attachment) => attachment.kind === 'file' && attachment.uri
+    ? normalizeAttachmentCleanupUri(attachment.uri) ?? attachment.uri
+    : undefined;
 
 const deleteOrphanedAttachmentFiles = async (orphaned: Attachment[]): Promise<void> => {
     if (isSandboxMode()) return;
@@ -51,6 +54,8 @@ const deleteOrphanedAttachmentFiles = async (orphaned: Attachment[]): Promise<vo
             const fileName = normalizedUri.slice(managedDirPrefix.length).split(/[?#]/, 1)[0];
             if (!fileName || fileName.includes('/')) continue;
             if (fileName !== attachment.id && !fileName.startsWith(`${attachment.id}.`)) continue;
+            const { _allTasks: tasks, _allProjects: projects } = useTaskStore.getState();
+            if (isAttachmentLocalResourceReferenced(attachment, findLiveAttachmentResourceReferences({ tasks, projects }))) continue;
             try {
                 await remove(attachment.uri);
             } catch (error) {
@@ -80,7 +85,7 @@ export function useTaskItemAttachments({ task, t }: UseTaskItemAttachmentsProps)
     const editAttachmentsRef = useRef(editAttachments);
     editAttachmentsRef.current = editAttachments;
     const baselineAttachmentsRef = useRef<Attachment[]>(task.attachments || []);
-    const observedStoreFileGenerationsRef = useRef(new Set<string>());
+    const persistedFileSourcesRef = useRef(new Map<string, 'baseline' | 'observed'>());
     const unnamedLinksRef = useRef(new Map<string, Attachment>());
 
 
@@ -623,15 +628,10 @@ export function useTaskItemAttachments({ task, t }: UseTaskItemAttachmentsProps)
         attachment: Attachment,
         latestStoreAttachments: Attachment[],
     ) => {
+        const persistedFiles = persistedFileSourcesRef.current;
         for (const stored of latestStoreAttachments) {
-            if (stored.kind !== 'file' || !stored.uri || stored.deletedAt) continue;
-            const generation = `${stored.id}\0${stored.uri}`;
-            const wasAlreadyBaseline = baselineAttachmentsRef.current.some(
-                (baseline) => baseline.kind === 'file'
-                    && baseline.id === stored.id
-                    && baseline.uri === stored.uri,
-            );
-            if (!wasAlreadyBaseline) observedStoreFileGenerationsRef.current.add(generation);
+            const uri = attachmentFileIdentity(stored);
+            if (uri && !persistedFiles.has(uri)) persistedFiles.set(uri, 'observed');
         }
         setEditAttachments((currentDraft) => {
             const merged = new Map<string, Attachment>();
@@ -644,25 +644,36 @@ export function useTaskItemAttachments({ task, t }: UseTaskItemAttachmentsProps)
         });
     }, []);
 
-    const settleAttachmentFiles = useCallback((
-        committedAttachments: Attachment[],
-        preserveObservedStoreFiles = false,
-    ) => {
+    const settleAttachmentFiles = useCallback((committedAttachments: Attachment[]) => {
+        const persistedFiles = persistedFileSourcesRef.current;
+        for (const attachment of [...baselineAttachmentsRef.current, ...committedAttachments]) {
+            const uri = attachmentFileIdentity(attachment);
+            if (uri) persistedFiles.set(uri, 'baseline');
+        }
         const settlement = planAttachmentDraftSettlement({
             baselineAttachments: baselineAttachmentsRef.current,
             draftAttachments: editAttachmentsRef.current,
             committedAttachments,
         });
-        let protectedStoreFile = false;
+        let keptBaselineFile = false;
+        let keptObservedFile = false;
         const removable = settlement
             .filter(({ attachment }) => {
-                const protectedGeneration = preserveObservedStoreFiles
-                    && observedStoreFileGenerationsRef.current.has(`${attachment.id}\0${attachment.uri}`);
-                protectedStoreFile ||= protectedGeneration;
-                return !protectedGeneration;
+                const uri = attachmentFileIdentity(attachment);
+                const source = uri ? persistedFiles.get(uri) : undefined;
+                keptBaselineFile ||= source === 'baseline';
+                keptObservedFile ||= source === 'observed';
+                return source === undefined;
             })
             .map((candidate) => candidate.attachment);
-        if (protectedStoreFile) {
+        if (keptBaselineFile && isTauriRuntime() && !isSandboxMode()) {
+            void logInfo('Persisted task attachment file retained during editor cleanup', {
+                scope: 'attachment',
+                extra: { releaseCheck: 'v1.3.10/desktop-shared-attachment' },
+                force: true,
+            });
+        }
+        if (keptObservedFile) {
             void logInfo('Store attachment files protected during draft settlement', {
                 scope: 'attachment',
                 extra: { releaseCheck: 'v1.3.2/dictation-store-files-protected' },
@@ -688,7 +699,6 @@ export function useTaskItemAttachments({ task, t }: UseTaskItemAttachmentsProps)
 
     const settlePersistedAttachmentSave = useCallback((committedAttachments: Attachment[]) => {
         settleAttachmentFiles(committedAttachments);
-        observedStoreFileGenerationsRef.current.clear();
         attachmentSaveAwaitingDurabilityRef.current = false;
         if (unnamedLinksRef.current.size === 0) return;
         const committedUnnamedLinks = committedAttachments.filter((attachment) => {
@@ -709,7 +719,7 @@ export function useTaskItemAttachments({ task, t }: UseTaskItemAttachmentsProps)
         importGenerationRef.current += 1;
         webDraftRef.current.discard();
         if (attachmentSaveAwaitingDurabilityRef.current) return;
-        settleAttachmentFiles(baselineAttachmentsRef.current, true);
+        settleAttachmentFiles(baselineAttachmentsRef.current);
     }, [settleAttachmentFiles]);
 
     const resetAttachmentState = useCallback((attachments: Attachment[] | undefined) => {
@@ -720,7 +730,7 @@ export function useTaskItemAttachments({ task, t }: UseTaskItemAttachmentsProps)
         setPendingFileImports(0);
         const nextList = attachments || [];
         if (!attachmentSaveAwaitingDurabilityRef.current) {
-            settleAttachmentFiles(nextList, true);
+            settleAttachmentFiles(nextList);
         }
         setEditAttachments(nextList);
         setAttachmentError(null);

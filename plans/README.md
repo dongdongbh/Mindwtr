@@ -1,5 +1,13 @@
 # Plans index
 
+## Review from v1.3.6 — November 25, 2026
+
+| Plan | Impact | Effort | Verification |
+| --- | --- | --- | --- |
+| [135](135-entity-open-url.md) | Preserve one encoding contract for clipboard, widgets and search | Small | Byte-level output and parser round trip |
+
+The transport audit kept Gmail's explicit all-or-nothing acknowledgement contract. A transport-format migration would reopen ADR 0020 without new performance evidence. The architecture change above is independent of the attachment and recurrence fixes.
+
 ## Release review from v1.3.0 — September 28, 2026
 
 Planned at `285b922ab` after four comprehensive fixes. Astra reviews only shipping

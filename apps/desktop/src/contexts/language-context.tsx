@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useCallback, useContext, useState, useEffect } from 'react';
 
 import { type Language, getSystemDefaultLanguage, getTranslationsSync, loadTranslations, loadStoredLanguageSync, saveStoredLanguageSync } from '@mindwtr/core';
 export type { Language };
@@ -7,6 +7,7 @@ interface LanguageContextType {
     language: Language;
     setLanguage: (lang: Language) => void;
     t: (key: string) => string;
+    refreshRegionalFormats?: () => void;
 }
 
 
@@ -34,6 +35,10 @@ export function LanguageProvider({
     });
     const [translationsMap, setTranslationsMap] = useState<Record<string, string>>({});
     const [fallbackTranslations, setFallbackTranslations] = useState<Record<string, string>>(() => getTranslationsSync('en'));
+    const [, setRegionalFormatRevision] = useState(0);
+    const refreshRegionalFormats = useCallback(() => {
+        setRegionalFormatRevision((revision) => revision + 1);
+    }, []);
 
     useEffect(() => {
         if (isTest) return;
@@ -68,7 +73,7 @@ export function LanguageProvider({
     };
 
     return (
-        <LanguageContext.Provider value={{ language, setLanguage, t }}>
+        <LanguageContext.Provider value={{ language, setLanguage, t, refreshRegionalFormats }}>
             {children}
         </LanguageContext.Provider>
     );

@@ -80,12 +80,48 @@ class WidgetGroupingTest {
     assertEquals("group:project:next", WidgetListStore.read(context, 42))
 
     val dropdown = activity(true)
-    assertEquals(View.GONE, dropdown.findViewById<View>(R.id.mindwtr_widget_configure_grouping_row).visibility)
+    assertEquals(View.VISIBLE, dropdown.findViewById<View>(R.id.mindwtr_widget_configure_grouping_row).visibility)
     val list = dropdown.findViewById<ListView>(R.id.mindwtr_widget_configure_lists)
     val adapter = list.adapter as WidgetConfigureActivity.ChooserAdapter
     val waiting = (0 until adapter.count).single { adapter.getItem(it).first == "waiting" }
-    adapter.pick(waiting)
+    list.performItemClick(adapter.getView(waiting, null, list), waiting, adapter.getItemId(waiting))
     assertEquals("group:project:waiting", WidgetListStore.read(context, 42))
+    assertTrue(dropdown.isFinishing)
+  }
+
+  @Test fun theTasksArrowChangesGroupingOnlyForTheWidgetThatOpenedIt() {
+    val widgetId = 48
+    val otherWidgetId = 49
+    val manager = AppWidgetManager.getInstance(context)
+    for (id in listOf(widgetId, otherWidgetId)) {
+      shadowOf(manager).addBoundWidget(id, AppWidgetProviderInfo().apply { provider = ComponentName(context.packageName, "TasksWidgetProvider") })
+      WidgetListStore.write(context, id, "group:project:next")
+    }
+    WidgetListStore.writeBackground(context, widgetId, WidgetBackground.DARK_TEXT)
+    WidgetListStore.writeFocusAvailable(context, widgetId, true)
+    WidgetPayloadStore.write(context, JSONObject().put("listTitles", JSONObject().put("groupBy", "Gruppieren nach")).toString())
+    WidgetRenderer.render(context, manager, intArrayOf(widgetId), WidgetKind.TASKS)
+
+    val view = shadowOf(manager).getViewFor(widgetId)
+    view.findViewById<View>(R.id.mindwtr_widget_chooser).performClick()
+    val intent = shadowOf(context as Application).nextStartedActivity
+    val controller = Robolectric.buildActivity(WidgetConfigureActivity::class.java, intent)
+    controller.get().setTheme(androidx.appcompat.R.style.Theme_AppCompat)
+    val activity = controller.create().get()
+    val spinner = activity.findViewById<Spinner>(R.id.mindwtr_widget_configure_grouping)
+    shadowOf(android.os.Looper.getMainLooper()).idle()
+    assertFalse(activity.isFinishing)
+    assertEquals("Gruppieren nach", activity.findViewById<TextView>(R.id.mindwtr_widget_configure_grouping_label).text.toString())
+    assertEquals("Project", spinner.selectedItem)
+    assertEquals(View.VISIBLE, activity.findViewById<View>(R.id.mindwtr_widget_configure_grouping_row).visibility)
+    spinner.setSelection(2)
+    shadowOf(android.os.Looper.getMainLooper()).idle()
+
+    assertTrue(activity.isFinishing)
+    assertEquals("group:context:next", WidgetListStore.read(context, widgetId))
+    assertEquals("group:project:next", WidgetListStore.read(context, otherWidgetId))
+    assertEquals(WidgetBackground.DARK_TEXT, WidgetListStore.background(context, widgetId))
+    assertTrue(WidgetListStore.focusAvailable(context, widgetId))
   }
 
   @Test fun priorityOptionIsAbsentWhenPrioritiesAreDisabledAndFocusKeepsItsHierarchy() {
@@ -94,7 +130,9 @@ class WidgetGroupingTest {
     WidgetPayloadStore.write(context, JSONObject().put("prioritiesEnabled", false).toString())
     WidgetListStore.write(context, 44, "focus")
     val controller = Robolectric.buildActivity(WidgetConfigureActivity::class.java,
-      Intent(context, WidgetConfigureActivity::class.java).putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, 44))
+      Intent(context, WidgetConfigureActivity::class.java)
+        .putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, 44)
+        .putExtra(WidgetConfigureActivity.EXTRA_DROPDOWN, true))
     controller.get().setTheme(androidx.appcompat.R.style.Theme_AppCompat)
     val activity = controller.create().get()
     assertEquals(4, activity.findViewById<Spinner>(R.id.mindwtr_widget_configure_grouping).count)

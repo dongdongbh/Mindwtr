@@ -4,8 +4,10 @@ import { ASSOCIATIONS, LIFECYCLE, NATIVE_NULLABLE_DRAFT_FIELDS, RECURRENCE, SCHE
     type NativeTaskRecurrenceBase, type NativeTaskScheduleBase } from './native-host-contract-task-save';
 import { readNativeAttachments } from './native-host-contract-attachments';
 import { isNativeJsonWithinBytes, readChecklist } from './native-host-contract-task-view';
-import { getTaskEditorDailyInterval, getTaskEditorSuggestions } from './task-editor-model';
+import { getTaskEditorDailyInterval, parseTaskEditorTokenList } from './task-editor-model';
 import { getTaskEditorRelativeStart, getTaskEditorRecurrenceInputValues, getTaskEditorTimeEstimate } from './task-editor-schedule';
+import { logInfo } from './logger';
+import { formatTaskTokenInput } from './task-token-input';
 import { taskEditValuesEqual } from './json-value-equality';
 import type { TaskDraft, TaskDraftField } from './task-draft';
 import type { Task } from './types';
@@ -196,14 +198,20 @@ function validateEditorSaveCheckpoint(input: NativeTaskEditorSaveCheckpointInput
         if (![raw.tokens, raw.tokenCanonical, raw.tokenResolved].every((entry) => exact(entry, tokens))
             || !Array.isArray(raw.tokenEdited) || new Set(raw.tokenEdited).size !== raw.tokenEdited.length
             || raw.tokenEdited.some((field) => !tokens.includes(field as typeof tokens[number]))) return invalid();
+        let usedLegacyTokenFormat = false;
         for (const field of tokens) {
             const value = edited[field];
             if (typeof value !== 'string' || [raw.tokens, raw.tokenCanonical, raw.tokenResolved]
                 .some((entry) => (entry as Record<string, unknown>)[field] !== value)) return invalid();
             if (!raw.tokenEdited.includes(field)) {
                 if (!taskEditValuesEqual(value, base[field])) return invalid();
-            } else if (field !== 'assignedTo' && getTaskEditorSuggestions({ field, text: value, limit: 0,
-                knownTokens: [], usage: [], people: [], tasks: [] }).draftValue !== value) return invalid();
+            } else if (field !== 'assignedTo') {
+                const parsedTokens = parseTaskEditorTokenList(value, field === 'contexts' ? '@' : '#');
+                if (formatTaskTokenInput(parsedTokens) !== value) {
+                    if (parsedTokens.join(', ') !== value) return invalid();
+                    usedLegacyTokenFormat = true;
+                }
+            }
         }
         if (!exact(raw.checklistInputs, []) || raw.checklistAppend !== '' || raw.relativeOwned !== false || raw.relativeCommitRequested !== false
             || !Array.isArray(raw.recurrenceOwned) || raw.recurrenceOwned.length !== 0
@@ -217,6 +225,10 @@ function validateEditorSaveCheckpoint(input: NativeTaskEditorSaveCheckpointInput
             if (interval === null || count === null || !exact(raw.recurrenceInputs, ['interval', 'count'])
                 || raw.recurrenceInputs.interval !== interval || raw.recurrenceInputs.count !== count) return invalid();
         } else if (!exact(raw.recurrenceInputs, [])) return invalid();
+        if (usedLegacyTokenFormat) {
+            logInfo('Native editor checkpoint accepted legacy token format', { scope: 'store', category: 'storage', force: true,
+                context: { releaseCheck: 'v1.3.10/native-editor-legacy-tokens', outcome: 'validated' } });
+        }
         return { ok: true, value: { kind: 'ready' } };
     } catch { return invalid(); }
 }

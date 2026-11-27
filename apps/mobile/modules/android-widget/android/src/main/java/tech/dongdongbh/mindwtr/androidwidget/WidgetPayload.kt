@@ -65,7 +65,8 @@ data class WidgetPayload(
   data class CaptureDestinationLabels(val destination: String, val none: String, val areas: String, val projects: String,
     val deferred: String, val unavailable: String, val search: String, val needsSelection: String)
   data class CaptureDestinations(val defaultDestination: CaptureDestination, val areas: List<CaptureArea>,
-    val projects: List<CaptureProject>, val sections: List<CaptureSection>, val labels: CaptureDestinationLabels)
+    val projects: List<CaptureProject>, val sections: List<CaptureSection>, val labels: CaptureDestinationLabels,
+    val savedContexts: List<String> = emptyList(), val savedTags: List<String> = emptyList())
 
   data class DisplaySnapshot(val sourceTaskIds: Set<String>, val payload: WidgetPayload)
 
@@ -402,7 +403,8 @@ data class WidgetPayload(
       return CaptureDestinations(destination, areas, projects, sections, CaptureDestinationLabels(
         label("destination", "Destination"), label("none", "None"), label("areas", "Areas"), label("projects", "Projects"),
         label("deferred", "Deferred"), label("unavailable", "Destination unavailable"), label("search", "Search"),
-        label("needsSelection", "Choose a destination to save.")))
+        label("needsSelection", "Choose a destination to save.")),
+        parseStrings(json.optJSONArray("savedContexts")), parseStrings(json.optJSONArray("savedTags")))
     }
 
     private fun parseUpcomingDays(json: JSONObject?): UpcomingDays? {

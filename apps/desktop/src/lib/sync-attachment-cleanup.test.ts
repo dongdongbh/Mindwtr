@@ -13,6 +13,7 @@ const fsMocks = vi.hoisted(() => ({
     readDir: vi.fn(),
     remove: vi.fn(),
 }));
+const invokeNative = vi.hoisted(() => vi.fn());
 
 const coreMocks = vi.hoisted(() => ({
     webdavDeleteFile: vi.fn(),
@@ -28,6 +29,7 @@ vi.mock('@mindwtr/core', async (importOriginal) => ({
 }));
 
 vi.mock('@tauri-apps/plugin-fs', () => fsMocks);
+vi.mock('./tauri-invoke', () => ({ invokeNative }));
 vi.mock('./managed-paths', () => ({
     getManagedDataDir: async () => '/new-profile',
     getManagedPath: async (...segments: string[]) => ['/new-profile', ...segments].join('/'),
@@ -231,6 +233,11 @@ describe('desktop attachment cleanup freshness', () => {
 });
 
 describe('deleteAttachmentFile', () => {
+    beforeEach(() => {
+        fsMocks.remove.mockReset();
+        invokeNative.mockReset().mockResolvedValue(true);
+    });
+
     const attachment = (uri: string) => ({
         id: 'a1',
         kind: 'file' as const,
@@ -238,6 +245,23 @@ describe('deleteAttachmentFile', () => {
         uri,
         createdAt: '2026-08-16T00:00:00.000Z',
         updatedAt: '2026-08-16T00:00:00.000Z',
+    });
+
+    it('retains the tombstone and its file when the native writer detects a new durable owner', async () => {
+        const deleted = { ...attachment('/new-profile/attachments/a1.pdf'), deletedAt: '2026-08-16T00:01:00.000Z', localStatus: 'available' as const };
+        const appData = buildData();
+        appData.tasks = [{ id: 'task', title: 'Task', status: 'next', tags: [], contexts: [],
+            createdAt: deleted.createdAt, updatedAt: deleted.updatedAt, attachments: [deleted] }];
+        fsMocks.remove.mockReset();
+        fsMocks.exists.mockResolvedValue(true);
+        fsMocks.readDir.mockResolvedValue([]);
+        invokeNative.mockResolvedValueOnce(false);
+
+        const cleaned = await cleanupOrphanedAttachments(appData, 'off', buildDeps(), { ensureLocalSnapshotFresh: vi.fn() });
+
+        expect(fsMocks.remove).not.toHaveBeenCalled();
+        expect(invokeNative).toHaveBeenCalledWith('remove_unreferenced_managed_attachment', { path: deleted.uri, attachmentId: deleted.id });
+        expect(cleaned.tasks[0].attachments).toEqual([deleted]);
     });
 
     it('removes the profile copy a relocated portable install left under a stale path', async () => {
@@ -252,7 +276,10 @@ describe('deleteAttachmentFile', () => {
             { ensureLocalSnapshotFresh: vi.fn() },
         );
 
-        expect(fsMocks.remove).toHaveBeenCalledWith('/new-profile/attachments/a1.pdf');
+        expect(fsMocks.remove).not.toHaveBeenCalled();
+        expect(invokeNative).toHaveBeenCalledWith('remove_unreferenced_managed_attachment', {
+            path: '/new-profile/attachments/a1.pdf', attachmentId: 'a1',
+        });
     });
 
     it('never removes a pointer target outside the managed dir', async () => {
@@ -266,13 +293,15 @@ describe('deleteAttachmentFile', () => {
         );
 
         expect(fsMocks.remove).not.toHaveBeenCalled();
+        expect(invokeNative).not.toHaveBeenCalled();
     });
 
     it('logs an attachment id instead of a private title or path when deletion fails', async () => {
         const privateTitle = 'Divorce settlement draft.pdf';
         const privatePath = `/new-profile/attachments/${privateTitle}`;
         const logSyncWarning = vi.fn();
-        fsMocks.remove.mockRejectedValueOnce(new Error(`Failed to remove ${privatePath}`));
+        fsMocks.exists.mockResolvedValue(true);
+        invokeNative.mockRejectedValueOnce(new Error(`Failed to remove ${privatePath}`));
 
         await deleteAttachmentFile(
             { ...attachment(privatePath), title: privateTitle },
@@ -289,39 +318,35 @@ describe('deleteAttachmentFile', () => {
         );
     });
 
-    it('treats an orphan file that is already gone as cleaned, not a failure', async () => {
+    it('treats a native absence proof as cleaned', async () => {
 
 
         fsMocks.remove.mockReset();
         fsMocks.exists.mockResolvedValue(true);
         const logSyncWarning = vi.fn();
-        fsMocks.remove.mockRejectedValueOnce(new Error('No such file or directory (os error 2)'));
 
         await expect(deleteAttachmentFile(
             attachment('/new-profile/attachments/a1.pdf'),
             { logSyncWarning },
             { ensureLocalSnapshotFresh: vi.fn() },
-        )).resolves.toBeUndefined();
+        )).resolves.toBe(true);
 
         expect(logSyncWarning).not.toHaveBeenCalled();
     });
 
 
-    it('treats a localized string rejection for a missing file as cleaned', async () => {
-        fsMocks.remove.mockReset();
+    it('does not claim cleanup after a refused native read', async () => {
         fsMocks.exists.mockResolvedValue(true);
         const logSyncWarning = vi.fn();
-        fsMocks.remove.mockRejectedValueOnce(
-            'failed to get metadata of path: /new-profile/attachments/a1.pdf with error: Не удается найти указанный файл. (os error 2)',
-        );
+        invokeNative.mockRejectedValueOnce('database is locked');
 
         await expect(deleteAttachmentFile(
             attachment('/new-profile/attachments/a1.pdf'),
             { logSyncWarning },
             { ensureLocalSnapshotFresh: vi.fn() },
-        )).resolves.toBeUndefined();
+        )).resolves.toBe(false);
 
-        expect(logSyncWarning).not.toHaveBeenCalled();
+        expect(logSyncWarning).toHaveBeenCalledTimes(1);
     });
 
 
@@ -329,7 +354,7 @@ describe('deleteAttachmentFile', () => {
         fsMocks.remove.mockReset();
         fsMocks.exists.mockResolvedValue(true);
         const logSyncWarning = vi.fn();
-        fsMocks.remove.mockRejectedValueOnce(
+        invokeNative.mockRejectedValueOnce(
             'failed to remove path: /new-profile/attachments/a1.pdf with error: Access is denied. (os error 5)',
         );
 

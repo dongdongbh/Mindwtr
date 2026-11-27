@@ -406,10 +406,10 @@ export default function ProjectsScreen() {
     }
   }, [projects, selectedProject, updateProject]);
 
-  const [captureProjectId, setCaptureProjectId] = useState<string | null>(null);
+  const [captureTarget, setCaptureTarget] = useState<{ projectId: string; sectionId?: string } | null>(null);
   useEffect(() => {
-    if (captureProjectId && selectedProject?.id !== captureProjectId) setCaptureProjectId(null);
-  }, [captureProjectId, selectedProject?.id]);
+    if (captureTarget && selectedProject?.id !== captureTarget.projectId) setCaptureTarget(null);
+  }, [captureTarget, selectedProject?.id]);
   const reopenProjectIdAfterCaptureRef = useRef<string | null>(null);
   const pendingGettingStartedAction = useRef<GettingStartedAction | null>(null);
   const pendingProjectDismissActionRef = useRef<(() => void) | null>(null);
@@ -839,18 +839,19 @@ export default function ProjectsScreen() {
   persistSelectedProjectEditsRef.current = persistSelectedProjectEdits;
 
 
-  const openProjectQuickAdd = useCallback((projectToAddTo: Project) => {
+  const openProjectQuickAdd = useCallback((projectToAddTo: Project, sectionId?: string) => {
     commitSelectedProjectNotes();
     persistSelectedProjectEdits(selectedProject);
+    const target = { projectId: projectToAddTo.id, ...(sectionId === undefined ? {} : { sectionId }) };
     if (Platform.OS === 'android') {
-      setCaptureProjectId(projectToAddTo.id);
+      setCaptureTarget(target);
       return;
     }
     reopenProjectIdAfterCaptureRef.current = projectToAddTo.id;
     setSelectedProject(null);
     const openCapture = () => openQuickCapture({
       initialProps: {
-        projectId: projectToAddTo.id,
+        ...target,
         status: 'next',
       },
       returnTo: buildProjectQuickCaptureReturnTo(projectToAddTo.id),
@@ -1202,13 +1203,13 @@ export default function ProjectsScreen() {
         tasks={selectedProjectTasks}
       />
 
-      {captureProjectId && selectedProject?.id === captureProjectId && (
+      {captureTarget && selectedProject?.id === captureTarget.projectId && (
         <CaptureForm
-          params={{ initialProps: JSON.stringify({ projectId: captureProjectId, status: 'next' }) }}
+          params={{ initialProps: JSON.stringify({ ...captureTarget, status: 'next' }) }}
           projectModal={{
-            close: () => setCaptureProjectId(null),
+            close: () => setCaptureTarget(null),
             edit: (id) => {
-              setCaptureProjectId(null);
+              setCaptureTarget(null);
               const task = useTaskStore.getState()._allTasks.find((item) => item.id === id && !item.deletedAt);
               if (!task) return;
               setHighlightTask(id);

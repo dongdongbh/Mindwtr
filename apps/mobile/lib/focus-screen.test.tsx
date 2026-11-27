@@ -4,6 +4,7 @@ import { act, create, type ReactTestInstance } from 'react-test-renderer';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppData, AppSettings, Area, Project, StorageAdapter, Task } from '@mindwtr/core';
 
+import { getFocusWidgetFilter, setFocusWidgetFilter } from '@/lib/focus-widget-filter';
 import FocusScreen from '../app/(drawer)/(tabs)/focus';
 import { SwipeableTaskItem } from '@/components/swipeable-task-item';
 import { WidgetLaunchDestination } from '@/hooks/use-widget-launch';
@@ -2202,6 +2203,27 @@ describe('FocusScreen', () => {
     act(() => { tree = create(<FocusScreen />); });
     expect(tree.root.findByType(WidgetLaunchDestination).props.path).toBe('/focus');
     act(() => { tree.unmount(); });
+  });
+
+  it('keeps the main Focus widget filter when shortcuts open successive saved lists', () => {
+    const previous = getFocusWidgetFilter();
+    const mainFilter = { criteria: { contexts: ['@office'] }, sortBy: 'title' as const };
+    setFocusWidgetFilter(mainFilter);
+    storeState.settings = { ...storeState.settings, savedFilters: ['first', 'second'].map((id) => ({
+      id, name: id, view: 'focus' as const, criteria: { contexts: ['@' + id] },
+      createdAt: '2026-04-01T00:00:00.000Z', updatedAt: '2026-04-01T00:00:00.000Z',
+    })) };
+    let tree: ReturnType<typeof create> | undefined;
+    try {
+      for (const id of ['first', 'second']) {
+        act(() => { tree = create(<FocusScreen initialSavedFilterId={id} />); });
+        expect(getFocusWidgetFilter()).toEqual(mainFilter);
+        act(() => { tree!.unmount(); tree = undefined; });
+      }
+    } finally {
+      if (tree) act(() => tree!.unmount());
+      setFocusWidgetFilter(previous);
+    }
   });
 
   it('selects the widget Focus filter once after settings hydrate and keeps controls editable', () => {

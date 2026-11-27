@@ -1368,6 +1368,36 @@ describe('TaskItemFieldRenderer date clear buttons', () => {
         expect(input).toHaveValue('@computer');
     });
 
+    it('browses all contexts, keeps the search open after toggles, and preserves typed entries', () => {
+        const allContextOptions = Array.from({ length: 12 }, (_, index) => `@context ${index + 1}`);
+        allContextOptions.push('@CONTEXT 1');
+        const { getAllByRole, getByRole, queryByRole } = render(<ContextAutocompleteHarness
+            initialValue="@CONTEXT 1, custom entry"
+            allContextOptions={allContextOptions}
+            popularContextOptions={['@context 1']}
+        />);
+        const browse = getByRole('button', { name: /Contexts · / });
+        fireEvent.click(browse);
+        const search = getByRole('searchbox');
+        expect(search).toHaveFocus();
+        expect(getAllByRole('checkbox')).toHaveLength(14);
+        expect(getByRole('checkbox', { name: '@CONTEXT 1' })).toBeChecked();
+        expect(getByRole('checkbox', { name: '@context 1' })).not.toBeChecked();
+        fireEvent.click(getByRole('checkbox', { name: '@context 1' }));
+        fireEvent.click(getByRole('checkbox', { name: '@CONTEXT 1' }));
+        expect(getByRole('checkbox', { name: '@context 1' })).toBeChecked();
+        expect(getByRole('checkbox', { name: '@CONTEXT 1' })).not.toBeChecked();
+        fireEvent.change(search, { target: { value: 'CONTEXT 1' } });
+        expect(getAllByRole('checkbox')).toHaveLength(5);
+        fireEvent.click(getByRole('checkbox', { name: '@context 11' }));
+        fireEvent.click(getByRole('checkbox', { name: '@context 12' }));
+        expect(getByRole('textbox', { name: 'Contexts' })).toHaveValue('custom entry, @context 1, @context 11, @context 12');
+        expect(search).toHaveValue('CONTEXT 1');
+        fireEvent.keyDown(search, { key: 'Escape' });
+        expect(queryByRole('searchbox')).toBeNull();
+        expect(browse).toHaveFocus();
+    });
+
     it('suggests visible context chips after a comma when the full option list is empty', async () => {
         const { findByRole, getByRole } = render(
             <ContextAutocompleteHarness

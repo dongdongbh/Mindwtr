@@ -1,9 +1,10 @@
 import React from 'react';
 import { Text, TextInput, TouchableOpacity, View } from 'react-native';
 
-import { getProcessInboxTokenSection } from '@mindwtr/core';
+import { getProcessInboxTokenSection, type getTaskTokenCatalog } from '@mindwtr/core';
 
 import { styles } from '../inbox-processing-modal.styles';
+import { TokenPicker } from '../TokenPicker';
 import { InboxSuggestionList } from './InboxSuggestionList';
 import type { ThemeColors } from '@/hooks/use-theme-colors';
 
@@ -21,6 +22,7 @@ type Props = {
   setNewContext: (v: string) => void;
   addCustomContextMobile: (kind?: 'context' | 'tag') => void;
   tokenSuggestions: string[];
+  tokenCatalog: ReturnType<typeof getTaskTokenCatalog>;
   applyTokenSuggestion: (token: string) => void;
   contextCopilotSuggestions: string[];
   tagCopilotSuggestions: string[];
@@ -40,6 +42,7 @@ export function InboxContextSection({
   setNewContext,
   addCustomContextMobile,
   tokenSuggestions,
+  tokenCatalog,
   applyTokenSuggestion,
   contextCopilotSuggestions,
   tagCopilotSuggestions,
@@ -129,6 +132,8 @@ export function InboxContextSection({
         </TouchableOpacity>
       </View>
       <InboxSuggestionList suggestions={visibleTokenSuggestions} onSelect={applyTokenSuggestion} tc={tc} />
+      {showContextsField && <TokenPicker t={t} tc={tc} label={t('taskEdit.contextsLabel')} tokens={tokenCatalog.contexts} selected={selectedContexts} onToggle={toggleContext} />}
+      {showTagsField && <TokenPicker t={t} tc={tc} label={t('taskEdit.tagsLabel')} tokens={tokenCatalog.tags} selected={selectedTags} onToggle={toggleTag} />}
       {showContextsField && visibleContextCopilotSuggestions.length > 0 && (
         <View style={[styles.tokenSuggestionsContainer, { backgroundColor: tc.cardBg, borderColor: tc.border }]}>
           <Text style={[styles.tokenSectionTitle, { color: tc.secondaryText }]}>{suggestedContextsLabel}</Text>

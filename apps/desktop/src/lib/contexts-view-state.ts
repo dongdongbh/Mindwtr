@@ -26,9 +26,7 @@ export const DEFAULT_CONTEXTS_VIEW_STATE: ContextsPersistedViewState = {
     groupBy: 'none',
 };
 
-export type ContextsTokenSelectionEventDetail = {
-    selectedContext: string | null;
-};
+export type ContextsViewSelection = Pick<ContextsPersistedViewState, 'selectedContexts' | 'matchMode'>;
 
 export function sanitizeContextsViewState(
     value: unknown,
@@ -84,11 +82,10 @@ export function readContextsViewState(): ContextsPersistedViewState {
     }
 }
 
-export function persistContextsViewSelection(selectedContext: string | null): ContextsPersistedViewState {
+export function dispatchContextsViewSelection(selection: ContextsViewSelection): void {
     const nextState: ContextsPersistedViewState = {
         ...readContextsViewState(),
-        selectedContexts: selectedContext ? [selectedContext] : [],
-        matchMode: 'all',
+        ...selection,
     };
     const storage = getWorkspaceCache();
     if (storage) {
@@ -98,28 +95,27 @@ export function persistContextsViewSelection(selectedContext: string | null): Co
 
         }
     }
-    return nextState;
-}
-
-export function dispatchContextsTokenSelection(selectedContext: string | null): void {
-    persistContextsViewSelection(selectedContext);
     if (typeof window === 'undefined') return;
     window.dispatchEvent(
-        new CustomEvent<ContextsTokenSelectionEventDetail>(CONTEXTS_TOKEN_SELECTION_EVENT, {
-            detail: { selectedContext },
+        new CustomEvent<ContextsViewSelection>(CONTEXTS_TOKEN_SELECTION_EVENT, {
+            detail: selection,
         }),
     );
 }
 
+export function dispatchContextsTokenSelection(selectedContext: string | null): void {
+    dispatchContextsViewSelection({ selectedContexts: selectedContext ? [selectedContext] : [], matchMode: 'all' });
+}
+
 export function subscribeContextsTokenSelection(
-    handler: (detail: ContextsTokenSelectionEventDetail) => void,
+    handler: (selection: ContextsViewSelection) => void,
 ): () => void {
     if (typeof window === 'undefined') {
         return () => undefined;
     }
 
     const listener: EventListener = (event) => {
-        const detail = (event as CustomEvent<ContextsTokenSelectionEventDetail | undefined>).detail;
+        const detail = (event as CustomEvent<ContextsViewSelection | undefined>).detail;
         if (!detail) return;
         handler(detail);
     };

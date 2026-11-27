@@ -147,6 +147,23 @@ vi.mock('react-native', async (importOriginal) => {
 });
 
 describe('ContextsView', () => {
+  it('shows only tasks matching the initial widget context', async () => {
+    const previous = storeState.tasks;
+    storeState.tasks = [
+      { ...makeTask('teddy', 'Call Teddy'), contexts: ['@person/Teddy'] },
+      { ...makeTask('emma', 'Call Emma'), contexts: ['@person/Emma'] },
+    ];
+    let tree!: ReactTestRenderer;
+    try {
+      await act(async () => { tree = create(<ContextsView initialContext="@person/Teddy" />); });
+      const rows = tree.root.findAll((node) => (node.type as unknown) === 'SwipeableTaskItem');
+      expect(rows.map((node) => node.props.task.id)).toEqual(['teddy']);
+    } finally {
+      await act(async () => { tree?.unmount(); });
+      storeState.tasks = previous;
+    }
+  });
+
   it('selects the widget saved filter with its criteria and sort while keeping controls editable', async () => {
     const previous = storeState.settings;
     storeState.tasks = [

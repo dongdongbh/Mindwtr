@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { getProjectCalendarReferenceCandidates, resolveProjectCalendarReference } from './project-calendar-reference';
 import { hasCalendarPushTaskMarker } from './calendar-scheduling';
 import {
     createExternalCalendarFeeds,
@@ -84,6 +85,39 @@ describe('external calendar feeds behind the host ports', () => {
     beforeEach(() => { process.env.TZ = 'UTC'; });
     afterEach(() => {
         vi.useRealTimers();
+    });
+
+    it('links an Apple occurrence across devices while retaining the saved snapshot on missing or ambiguous matches', async () => {
+        const calendar = { id: 'calendar-A', title: 'Holidays', source: { type: 'caldav', name: 'iCloud' } };
+        const occurrence = { calendarId: calendar.id, id: 'local-A', externalIdentifier: 'holiday-series',
+            isRecurring: true, allDay: true, originalStartDate: '2027-01-06T00:00:00Z',
+            startDate: '2027-01-06T00:00:00Z', endDate: '2027-01-07T00:00:00Z', title: 'Holiday' };
+        const now = new Date('2026-12-01T12:00:00Z');
+        const load = async (calendars: DeviceCalendar[], events: DeviceCalendarEvent[], permission = 'granted') =>
+            device({ platform: 'ios', calendars, events, permission,
+                storage: { [SYSTEM_CALENDAR_SETTINGS_KEY]: JSON.stringify({ enabled: true, selectAll: true }) },
+            }).feeds.fetchExternalCalendarEvents(now, new Date('2027-02-01T00:00:00Z'));
+        const first = await load([calendar], [occurrence]);
+        const [saved] = JSON.parse(JSON.stringify(getProjectCalendarReferenceCandidates(first.events, first.calendars, now)));
+        expect(saved).toMatchObject({ uid: 'holiday-series', recurrenceId: '2027-01-06', title: 'Holiday' });
+        const second = { ...calendar, id: 'calendar-B' };
+        const moved = { ...occurrence, calendarId: second.id, id: 'local-B', startDate: '2027-01-07T00:00:00Z', endDate: '2027-01-08T00:00:00Z' };
+        const next = { ...moved, originalStartDate: '2027-01-13T00:00:00Z', startDate: '2027-01-13T00:00:00Z', endDate: '2027-01-14T00:00:00Z' };
+        const peer = await load([second], [moved, next]);
+        expect(resolveProjectCalendarReference(saved, peer.events, true, now).event?.start).toBe('2027-01-07T00:00:00.000Z');
+        for (const result of [
+            await load([second], [next]), await load([second], [moved], 'denied'),
+            await load([second], [moved, { ...moved, id: 'duplicate' }]),
+            await load([calendar, second], [moved]),
+            await load([second], [{ ...moved, originalStartDate: undefined }]),
+            await load([second], [{ ...moved, externalIdentifier: undefined }]),
+        ]) {
+            expect(resolveProjectCalendarReference(saved, result.events, true, now)).toEqual({ status: 'unavailable' });
+        }
+        const single = await load([second], [{ ...moved, isRecurring: false, originalStartDate: undefined }]);
+        const [singleReference] = getProjectCalendarReferenceCandidates(single.events, single.calendars, now);
+        expect(singleReference?.uid).toBe('holiday-series');
+        expect(singleReference.recurrenceId).toBeUndefined();
     });
 
     it('reads each enabled feed through fetch, a local file through readLocalFile, and skips a failing or disabled one', async () => {

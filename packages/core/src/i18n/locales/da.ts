@@ -356,6 +356,7 @@ export const daOverrides: Record<string, string> = {
     'keybindings.focusSidebar': 'Flyt fokus ét panel til venstre',
     'keybindings.focusContent': 'Flyt fokus ét panel til højre',
     'keybindings.goInbox': 'Gå til Indbakke',
+    'keybindings.goForward': 'Frem',
     'keybindings.goNext': 'Gå til Næste handlinger',
     'keybindings.goAgenda': 'Gå til Fokus',
     'keybindings.goProjects': 'Gå til Projekter',
@@ -2864,6 +2865,7 @@ export const daOverrides: Record<string, string> = {
     'settings.syncMobile.iosFolderFallbackConfirm': 'Vælg sikkerhedskopifil',
     'settings.syncMobile.useRedirectUri': 'Brug omdirigerings-URI',
     'settings.syncMobile.webdavEndpointIsReachable': 'WebDAV-endepunktet kan nås.',
+    'settings.syncMobile.webdavOriginRejected': 'WebDAV-serveren afviste anmodningens oprindelse (401).',
     'settings.persistentCaptureLabel': 'Hurtig registrering i meddelelseslinjen',
     'settings.persistentCaptureDesc':
         'Behold en fast meddelelse, så du kan registrere overalt, også fra låseskærmen.',

@@ -470,21 +470,18 @@ class QuickCaptureActivity : AppCompatActivity() {
     autocompleteMatches.removeAllViews()
     autocompleteMatches.visibility = View.GONE
     if (!input.hasFocus() || !input.isEnabled || contextPanel.visibility == View.VISIBLE ||
-      (input.text?.let(BaseInputConnection::getComposingSpanStart) ?: -1) >= 0 || input.selectionStart != input.selectionEnd) return
+      input.selectionStart != input.selectionEnd) return
     val text = input.text?.toString().orEmpty()
     val token = QuickCaptureAutocomplete.tokenAt(text, input.selectionStart) ?: return
+    val catalog = capturePayload.captureDestinations
     val choices = when (token.prefix) {
-      '@' -> capturePayload.contexts.mapNotNull { option ->
-        WidgetListStore.captureText(option.id).trimEnd().takeIf { it.isNotEmpty() }
-          ?.let { QuickCaptureAutocomplete.Choice(option.name, it) }
+      '@' -> tokenChoices(capturePayload.contexts, catalog?.savedContexts.orEmpty(), WidgetListStore.CONTEXT_PREFIX)
+      '#' -> tokenChoices(capturePayload.tags, catalog?.savedTags.orEmpty(), WidgetListStore.TAG_PREFIX)
+      '+' -> catalog?.projects.orEmpty().map { project ->
+        QuickCaptureAutocomplete.Choice(project.title, "", WidgetPayload.CaptureDestination("project", project.id))
       }
-      '#' -> capturePayload.tags.mapNotNull { option ->
-        WidgetListStore.captureText(option.id).trimEnd().takeIf { it.isNotEmpty() }
-          ?.let { QuickCaptureAutocomplete.Choice(option.name, it) }
-      }
-      '+' -> capturePayload.captureDestinations?.projects.orEmpty().map { project ->
-        val name = project.title.replace("\\", "\\\\").replace("\"", "\\\"")
-        QuickCaptureAutocomplete.Choice(project.title, "+\"$name\"", project.id)
+      '!' -> catalog?.areas.orEmpty().map { area ->
+        QuickCaptureAutocomplete.Choice(area.name, "", WidgetPayload.CaptureDestination("area", area.id))
       }
       else -> emptyList()
     }
@@ -505,7 +502,7 @@ class QuickCaptureActivity : AppCompatActivity() {
           val current = input.text?.toString().orEmpty()
           val active = QuickCaptureAutocomplete.tokenAt(current, input.selectionStart) ?: return@setOnClickListener
           val (next, caret) = QuickCaptureAutocomplete.replace(current, active, choice)
-          choice.projectId?.let { audioSession.selectDestination(WidgetPayload.CaptureDestination("project", it)) }
+          choice.destination?.let { audioSession.selectDestination(it) }
           input.setText(next)
           input.setSelection(caret.coerceAtMost(next.length))
           input.requestFocus()
@@ -514,6 +511,12 @@ class QuickCaptureActivity : AppCompatActivity() {
       })
     }
   }
+
+  private fun tokenChoices(options: List<WidgetPayload.SavedFilterOption>, saved: List<String>, prefix: String) =
+    (options + saved.map { WidgetPayload.SavedFilterOption(prefix + it, it) }).distinctBy { it.id }.mapNotNull { option ->
+      WidgetListStore.captureText(option.id).trimEnd().takeIf { it.isNotEmpty() }
+        ?.let { QuickCaptureAutocomplete.Choice(option.name, it) }
+    }
 
   private fun currentContextChoices() =
     contextChoices(contextOptions, input.text?.toString().orEmpty(), contextFilter.text?.toString().orEmpty())

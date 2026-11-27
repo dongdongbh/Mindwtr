@@ -1,6 +1,6 @@
 import { normalizeBulkTaskTokenInput, type BulkTaskTokenField } from './bulk-task-tokens';
 import { getUsedTaskTokens } from './task-token-usage';
-import { buildFocusTaskSections, DEFAULT_FOCUS_SORT_BY, type FocusTaskLists } from './focus-sections';
+import { buildFocusTaskSections, DEFAULT_FOCUS_SORT_BY, type FocusTaskLists, type FocusTaskSection } from './focus-sections';
 import type { FocusWidgetFilter } from './focus-widget-filter';
 import { compareSomedayTasks, compareWaitingTasks } from './menu-views-model';
 import { applyFilter, normalizeSavedFilters } from './saved-filters';
@@ -121,6 +121,7 @@ export interface WidgetTaskList {
     tasks: Task[];
     groupBy?: FocusGroupBy;
     showStatus?: boolean;
+    focusSections?: FocusTaskSection[];
 }
 
 export interface WidgetListContext {
@@ -165,11 +166,19 @@ function buildSavedFilterList(filter: SavedFilter, context: WidgetListContext): 
     if (filter.view === 'focus') {
         const lists = context.getFocusLists({ criteria,
             sortBy: filter.sortBy ?? DEFAULT_FOCUS_SORT_BY, sortOrder: filter.sortOrder });
-        const tasks = [...new Map(buildFocusTaskSections(lists, (key) => context.tr[key])
-            .flatMap((section) => section.items).map((task) => [task.id, task])).values()];
+        const seen = new Set<string>();
+        const focusSections = buildFocusTaskSections(lists, (key) => context.tr[key]).map((section) => ({
+            ...section,
+            items: section.items.filter((task) => {
+                if (seen.has(task.id)) return false;
+                seen.add(task.id);
+                return true;
+            }),
+        }));
+        const tasks = focusSections.flatMap((section) => section.items);
         logInfo('Saved Focus filter projected for widget', { scope: 'widget-lists', category: 'unknown', force: true,
             context: { releaseCheck: 'v1.3.9/widget-focus-filter-scope', count: tasks.length, outcome: 'projected' } });
-        return { title: filter.name, tasks, groupBy: filter.groupBy, showStatus: true };
+        return { title: filter.name, tasks, groupBy: filter.groupBy, showStatus: true, focusSections };
     }
     const status = savedFilterStatus[filter.view];
     const includeReference = (filter.view === 'contexts' || filter.view === 'all') && filter.criteria.statuses?.includes('reference');

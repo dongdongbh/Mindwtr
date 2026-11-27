@@ -180,6 +180,7 @@ import { createIOSStartupPromptHost, createNativeAbout } from './host-about';
 import { readShareCard } from './host-share-card';
 import { createNativeAppSearch, type AppSearchCall } from './host-app-search';
 import { readMarkdownReferences } from './host-markdown-references';
+import { enrichAndroidCaptureTitle, enrichAndroidEditorLinkTitles } from './host-link-title';
 import { createNativeAI } from './host-ai';
 import { createIOSTaskAI } from './host-ios-task-ai';
 import { createIOSInboxAI } from './host-ios-inbox-ai';
@@ -720,6 +721,8 @@ const widgets = typeof (globalThis.__mindwtrNative as { widgetPublish?: unknown 
         active: () => checked(native().widgetAppState!()) === 'active',
     })
     : null;
+
+let todayWidgetFilterHeld = false;
 
 const cacheIOSFocusWidgetFilter = (focus: NativeFocusView): void => {
     if (globalThis.__mindwtrHostPlatform !== 'ios') return;
@@ -1530,8 +1533,9 @@ const MENU_READS: Record<string, (input: never) => Reply> = {
     settingsMenu: (input) => contract.getSettingsMenu(input),
     syncBadge: () => ({ ok: true, value: (nativeSync ?? iosManualSync)?.badgeView() ?? { state: 'hidden', color: null, accessibilityLabel: null, icon: null } }),
 
-    generalSettings: (input) => contract.getGeneralSettings(nativeAppSearch
-        ? { ...(input as Parameters<typeof contract.getGeneralSettings>[0]), appSearch: nativeAppSearch.device() } : input),
+    generalSettings: (input) => contract.getGeneralSettings({ ...(input as Parameters<typeof contract.getGeneralSettings>[0]),
+        ...(nativeAppSearch ? { appSearch: nativeAppSearch.device() } : {}),
+        ...(globalThis.__mindwtrHostPlatform === 'android' ? { fetchLinkTitlesRow: true } : {}) }),
     gtdSettings: (input) => contract.getGtdSettings(input),
     manageSettings: (input) => contract.getManageSettings(input),
     manageList: (input) => contract.getManageSettingsList(input),
@@ -1647,7 +1651,11 @@ const ATTACHMENT_REQUESTS: Record<string, (input: never) => Promise<Reply>> = {
     draftRemove: (input) => draftOnly(input, () => contract.removeAttachment(input)),
     downloadAttachment: (input) => contract.downloadAttachment(input),
     openAttachment: (input) => contract.openAttachment(input),
-    settleTaskDraftAttachments: (input) => contract.settleTaskDraftAttachments(input),
+    settleTaskDraftAttachments: async (input) => {
+        const reply = await contract.settleTaskDraftAttachments(input);
+        if (reply.ok) enrichAndroidEditorLinkTitles(input);
+        return reply;
+    },
 
 
     prepareSharedFiles: (input) => contract.prepareSharedFiles(input),
@@ -3207,11 +3215,13 @@ globalThis.MindwtrHost = {
 
     focus(limit: number, controls = '', controlEdit = '', folds = ''): string {
         return submit(async () => {
+            const { todayWidgetFilter, ...edit } = controlEdit ? JSON.parse(controlEdit) : {};
+            if (todayWidgetFilter === 'hold' || todayWidgetFilter === 'release') todayWidgetFilterHeld = todayWidgetFilter === 'hold';
             requireSaved();
-            const focus = unwrap(contract.getFocus({ limit, ...(controls ? { controls: JSON.parse(controls) } : {}), ...(controlEdit ? { controlEdit: JSON.parse(controlEdit) } : {}),
+            const focus = unwrap(contract.getFocus({ limit, ...(controls ? { controls: JSON.parse(controls) } : {}), ...(Object.keys(edit).length ? { controlEdit: edit } : {}),
                 ...(folds ? { collapsedGroupIds: JSON.parse(folds) } : {}) }));
             cacheIOSFocusWidgetFilter(focus);
-            widgets?.focusFilter(focus.controls?.widgetFilter);
+            if (!todayWidgetFilterHeld) widgets?.focusFilter(focus.controls?.widgetFilter);
             return focus;
         });
     },
@@ -6303,7 +6313,12 @@ globalThis.MindwtrHost = {
         });
     },
     captureSubmit(json: string): string {
-        return submit(async () => taskResult('quickCapture', await contract.submitQuickCapture(JSON.parse(json))));
+        return submit(async () => {
+            const input = JSON.parse(json);
+            const result = taskResult('quickCapture', await contract.submitQuickCapture(input));
+            if (result.kind === 'saved' && input.openAfterSave !== true) enrichAndroidCaptureTitle(result.taskId, input.text);
+            return result;
+        });
     },
 
     capturePrepare(json: string): string {
@@ -6316,7 +6331,13 @@ globalThis.MindwtrHost = {
         return submit(async () => { requireSaved(); return unwrap(contract.prepareQuickCaptureCopilot(JSON.parse(json))); });
     },
     captureCommit(json: string): string {
-        return submit(async () => taskResult('quickCapture', await contract.commitPreparedQuickCapture(JSON.parse(json))));
+        return submit(async () => {
+            const input = JSON.parse(json);
+            const result = taskResult('quickCapture', await contract.commitPreparedQuickCapture(input));
+            const request = input.request.capture ?? input.request;
+            if (request.openAfterSave !== true) enrichAndroidCaptureTitle(result.taskId, request.text);
+            return result;
+        });
     },
 
     captureLinesPrepare(json: string): string {
@@ -6762,7 +6783,12 @@ globalThis.MindwtrHost = {
     },
 
     captureModalSubmit(json: string): string {
-        return submit(async () => taskResult('captureModal', await contract.submitCaptureModal(JSON.parse(json))));
+        return submit(async () => {
+            const input = JSON.parse(json);
+            const result = taskResult('captureModal', await contract.submitCaptureModal(input));
+            if (result.kind === 'saved' && input.openAfterSave !== true) enrichAndroidCaptureTitle(result.taskId, input.draft.text);
+            return result;
+        });
     },
 
     captureModalLines(json: string): string {
@@ -7293,7 +7319,8 @@ globalThis.MindwtrHost = {
         });
     },
     ingest(requestId: string): string {
-        return submit(async () => taskResult('ingest', await contract.ingestPendingCaptures({ requestId, queue: pendingCaptureQueue, lastApplied: lastAppliedRecord })));
+        return submit(async () => taskResult('ingest', await contract.ingestPendingCaptures({ requestId, queue: pendingCaptureQueue, lastApplied: lastAppliedRecord,
+            onTextCaptureSaved: enrichAndroidCaptureTitle })));
     },
 
 

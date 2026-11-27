@@ -1,16 +1,25 @@
 import { useEffect, useRef, useState } from 'react';
 import { isEntityOpenUrl, parseEntityOpenUrl, translateWithFallback, useTaskStore } from '@mindwtr/core';
 import { logInfo, logWarn } from '../lib/app-log';
+import { OpenAttachmentTaskEvent } from '../lib/navigation-events';
 import { useUiStore } from '../store/ui-store';
 
 
 export function useTaskDeepLink(dataReady: boolean, enabled: boolean, t: (key: string) => string) {
-    const [pendingUrl, setPendingUrl] = useState<{ url: string } | null>(null);
+    const [pendingTask, setPendingTask] = useState<{ id: string; source: 'attachment' | 'external' } | null>(null);
     const [openTaskId, setOpenTaskId] = useState<string | null>(null);
     const linkedTask = useTaskStore((state) => openTaskId ? state._tasksById.get(openTaskId) : undefined);
     const projects = useTaskStore((state) => state.projects);
     const error = useTaskStore((state) => state.error);
     const loadFailed = useRef(false);
+
+    useEffect(() => {
+        const receive = (event: Event) => {
+            if (event instanceof OpenAttachmentTaskEvent) setPendingTask({ id: event.taskId, source: 'attachment' });
+        };
+        window.addEventListener(OpenAttachmentTaskEvent.eventName, receive);
+        return () => window.removeEventListener(OpenAttachmentTaskEvent.eventName, receive);
+    }, []);
 
     useEffect(() => {
         if (!enabled) return;
@@ -21,7 +30,10 @@ export function useTaskDeepLink(dataReady: boolean, enabled: boolean, t: (key: s
             if (disposed) return;
             delivered = true;
             const url = urls.find(isEntityOpenUrl);
-            if (url) setPendingUrl({ url });
+            if (url) {
+                const target = parseEntityOpenUrl(url);
+                setPendingTask(target?.kind === 'task' ? { id: target.id, source: 'external' } : null);
+            }
         };
         void import('@tauri-apps/plugin-deep-link').then(async ({ onOpenUrl, getCurrent }) => {
 
@@ -37,7 +49,7 @@ export function useTaskDeepLink(dataReady: boolean, enabled: boolean, t: (key: s
     }, [enabled]);
 
     useEffect(() => {
-        if (!pendingUrl) return;
+        if (!pendingTask) return;
         if (!dataReady) {
             if (error && !loadFailed.current) {
                 loadFailed.current = true;
@@ -47,10 +59,8 @@ export function useTaskDeepLink(dataReady: boolean, enabled: boolean, t: (key: s
             return;
         }
         loadFailed.current = false;
-        const payload = parseEntityOpenUrl(pendingUrl.url);
-        if (payload?.kind !== 'task') { setPendingUrl(null); return; }
-        const task = useTaskStore.getState()._tasksById.get(payload.id);
-        setPendingUrl(null);
+        const task = useTaskStore.getState()._tasksById.get(pendingTask.id);
+        setPendingTask(null);
         if (task && !task.deletedAt) {
             useUiStore.getState().setTaskExpanded(task.id, true);
             setOpenTaskId(task.id);
@@ -61,9 +71,12 @@ export function useTaskDeepLink(dataReady: boolean, enabled: boolean, t: (key: s
         }
         void logInfo('Task link route requested', {
             scope: 'routing',
-            extra: { releaseCheck: 'v1.3.5/task-link-open', outcome: task && !task.deletedAt ? 'opened' : 'missing' },
+            extra: {
+                releaseCheck: pendingTask.source === 'attachment' ? 'v1.3.10/attachment-task-link' : 'v1.3.5/task-link-open',
+                outcome: task && !task.deletedAt ? 'opened' : 'missing',
+            },
         }).catch(() => undefined);
-    }, [dataReady, error, pendingUrl, t]);
+    }, [dataReady, error, pendingTask, t]);
 
     const openTask = linkedTask && !linkedTask.deletedAt ? linkedTask : null;
     return {

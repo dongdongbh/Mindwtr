@@ -27,3 +27,14 @@ export function sanitizeHiddenSidebarViews(value: unknown): HideableSidebarViewI
     if (!Array.isArray(value)) return [];
     return [...new Set(value.filter((id): id is HideableSidebarViewId => typeof id === 'string' && HIDEABLE_ID_SET.has(id)))];
 }
+
+export function isSidebarViewHidden(view: string, hidden: readonly string[]): boolean {
+    return view === 'history'
+        ? hidden.includes('done') && hidden.includes('archived')
+        : hidden.includes(view);
+}
+
+export function resolveDesktopStartupView(explicit: string | null, restored: string | undefined, hidden: readonly string[]): string {
+    const candidate = restored ?? 'agenda';
+    return explicit ?? (isSidebarViewHidden(candidate, hidden) ? 'inbox' : candidate);
+}

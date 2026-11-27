@@ -59,6 +59,7 @@ Source: `apps/mobile`. Routes live in `apps/mobile/app` (expo-router). Labels be
 - Reach: Inbox › Process Inbox (N). A step-by-step clarify flow opens for each task.
 - Code: `apps/mobile/components/inbox-processing-modal.tsx`, `apps/mobile/components/inbox-processing/InboxStepFlow.tsx`, `apps/mobile/components/inbox-processing/useInboxProcessingController.ts`
 - Checks: `apps/mobile/components/inbox-processing-modal.test.tsx`, `apps/mobile/components/inbox-processing/process-inbox-parity.test.tsx`, `apps/mobile/components/inbox-processing/InboxProjectSection.test.tsx`
+- During Inbox project conversion, Project name and Next action are separately editable. Back restores the task title from before conversion.
 - Notes: Area assignment precedes Projects. Selecting a project shows its inherited Area and indented Section controls; a project with no Area shows No area. Browse projects has All areas, No area and named Areas; changing browsing preserves assignment and sections. Search remains global. More opens and closes without moving the scroll position. Setting a project clears a direct area, because a task has one Container.
 
 ## Mind Sweep
@@ -70,6 +71,8 @@ Source: `apps/mobile`. Routes live in `apps/mobile/app` (expo-router). Labels be
 - Notes: Each item becomes an inbox task through Capture.
 
 ## Quick capture sheet
+
+- If the destination section disappears during project capture, **Clear** removes the stale destination and keeps the draft available to save or assign elsewhere.
 
 - Reach: Center Add Task tab button. Also an empty-list action on Inbox.
 - Shortcuts: Long press Add Task to switch text and voice. Deep link `mindwtr:///capture-quick?mode=text&entry=details` opens this sheet over Inbox.
@@ -92,6 +95,7 @@ Source: `apps/mobile`. Routes live in `apps/mobile/app` (expo-router). Labels be
 ## Queued Android capture
 
 - Reach: Android Quick capture widget, Quick Settings tile, or capture shortcut.
+- Android home-screen capture: type `#` or `@` to search used and saved tokens, including while composing text. Type `!` to choose an existing Area by name.
 - Code: `apps/mobile/modules/android-widget/android/src/main/java/tech/dongdongbh/mindwtr/androidwidget/QuickCaptureActivity.kt`, `packages/core/src/pending-captures.ts`
 - Checks: `packages/core/src/pending-captures.test.ts`, `apps/mobile/lib/pending-captures.test.ts`
 - Notes: The standalone screen shows editable Status and Destination, a one-line expanding title, and local `@`, `+`, `#` suggestions. Save and Cancel stay labelled. The displayed destination is frozen into text/audio queue entries, including explicit None; later settings changes cannot redirect them. Missing destinations keep the draft or queued capture for recovery. Older queue entries without destination metadata retain legacy default-area handling. IME composition confirmation must not submit the title.
@@ -115,7 +119,7 @@ Source: `apps/mobile`. Routes live in `apps/mobile/app` (expo-router). Labels be
 - Notes: Destination lists None, Areas, active Projects, then Someday / Waiting projects, preserving order within each group and direct project selection. Edits stay in the Task draft until Save. Sending a draft back to Inbox drops its Focus star. Field order and visibility come from Settings › GTD › Task editor layout.
 - Reference contexts: Menu › Reference › open an item › Edit › Contexts. Existing contexts remain visible in rows and Preview; edit or clear them and Save while keeping Reference status. An empty Contexts field follows the task editor layout. The shared editor and preview models also supply native Android and iOS. Frozen parity fixtures retain their original observations; parity tests apply only the approved Reference-context visibility delta (#1565), backed by current RN editor, preview, and row render tests.
 
-- Preview completion: Mark Done appears inside the visible Status card for editable active tasks. On Android, long-press Mark Done to choose a completion time. Both actions save the complete current draft, including pending checklist input, through one normal completion write. Repeated taps and competing Save/Close are blocked until persistence finishes; a failed barrier keeps the Done draft/files with inline error and Retry in Preview/header. Retry actively persists the applied state without creating another recurring successor. iOS sheet swipe attempts run the same Save/Discard/Cancel decision as Close before the sheet can disappear; Cancel and failed saves keep the draft visible. Close is blocked while submitting or retrying. Reference, terminal, Trash, projected and archived-project previews have no action.
+- Preview completion: For editable active tasks, Mark Done sits beside the status in the Status card when both controls fit. It wraps below the status when space is limited. On Android, long-press Mark Done to choose a completion time. Both actions save the complete current draft, including pending checklist input, through one normal completion write. Repeated taps and competing Save/Close are blocked until persistence finishes; a failed barrier keeps the Done draft/files with inline error and Retry in Preview/header. Retry actively persists the applied state without creating another recurring successor. iOS sheet swipe attempts run the same Save/Discard/Cancel decision as Close before the sheet can disappear; Cancel and failed saves keep the draft visible. Close is blocked while submitting or retrying. Reference, terminal, Trash, projected and archived-project previews have no action.
 
 ## Completion time
 
@@ -153,6 +157,7 @@ Source: `apps/mobile`. Routes live in `apps/mobile/app` (expo-router). Labels be
 ## Bulk selection
 
 - With Time Estimates enabled, open Contexts › Filters › Time estimate › No estimate. Select tasks › Bulk organize › Time estimate to keep, set or clear their estimates. Setting an estimate removes the task from this filter.
+- In Bulk organize, set or clear the person or priority independently. Keep existing preserves each selected task’s value. The priority field requires priorities to be enabled.
 - Bulk organize status includes Inbox for returning tasks to processing; existing project, notes, tags and dates stay unchanged unless explicitly edited.
 
 - Reach: Long press a task row in Inbox, project tasks, Waiting For, Someday, Contexts, or Review. The bar shows Move to, Bulk organize, Range, Add tag, Remove tag, Delete, and Done to exit.
@@ -183,14 +188,18 @@ Source: `apps/mobile`. Routes live in `apps/mobile/app` (expo-router). Labels be
 - Repeat after completion: In project details, enter the count in `project-repeat-after-count`, choose days, weeks, months, or years in `project-repeat-after-unit`, then use `project-repeat-after-save`. Clear the count and save to turn repeating off. Turn off repeats on active tasks in the project before enabling it. Select Complete in project actions to schedule its next run.
 - Reach: Projects › tap a project. Controls cover status, area, tags, dates, sections, flow mode, and the project task list.
 - Shortcuts: Reorder › long press and drag a task handle.
+- Project sections: Tap a section heading to collapse or expand its tasks. Tap `+` beside a section to open Add Task with that project and section selected. Empty sections show their add button when task filters are clear. Reorder shows all eligible tasks and section drop targets.
 - Selectors: `project-calendar-reference`, `project-calendar-link`, `project-calendar-unlink`, `project-calendar-event-` (+ index), `project-actions-menu-button`, `project-add-task-button`, `project-status-picker`, `project-status-menu-item-` (+ status), `project-area-picker`, `project-tag-picker`, `project-due-date-picker`, `project-start-date-picker`, `project-review-date-picker`, `project-sections-button`, `project-section-add-button`, `project-section-title-input`, `project-section-save-button`, `project-flow-mode-options`, `project-convert-to-section-button`, `project-duplicate-button`, `project-delete-button`, `project-task-reorder-toggle`, `project-task-drag-handle-` (+ task id), `project-task-view-options-button`
+- Section selectors: `project-section-toggle-` and `project-section-add-task-` (+ section id), `capture-project-section-destination`.
 - Code: `apps/mobile/components/projects-screen/ProjectDetailModal.tsx`, `apps/mobile/components/projects-screen/ProjectCalendarReference.tsx`, `apps/mobile/components/projects-screen/ProjectTaskList.tsx`, `apps/mobile/components/projects-screen/ProjectToSectionModal.tsx`
-- Checks: `apps/mobile/components/projects-screen/ProjectCalendarReference.test.tsx`, `apps/mobile/components/projects-screen/ProjectDetailModal.test.tsx`, `apps/mobile/components/projects-screen/ProjectToSectionModal.test.tsx`, `apps/mobile/components/project-next-action-prompt.test.tsx`
+- Checks: `apps/mobile/components/projects-screen/ProjectCalendarReference.test.tsx`, `apps/mobile/components/projects-screen/ProjectDetailModal.test.tsx`, `apps/mobile/components/projects-screen/ProjectToSectionModal.test.tsx`, `apps/mobile/components/project-next-action-prompt.test.tsx`, `apps/mobile/components/task-list.test.tsx`, `apps/mobile/tests/capture-modal.test.tsx`
 - Notes: Details › Link calendar event selects an existing read-only event from the next 90 days as the scheduled next step. Search by event title or calendar name across the full upcoming list; at most 200 matches are displayed. Replace and Unlink change only the reference. Elapsed events invite an outcome review; unavailable calendars preserve last known details.
+- On iPhone, enabled Apple device calendars can supply read-only project links. A unique calendar and event occurrence must match; unavailable or ambiguous matches retain the saved title and date.
 - Notes: An Archived project is read-only and accepts no new tasks. Tasks moved in land at the end of the Unsectioned group.
 
 ## Contexts and tags
 
+- In task editing and Inbox processing, open Browse beside Contexts or Tags to search or toggle multiple saved and in-use values. An empty search shows the full list.
 - Reach: Menu › Contexts. Chips list each @context and #tag with a count.
 - Shortcuts: Tap a chip to show only that token. Long press a chip to add it to or remove it from the selection. Deep link route `/contexts?token=@home`.
 - Code: `apps/mobile/components/views/contexts-view.tsx`, `apps/mobile/app/(drawer)/contexts.tsx`, `apps/mobile/app/(drawer)/(tabs)/contexts-tab.tsx`
@@ -420,9 +429,13 @@ Source: `apps/mobile`. Routes live in `apps/mobile/app` (expo-router). Labels be
 
 ## Android widgets
 
+- Android Tasks widget: select a context directly, then tap the header to open Contexts with that context selected.
+
 - Background sync: After a background save, Tasks and Compact refresh from local data. If publication fails, Mindwtr retries once. If both attempts fail, a later successful background sync can republish the saved data. Export Diagnostics to see the retry outcome. Android controls when background sync runs.
 
 - List scope: The compact built-in list is named Today (stored list ID `focus`) and contains Today’s Focus plus today’s schedule. Saved Focus filters use the app’s shared Focus task sections, including Next Actions, Review Due and Upcoming; unrelated Inbox/Someday tasks and blocked sequential successors remain excluded. This shared projection also serves iOS widgets. Check: `packages/core/src/widget-focus-filter.test.ts`.
+- Opening a saved Focus list through a Shortcut or widget keeps its filter local to that screen. The built-in Today widget continues using the main Focus screen’s filter.
+- Saved Focus widget grouping applies only to Next Actions. Group headings show both the section and group name, such as “Next Actions · @desk”. Today’s Focus, Today, Review Due, and Upcoming keep their own headings when they have visible tasks.
 
 - Reach: Home screen › add widget: Tasks (list chooser), Compact, Quick Capture. Tap the title to open the shown list. Tap the chevron to choose a list. Tap a ring to check off a task. Tap plus to capture.
 - Shortcuts: Widget links open `mindwtr:///focus`, `mindwtr:///inbox`, `mindwtr:///waiting`, `mindwtr:///someday`, or `mindwtr:///widget-list/<list-id>`.
@@ -431,6 +444,7 @@ Source: `apps/mobile`. Routes live in `apps/mobile/app` (expo-router). Labels be
 - Notes: The Android list chooser requests a fresh snapshot when opened and updates its options when publication completes, retaining search and pending choices. Check: `WidgetChooserRefreshTest.kt`. Warm widget task links have one navigation owner; closing the task preview leaves the matching page and selected navigation item. Check: `use-root-layout-external-capture.test.tsx`.
 - Notes: Widget check-offs and captures are queued; the app applies them through the store on the next drain. Widget code never writes SQLite. Rows checked off in a row stay in place, struck through and undoable, until three seconds after the last tap; then they all leave together (`CheckoffStore.kt`, check `CheckoffStoreTest.kt`) (#1211).
 - Notes: Existing `/widget-list/filter:<id>` links for saved Contexts or Focus filters open the full matching controls with that filter selected after local settings load. Clearing or changing the selection does not reapply it on settings refresh. Deleted or unknown filters show an empty result. The original widget path remains mounted for launch acknowledgment after App lock unlocks.
+- Tasks and Compact widget settings: choose a transparent text mode and adjust Background opacity from 0% to 100% per widget.
 - E-Ink: Present priority rings and identity dots use each Android widget's effective text foreground, including transparent light-text and dark-text modes. Missing identity stays hidden; the transparent surface stays clear.
 
 ## Android launcher shortcuts and Quick Settings tile

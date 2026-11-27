@@ -110,6 +110,8 @@ final class NativeCalendarReader: NativeCalendarWriteWitnessing, NativeCalendarR
                                   "calendarId": event.calendar.calendarIdentifier,
                                   "allDay": event.isAllDay,
                                   "isRecurring": event.isDetached || !(event.recurrenceRules ?? []).isEmpty]
+        value["externalIdentifier"] = event.calendarItemExternalIdentifier
+        if let original = event.occurrenceDate { value["originalStartDate"] = formatter.string(from: original) }
         if let title = event.title { value["title"] = title }
         if let start = event.startDate { value["startDate"] = formatter.string(from: start) }
         if let end = event.endDate { value["endDate"] = formatter.string(from: end) }

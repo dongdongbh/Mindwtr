@@ -402,7 +402,7 @@ export function QuickCaptureSheetBody({
             {destinationLabel !== undefined ? (
               <TouchableOpacity onPress={onOpenDestinationPicker} disabled={saving}
                 accessibilityRole="button" accessibilityLabel={`${t('task.destination')}: ${destinationLabel}`}
-                style={[styles.optionChip, { backgroundColor: tc.filterBg, borderColor: tc.border, alignSelf: 'flex-start' }]}>
+                style={[styles.optionChip, styles.destinationChip, { backgroundColor: tc.filterBg, borderColor: tc.border }]}>
                 <Folder size={16} color={tc.text} />
                 <CompactText style={[styles.optionText, { color: destinationAvailable ? tc.text : tc.danger }]}>
                   {t('task.destination')}: {destinationLabel}

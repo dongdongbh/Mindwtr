@@ -27,6 +27,7 @@ import {
     type InboxProcessingVisibility,
 } from './views/inbox/inbox-processing-utils';
 import { TokenAutocompleteInput } from './Task/TokenAutocompleteInput';
+import { TokenPicker } from './Task/TokenPicker';
 import { AutocompleteTextInput } from './ui/AutocompleteTextInput';
 import { AreaSelector } from './ui/AreaSelector';
 import { ProjectSelector } from './ui/ProjectSelector';
@@ -80,6 +81,8 @@ export type InboxProcessingQuickPanelProps = {
     onCreateSection: (title: string) => Promise<string | null>;
     toggleContext: (ctx: string) => void;
     toggleTag: (tag: string) => void;
+    projectName: string;
+    setProjectName: (value: string) => void;
     convertToProject: boolean;
     setConvertToProject: (value: boolean) => void;
     nextActionDraft: string;
@@ -155,6 +158,8 @@ export function InboxProcessingQuickPanel({
     onCreateSection,
     toggleContext,
     toggleTag,
+    projectName,
+    setProjectName,
     convertToProject,
     setConvertToProject,
     nextActionDraft,
@@ -327,9 +332,11 @@ export function InboxProcessingQuickPanel({
                         onChange={onContextsInputChange}
                         suggestions={[...suggestedContexts, ...allContexts]}
                         prefix="@"
+                        quotedTokens
                         placeholder={t('taskEdit.contextsPlaceholder')}
                         className="w-full bg-muted/50 border border-border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/40 focus:outline-none"
                     />
+                    <TokenPicker t={t} label={t('taskEdit.contextsLabel')} tokens={allContexts} selected={selectedContexts} onToggle={toggleContext} />
                     {suggestedContexts.length > 0 ? (
                         <div className="flex flex-wrap gap-2">
                             {suggestedContexts.map((ctx) => (
@@ -361,9 +368,11 @@ export function InboxProcessingQuickPanel({
                         onChange={onTagsInputChange}
                         suggestions={[...suggestedTags, ...allTags]}
                         prefix="#"
+                        quotedTokens
                         placeholder={t('taskEdit.tagsPlaceholder')}
                         className="w-full bg-muted/50 border border-border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/40 focus:outline-none"
                     />
+                    <TokenPicker t={t} label={t('taskEdit.tagsLabel')} tokens={allTags} selected={selectedTags} onToggle={toggleTag} />
                     {suggestedTags.length > 0 ? (
                         <div className="flex flex-wrap gap-2">
                             {suggestedTags.map((tag) => (
@@ -513,8 +522,8 @@ export function InboxProcessingQuickPanel({
                         <input
                             ref={titleInputRef}
                             aria-label={t(convertToProject ? 'projects.projectName' : 'taskEdit.titleLabel')}
-                            value={processingTitle}
-                            onChange={(event) => setProcessingTitle(event.target.value)}
+                            value={convertToProject ? projectName : processingTitle}
+                            onChange={(event) => (convertToProject ? setProjectName : setProcessingTitle)(event.target.value)}
                             className="w-full bg-muted/50 border border-border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/40 focus:outline-none"
                         />
                     </div>
@@ -802,10 +811,6 @@ export function InboxProcessingQuickPanel({
                             <button
                                 type="button"
                                 onClick={() => {
-                                    if (!convertToProject) {
-                                        setNextActionDraft('');
-                                        setExtraActionDrafts([]);
-                                    }
                                     setConvertToProject(!convertToProject);
                                 }}
                                 className={cn(
