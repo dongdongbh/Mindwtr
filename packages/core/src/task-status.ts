@@ -3,7 +3,7 @@ import { normalizeRecurrenceForLoad } from './recurrence';
 import { normalizeDueReminderLeadMinutes, normalizeStartReminderLeadMinutes, normalizeRepeatReminderMinutes } from './schedule-utils';
 import { normalizeTimeSpentMinutes } from './time-spent';
 import { normalizeRelativeStartOffset } from './task-relative-start';
-import { preserveShallowIdentity, sameShallowRecord } from './shallow-identity';
+import { preserveShallowIdentity, sameShallowRecord, sameShallowValue } from './shallow-identity';
 import { safeParseDate } from './date';
 import type { FocusDateProjection } from './task-utils';
 
@@ -88,6 +88,8 @@ const LEGACY_STATUS_MAP: Record<string, TaskStatus> = {
 };
 
 
+const hasOwnProperty = Object.prototype.hasOwnProperty;
+
 export type TaskLoadTemporalContext = { futureBoundary: string;
     dates: ReadonlyMap<string, Pick<FocusDateProjection, 'parsedAt'>> };
 const isFutureStart = (task: Pick<Task, 'startTime'>, now: Date, temporal?: TaskLoadTemporalContext): boolean => {
@@ -141,9 +143,11 @@ export function normalizeTaskLifecycleFields(task: Task): Task {
     return sameShallowRecord(task, next) ? task : next;
 }
 
+const storedAs = (task: Task, key: keyof Task, value: unknown): boolean =>
+    hasOwnProperty.call(task, key) && sameShallowValue(task[key], value);
+
 export function normalizeTaskForLoad(task: Task, nowIso: string = new Date().toISOString(), temporal?: TaskLoadTemporalContext): Task {
     const normalizedStatus = normalizeTaskStatus((task as any).status);
-    const { rev: _legacyRev, revBy: _legacyRevBy, ...rest } = task as Task & { rev?: unknown; revBy?: unknown };
 
     let createdAtIso = typeof task.createdAt === 'string' ? task.createdAt : nowIso;
     let createdAtMs = Date.parse(createdAtIso);
@@ -190,41 +194,68 @@ export function normalizeTaskForLoad(task: Task, nowIso: string = new Date().toI
     const relativeStartOffset = task.dueDate
         ? preserveShallowIdentity(task.relativeStartOffset, normalizeRelativeStartOffset(task.relativeStartOffset))
         : undefined;
-    const lifecycle = lifecycleFields(normalizedStatus, rest.cancelledAt, rest.completedAt, updatedAtIso, createdAtIso);
+    const recurrence = preserveShallowIdentity(task.recurrence, normalizeRecurrenceForLoad(task.recurrence));
+    const repeatReminderMinutes = normalizeRepeatReminderMinutes(task.repeatReminderMinutes);
+    const dueReminderLeadMinutes = normalizeDueReminderLeadMinutes(task.dueReminderLeadMinutes);
+    const startReminderLeadMinutes = normalizeStartReminderLeadMinutes(task.startReminderLeadMinutes);
+    const timeSpentMinutes = normalizeTimeSpentMinutes(task.timeSpentMinutes);
+    const addsPushCount = !(hasValidPushCount || task.purgedAt);
+    const { cancelledAt, completedAt } = lifecycleFields(normalizedStatus, task.cancelledAt, task.completedAt, updatedAtIso, createdAtIso);
+    const terminal = isTaskFinished(normalizedStatus);
+    const unfocusesFutureStart = !terminal && Boolean(task.isFocusedToday) && isFutureStart(task, new Date(nowIso), temporal);
+    const clearsFocusFlag = terminal || (unfocusesFutureStart && normalizedStatus !== 'next');
+    const clearsFocusOrder = terminal || unfocusesFutureStart;
 
+    const unchanged = storedAs(task, 'rev', rev)
+        && (revBy ? storedAs(task, 'revBy', revBy) : !hasOwnProperty.call(task, 'revBy'))
+        && (!addsPushCount || storedAs(task, 'pushCount', 0))
+        && storedAs(task, 'createdAt', createdAtIso)
+        && storedAs(task, 'updatedAt', updatedAtIso)
+        && storedAs(task, 'status', normalizedStatus)
+        && storedAs(task, 'projectId', projectId)
+        && storedAs(task, 'areaId', resolvedAreaId)
+        && storedAs(task, 'order', normalizedOrder)
+        && storedAs(task, 'orderNum', normalizedOrder)
+        && storedAs(task, 'recurrence', recurrence)
+        && storedAs(task, 'repeatReminderMinutes', repeatReminderMinutes)
+        && storedAs(task, 'dueReminderLeadMinutes', dueReminderLeadMinutes)
+        && storedAs(task, 'startReminderLeadMinutes', startReminderLeadMinutes)
+        && storedAs(task, 'timeSpentMinutes', timeSpentMinutes)
+        && storedAs(task, 'relativeStartOffset', relativeStartOffset)
+        && storedAs(task, 'cancelledAt', cancelledAt)
+        && storedAs(task, 'completedAt', completedAt)
+        && (!clearsFocusFlag || storedAs(task, 'isFocusedToday', false))
+        && (!clearsFocusOrder || storedAs(task, 'focusOrder', undefined));
+    if (unchanged) return task;
 
-    const next: Task = {
-        ...rest,
-        createdAt: createdAtIso,
-        updatedAt: updatedAtIso,
-        status: normalizedStatus,
-        projectId,
-        areaId: resolvedAreaId,
-        order: normalizedOrder,
-        orderNum: normalizedOrder,
-        recurrence: preserveShallowIdentity(task.recurrence, normalizeRecurrenceForLoad(task.recurrence)),
-        repeatReminderMinutes: normalizeRepeatReminderMinutes(task.repeatReminderMinutes),
-        dueReminderLeadMinutes: normalizeDueReminderLeadMinutes(task.dueReminderLeadMinutes),
-        startReminderLeadMinutes: normalizeStartReminderLeadMinutes(task.startReminderLeadMinutes),
-        timeSpentMinutes: normalizeTimeSpentMinutes(task.timeSpentMinutes),
-        relativeStartOffset,
-        rev,
-        ...(revBy ? { revBy } : {}),
-        ...(textDirection ? { textDirection } : {}),
-
-
-        ...(hasValidPushCount || task.purgedAt ? {} : { pushCount: 0 }),
-        cancelledAt: lifecycle.cancelledAt,
-        completedAt: lifecycle.completedAt,
-        ...lifecycle.focus,
-    };
-
-
-    if (next.isFocusedToday && isFutureStart(next, new Date(nowIso), temporal)) {
-        if (next.status !== 'next') next.isFocusedToday = false;
+    const { rev: _legacyRev, revBy: _legacyRevBy, ...rest } = task as Task & { rev?: unknown; revBy?: unknown };
+    const next = rest as Task;
+    next.createdAt = createdAtIso;
+    next.updatedAt = updatedAtIso;
+    next.status = normalizedStatus;
+    next.projectId = projectId;
+    next.areaId = resolvedAreaId;
+    next.order = normalizedOrder;
+    next.orderNum = normalizedOrder;
+    next.recurrence = recurrence;
+    next.repeatReminderMinutes = repeatReminderMinutes;
+    next.dueReminderLeadMinutes = dueReminderLeadMinutes;
+    next.startReminderLeadMinutes = startReminderLeadMinutes;
+    next.timeSpentMinutes = timeSpentMinutes;
+    next.relativeStartOffset = relativeStartOffset;
+    next.rev = rev;
+    if (revBy) next.revBy = revBy;
+    if (textDirection) next.textDirection = textDirection;
+    if (addsPushCount) next.pushCount = 0;
+    next.cancelledAt = cancelledAt;
+    next.completedAt = completedAt;
+    if (terminal) {
+        next.isFocusedToday = false;
         next.focusOrder = undefined;
     }
-
-
-    return sameShallowRecord(task, next) ? task : next;
+    if (unfocusesFutureStart) {
+        if (normalizedStatus !== 'next') next.isFocusedToday = false;
+        next.focusOrder = undefined;
+    }
+    return next;
 }

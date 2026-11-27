@@ -1,7 +1,7 @@
 
 
 
-const sameShallowValue = (left: unknown, right: unknown): boolean => {
+export const sameShallowValue = (left: unknown, right: unknown): boolean => {
     if (Object.is(left, right)) return true;
     if (!Array.isArray(left) || !Array.isArray(right)) return false;
     if (left.length !== right.length) return false;

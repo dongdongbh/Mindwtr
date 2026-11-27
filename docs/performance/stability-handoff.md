@@ -98,6 +98,13 @@ large-5000 and 1k fixtures, interleaved A/B on archived APKs in quiet windows.
   candidate installs (logged as `v1.3.10/android-shipped-bytecode`); a corrupt or truncated asset falls back to parsing the source
   (checked on the phone). APK +3.66 MB. Starts from the device cache are unchanged (cache-hit A/B at 5k, n = 20 each: 527 vs 527 ms).
   **Next:** the asset read is 51–64 ms (inflate, copy, checksum); an uncompressed asset would cut most of it for about 5.9 MB more APK.
+- **Load normalizer at 5k (11-27):** [evidence](native-android-load-normalizer-2026-11-27.md). `normalizeTaskForLoad` (shared core)
+  copied every task twice and ran a full key comparison. It now checks field by field whether the task is already normalized and
+  returns it, or makes one copy. Output, key order and object identity are unchanged (frozen corpus of 216 digests recorded from the
+  old code, mutants caught, a test that keeps the check and copy field lists equal). S23, interleaved A/B, n = 20 each: 5k first
+  content **529 → 493 ms**, `store:normalize` 89.7 → 49.9 ms; with `rev`/`revBy` on every row **549 → 488 ms**, 109.2 → 40.9 ms;
+  empty unchanged (232 vs 229). Desktop and RN not measured.
+  **Next:** `JSON.parse` of the read (about 43 ms), then `sqlite:decodeTasks` (29 ms).
 
 September 15 shared-core update: [archive reactivation candidate validation](archive-reactivation-2026-09-15.md) removes repeated full-section projections. This is synthetic core work-count evidence; native desktop and mobile latency remain unmeasured for this change.
 
