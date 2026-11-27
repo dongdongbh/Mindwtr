@@ -3789,6 +3789,33 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
         assert.doesNotMatch(gradle, /wang\.harlon\.quickjs/, 'the engine is built from the vendored source');
         assert.match(readFileSync(resolve(wrapper, 'quickjs/VERSION'), 'utf8'), /^\d{4}-\d{2}-\d{2}\n$/);
         assert.match(source('ProcessCoreHost.kt'), /BytecodeCache\(File\(app\.codeCacheDir, "core-host\.qjsc"\), BuildConfig\.QUICKJS_ENGINE\)/);
+        assert.match(source('ProcessCoreHost.kt'), /BytecodeCache\.readShipped\(BuildConfig\.QUICKJS_ENGINE, hash\) \{ app\.assets\.open\("core-host\.qjsc"\) \}/, 'shipped bytecode is keyed like the cache');
+        assert.match(coreHost, /val shipped = if \(cached != null && cached\.bytecode == null\) bundle\.shipped\(\) else null/, 'shipped bytecode runs only when the device cache missed');
+        assert.match(coreHost, /shippedCheck = BytecodeCache\.Read\(null, shipped\?\.outcome \?: "absent", shipped\?\.digest\)/);
+        assert.match(coreHost, /logShippedBytecode\(shippedCheck, compiled\)/, 'the device compile checks the shipped bytes');
+        assert.match(gradle, /"\$assets\/core-host\.qjsc", "quickjs-\$quickjsVersion"\)/, 'the shipped container names the engine built into the app');
+        assert.match(gradle, /tasks\.named\("preBuild"\) \{ dependsOn\(buildShippedBytecode\) \}/);
+        const compiler = readFileSync(resolve(app, 'scripts/compile-bytecode.c'), 'utf8');
+        const cmake = readFileSync(resolve(wrapper, 'CMakeLists.txt'), 'utf8');
+        const wrapperCompile = /jbyteArray QuickJSWrapper::compile[\s\S]*?\n\}\n/.exec(readFileSync(resolve(wrapper, 'native/cpp/quickjs_wrapper.cpp'), 'utf8'))?.[0] ?? assert.fail('the wrapper has no compile');
+        const appRuntime = readFileSync(resolve(wrapper, 'native/cpp/quickjs_context_jni.cpp'), 'utf8');
+        const hostCommand = /val buildBytecodeCompiler by tasks\.registering\(Exec::class\) \{[\s\S]*?commandLine\(([\s\S]*?)\)\n    inputs/.exec(gradle)?.[1] ?? assert.fail('no host bytecode compiler command');
+        const hostSources = /val engineSources = listOf\(([^)]*)\)/.exec(gradle)?.[1] ?? assert.fail('no host engine sources');
+        const appDefines = (/target_compile_definitions\(\s*quickjs-android-wrapper\s+PRIVATE\s+([^)]*)\)/.exec(cmake)?.[1] ?? assert.fail('no engine defines'))
+            .trim().split(/\s+/).filter((define) => define !== 'IS_ANDROID=TRUE').map((define) => define.replace('"${QUICKJS_VERSION}"', '"<quickjs VERSION>"'));
+        const hostDefines = [...hostCommand.matchAll(/"-D((?:[^"\\]|\\.)*)"/g)].map(([, define]) => define.replace('\\"$quickjsVersion\\"', '"<quickjs VERSION>"'));
+        assert.deepEqual([...hostDefines].sort(), [...appDefines, 'NDEBUG'].sort(), 'the shipped bytecode is compiled with the app engine defines (CMake defines plus Release NDEBUG)');
+        for (const name of readdirSync(resolve(wrapper, 'quickjs')).filter((name) => /\.[ch]$/.test(name))) {
+            assert.doesNotMatch(readFileSync(resolve(wrapper, 'quickjs', name), 'utf8'), /IS_ANDROID/, `QuickJS ${name} reads IS_ANDROID, which the host bytecode compiler does not define`);
+        }
+        assert.deepEqual([...hostSources.matchAll(/"(\w+\.c)"/g)].map(([, file]) => file).sort(),
+            [...cmake.matchAll(/^\s+quickjs\/(\w+\.c)$/gm)].map(([, file]) => file).sort(), 'the host bytecode compiler builds the app engine sources');
+        const flag = (text, pattern, what) => pattern.exec(text)?.[1] ?? assert.fail(`no ${what}`);
+        assert.equal(flag(compiler, /JS_SetStripInfo\(runtime, (\w+)\);/, 'host strip setting'), flag(appRuntime, /auto \*rt = JS_NewRuntime\(\);\s+JS_SetStripInfo\(rt, (\w+)\);/, 'app strip setting'), 'the build strips like the app runtime');
+        assert.equal(flag(compiler, /JS_Eval\(context, source, strlen\(source\), argv\[2\], ([^)]+)\);/, 'host eval flags'), flag(wrapperCompile, /auto eval_flags = +([^;]+);/, 'app eval flags'), 'the build parses the bundle like the app');
+        assert.equal(flag(compiler, /JS_WriteObject\(context, &size, compiled, ([^)]+)\);/, 'host write flags'), flag(wrapperCompile, /JS_WriteObject\(context, &bufferLength, compiled, ([^)]+)\);/, 'app write flags'), 'the build writes bytecode like the app');
+        assert.match(coreHost, /compiler\.compile\(String\(bytes, Charsets\.UTF_8\), "core-host\.js"\)/, 'the app compiles the bundle as a script named core-host.js');
+        assert.match(readFileSync(resolve(app, 'scripts/build-bytecode.mjs'), 'utf8'), /execFileSync\(compiler, \[bundlePath, 'core-host\.js', raw\]/, 'the build names the bundle core-host.js like the app');
         assert.match(readFileSync(resolve(wrapper, 'native/cpp/quickjs_context_jni.cpp'), 'utf8'), /auto \*rt = JS_NewRuntime\(\);\s+JS_SetStripInfo\(rt, JS_STRIP_SOURCE\);/, 'cached bytecode carries no function source');
         const toJava = /QuickJSWrapper::toJavaObject[\s\S]*?default:/.exec(readFileSync(resolve(wrapper, 'native/cpp/quickjs_wrapper.cpp'), 'utf8'))?.[0] ?? assert.fail('toJavaObject has no tag switch');
         assert.match(toJava, /case JS_TAG_STRING_ROPE:\s+case JS_TAG_STRING: \{\s+result = toJavaString\(env, value\);/, 'a rope string reaches Kotlin as a string, not null');

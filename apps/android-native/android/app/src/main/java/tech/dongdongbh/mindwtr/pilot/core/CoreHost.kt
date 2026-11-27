@@ -310,6 +310,7 @@ class CoreHost(
 
 
     @Volatile private var bundleOutcome = ""
+    @Volatile private var shippedCheck = BytecodeCache.Read(null, "absent")
     @Volatile private var bundleSource: CoreBundle? = null
     private var cacheWriter: Thread? = null
 
@@ -317,10 +318,12 @@ class CoreHost(
     private fun load(first: QuickJSContext, database: () -> SqliteBridge, bundle: CoreBundle) {
         var engine = first
         val cached = bundle.cache?.let { cache -> bundle.hash.takeIf { it.isNotEmpty() }?.let(cache::read) }
-        bundleOutcome = cached?.outcome ?: "off"
+        val shipped = if (cached != null && cached.bytecode == null) bundle.shipped() else null
+        shippedCheck = BytecodeCache.Read(null, shipped?.outcome ?: "absent", shipped?.digest)
+        bundleOutcome = if (shipped?.bytecode != null) "shipped" else cached?.outcome ?: "off"
         Trace.beginSection("core:evaluate")
         try {
-            cached?.bytecode?.let { compiled ->
+            (cached?.bytecode ?: shipped?.bytecode)?.let { compiled ->
                 val ran = runCatching { engine.execute(compiled) }
                 if (ran.isSuccess) return
                 bundleOutcome = "failed:${ran.exceptionOrNull()?.javaClass?.simpleName}"
@@ -363,12 +366,21 @@ class CoreHost(
                     check(BytecodeCache.bodyMatches(bytes, bundle.hash)) { "the bundle does not match its key" }
                     val compiler = QuickJSContext.create()
                     val compiled = try { compiler.compile(String(bytes, Charsets.UTF_8), "core-host.js") } finally { compiler.destroy() }
+                    logShippedBytecode(shippedCheck, compiled)
                     if (cache.write(bundle.hash, compiled)) "written bytes=${compiled.size}" else "write-failed"
                 }.getOrElse { "failed:${it.javaClass.simpleName}" }
                 Log.i(TAG, "Native Android bytecode cache releaseCheck=v1.3.4/native-android-bytecode-cache outcome=$outcome")
             }, "mindwtr-bytecode").also { cacheWriter = it }
         }
         writer.start()
+    }
+
+
+    private fun logShippedBytecode(shipped: BytecodeCache.Read, compiled: ByteArray) {
+        val outcome = shippedBytecodeOutcome(shipped, compiled)
+        Log.i(TAG, "Native Android shipped bytecode releaseCheck=v1.3.10/android-shipped-bytecode outcome=$outcome load=$bundleOutcome")
+        logLine("Native Android shipped bytecode releaseCheck=v1.3.10/android-shipped-bytecode", JSONObject()
+            .put("releaseCheck", "v1.3.10/android-shipped-bytecode").put("outcome", outcome).put("load", bundleOutcome))
     }
 
 
@@ -1401,6 +1413,7 @@ internal inline fun <T> traced(name: String, work: () -> T): T {
 
 fun engineCacheOutcome(load: String): String = when {
     load == "hit" -> "hit"
+    load == "shipped" -> "shipped"
     load == "other-engine" -> "miss-version"
     load == "absent" || load == "stale-bundle" -> "miss-new"
     load.startsWith("failed:") -> "failed"
@@ -1408,6 +1421,18 @@ fun engineCacheOutcome(load: String): String = when {
 }
 
 
-class CoreBundle(val hash: String, val cache: BytecodeCache?, val bytes: () -> ByteArray) {
+fun shippedBytecodeOutcome(shipped: BytecodeCache.Read, compiled: ByteArray): String = when {
+    shipped.digest == null -> "unused-${shipped.outcome}"
+    shipped.digest.contentEquals(BytecodeCache.sha256(compiled)) -> "match"
+    else -> "mismatch"
+}
+
+
+class CoreBundle(
+    val hash: String,
+    val cache: BytecodeCache?,
+    val shipped: () -> BytecodeCache.Read = { BytecodeCache.Read(null, "absent") },
+    val bytes: () -> ByteArray,
+) {
     fun source(): String = String(bytes(), Charsets.UTF_8)
 }

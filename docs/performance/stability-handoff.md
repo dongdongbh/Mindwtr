@@ -91,6 +91,13 @@ large-5000 and 1k fixtures, interleaved A/B on archived APKs in quiet windows.
   `sqlite:readRows`, `sqlite:decodeTasks`, `store:normalize`.
   **Next bounded hypothesis:** the load normalizer (88.6 ms at 5k) copies every task a second time right after `mapSqliteTaskRow`;
   shared core, so it needs a frozen-output corpus for RN, desktop and iOS before any change. After that, `JSON.parse` of the read (43 ms).
+- **First start after an install or update (11-27):** [evidence](native-android-cachemiss-2026-11-27.md). The APK now ships the bundle
+  as QuickJS bytecode, compiled at build time by a host program from the same vendored QuickJS sources and keyed like the device
+  cache (bundle hash, engine, length, checksum). Interleaved A/B, n = 8 per arm: first content after a fresh install, empty
+  **873.5 → 291 ms**, 5k **1538.5 → 943 ms**. The phone's own background compile was byte-identical to the shipped file on all 16
+  candidate installs (logged as `v1.3.10/android-shipped-bytecode`); a corrupt or truncated asset falls back to parsing the source
+  (checked on the phone). APK +3.66 MB. Starts from the device cache are unchanged (cache-hit A/B at 5k, n = 20 each: 527 vs 527 ms).
+  **Next:** the asset read is 51–64 ms (inflate, copy, checksum); an uncompressed asset would cut most of it for about 5.9 MB more APK.
 
 September 15 shared-core update: [archive reactivation candidate validation](archive-reactivation-2026-09-15.md) removes repeated full-section projections. This is synthetic core work-count evidence; native desktop and mobile latency remain unmeasured for this change.
 

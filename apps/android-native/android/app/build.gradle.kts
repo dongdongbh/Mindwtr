@@ -316,6 +316,30 @@ val buildCoreBundle by tasks.registering(Exec::class) {
 }
 
 
+val quickjsSource = rootProject.projectDir.resolve("third_party/quickjs-wrapper/quickjs")
+val bytecodeCompiler = layout.buildDirectory.file("bytecode-compiler/compile-bytecode")
+val buildBytecodeCompiler by tasks.registering(Exec::class) {
+    val program = rootProject.projectDir.resolve("../scripts/compile-bytecode.c")
+    val engineSources = listOf("quickjs.c", "cutils.c", "dtoa.c", "libregexp.c", "libunicode.c").map { quickjsSource.resolve(it).path }
+    val out = bytecodeCompiler.get().asFile
+    doFirst { out.parentFile.mkdirs() }
+    commandLine(listOf("cc", "-O2", "-w", "-D_GNU_SOURCE", "-DCONFIG_VERSION=\"$quickjsVersion\"", "-DJS_DEFAULT_STACK_SIZE=262144", "-DNDEBUG",
+        "-I${quickjsSource.path}", program.path) + engineSources + listOf("-lm", "-lpthread", "-o", out.path))
+    inputs.files(fileTree(quickjsSource), program)
+    outputs.file(out)
+}
+
+val buildShippedBytecode by tasks.registering(Exec::class) {
+    dependsOn(buildCoreBundle, buildBytecodeCompiler)
+    workingDir = rootProject.projectDir.resolve("../../..")
+    val assets = "apps/android-native/android/app/src/main/assets"
+    commandLine("node", "apps/android-native/scripts/build-bytecode.mjs", bytecodeCompiler.get().asFile.path,
+        "$assets/core-host.js", "$assets/core-host.qjsc", "quickjs-$quickjsVersion")
+    inputs.files(buildCoreBundle.map { it.outputs.files }, bytecodeCompiler, workingDir.resolve("apps/android-native/scripts/build-bytecode.mjs"))
+    outputs.file("src/main/assets/core-host.qjsc")
+}
+
+
 val verifyBundle = rootProject.projectDir.resolve("../scripts/verify-bundle.mjs").path
 tasks.withType<com.android.build.gradle.tasks.MergeSourceSetFolders>().configureEach {
     if (name.startsWith("merge") && name.endsWith("Assets") && !name.contains("Test")) {
@@ -405,6 +429,7 @@ val rnGmail by tasks.registering(Sync::class) {
     into(layout.buildDirectory.dir("generated/rnGmail"))
 }
 tasks.named("preBuild") { dependsOn(buildCoreBundle, buildShortcuts, buildWidgets, rnAttachmentInstaller, rnPersistentCapture, rnFileSync, rnGmail) }
+tasks.named("preBuild") { dependsOn(buildShippedBytecode) }
 tasks.matching { it.name.startsWith("pre") && it.name.endsWith("BenchmarkTraceBuild") }.configureEach { dependsOn(buildTracedCoreBundle) }
 
 

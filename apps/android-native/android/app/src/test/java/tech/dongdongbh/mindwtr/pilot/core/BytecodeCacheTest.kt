@@ -55,6 +55,48 @@ class BytecodeCacheTest {
     @Test fun theEngineLineNamesWhyTheCacheMissed() {
         assertEquals(listOf("hit", "miss-version", "miss-new", "miss-new", "failed", "miss-corrupt", "miss-off"),
             listOf("hit", "other-engine", "absent", "stale-bundle", "failed:QuickJSException", "corrupt", "off").map(::engineCacheOutcome))
+        assertEquals("shipped", engineCacheOutcome("shipped"))
+    }
+
+    private val golden = javaClass.classLoader!!.getResourceAsStream("bytecode-container.golden")!!.use { it.readBytes() }
+    private val goldenBytecode = ByteArray(16) { it.toByte() }
+    private fun shipped(bytes: ByteArray, engine: String = "quickjs-2026-06-04", hash: String = bundle) =
+        BytecodeCache.readShipped(engine, hash) { bytes.inputStream() }
+
+    @Test fun theBuildWritesTheSameContainerAsTheCache() {
+        assertTrue(cache(engine = "quickjs-2026-06-04").write(bundle, goldenBytecode))
+        assertArrayEquals(golden, file().readBytes())
+    }
+
+    @Test fun shippedBytecodeRunsOnlyForItsBundleAndEngine() {
+        val read = shipped(golden)
+        assertEquals("hit", read.outcome)
+        assertArrayEquals(goldenBytecode, read.bytecode)
+        assertArrayEquals(BytecodeCache.sha256(goldenBytecode), read.digest)
+        assertMiss("stale-bundle", shipped(golden, hash = otherBundle))
+        assertMiss("other-engine", shipped(golden, engine = "quickjs-2026-07-01"))
+    }
+
+    @Test fun damagedShippedBytecodeNeverRuns() {
+        assertMiss("corrupt", shipped(golden.copyOf().also { it[it.size - 1] = (it.last().toInt() xor 0xff).toByte() }))
+        assertMiss("corrupt", shipped(golden.copyOf().also { it[0] = 'X'.code.toByte() }))
+        assertMiss("truncated", shipped(golden.copyOf(golden.size - 1)))
+        assertMiss("truncated", shipped(golden + byteArrayOf(0)))
+        assertMiss("truncated", shipped(golden.copyOf(20)))
+    }
+
+    @Test fun anApkWithoutShippedBytecodeRunsTheSource() {
+        assertMiss("absent", BytecodeCache.readShipped("quickjs-2026-06-04", bundle) { throw java.io.FileNotFoundException("core-host.qjsc") })
+        assertTrue(BytecodeCache.readShipped("quickjs-2026-06-04", bundle) { throw java.io.IOException("read failed") }.outcome.startsWith("error:"))
+    }
+
+    @Test fun theDeviceCompileChecksTheShippedBytes() {
+        val shipped = shipped(golden)
+        val check = BytecodeCache.Read(null, shipped.outcome, shipped.digest)
+        assertEquals("match", shippedBytecodeOutcome(check, goldenBytecode))
+        assertEquals("mismatch", shippedBytecodeOutcome(check, goldenBytecode.copyOf(15)))
+        assertEquals("unused-stale-bundle", shippedBytecodeOutcome(shipped(golden, hash = otherBundle), goldenBytecode))
+        assertEquals("unused-corrupt", shippedBytecodeOutcome(shipped(golden.copyOf().also { it[0] = 'X'.code.toByte() }), goldenBytecode))
     }
 
     @Test fun changedBytecodeFailsItsChecksum() {

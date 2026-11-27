@@ -5,6 +5,7 @@ import java.io.DataInputStream
 import java.io.DataOutputStream
 import java.io.EOFException
 import java.io.File
+import java.io.FileNotFoundException
 import java.io.FileOutputStream
 import java.io.InputStream
 import java.security.MessageDigest
@@ -16,33 +17,9 @@ class BytecodeCache(
     private val syncDirectory: (File) -> Unit = ::syncDirectory,
 ) {
 
-    class Read(val bytecode: ByteArray?, val outcome: String)
+    class Read(val bytecode: ByteArray?, val outcome: String, val digest: ByteArray? = null)
 
-    fun read(bundleHash: String): Read = try {
-        if (!file.exists()) Read(null, "absent")
-        else DataInputStream(file.inputStream().buffered()).use { input ->
-            val magic = ByteArray(MAGIC.size).also(input::readFully)
-            val sameBundle = magic.contentEquals(MAGIC) && ByteArray(32).also(input::readFully).contentEquals(hex(bundleHash))
-            when {
-                !magic.contentEquals(MAGIC) -> Read(null, "corrupt")
-                input.readUTF() != engineVersion -> Read(null, "other-engine")
-                !sameBundle -> Read(null, "stale-bundle")
-                else -> {
-                    val length = input.readInt()
-                    val digest = ByteArray(32).also(input::readFully)
-                    if (length < 0 || length.toLong() != file.length() - HEADER_FIXED - utfLength(engineVersion)) Read(null, "truncated")
-                    else {
-                        val bytecode = ByteArray(length).also(input::readFully)
-                        if (sha256(bytecode).contentEquals(digest)) Read(bytecode, "hit") else Read(null, "corrupt")
-                    }
-                }
-            }
-        }
-    } catch (short: EOFException) {
-        Read(null, "truncated")
-    } catch (error: Exception) {
-        Read(null, "error:${error.javaClass.simpleName}")
-    }
+    fun read(bundleHash: String): Read = if (!file.exists()) Read(null, "absent") else decode(engineVersion, bundleHash, file.length(), file::inputStream)
 
 
     fun write(bundleHash: String, bytecode: ByteArray): Boolean {
@@ -87,6 +64,41 @@ class BytecodeCache(
 
         private val HEADER_FIXED = MAGIC.size + 32L + 4 + 32
         private fun utfLength(text: String) = 2L + text.toByteArray(Charsets.UTF_8).size
+
+        fun decode(engineVersion: String, bundleHash: String, size: Long, open: () -> InputStream): Read = try {
+            DataInputStream(open().buffered()).use { input ->
+                val magic = ByteArray(MAGIC.size).also(input::readFully)
+                val sameBundle = magic.contentEquals(MAGIC) && ByteArray(32).also(input::readFully).contentEquals(hex(bundleHash))
+                when {
+                    !magic.contentEquals(MAGIC) -> Read(null, "corrupt")
+                    input.readUTF() != engineVersion -> Read(null, "other-engine")
+                    !sameBundle -> Read(null, "stale-bundle")
+                    else -> {
+                        val length = input.readInt()
+                        val digest = ByteArray(32).also(input::readFully)
+                        if (length < 0 || length.toLong() != size - HEADER_FIXED - utfLength(engineVersion)) Read(null, "truncated")
+                        else {
+                            val bytecode = ByteArray(length).also(input::readFully)
+                            if (sha256(bytecode).contentEquals(digest)) Read(bytecode, "hit", digest) else Read(null, "corrupt")
+                        }
+                    }
+                }
+            }
+        } catch (short: EOFException) {
+            Read(null, "truncated")
+        } catch (error: Exception) {
+            Read(null, "error:${error.javaClass.simpleName}")
+        }
+
+
+        fun readShipped(engineVersion: String, bundleHash: String, open: () -> InputStream): Read = try {
+            val bytes = open().use { it.readBytes() }
+            decode(engineVersion, bundleHash, bytes.size.toLong(), bytes::inputStream)
+        } catch (missing: FileNotFoundException) {
+            Read(null, "absent")
+        } catch (error: Exception) {
+            Read(null, "error:${error.javaClass.simpleName}")
+        }
 
         fun sha256(bytes: ByteArray): ByteArray = MessageDigest.getInstance("SHA-256").digest(bytes)
 

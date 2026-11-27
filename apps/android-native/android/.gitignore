@@ -1,5 +1,6 @@
 app/src/main/assets/*.js
 app/src/main/assets/*.json
+app/src/main/assets/*.qjsc
 local.properties
 .gradle/
 build/

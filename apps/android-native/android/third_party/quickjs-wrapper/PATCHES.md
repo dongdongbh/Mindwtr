@@ -30,3 +30,5 @@ This folder builds the app's JavaScript engine from source. It replaces the Mave
 - 16 KB page alignment (`-z max-page-size=16384`), as in wrapper 3.2.0.
 
 Two guards keep an old bytecode cache from running on a new engine. First, Android deletes the app's `code_cache` folder on every install or update. Second, the app keys the cache on `quickjs/VERSION` (`BuildConfig.QUICKJS_ENGINE`), so a cache from another release is skipped. Bellard's master branch does not bump `VERSION` between releases, so vendor a tagged release, or the second guard does not apply.
+
+The APK also ships the bundle as bytecode (`core-host.qjsc`), compiled at build time by `apps/android-native/scripts/compile-bytecode.c` from these sources (Gradle tasks `buildBytecodeCompiler` and `buildShippedBytecode`). It must compile the way the app does. If you change the runtime setup in `createRuntime`, the wrapper's `compile`, or the defines in `CMakeLists.txt`, change that program and its Gradle flags the same way. On the phone, the app compares its own compile with the shipped bytes once per install and logs `v1.3.10/android-shipped-bytecode` with `outcome=match` or `mismatch`.
