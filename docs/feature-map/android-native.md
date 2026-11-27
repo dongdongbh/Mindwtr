@@ -307,8 +307,8 @@ The native client is a Kotlin and Jetpack Compose app in `apps/android-native`. 
 - Shortcuts: Swipe a card right past half to duplicate it; left past half to delete it (no question, no Undo, as in RN). Hold a card 180 ms to drag it to another column.
 - Selectors: `board`, `board-search`, `board-filters`, `board-column`, `board-card`
 - Code: `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/BoardScreen.kt`, `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/BoardModel.kt`
-- Checks: `apps/android-native/scripts/check-calendar-board-device.mjs`, `apps/android-native/scripts/check-review-organize-device.mjs`
-- Notes: A drop sends one move, so only the moved card is written.
+- Checks: `apps/android-native/scripts/check-calendar-board-device.mjs`, `apps/android-native/scripts/check-review-organize-device.mjs`, `packages/core/src/native-host-contract-board.test.ts`
+- Notes: A drop sends one move, so only the moved card is written. Filters has RN's rows in RN's order: Due date, Task dates (Any time or one of six date presets), Contexts & tags, and Projects. Task dates goes through core's board filter as `setAnyDateRange`.
 
 ## Projects
 

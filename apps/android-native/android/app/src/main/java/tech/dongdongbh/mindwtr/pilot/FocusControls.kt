@@ -11,6 +11,7 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -372,21 +373,39 @@ private fun ViewOptionsSheet(model: InboxViewModel, controls: JSONObject) = with
             Text(view.getString("title"), style = rnText(16, 700), color = c.text, modifier = Modifier.weight(1f).semantics { heading() })
             SheetText(view.getString("doneLabel")) { keepDialog(null) }
         }
-        Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {
             val sort = view.getJSONObject("sort")
             SheetLabel(sort.getString("label"))
-            ChipFlow(sort.menuObjects("options"), idle) { edit(it) }
+            val sorts = sort.menuObjects("options")
+            GrowingChipRows(sorts.size) { index ->
+                val option = sorts[index]
+                SheetChip(option.getString("label"), option.getBoolean("selected"), false, enabled = idle) { edit(option.getJSONObject("edit")) }
+            }
             val grouping = view.getJSONObject("group")
             SheetLabel(grouping.getString("label"))
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                for (option in grouping.menuObjects("options")) SheetChip(option.getString("label"), option.getBoolean("selected"), false, enabled = idle) {
-                    group(option.getString("value"))
-                }
+            val groups = grouping.menuObjects("options")
+            GrowingChipRows(groups.size) { index ->
+                val option = groups[index]
+                SheetChip(option.getString("label"), option.getBoolean("selected"), false, enabled = idle) { group(option.getString("value")) }
             }
             val details = view.getJSONObject("details")
             SheetLabel(details.getString("sectionLabel"))
             val on = model.focusView.showDetails
-            SheetChip(details.getString(if (on) "hideLabel" else "showLabel"), on, false, enabled = true) { model.setFocusDetails(!on) }
+            GrowingChipRows(1) { SheetChip(details.getString(if (on) "hideLabel" else "showLabel"), on, false, enabled = true) { model.setFocusDetails(!on) } }
+        }
+    }
+}
+
+
+private val RN_FILTER_CHIP_BASIS = 104.dp
+
+@Composable
+internal fun GrowingChipRows(count: Int, chip: @Composable (Int) -> Unit) = BoxWithConstraints(Modifier.fillMaxWidth()) {
+    val gap = 8.dp
+    val columns = ((maxWidth + gap) / (RN_FILTER_CHIP_BASIS + gap)).toInt().coerceAtLeast(1)
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(gap)) {
+        for (row in (0 until count).chunked(columns)) Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(gap)) {
+            for (index in row) Box(Modifier.weight(1f).fillMaxHeight(), propagateMinConstraints = true) { chip(index) }
         }
     }
 }

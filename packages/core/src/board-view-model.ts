@@ -11,7 +11,7 @@ import { createTaskFilterPredicate, hasActiveFilterCriteria, SAVED_FILTER_NO_PRO
 import type { TaskMetadataFilterVisibility } from './task-metadata-filter-visibility';
 import { getUsedTaskTokens } from './task-token-usage';
 import { sortTasksByBoardOrder } from './task-utils';
-import type { Area, FilterCriteria, MultiValueFilterMatchMode, Project, Task, TaskStatus } from './types';
+import type { Area, DateRange, FilterCriteria, MultiValueFilterMatchMode, Project, Task, TaskStatus } from './types';
 
 type Translate = (key: string) => string;
 
@@ -249,6 +249,7 @@ export type BoardFilterState = {
     contextMatchMode: MultiValueFilterMatchMode;
     tagMatchMode: MultiValueFilterMatchMode;
     duePreset: BoardDuePreset | null;
+    anyDateRange?: DateRange;
 };
 
 export const EMPTY_BOARD_FILTER_STATE: BoardFilterState = {
@@ -262,7 +263,7 @@ export const EMPTY_BOARD_FILTER_STATE: BoardFilterState = {
 };
 
 export type BoardFilterEdit =
-    | Extract<ListFilterEdit, { type: 'toggleToken' | 'removeToken' | 'toggleProject' | 'removeProject' | 'setMatchMode' | 'setSearch' | 'clear' }>
+    | Extract<ListFilterEdit, { type: 'toggleToken' | 'removeToken' | 'toggleProject' | 'removeProject' | 'setMatchMode' | 'setSearch' | 'setAnyDateRange' | 'clear' }>
     | { type: 'toggleDuePreset'; preset: BoardDuePreset }
     | { type: 'clearDuePreset' };
 
@@ -284,6 +285,10 @@ export function applyBoardFilterEdit(state: BoardFilterState, edit: BoardFilterE
             return { ...state, duePreset: null };
         case 'clear':
             return EMPTY_BOARD_FILTER_STATE;
+        case 'setAnyDateRange': {
+            const { anyDateRange: _previous, ...rest } = state;
+            return edit.value ? { ...rest, anyDateRange: edit.value } : rest;
+        }
         default: {
             const list = applyListFilterEdit({ ...EMPTY_LIST_FILTER_STATE, ...state, searchQuery: '' }, edit);
             return withMatchModes({

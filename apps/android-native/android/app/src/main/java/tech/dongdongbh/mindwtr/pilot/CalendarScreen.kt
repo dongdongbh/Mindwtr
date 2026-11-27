@@ -1041,7 +1041,7 @@ private fun ItemSheet(model: InboxViewModel, sheet: JSONObject) = with(model.men
             sheet.menuText("message")?.let { Text(it, style = rnText(16, 400, 23), color = c.secondaryText, modifier = Modifier.heightIn(max = 240.dp).verticalScroll(rememberScrollState())) }
             val buttons = sheet.menuObjects("buttons")
             val stacked = buttons.size > 2
-            val primary = buttons.indexOfLast { it.getString("style") == "default" }
+            val primary = buttons.indexOfLast { it.getString("style") == "default" }.takeIf { it == buttons.lastIndex } ?: -1
             val content: @Composable (Modifier) -> Unit = { weight ->
                 buttons.forEachIndexed { index, button ->
                     val style = button.getString("style")

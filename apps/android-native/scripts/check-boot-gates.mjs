@@ -942,7 +942,6 @@ for (const [file, opener] of [['TaskRowView.kt', /private fun DatesSheet[\s\S]{0
         'Attachments.kt:AudioPlayer', 'CompletedAtFlow.kt:TimeSpentCard', 'MoreSheet.kt:MoreSheet', 'NextActionPrompt.kt:NextActionPrompt', 'ProjectDetails.kt:Overlay',
         'SearchScreen.kt:FilterSheet', 'SearchScreen.kt:SaveSearchDialog', 'StartupPrompts.kt:PromptWindow', 'StartupPrompts.kt:WelcomeSheet',
         'TaskEditor.kt:WaitingPrompt', 'TaskEditor.kt:MonthlyCustomDialog', 'ThemedAlert.kt:ThemedAlert']);
-    const bulkBarScrimsLeftToItsOwnTask = new Set(['BulkBar.kt:ModalCard', 'BulkBar.kt:OrganizeDialog', 'BulkBar.kt:OrganizePicker']);
     const plainScrims = new Set();
     for (const file of readdirSync(pilot).filter((name) => name.endsWith('.kt'))) {
         const text = readFileSync(resolve(pilot, file), 'utf8');
@@ -952,11 +951,11 @@ for (const [file, opener] of [['TaskRowView.kt', /private fun DatesSheet[\s\S]{0
         }
     }
     for (const modal of plainScrims) {
-        assert(fullWindowHosts.has(modal) || bulkBarScrimsLeftToItsOwnTask.has(modal),
+        assert(fullWindowHosts.has(modal),
             `${modal}: a modal hosted below the app header dims the whole window and centers on it with windowScrim, as RN's Modal does`);
     }
     for (const modal of fullWindowHosts) assert(plainScrims.has(modal), `${modal} no longer has a plain scrim: drop it from the full-window list`);
-    for (const file of ['ContextsScreen.kt', 'ReviewScreen.kt', 'WeeklyReviewScreen.kt', 'FocusControls.kt', 'CaptureScreen.kt', 'MenuWidgets.kt', 'SettingsScreen.kt', 'CalendarScreen.kt', 'BoardScreen.kt']) {
+    for (const file of ['BulkBar.kt', 'ContextsScreen.kt', 'ReviewScreen.kt', 'WeeklyReviewScreen.kt', 'FocusControls.kt', 'CaptureScreen.kt', 'MenuWidgets.kt', 'SettingsScreen.kt', 'CalendarScreen.kt', 'BoardScreen.kt']) {
         assert.doesNotMatch(source(file), /windowScrim\([^\n]*\.imePadding\(\)|windowScrim[\s\S]{0,400}?Alignment\.BottomCenter\)\.imePadding\(\)/, `${file}: a window-wide modal pads by the whole keyboard height, since its host already took the navigation bar`);
     }
     const calendarUi = source('CalendarScreen.kt');
@@ -970,6 +969,30 @@ for (const [file, opener] of [['TaskRowView.kt', /private fun DatesSheet[\s\S]{0
         assert.doesNotMatch(source(file), /windowScrim\(theme\.settingsScrim\)[\s\S]{0,300}?screenHeightDp \* 0\.7f/, `${file}: a settings picker caps at 70% of the padded overlay, as RN's pickerCard does`);
     }
     assert.match(source('CaptureScreen.kt'), /val sheetMax = max\(260\.dp, maxHeight - max\(statusTop, 12\.dp\) - 8\.dp\)/, 'quick capture caps its sheet like RN: window height minus the status bar and 8 dp');
+}
+{
+    const capture = source('CaptureScreen.kt');
+    assert.match(capture, /if \(kind == "destination"\) return CaptureDestinationPicker\(draft, picker, locked\)/, 'quick capture opens RN\'s Destination picker, not the generic capture picker card');
+    assert.match(capture, /fun InboxViewModel\.CaptureDestinationPicker[\s\S]{0,300}?PickerDialog\(picker\.getString\("title"\), this::closeCapturePicker, search = \{[\s\S]{0,900}?listOf\("area" to areaLabel, "project" to projectsLabel, "deferred" to t\("projects\.deferredSection"\)\)[\s\S]{0,200}?PickerHeading\(heading\)/,
+        'the capture Destination picker groups Area, Projects and Someday / Waiting under RN\'s headings, with RN\'s Cancel button');
+    assert.match(capture, /Row\(Modifier\.padding\(top = 8\.dp\)\) \{\s+OptionChip\(Lucide\.Folder,[^\n]*\n[^\n]*fill = false,/, 'the Destination chip fits its text, as RN\'s destinationChip (alignSelf flex-start) does');
+    const focus = source('FocusControls.kt');
+    const viewOptions = focus.slice(focus.indexOf('private fun ViewOptionsSheet('), focus.indexOf('internal fun GrowingChipRows('));
+    assert.equal(viewOptions.match(/GrowingChipRows\(/g)?.length, 3, 'Focus View options lays out its Sort, Group and Details chips as RN\'s growing FilterChips');
+    assert.doesNotMatch(viewOptions, /ChipFlow\(|FlowRow\(|spacedBy\(10\.dp\)/, 'Focus View options has no fit-to-text chips and no gaps RN\'s sheet lacks');
+    assert.match(focus, /private val RN_FILTER_CHIP_BASIS = 104\.dp[\s\S]{0,800}?for \(row in \(0 until count\)\.chunked\(columns\)\)[^\n]*\n\s+for \(index in row\) Box\(Modifier\.weight\(1f\)\.fillMaxHeight\(\), propagateMinConstraints = true\)/,
+        'a growing chip row puts as many chips on a line as RN\'s 104 dp FilterChip flexBasis allows, whatever their text, and fills the line like RN\'s flexGrow');
+    const board = source('BoardScreen.kt');
+    assert.match(board, /DueSection\(model, sheetView\.getJSONObject\("due"\), open\)\s+Column\(verticalArrangement = Arrangement\.spacedBy\(8\.dp\)\) \{\s+TaskDates\(model, filters, open\)/, 'Board filters show RN\'s Task dates row first in the overview rows');
+    assert.match(board, /put\("type", "setAnyDateRange"\)[\s\S]{0,900}?OverviewRow\(t\("filters\.taskDates"\)[\s\S]{0,400}?GrowingChipRows\(options\.size\)[\s\S]{0,300}?board\.filterEdit\(option\.getJSONObject\("edit"\)\)/,
+        'the Board Task dates row edits core\'s board filter through setAnyDateRange, with RN\'s growing chips');
+    assert.match(board, /if \(expanded\) GrowingChipRows\(presets\.size\)/, 'the Board Due date chips grow like RN\'s FilterChips');
+    assert.match(source('CalendarScreen.kt'), /val primary = buttons\.indexOfLast \{ it\.getString\("style"\) == "default" \}\.takeIf \{ it == buttons\.lastIndex \} \?: -1/,
+        'a calendar sheet fills only a last default button, as RN\'s themed alert does');
+    const contexts = source('ContextsScreen.kt');
+    assert.match(contexts, /Icon\(Lucide\.SlidersHorizontal, null, tint = c\.tint, modifier = Modifier\.size\(20\.dp\)\)\s+\}\s+view\.optJSONObject\("sort"\)\?\.let \{ sort ->\s+DirectControl\(Lucide\.ArrowUpDown/,
+        'the Contexts header shows RN\'s sliders Filter button before Sort');
+    assert.doesNotMatch(contexts, /Lucide\.Filter\b/, 'the Contexts header uses RN\'s sliders icon, not a funnel');
 }
 assert.match(rowUi, /Box\(if \(offset\.value != 0f\) Modifier\.clipToBounds\(\) else Modifier\) \{/, 'an open tray clips the moved row at the row bounds, as RN\'s Swipeable does');
 assert.match(rowUi, /background\(theme\.einkSafe\(coreColorOrNull\(part\.dotColor\) \?: c\.tint\)\)/, 'a row\'s project and area dot goes through einkSafe, as RN\'s row does');

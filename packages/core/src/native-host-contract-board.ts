@@ -25,7 +25,7 @@ import {
     type BoardStatus,
 } from './board-view-model';
 import { canCompleteNativeBoardTask } from './native-host-contract-task-checklist';
-import { matchesPickerQuery } from './native-host-contract-menu-views';
+import { isFilterDateRange, matchesPickerQuery } from './native-host-contract-menu-views';
 import { createProjectOrderReserver, ensureDeviceId, matchesDuplicateSource, nextRevision } from './store-helpers';
 import { boardMoveEffect, boardMoveScope, boardReactivationContainerAllowed, samePreparedTask, buildDuplicateTask, sanitizeRestoredTaskContainerReferences, taskEditValuesEqual } from './store-tasks';
 import { TASK_SYNC_FIELD_SCHEMA } from './task-sync-schema';
@@ -242,6 +242,7 @@ const FILTER_CHECKS: Record<keyof BoardFilterState, (value: unknown) => boolean>
     contextMatchMode: isMatchMode,
     tagMatchMode: isMatchMode,
     duePreset: (value) => value === null || isDuePreset(value),
+    anyDateRange: (value) => isFilterDateRange(value),
 };
 
 const readFilters = (value: unknown): BoardFilterState | null => {
@@ -267,6 +268,8 @@ const isFilterEdit = (edit: unknown): edit is BoardFilterEdit => {
             return (edit.kind === 'context' || edit.kind === 'tag') && isMatchMode(edit.value);
         case 'toggleDuePreset':
             return isDuePreset(edit.preset);
+        case 'setAnyDateRange':
+            return edit.value === null || isFilterDateRange(edit.value);
         case 'clearDuePreset':
         case 'clear':
             return true;

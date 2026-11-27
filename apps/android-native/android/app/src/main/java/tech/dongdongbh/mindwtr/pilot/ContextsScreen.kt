@@ -20,6 +20,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.material3.Icon
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -71,11 +73,14 @@ fun ContextsList(model: InboxViewModel) = with(model.menu) {
                 ListSearchField(own("contexts").optString("searchQuery"), view.getString("searchPlaceholder"), Modifier.weight(1f)) {
                     typeSearch("contexts", "searchQuery", it)
                 }
-
+                val filtersLabel = t("filters.label")
+                Box(Modifier.heightIn(min = 44.dp).widthIn(min = 44.dp).clickable(enabled = idle, role = Role.Button) { openDialog("filters"); reload() }
+                    .semantics { contentDescription = filtersLabel }.padding(10.dp)) {
+                    Icon(Lucide.SlidersHorizontal, null, tint = c.tint, modifier = Modifier.size(20.dp))
+                }
                 view.optJSONObject("sort")?.let { sort ->
                     DirectControl(Lucide.ArrowUpDown, sort.getString("accessibilityLabel"), null, null, idle) { openDialog("sort") }
                 }
-                DirectControl(Lucide.Filter, t("filters.label"), null, null, idle) { openDialog("filters"); reload() }
                 if (view.optBoolean("canSave")) {
                     DirectControl(Lucide.Plus, t("common.save"), null, null, idle) { openContextsSave() }
                 }

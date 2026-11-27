@@ -72,6 +72,8 @@ val LABEL_KEYS = listOf(
     "tab.menu", "settings.syncBadgeSyncing", "settings.syncBadgeHealthy", "settings.syncBadgeWarning",
     "waiting.title", "someday.title", "nav.reference", "nav.history", "taskEdit.moreOptions", "common.search",
     "filters.excluded", "filters.remove", "filters.clear", "filters.active", "filters.contexts", "filters.projects", "filters.timeEstimate",
+    "filters.taskDates", "filters.anyTime", "filters.datePreset.today", "filters.datePreset.next_7_days", "filters.datePreset.overdue_next_7_days",
+    "filters.datePreset.next_14_days", "filters.datePreset.next_30_days", "filters.datePreset.upcoming",
     "filters.more", "filters.priority", "bulk.selected", "viewSections.add", "viewSections.addTask", "viewSections.nameHint", "viewSections.namePlaceholder", "common.all",
 
     "contexts.title", "trash.title", "nav.review", "projects.title", "tab.review", "nav.contexts", "nav.done", "common.delete", "task.aria.delete",

@@ -320,7 +320,7 @@ export const isPreservedFilterCriteria = (value: unknown): value is FilterCriter
         && ['contextMatchMode', 'tagMatchMode'].every((key) => value[key] == null || MATCH_MODES.has(value[key] as string));
 };
 
-const isFilterDateRange = (value: unknown): boolean => {
+export const isFilterDateRange = (value: unknown): boolean => {
     const normalized = normalizeDateRange(value);
     return !!normalized && isObjectRecord(value) && Object.entries(value).every(([key, entry]) => (
         isText(entry, 500) && key in normalized && normalized[key as keyof typeof normalized] === entry

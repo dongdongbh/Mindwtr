@@ -441,6 +441,7 @@ private fun BoardFilterSheet(model: InboxViewModel, shown: BoardPage, open: JSON
                     }
                     DueSection(model, sheetView.getJSONObject("due"), open)
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TaskDates(model, filters, open)
                         if (shown.collectionTotal("tokens") > 0) {
                             val picked = filters.optJSONArray("tokens").ids() + filters.optJSONArray("excludedTokens").ids().map { "$excluded: $it" }
                             OverviewRow(t("filters.contexts"), picked.joinToString(", ").ifEmpty { all }, all, null) { setSheet(JSONObject(open.toString()).put("page", "tokens")) }
@@ -455,6 +456,31 @@ private fun BoardFilterSheet(model: InboxViewModel, shown: BoardPage, open: JSON
             Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.End) {
                 Text(t("common.done"), style = rnText(14, 700), color = c.tint, modifier = Modifier.heightIn(min = 44.dp)
                     .clickable(role = Role.Button) { setSheet(null) }.padding(horizontal = 10.dp, vertical = 12.dp))
+            }
+        }
+    }
+}
+
+
+@Composable
+private fun TaskDates(model: InboxViewModel, filters: JSONObject, open: JSONObject) = with(model.menu) {
+    val anyTime = t("filters.anyTime")
+    val chosen = filters.optJSONObject("anyDateRange")?.optString("preset")
+    val presets = listOf("today" to t("filters.datePreset.today"), "next_7_days" to t("filters.datePreset.next_7_days"),
+        "overdue_next_7_days" to t("filters.datePreset.overdue_next_7_days"), "next_14_days" to t("filters.datePreset.next_14_days"),
+        "next_30_days" to t("filters.datePreset.next_30_days"), "upcoming" to t("filters.datePreset.upcoming"))
+    val edit = { preset: String? -> JSONObject().put("type", "setAnyDateRange").put("value", preset?.let { JSONObject().put("preset", it) } ?: JSONObject.NULL) }
+    val options = listOf(JSONObject().put("label", anyTime).put("selected", !filters.has("anyDateRange")).put("edit", edit(null))) +
+        presets.map { (preset, label) -> JSONObject().put("label", label).put("selected", preset == chosen).put("edit", edit(preset)) }
+    val expanded = open.optBoolean("dates")
+    Column {
+        OverviewRow(t("filters.taskDates"), presets.firstOrNull { it.first == chosen }?.second ?: anyTime, t("common.all"), expanded) {
+            board.keepSheet(JSONObject(open.toString()).put("dates", !expanded))
+        }
+        if (expanded) Box(Modifier.padding(start = 4.dp, end = 4.dp, top = 10.dp)) {
+            GrowingChipRows(options.size) { index ->
+                val option = options[index]
+                SheetChip(option.getString("label"), option.getBoolean("selected"), false, enabled = idle) { board.filterEdit(option.getJSONObject("edit")) }
             }
         }
     }
@@ -482,8 +508,9 @@ private fun DueSection(model: InboxViewModel, due: JSONObject, open: JSONObject)
             }
             Text(if (expanded) "−" else "+", style = rnText(20, 400), color = c.secondaryText, textAlign = TextAlign.Center, modifier = Modifier.widthIn(min = 20.dp))
         }
-        if (expanded) FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            for (preset in presets) SheetChip(preset.getString("label"), preset.getBoolean("selected"), false, enabled = idle) { board.duePreset(preset.getString("preset")) }
+        if (expanded) GrowingChipRows(presets.size) { index ->
+            val preset = presets[index]
+            SheetChip(preset.getString("label"), preset.getBoolean("selected"), false, enabled = idle) { board.duePreset(preset.getString("preset")) }
         }
     }
 }

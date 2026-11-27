@@ -320,9 +320,9 @@ fun CapturePopup(model: InboxViewModel, draft: CaptureDraft) = with(model) {
                 val preview = view.items("preview")
                 if (preview.isNotEmpty()) PreviewStrip(preview, Modifier.padding(top = 8.dp))
                 RecordingRows(voice.state)
-                view.optJSONObject("destination")?.let { destination -> FlowRow(Modifier.padding(top = 10.dp).fillMaxWidth()) {
+                view.optJSONObject("destination")?.let { destination -> Row(Modifier.padding(top = 8.dp)) {
                     OptionChip(Lucide.Folder, t("task.destination") + ": " + destination.getString("label"),
-                        t("task.destination") + ": " + destination.getString("accessibilityLabel"), !locked,
+                        t("task.destination") + ": " + destination.getString("accessibilityLabel"), !locked, fill = false,
                         iconTint = if (destination.getBoolean("available")) null else c.warning,
                         modifier = Modifier.testTag("capture-destination"),
                         onLongClick = { openCapturePicker("destination") }) { openCapturePicker("destination") }
@@ -540,11 +540,11 @@ internal fun PreviewStrip(entries: List<JSONObject>, modifier: Modifier) {
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun RowScope.OptionChip(icon: ImageVector, label: String?, description: String, enabled: Boolean, collapsed: Boolean = false,
-                                iconOnly: Boolean = false, iconTint: Color? = null, modifier: Modifier = Modifier,
+                                iconOnly: Boolean = false, fill: Boolean = !collapsed && !iconOnly, iconTint: Color? = null, modifier: Modifier = Modifier,
                                 onLongClick: () -> Unit, onClick: () -> Unit) {
     val c = LocalTheme.current.colors
     val pill = RoundedCornerShape(999.dp)
-    Row(modifier.then(if (collapsed || iconOnly) Modifier else Modifier.weight(1f).widthIn(min = 120.dp))
+    Row(modifier.then(if (fill) Modifier.weight(1f).widthIn(min = 120.dp) else Modifier)
         .heightIn(min = if (collapsed) 40.dp else 44.dp).clip(pill).background(c.filterBg).rnBorder(1.dp, c.border, pill)
         .combinedClickable(enabled = enabled, role = Role.Button, onLongClick = onLongClick, onClick = onClick)
         .semantics { contentDescription = description }.padding(horizontal = if (collapsed) 12.dp else 10.dp, vertical = 8.dp),
@@ -642,13 +642,13 @@ private fun InboxViewModel.CapturePicker(model: InboxViewModel, draft: CaptureDr
         Column(Modifier.padding(top = 10.dp).fillMaxWidth().heightIn(max = 220.dp).clip(listShape).rnBorder(1.dp, c.border, listShape)
             .verticalScroll(rememberScrollState()).padding(vertical = 6.dp)) { rows() }
     }
+    if (kind == "destination") return CaptureDestinationPicker(draft, picker, locked)
     PickerCard(picker.getString("title"), this::closeCapturePicker) {
         if (kind != "priority") {
             val query = draft.picker?.optString("query").orEmpty()
             val submit = {
                 when (kind) {
                     "context" -> picker.child("add")?.let { add -> pickCapture(add.getJSONObject("edit"), close = false, clearQuery = true) }
-                    "destination" -> Unit
                     else -> if (query.isNotBlank()) submitCapturePicker()
                 }
             }
@@ -708,6 +708,34 @@ private fun InboxViewModel.CapturePicker(model: InboxViewModel, draft: CaptureDr
                 }
             }
         }
+    }
+}
+
+
+@Composable
+private fun InboxViewModel.CaptureDestinationPicker(draft: CaptureDraft, picker: JSONObject, locked: Boolean) {
+    val pick = { edit: JSONObject -> if (!locked) pickCapture(edit, close = true, clearQuery = true) }
+    PickerDialog(picker.getString("title"), this::closeCapturePicker, search = {
+        ModalInput(draft.picker?.optString("query").orEmpty(), picker.getString("placeholder"), picker.getString("title"),
+            Modifier.testTag("capture-destination-search"), enabled = !locked) { captureQuery(it) }
+    }) {
+        val none = picker.getJSONObject("none")
+        PickerItem(none.getString("label"), selected = none.getBoolean("selected")) { pick(none.getJSONObject("edit")) }
+        val items = picker.items("items")
+        val areaLabel = t("taskEdit.areaLabel")
+        val projectsLabel = t("nav.projects")
+        for ((group, heading) in listOf("area" to areaLabel, "project" to projectsLabel, "deferred" to t("projects.deferredSection"))) {
+            val rows = items.filter { it.getString("group") == group }
+            if (group != "deferred" || rows.isNotEmpty()) PickerHeading(heading)
+            for (row in rows) {
+                val label = row.getString("label")
+                PickerItem(label, "capture-destination-$group", "${if (group == "area") areaLabel else projectsLabel}: $label", row.getBoolean("selected")) {
+                    pick(row.getJSONObject("edit"))
+                }
+            }
+        }
+        if (items.isEmpty()) Text(t("common.noMatches"), style = rnText(16, 400), color = LocalTheme.current.colors.secondaryText,
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp).semantics { liveRegion = LiveRegionMode.Polite })
     }
 }
 

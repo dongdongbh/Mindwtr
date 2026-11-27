@@ -116,6 +116,23 @@ describe('native host contract: Board', () => {
         expect(saveData).not.toHaveBeenCalled();
     });
 
+    it('filters cards by Task dates as mobile\'s sheet does, and adds no filter key while it is unset', async () => {
+        freezeClock();
+        const { host } = await openHost();
+        const cardIds = (view: { columns: { cards: { row: { id: string } }[] }[] }) => view.columns.flatMap((column) => column.cards.map((card) => card.row.id));
+        const base = value(host.getBoardView({ limit: 100 }));
+        expect(Object.keys(base.filters).sort()).toEqual(Object.keys(EMPTY_BOARD_FILTER_STATE).sort());
+        const dated = value(host.getBoardView({ filters: base.filters, filterEdit: { type: 'setAnyDateRange', value: { preset: 'today' } }, limit: 100 }));
+        expect(dated.filters).toEqual({ ...base.filters, anyDateRange: { preset: 'today' } });
+        expect(cardIds(dated)).toEqual(direct({ ...EMPTY_BOARD_FILTER_STATE, anyDateRange: { preset: 'today' } }).columns.flatMap((column) => column.tasks.map((task) => task.id)));
+        expect(cardIds(dated).length).toBeLessThan(cardIds(base).length);
+        expect(dated.bar.active).toBe(true);
+        const chip = dated.sheet.chips.items.find((item) => item.id === 'anyDateRange')!;
+        expect(chip.edit).toEqual({ type: 'setAnyDateRange', value: null });
+        expect(value(host.getBoardView({ filters: dated.filters, filterEdit: chip.edit, limit: 100 })).filters).toEqual(base.filters);
+        expect(host.getBoardView({ filters: { anyDateRange: { preset: 'someday' } } as never, limit: 1 }).ok).toBe(false);
+    });
+
     it('speaks the host language', async () => {
         freezeClock();
         const { host } = await openHost();

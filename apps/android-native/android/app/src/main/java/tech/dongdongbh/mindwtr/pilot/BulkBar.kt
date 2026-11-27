@@ -17,7 +17,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.ime
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
@@ -179,8 +178,8 @@ fun AddTagDialog(model: InboxViewModel, open: JSONObject) = with(model.menu) {
 private fun ModalCard(model: InboxViewModel, content: @Composable () -> Unit) {
     val theme = LocalTheme.current
     val close = t("common.close")
-    Box(Modifier.fillMaxSize().background(theme.pickerScrim).clickable(role = Role.Button) { model.menu.keepDialog(null) }
-        .semantics { contentDescription = close }.imePadding().padding(20.dp), contentAlignment = Alignment.Center) {
+    Box(Modifier.fillMaxSize().windowScrim(theme.pickerScrim).clickable(role = Role.Button) { model.menu.keepDialog(null) }
+        .semantics { contentDescription = close }.windowImePadding().padding(20.dp), contentAlignment = Alignment.Center) {
         Column(Modifier.widthIn(max = 360.dp).fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(theme.colors.cardBg)
             .pointerInput(Unit) { detectTapGestures { } }.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) { content() }
     }
