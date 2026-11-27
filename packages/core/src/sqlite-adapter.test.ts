@@ -103,6 +103,17 @@ const loadDatabaseCtor = (): DatabaseCtor | null => {
 const RuntimeDatabase = loadDatabaseCtor();
 const describeSqlite = RuntimeDatabase ? describe : describe.skip;
 
+const openTestDatabase = (filename: string): Database => {
+    if (!RuntimeDatabase) {
+        throw new Error('No compatible sqlite runtime available for tests');
+    }
+    const database = new RuntimeDatabase(filename);
+    if (filename !== ':memory:') {
+        database.exec('PRAGMA synchronous = OFF');
+    }
+    return database;
+};
+
 
 it('has a sqlite runtime available to run the adapter suite', () => {
     expect(RuntimeDatabase).not.toBeNull();
@@ -129,13 +140,10 @@ describeSqlite('SqliteAdapter', () => {
     let adapter: SqliteAdapter;
 
     beforeEach(() => {
-        if (!RuntimeDatabase) {
-            throw new Error('No compatible sqlite runtime available for tests');
-        }
         databaseDir = mkdtempSync(join(tmpdir(), 'mindwtr-sqlite-adapter-'));
         databasePath = join(databaseDir, 'mindwtr.db');
         additionalConnections = [];
-        db = new RuntimeDatabase(databasePath);
+        db = openTestDatabase(databasePath);
         adapter = new SqliteAdapter(createClient(db));
     });
 
@@ -146,8 +154,7 @@ describeSqlite('SqliteAdapter', () => {
     });
 
     const createAdditionalConnection = (): Database => {
-        if (!RuntimeDatabase) throw new Error('No compatible sqlite runtime available for tests');
-        const connection = new RuntimeDatabase(databasePath);
+        const connection = openTestDatabase(databasePath);
         additionalConnections.push(connection);
         return connection;
     };
@@ -176,7 +183,7 @@ describeSqlite('SqliteAdapter', () => {
                 { id: 'later', projectId: 'trip', title: 'Later', order: 2, rev: 1, createdAt: at, updatedAt: at },
             ] });
         db.close();
-        db = new RuntimeDatabase!(databasePath);
+        db = openTestDatabase(databasePath);
         adapter = new SqliteAdapter(createClient(db));
         const reopened = await adapter.getData();
         expect(reopened.projects[0].perSectionFlow).toBe(true);
@@ -202,13 +209,13 @@ describeSqlite('SqliteAdapter', () => {
         await adapter.getData();
         await adapter.saveData(source);
         db.close();
-        db = new RuntimeDatabase!(databasePath);
+        db = openTestDatabase(databasePath);
         adapter = new SqliteAdapter(createClient(db));
         const loaded = await adapter.getData();
         expect(loaded.projects[0].calendarReference).toEqual(reference);
         await adapter.saveData({ ...loaded, projects: [{ ...loaded.projects[0], calendarReference: null, rev: 2 }] });
         db.close();
-        db = new RuntimeDatabase!(databasePath);
+        db = openTestDatabase(databasePath);
         adapter = new SqliteAdapter(createClient(db));
         expect((await adapter.getData()).projects[0].calendarReference).toBeNull();
         expect(getSql(db, 'SELECT calendarReference FROM projects WHERE id=?', ['reference'])).toEqual({ calendarReference: 'null' });
@@ -223,12 +230,12 @@ describeSqlite('SqliteAdapter', () => {
         const source: AppData = { tasks: [], projects: [row], areas: [], sections: [], settings: {} };
         await adapter.saveData(source);
         db.close();
-        db = new RuntimeDatabase!(databasePath);
+        db = openTestDatabase(databasePath);
         adapter = new SqliteAdapter(createClient(db));
         expect((await adapter.getData()).projects[0].colorOverride).toBe('#3b82f6');
         await adapter.saveData({ ...source, projects: [{ ...row, colorOverride: null, color: '#94a3b8', rev: 2 }] });
         db.close();
-        db = new RuntimeDatabase!(databasePath);
+        db = openTestDatabase(databasePath);
         adapter = new SqliteAdapter(createClient(db));
         const reset = await adapter.getData();
         expect(reset.projects[0].colorOverride).toBeUndefined();
@@ -261,7 +268,7 @@ describeSqlite('SqliteAdapter', () => {
         };
         await adapter.saveData(movedData);
         db.close();
-        db = new RuntimeDatabase!(databasePath);
+        db = openTestDatabase(databasePath);
         adapter = new SqliteAdapter(createClient(db));
         const reopened = await adapter.getData();
         expect(reopened.tasks.map((task) => task.viewSectionIds)).toEqual([
@@ -284,7 +291,7 @@ describeSqlite('SqliteAdapter', () => {
         };
         await adapter.saveData(finalData);
         db.close();
-        db = new RuntimeDatabase!(databasePath);
+        db = openTestDatabase(databasePath);
         adapter = new SqliteAdapter(createClient(db));
         const final = await adapter.getData();
         expect(final.tasks.find((task) => task.id === 'one')).toMatchObject({
@@ -309,7 +316,7 @@ describeSqlite('SqliteAdapter', () => {
             sections: [], areas: [], settings: {},
         });
         db.close();
-        db = new RuntimeDatabase!(databasePath);
+        db = openTestDatabase(databasePath);
         adapter = new SqliteAdapter(createClient(db));
         const reopened = await adapter.getData();
         const byId = new Map(reopened.projects.map((project) => [project.id, project]));
@@ -2104,7 +2111,7 @@ describeSqlite('SqliteAdapter', () => {
             sections: [], areas: [], settings: {},
         });
         db.close();
-        db = new RuntimeDatabase!(databasePath);
+        db = openTestDatabase(databasePath);
         adapter = new SqliteAdapter(createClient(db));
         const loaded = await adapter.getData();
         expect(loaded.tasks[0].description).toBe(`[Note](${uri})`);
@@ -2554,10 +2561,9 @@ describeSqlite('SqliteAdapter final tombstone expiry', () => {
     });
 
     beforeEach(() => {
-        if (!RuntimeDatabase) throw new Error('No compatible sqlite runtime available for tests');
         databaseDir = mkdtempSync(join(tmpdir(), 'mindwtr-sqlite-final-tombstone-'));
         databasePath = join(databaseDir, 'mindwtr.db');
-        db = new RuntimeDatabase(databasePath);
+        db = openTestDatabase(databasePath);
         statements = [];
         const base = createClient(db);
         adapter = new SqliteAdapter({
@@ -2682,7 +2688,7 @@ describeSqlite('SqliteAdapter final tombstone expiry', () => {
     it('refuses a row inserted after this adapter observed an empty database', async () => {
         await adapter.saveData(emptyData());
         await adapter.getData();
-        const writerDb = new RuntimeDatabase!(databasePath);
+        const writerDb = openTestDatabase(databasePath);
         try {
             const writer = new SqliteAdapter(createClient(writerDb));
             await writer.saveData(taskTombstoneData());

@@ -44,7 +44,9 @@ afterEach(async () => {
 
 async function open(path: string, seed = false, seedData = initial()) {
     await flushPendingSave(); resetForTests(); resetNativeRequestReceipts();
-    const db = new DatabaseSync(path); databases.push(db);
+    const db = new DatabaseSync(path);
+    db.exec('PRAGMA synchronous = OFF');
+    databases.push(db);
     const fault = { commits: 0 };
     const client = clientOf(db, fault);
     if (seed) await new NativeReceiptSqliteAdapter(client).saveData(seedData);

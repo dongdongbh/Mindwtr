@@ -55,7 +55,9 @@ const root = join(process.cwd(), '../../.orchestrator/tmp'); mkdirSync(root, { r
 const directories: string[] = [], databases: Database[] = [], faults: Array<{ commits: number; after: number }> = [];
 async function open(path: string, initial?: AppData) {
     await flushPendingSave(); resetForTests(); resetNativeRequestReceipts();
-    const db = new DatabaseSync(path); databases.push(db);
+    const db = new DatabaseSync(path);
+    db.exec('PRAGMA synchronous = OFF');
+    databases.push(db);
     const fault = { commits: 0, after: 0 }; faults.push(fault); const writes = vi.fn();
     const client: SqliteClient = {
         run: async (sql, params = []) => {
