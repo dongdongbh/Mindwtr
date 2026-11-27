@@ -10821,14 +10821,18 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
         'quick date labels are centered RN CompactText in secondaryText');
 
     const rnTabs = readFileSync(resolve(app, '../mobile/components/task-edit/TaskEditTabs.tsx'), 'utf8');
-    assert.match(rnTabs, /width: containerWidth \/ 2,[\s\S]{0,300}?outputRange: \[0, containerWidth \/ 2\]/, 'RN sizes the editor tab indicator from the pager width, not the track');
+    assert.match(rnTabs, /onLayout=\{\(event\) => setTrackWidth\(event\.nativeEvent\.layout\.width\)\}/, 'RN measures the editor tab track');
+    assert.match(rnTabs, /const indicatorWidth = \(trackWidth - 2 \* TRACK_BORDER_WIDTH\) \/ 2;/, 'RN sizes the editor tab indicator to half the track inside its border');
+    assert.match(rnTabs, /width: indicatorWidth,[\s\S]{0,300}?outputRange: \[0, indicatorWidth\]/, 'RN slides the indicator by one half of the track');
+    assert.doesNotMatch(rnTabs, /containerWidth \/ 2/, 'RN no longer sizes the indicator from the pager width');
     assert.match(rnTabs, /modeTabs: \{[^}]*paddingHorizontal: 16,/);
     const tabs = code(source('TaskView.kt').slice(source('TaskView.kt').indexOf('fun EditorTabs('), source('TaskView.kt').indexOf('fun TaskViewTab(')));
-    assert.match(tabs, /BoxWithConstraints\(Modifier\.fillMaxWidth\(\)\.background\(c\.cardBg\)\.rnBorderBottom\(c\.border\)\) \{\s+val indicatorWidth = maxWidth \/ 2/,
-        'the editor tab indicator is half the editor width, like RN\'s containerWidth / 2');
+    assert.match(tabs, /BoxWithConstraints\(Modifier\.padding\(horizontal = 16\.dp, vertical = 10\.dp\)\.fillMaxWidth\(\)\.clip\(shape\)\.background\(c\.filterBg\)\.rnBorder\(1\.dp, c\.border, shape\)\) \{\s+val indicatorWidth = maxWidth \/ 2/,
+        'the editor tab indicator is half the track inside its border, like RN\'s measured track');
+    assert.doesNotMatch(tabs, /unbounded = true/, 'the indicator fits inside the track');
     assert.match(tabs, /offset\(x = indicatorOffset\)\.width\(indicatorWidth\)\.clip\(shape\)\.background\(c\.tint\)/, 'one sliding indicator, clipped by the track');
     assert.doesNotMatch(tabs, /background\(if \(open\) c\.tint/, 'tabs do not paint their own half of the track');
-    console.log('Bulk organize centers on the window, its quick dates share the row, and the editor tab indicator matches RN');
+    console.log('Bulk organize centers on the window, its quick dates share the row, and the editor tab indicator covers one half of the track like RN');
 }
 {
     const { hostGateGaps } = await import('../../ios-native/scripts/check-host-gates.mjs');

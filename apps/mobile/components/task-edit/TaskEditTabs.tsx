@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { View, Text, TouchableOpacity, Animated, StyleSheet } from 'react-native';
 import { Eye, Pencil } from 'lucide-react-native';
 
@@ -15,13 +15,16 @@ type TaskEditTabsProps = {
 export function TaskEditTabs({ editTab, onTabPress, scrollX, containerWidth }: TaskEditTabsProps) {
   const { t } = useLanguage();
   const tc = useThemeColors();
-  const canAnimateIndicator = containerWidth > 0 && typeof (scrollX as { interpolate?: unknown })?.interpolate === 'function';
+  const [trackWidth, setTrackWidth] = useState(0);
+  const indicatorWidth = (trackWidth - 2 * TRACK_BORDER_WIDTH) / 2;
+  const canAnimateIndicator = containerWidth > 0 && indicatorWidth > 0 && typeof (scrollX as { interpolate?: unknown })?.interpolate === 'function';
 
   return (
     <View style={[styles.modeTabs, { borderBottomColor: tc.border, backgroundColor: tc.cardBg }]}>
       <View
         accessibilityRole="tablist"
         style={[styles.modeTabsTrack, { backgroundColor: tc.filterBg, borderColor: tc.border }]}
+        onLayout={(event) => setTrackWidth(event.nativeEvent.layout.width)}
       >
         {canAnimateIndicator && (
           <Animated.View
@@ -29,13 +32,13 @@ export function TaskEditTabs({ editTab, onTabPress, scrollX, containerWidth }: T
             style={[
               styles.modeTabIndicator,
               {
-                width: containerWidth / 2,
+                width: indicatorWidth,
                 backgroundColor: tc.tint,
                 transform: [
                   {
                     translateX: scrollX.interpolate({
                       inputRange: [0, containerWidth],
-                      outputRange: [0, containerWidth / 2],
+                      outputRange: [0, indicatorWidth],
                       extrapolate: 'clamp',
                     }),
                   },
@@ -77,6 +80,8 @@ export function TaskEditTabs({ editTab, onTabPress, scrollX, containerWidth }: T
   );
 }
 
+const TRACK_BORDER_WIDTH = 1;
+
 const styles = StyleSheet.create({
   modeTabs: {
     flexDirection: 'row',
@@ -90,7 +95,7 @@ const styles = StyleSheet.create({
     flex: 1,
     flexDirection: 'row',
     borderRadius: 12,
-    borderWidth: 1,
+    borderWidth: TRACK_BORDER_WIDTH,
     overflow: 'hidden',
   },
   modeTab: {

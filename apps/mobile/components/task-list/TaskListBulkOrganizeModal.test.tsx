@@ -6,6 +6,7 @@ import { configureDateFormatting, type Area, type Project, type Task } from '@mi
 import { resetForTests, setStorageAdapter, useTaskStore } from '../../../../packages/core/src/store';
 
 import { TaskListBulkOrganizeModal } from './TaskListBulkOrganizeModal';
+import { styles as taskListStyles } from './task-list.styles';
 import { TaskEditProjectPicker } from '../task-edit/TaskEditProjectPicker';
 
 
@@ -271,6 +272,18 @@ describe('TaskListBulkOrganizeModal', () => {
 
     expect(StyleSheet.flatten(calendar.props.style).minHeight).toBeGreaterThanOrEqual(44);
     expect(StyleSheet.flatten(today.props.style).minHeight).toBeGreaterThanOrEqual(44);
+  });
+
+  it('wraps the Apply label instead of pushing Cancel out of the footer at large font sizes', () => {
+    const tree = renderModal();
+    const footer = tree.root.find((node) => node.props.style === taskListStyles.bulkOrganizeFooter || (Array.isArray(node.props.style) && node.props.style[0] === taskListStyles.bulkOrganizeFooter));
+    const [cancel, apply] = footer.findAllByType(TouchableOpacity);
+    const applyLabel = apply.findByType(Text);
+
+    expect(StyleSheet.flatten(cancel.props.style).flexShrink ?? 0).toBe(0);
+    expect(StyleSheet.flatten(apply.props.style).flexShrink).toBe(1);
+    expect(StyleSheet.flatten(applyLabel.props.style).flexShrink).toBe(1);
+    expect(applyLabel.props.numberOfLines).toBeUndefined();
   });
 
   it('names the three date inputs distinctly, including after a date is filled', () => {

@@ -295,6 +295,7 @@ export const styles = StyleSheet.create({
     fontWeight: '700',
   },
   bulkOrganizeApplyButton: {
+    flexShrink: 1,
     minHeight: 40,
     borderRadius: 8,
     flexDirection: 'row',
@@ -304,6 +305,7 @@ export const styles = StyleSheet.create({
     paddingHorizontal: 14,
   },
   bulkOrganizeApplyText: {
+    flexShrink: 1,
     fontSize: 14,
     fontWeight: '700',
   },

@@ -104,11 +104,11 @@ import org.json.JSONObject
 fun EditorTabs(model: InboxViewModel, editor: TaskEditor) {
     val c = LocalTheme.current.colors
     val shape = RoundedCornerShape(12.dp)
-    BoxWithConstraints(Modifier.fillMaxWidth().background(c.cardBg).rnBorderBottom(c.border)) {
-        val indicatorWidth = maxWidth / 2
-        val indicatorOffset by animateDpAsState(if (editor.tab == "view") indicatorWidth else 0.dp, label = "editorTabIndicator")
-        Box(Modifier.padding(horizontal = 16.dp, vertical = 10.dp).fillMaxWidth().clip(shape).background(c.filterBg).rnBorder(1.dp, c.border, shape)) {
-            Box(Modifier.matchParentSize().wrapContentWidth(Alignment.Start, unbounded = true).offset(x = indicatorOffset).width(indicatorWidth).clip(shape).background(c.tint))
+    Box(Modifier.fillMaxWidth().background(c.cardBg).rnBorderBottom(c.border)) {
+        BoxWithConstraints(Modifier.padding(horizontal = 16.dp, vertical = 10.dp).fillMaxWidth().clip(shape).background(c.filterBg).rnBorder(1.dp, c.border, shape)) {
+            val indicatorWidth = maxWidth / 2
+            val indicatorOffset by animateDpAsState(if (editor.tab == "view") indicatorWidth else 0.dp, label = "editorTabIndicator")
+            Box(Modifier.matchParentSize().wrapContentWidth(Alignment.Start).offset(x = indicatorOffset).width(indicatorWidth).clip(shape).background(c.tint))
             Row(Modifier.fillMaxWidth()) {
                 for ((tab, icon, key) in listOf(Triple("task", SettingsLucide.Pencil, "markdown.edit"), Triple("view", Lucide.Eye, "markdown.preview"))) {
                     val open = editor.tab == tab
