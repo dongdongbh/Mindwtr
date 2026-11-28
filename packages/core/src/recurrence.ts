@@ -1172,6 +1172,20 @@ function projectStrictIsoFrom(
     return { iso: nextIso, steps };
 }
 
+const resolveFluidRecurrenceBase = (
+    sourceIso: string,
+    fallbackIso: string,
+    fallbackDate: Date,
+): { baseIso: string; fallbackBase: Date; anchoredToFuture: boolean } => {
+    const sourceDate = safeParseDate(sourceIso);
+    const anchoredToFuture = Boolean(sourceDate && sourceDate.getTime() > fallbackDate.getTime());
+    return {
+        baseIso: anchoredToFuture ? sourceIso : fallbackIso,
+        fallbackBase: anchoredToFuture && sourceDate ? sourceDate : fallbackDate,
+        anchoredToFuture,
+    };
+};
+
 function projectFluidIsoFrom(
     baseIso: string,
     rule: RecurrenceRule,
@@ -1184,12 +1198,11 @@ function projectFluidIsoFrom(
     weekStart?: RecurrenceWeekday,
     bySetPos?: number,
 ): ProjectedIsoResult {
-
-
-    const fieldBaseDate = safeParseDate(baseIso);
-    const fieldIsFuture = Boolean(fieldBaseDate && fieldBaseDate.getTime() > projectionBase.getTime());
-    const fluidBaseIso = fieldIsFuture ? baseIso : projectedAtIso;
-    const fluidFallbackBase = fieldIsFuture && fieldBaseDate ? fieldBaseDate : projectionBase;
+    const { baseIso: fluidBaseIso, fallbackBase: fluidFallbackBase } = resolveFluidRecurrenceBase(
+        baseIso,
+        projectedAtIso,
+        projectionBase,
+    );
     let nextIso = preserveDateOnlyFormat(
         nextFluidIsoFrom(fluidBaseIso, rule, fluidFallbackBase, byDay, interval, byMonthDay, weekStart, bySetPos),
         baseIso,
@@ -1810,10 +1823,22 @@ export function projectNextRecurringTask(
     const completedAtDate = parsedCompletedAt ?? fallbackCompletedAt;
     const anchorField = getRecurrenceScheduleAnchorField(task);
     const sourceAnchorIso = anchorField ? task[anchorField] : undefined;
+    const fluidBase = strategy === 'fluid' && sourceAnchorIso
+        ? resolveFluidRecurrenceBase(sourceAnchorIso, completedAtIso, completedAtDate)
+        : null;
     let nextAnchorIso = sourceAnchorIso
         ? preserveDateOnlyFormat(
-            strategy === 'fluid'
-                ? nextFluidIsoFrom(completedAtIso, rule, completedAtDate, byDay, interval, byMonthDay, weekStart, bySetPos)
+            strategy === 'fluid' && fluidBase
+                ? nextFluidIsoFrom(
+                    fluidBase.baseIso,
+                    rule,
+                    fluidBase.fallbackBase,
+                    byDay,
+                    interval,
+                    byMonthDay,
+                    weekStart,
+                    bySetPos,
+                )
                 : nextIsoFrom(
                     sourceAnchorIso,
                     rule,
@@ -2155,6 +2180,23 @@ export function createNextRecurringTask(
             category: 'storage',
             context: { releaseCheck: 'v1.3.3/monthly-weekday-position', position: getRecurrenceBySetPos(task.recurrence) },
         });
+    }
+    if (next && getRecurrenceStrategy(task.recurrence) === 'fluid') {
+        const anchorField = getRecurrenceScheduleAnchorField(task);
+        const sourceAnchorIso = anchorField ? task[anchorField] : undefined;
+        const completedAtDate = safeParseDate(completedAtIso);
+        if (sourceAnchorIso && completedAtDate && resolveFluidRecurrenceBase(sourceAnchorIso, completedAtIso, completedAtDate).anchoredToFuture) {
+            logInfo('Fluid recurrence advanced from future anchor', {
+                scope: 'recurrence',
+                category: 'storage',
+                force: true,
+                context: {
+                    releaseCheck: 'v1.3.10/fluid-future-anchor',
+                    target: anchorField ?? 'none',
+                    outcome: 'anchored-future',
+                },
+            });
+        }
     }
     return next;
 }

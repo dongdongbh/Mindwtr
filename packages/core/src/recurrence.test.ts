@@ -26,6 +26,7 @@ import {
     CALENDAR_RANGE_PROJECTION_TOTAL_CAP,
 } from './recurrence';
 import { safeParseDate } from './date';
+import { consoleLogger, setLogger, type LogPayload } from './logger';
 import { applyTaskUpdates } from './store-helpers';
 import { isTaskDateCoherent } from './task-date-coherence';
 import type { Task, TaskStatus } from './types';
@@ -3309,5 +3310,122 @@ describe('frozen recurring follow-up projection', () => {
             ...noOffsetProjection,
             candidate: { ...noOffsetProjection.candidate, relativeStartOffset: { amount: -2, unit: 'day' } },
         }, createId)).toThrow('Invalid recurrence relative start offset');
+    });
+});
+
+describe('future-dated fluid recurrence completion and preview parity (#1626)', () => {
+    const completedAtIso = '2026-11-28T06:22:25.402Z';
+    const baseTask: Task = {
+        id: 'fluid-future-1626',
+        title: 'Weekly Saturday check',
+        status: 'next',
+        tags: [],
+        contexts: [],
+        createdAt: '2026-11-01T00:00:00.000Z',
+        updatedAt: '2026-11-01T00:00:00.000Z',
+    };
+
+    it('advances forward instead of jumping backwards when completing a fluid task with a future dueDate', () => {
+        const logs: LogPayload[] = [];
+        setLogger((payload) => { logs.push(payload); });
+        try {
+            const task: Task = {
+                ...baseTask,
+                startTime: '2026-11-28T15:30',
+                dueDate: '2026-12-31',
+                recurrence: {
+                    rule: 'weekly',
+                    strategy: 'fluid',
+                    byDay: ['SA'],
+                    rrule: 'FREQ=WEEKLY;BYDAY=SA',
+                },
+                showFutureRecurrence: true,
+            };
+
+            const next = createNextRecurringTask(task, completedAtIso, 'next');
+            const projected = createProjectedRecurringTask(task, completedAtIso);
+
+            expect(next?.startTime).toBe('2026-11-30T15:30');
+            expect(next?.dueDate).toBe('2027-01-02');
+            expect(projected?.startTime).toBe(next?.startTime);
+            expect(projected?.dueDate).toBe(next?.dueDate);
+            expect(logs.some((entry) => entry.context?.releaseCheck === 'v1.3.10/fluid-future-anchor'
+                && entry.context?.target === 'dueDate'
+                && entry.context?.outcome === 'anchored-future')).toBe(true);
+        } finally {
+            setLogger(consoleLogger);
+        }
+    });
+
+    it('advances forward on consecutive same-day completions of a weekly fluid task', () => {
+        const task: Task = {
+            ...baseTask,
+            startTime: '2026-11-28T15:30',
+            dueDate: '2026-11-28',
+            recurrence: {
+                rule: 'weekly',
+                strategy: 'fluid',
+                byDay: ['SA'],
+                rrule: 'FREQ=WEEKLY;BYDAY=SA',
+            },
+        };
+
+        const first = createNextRecurringTask(task, completedAtIso, 'next') as Task;
+        expect(first.startTime).toBe('2026-12-05T15:30');
+        expect(first.dueDate).toBe('2026-12-05');
+
+        const second = createNextRecurringTask(first, '2026-11-28T06:22:46.572Z', 'next') as Task;
+        expect(second.startTime).toBe('2026-12-12T15:30');
+        expect(second.dueDate).toBe('2026-12-12');
+    });
+
+    it('never moves schedule fields backwards across strategy, schedule, rule, and format matrix', () => {
+        const nowIso = '2026-07-15T10:00:00.000Z';
+        const strategies = ['strict', 'fluid'] as const;
+        const schedules = ['start-only', 'due-only', 'both', 'neither'] as const;
+        const formats = ['date-only', 'datetime'] as const;
+        const rules: Array<{ name: string; recurrence: NonNullable<Exclude<Task['recurrence'], string>> }> = [
+            { name: 'daily', recurrence: { rule: 'daily' } },
+            { name: 'weekly-byday', recurrence: { rule: 'weekly', byDay: ['SA'], rrule: 'FREQ=WEEKLY;BYDAY=SA' } },
+            { name: 'monthly-day', recurrence: { rule: 'monthly', byMonthDay: [25], rrule: 'FREQ=MONTHLY;BYMONTHDAY=25' } },
+            { name: 'monthly-nth', recurrence: { rule: 'monthly', byDay: ['3SA'], rrule: 'FREQ=MONTHLY;BYDAY=3SA' } },
+            { name: 'yearly', recurrence: { rule: 'yearly' } },
+            { name: 'count', recurrence: { rule: 'weekly', count: 3, completedOccurrences: 0, rrule: 'FREQ=WEEKLY;COUNT=3' } },
+        ];
+
+        for (const strategy of strategies) {
+            for (const schedule of schedules) {
+                for (const formatKind of formats) {
+                    const start = formatKind === 'date-only' ? '2026-07-18' : '2026-07-18T09:00';
+                    const due = formatKind === 'date-only' ? '2026-07-25' : '2026-07-25T17:00';
+                    for (const { name, recurrence } of rules) {
+                        const task: Task = {
+                            ...baseTask,
+                            id: `matrix-${strategy}-${schedule}-${formatKind}-${name}`,
+                            ...(schedule === 'start-only' ? { startTime: start } : {}),
+                            ...(schedule === 'due-only' ? { dueDate: due } : {}),
+                            ...(schedule === 'both' ? { startTime: start, dueDate: due } : {}),
+                            recurrence: { ...recurrence, strategy },
+                            showFutureRecurrence: true,
+                        };
+                        const next = createNextRecurringTask(task, nowIso, 'next');
+                        expect(next, task.id).not.toBeNull();
+                        if (task.startTime && next?.startTime) {
+                            expect(safeParseDate(next.startTime)!.getTime(), `${task.id} startTime`)
+                                .toBeGreaterThan(safeParseDate(task.startTime)!.getTime());
+                        }
+                        if (task.dueDate && next?.dueDate) {
+                            expect(safeParseDate(next.dueDate)!.getTime(), `${task.id} dueDate`)
+                                .toBeGreaterThan(safeParseDate(task.dueDate)!.getTime());
+                        }
+                        if (schedule !== 'neither') {
+                            const projected = createProjectedRecurringTask(task, nowIso);
+                            expect(projected?.startTime, `${task.id} preview startTime`).toBe(next?.startTime);
+                            expect(projected?.dueDate, `${task.id} preview dueDate`).toBe(next?.dueDate);
+                        }
+                    }
+                }
+            }
+        }
     });
 });

@@ -4440,13 +4440,55 @@ fn recurrence_start_needs_catchup(task: &Map<String, Value>, completed_at: &str)
     }
 }
 
+fn recurrence_fluid_needs_core_engine(task: &Map<String, Value>, completed_at: &str) -> bool {
+    if recurrence_strategy(task) != "fluid" {
+        return false;
+    }
+    let schedule_fields = ["dueDate", "startTime", "reviewAt"];
+    let present: Vec<&str> = schedule_fields
+        .iter()
+        .copied()
+        .filter(|field| has_non_empty_string(task, field))
+        .collect();
+    if present.len() > 1 {
+        return true;
+    }
+    let Some(anchor_field) = present.first().copied() else {
+        return false;
+    };
+    let Some(anchor_iso) = task.get(anchor_field).and_then(Value::as_str) else {
+        return false;
+    };
+    let Ok(completed) = OffsetDateTime::parse(completed_at, &Rfc3339) else {
+        return true;
+    };
+    if let Ok(anchor) = OffsetDateTime::parse(anchor_iso, &Rfc3339) {
+        return anchor > completed;
+    }
+    let Some(completed_local) = crate::local_query::local_wall(completed) else {
+        return true;
+    };
+    let floating = if anchor_iso.len() == 16 {
+        format!("{anchor_iso}:00")
+    } else {
+        anchor_iso.to_string()
+    };
+    let Some(anchor_local) = crate::local_query::parse_local_date(&floating) else {
+        return true;
+    };
+    anchor_local > completed_local
+}
+
 fn create_next_recurring_task_for_local_api(
     task: &Map<String, Value>,
     completed_at: &str,
     previous_status: &str,
 ) -> Option<Map<String, Value>> {
     let rule = recurrence_rule(task)?;
-    if recurrence_needs_core_engine(task) || recurrence_start_needs_catchup(task, completed_at) {
+    if recurrence_needs_core_engine(task)
+        || recurrence_start_needs_catchup(task, completed_at)
+        || recurrence_fluid_needs_core_engine(task, completed_at)
+    {
         return None;
     }
     let interval = recurrence_interval(task);

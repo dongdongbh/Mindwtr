@@ -64,6 +64,8 @@ The v1.3.6 task-editor correction is confirmed by the visible disappearance of t
 
 ## v1.3.10 (add before tagging, trim in the release after)
 
+- **`v1.3.10/fluid-future-anchor`** — `packages/core/src/recurrence.ts` (`createNextRecurringTask`), #1626. Complete an "after completion" (`fluid`) recurring task whose anchor date (`dueDate`, `startTime`, or `reviewAt`) is still in the future relative to completion time. Diagnostics records `Fluid recurrence advanced from future anchor` with `target` (`dueDate`, `startTime`, or `reviewAt`) and `outcome=anchored-future`, proving completion anchored forward from the future date instead of jumping backwards to `completedAt`. No task text, dates, or identifiers are logged.
+
 - **`v1.3.10/android-shipped-bytecode`** — `apps/android-native/android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/core/CoreHost.kt`. Install or update native Android, open it once, and wait a few seconds after the list appears. Diagnostics records `Native Android shipped bytecode` with `load=shipped` (the first start ran the bytecode shipped in the APK) and `outcome=match` (the bytecode the phone compiled itself is byte-identical). `outcome=mismatch` means the shipped bytecode differs from the phone's own compile; report it, because from the second start the app uses the phone's compile.
 
 - **`v1.3.10/desktop-regional-date`** — `apps/desktop/src/main.tsx`, #1499. Launch the desktop app with an English UI and Portuguese regional settings. Diagnostics records `Desktop regional date formatting initialized` with `outcome=configured` after startup applies the regional format. With System default selected, check that a task due 23 November displays day before month in both the row and its editor.

@@ -1677,5 +1677,42 @@
       "updatedAt": "2026-08-13T12:00:00.000Z"
     },
     "localApiExpected": null
+  },
+  {
+    "name": "future-dated fluid due date defers on the local API and advances past the stored due date in core",
+    "completedAt": "2026-11-28T06:22:25.402Z",
+    "previousStatus": "next",
+    "task": {
+      "id": "parity-fluid-future-due",
+      "title": "Weekly check",
+      "status": "next",
+      "startTime": "2026-11-28T15:30",
+      "dueDate": "2026-12-31",
+      "recurrence": {
+        "rule": "weekly",
+        "strategy": "fluid"
+      },
+      "tags": [],
+      "contexts": [],
+      "createdAt": "2026-11-01T00:00:00.000Z",
+      "updatedAt": "2026-11-01T00:00:00.000Z"
+    },
+    "expected": {
+      "title": "Weekly check",
+      "status": "next",
+      "startTime": "2026-12-05T15:30",
+      "dueDate": "2027-01-07",
+      "recurrence": {
+        "rule": "weekly",
+        "seriesId": "parity-fluid-future-due",
+        "strategy": "fluid"
+      },
+      "tags": [],
+      "contexts": [],
+      "isFocusedToday": false,
+      "createdAt": "2026-11-28T06:22:25.402Z",
+      "updatedAt": "2026-11-28T06:22:25.402Z"
+    },
+    "localApiExpected": null
   }
 ]
