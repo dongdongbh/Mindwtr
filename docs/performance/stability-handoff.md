@@ -105,6 +105,12 @@ large-5000 and 1k fixtures, interleaved A/B on archived APKs in quiet windows.
   content **529 → 493 ms**, `store:normalize` 89.7 → 49.9 ms; with `rev`/`revBy` on every row **549 → 488 ms**, 109.2 → 40.9 ms;
   empty unchanged (232 vs 229). Desktop and RN not measured.
   **Next:** `JSON.parse` of the read (about 43 ms), then `sqlite:decodeTasks` (29 ms).
+- **`[[` task-link search at 5k (11-27):** [evidence](native-android-wikilink-search-2026-11-27.md). Core's
+  `searchMarkdownReferences` (shared) sorted every match with two `localeCompare` calls per comparison, then kept 6; QuickJS
+  normalizes strings on each call. It now keeps only the best few while it walks the list, with the same comparison and the same
+  tie order (frozen corpus of 111 digests from the old code, mutants caught, work-count test). S23, interleaved A/B: one search
+  **153.1 → 19.9 ms** median, p90 164.0 → 24.3 (n = 61 / 80), under the 50 ms typing budget. The bridge adds about 0.4 ms. No cache.
+  A negative `limit` now returns nothing (no caller passes one). Desktop and RN not measured (Bun: 1.8 → 1.2 ms).
 
 September 15 shared-core update: [archive reactivation candidate validation](archive-reactivation-2026-09-15.md) removes repeated full-section projections. This is synthetic core work-count evidence; native desktop and mobile latency remain unmeasured for this change.
 

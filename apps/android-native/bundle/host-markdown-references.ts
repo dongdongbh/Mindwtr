@@ -4,6 +4,7 @@ import {
     searchMarkdownReferences,
     serializeMarkdownReference,
 } from '../../../packages/core/src/markdown';
+import { traceSection } from '../../../packages/core/src/perf-trace';
 import type { Project, Task } from '../../../packages/core/src/types';
 
 
@@ -23,8 +24,8 @@ export const readMarkdownReferences = (input: Input, state: Store, strings: Stri
     const query = getActiveMarkdownReferenceQuery(input.value, { start: input.start, end: input.end },
         { assist: isMarkdownEditorAssistEnabled(state.settings) });
     if (!query) return { ok: true, value: { start: input.start, end: input.end, suggestions: [] } };
-    const found = searchMarkdownReferences(state._allTasks, state.projects, query.query, SUGGESTION_LIMIT,
-        { excludeTaskIds: input.taskId ? [input.taskId] : undefined });
+    const found = traceSection('markdown:references', () => searchMarkdownReferences(state._allTasks, state.projects, query.query,
+        SUGGESTION_LIMIT, { excludeTaskIds: input.taskId ? [input.taskId] : undefined }));
     const labels = strings(['taskEdit.tab.task', 'taskEdit.projectLabel', ...found.map((item) => `status.${item.status}`)]);
     const typeLabel = { task: labels['taskEdit.tab.task'] ?? 'Task', project: labels['taskEdit.projectLabel'] ?? 'Project' };
     return { ok: true, value: {

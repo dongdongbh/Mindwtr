@@ -312,6 +312,29 @@ const scoreMarkdownReferenceTitle = (title: string, query: string): number => {
     return -1;
 };
 
+type ScoredMarkdownReference = {
+    candidate: MarkdownReferenceSearchResult;
+    score: number;
+};
+
+const compareScoredMarkdownReferences = (left: ScoredMarkdownReference, right: ScoredMarkdownReference): number => {
+    if (left.score !== right.score) return right.score - left.score;
+    const updatedAtDelta = right.candidate.updatedAt.localeCompare(left.candidate.updatedAt);
+    if (updatedAtDelta !== 0) return updatedAtDelta;
+    if (left.candidate.entityType !== right.candidate.entityType) {
+        return left.candidate.entityType === 'project' ? -1 : 1;
+    }
+    return left.candidate.title.localeCompare(right.candidate.title);
+};
+
+const keepTopMarkdownReference = (top: ScoredMarkdownReference[], entry: ScoredMarkdownReference, limit: number) => {
+    let index = top.length;
+    if (index === limit && compareScoredMarkdownReferences(top[index - 1], entry) <= 0) return;
+    while (index > 0 && compareScoredMarkdownReferences(top[index - 1], entry) > 0) index -= 1;
+    top.splice(index, 0, entry);
+    if (top.length > limit) top.pop();
+};
+
 export function searchMarkdownReferences(
     tasks: Task[],
     projects: Project[],
@@ -322,42 +345,29 @@ export function searchMarkdownReferences(
     const normalizedQuery = query.trim().toLowerCase();
     const excludedTaskIds = new Set(options?.excludeTaskIds ?? []);
     const excludedProjectIds = new Set(options?.excludeProjectIds ?? []);
-    const taskCandidates: MarkdownReferenceSearchResult[] = tasks
-        .filter((task) => !task.deletedAt && !excludedTaskIds.has(task.id) && Boolean(task.title?.trim()))
-        .map((task) => ({
-            entityType: 'task',
-            id: task.id,
-            title: task.title.trim(),
-            status: task.status,
-            updatedAt: task.updatedAt,
-        }));
-    const projectCandidates: MarkdownReferenceSearchResult[] = projects
-        .filter((project) => !project.deletedAt && !excludedProjectIds.has(project.id) && Boolean(project.title?.trim()))
-        .map((project) => ({
-            entityType: 'project',
-            id: project.id,
-            title: project.title.trim(),
-            status: project.status,
-            updatedAt: project.updatedAt,
-        }));
-
-    return [...taskCandidates, ...projectCandidates]
-        .map((candidate) => ({
-            candidate,
-            score: scoreMarkdownReferenceTitle(candidate.title, normalizedQuery),
-        }))
-        .filter(({ score }) => normalizedQuery ? score >= 0 : true)
-        .sort((left, right) => {
-            if (left.score !== right.score) return right.score - left.score;
-            const updatedAtDelta = right.candidate.updatedAt.localeCompare(left.candidate.updatedAt);
-            if (updatedAtDelta !== 0) return updatedAtDelta;
-            if (left.candidate.entityType !== right.candidate.entityType) {
-                return left.candidate.entityType === 'project' ? -1 : 1;
-            }
-            return left.candidate.title.localeCompare(right.candidate.title);
-        })
-        .slice(0, limit)
-        .map(({ candidate }) => candidate);
+    const kept = Math.max(0, Math.trunc(limit) || 0);
+    if (kept === 0) return [];
+    const top: ScoredMarkdownReference[] = [];
+    const consider = (
+        entityType: MarkdownReferenceSearchResult['entityType'],
+        item: { id: string; status: string; updatedAt: string },
+        title: string | undefined,
+    ) => {
+        if (!title) return;
+        const score = scoreMarkdownReferenceTitle(title, normalizedQuery);
+        if (normalizedQuery && score < 0) return;
+        keepTopMarkdownReference(top, {
+            candidate: { entityType, id: item.id, title, status: item.status, updatedAt: item.updatedAt },
+            score,
+        }, kept);
+    };
+    for (const task of tasks) {
+        if (!task.deletedAt && !excludedTaskIds.has(task.id)) consider('task', task, task.title?.trim());
+    }
+    for (const project of projects) {
+        if (!project.deletedAt && !excludedProjectIds.has(project.id)) consider('project', project, project.title?.trim());
+    }
+    return top.map(({ candidate }) => candidate);
 }
 
 export function parseInlineMarkdown(text: string): InlineToken[] {
