@@ -155,6 +155,12 @@ export const allowedEnglishMirrorKeysByLocale: Record<string, readonly string[]>
     it: [
         'sandbox.label',
         'keybindings.style.standard',
+        'nav.inbox',
+        'tab.inbox',
+        'list.inbox',
+        'status.inbox',
+        'inbox.title',
+        'taskEdit.checklist',
     ],
     nl: [
         'sandbox.label',
