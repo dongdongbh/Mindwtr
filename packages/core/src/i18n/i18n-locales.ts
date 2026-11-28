@@ -224,7 +224,7 @@ export const LOCALES = {
         mode: 'overrides',
         native: 'Italiano',
         nonLatin: false,
-        translatedKeyFloor: 1581,
+        translatedKeyFloor: 3088,
     },
     tr: {
         loadSync: () => require('./locales/tr') as typeof import('./locales/tr'),
