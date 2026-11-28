@@ -132,6 +132,11 @@ large-5000 and 1k fixtures, interleaved A/B on archived APKs in quiet windows.
   accessibility client reads and clears them only when the view leaves the window (also on upstream main). Use `replay` mode.
   Cold-start PSS at 5k without a GC: native 204 MB, RN 281 MB (n = 3 each). Not attributed: the shared `System` row grows about
   3 MB per run and levels off.
+- **Fling frames at 5k (11-28):** [evidence](native-android-fling-frames-2026-11-28.md). **Not wasted drawing.** Main draws about
+  35% more frames than `0a10ba227` for the same 5 flings because its Inbox keeps scrolling: the old list stopped at its **More**
+  button (row 50), so the last two flings ended in 355 ms, while main loads the next rows by itself (`7647451e4`, as RN's FlatList
+  scrolls on). Both draw at 120 Hz while moving (117.5 vs 118.0 fps) and no frame after the list stops. Scroll A/Bs must use flings
+  that reach no list end on either build. On flings 1 and 2 only, app-caused misses are 1.0% vs 1.5% (not traced).
 
 September 15 shared-core update: [archive reactivation candidate validation](archive-reactivation-2026-09-15.md) removes repeated full-section projections. This is synthetic core work-count evidence; native desktop and mobile latency remain unmeasured for this change.
 

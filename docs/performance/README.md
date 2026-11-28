@@ -36,6 +36,7 @@ follow-ups before acting on an older report's next-step recommendation.
 - [Native Android QuickJS engine upgrade](native-android-quickjs-2026-11-11.md)
 - [Native Android memory over repeated use](native-android-memory-2026-11-28.md)
 - [Native Android interactions after the parity passes](native-android-interactions-2026-11-28.md)
+- [Native Android fling frames at 5k](native-android-fling-frames-2026-11-28.md)
 
 Raw traces, builds, maps, and synthetic databases stay outside Git. The
 [diagnostics ledger](../release-notes/diagnostics-ledger.md) remains the source of
