@@ -119,6 +119,11 @@ large-5000 and 1k fixtures, interleaved A/B on archived APKs in quiet windows.
   tie order (frozen corpus of 111 digests from the old code, mutants caught, work-count test). S23, interleaved A/B: one search
   **153.1 → 19.9 ms** median, p90 164.0 → 24.3 (n = 61 / 80), under the 50 ms typing budget. The bridge adds about 0.4 ms. No cache.
   A negative `limit` now returns nothing (no caller passes one). Desktop and RN not measured (Bun: 1.8 → 1.2 ms).
+- **Interactions after a month of parity passes (11-28):** [evidence](native-android-interactions-2026-11-28.md). **No
+  regression.** The 10-26 head-to-head scenarios on main `0066f898e` vs the archived `0a10ba227` APK, interleaved ABBA, n = 16 per
+  cell at 5k: tab switches, editor open, capture open, keyboard shown, save and scroll are all inside the control's noise. Cold
+  first content 1059 → 460 ms and warm 108 → 62 ms. Tab "settled" is no longer the ripple (items fade like RN since `cf0e0424f`).
+  **Next:** main draws about 35% more frames for the same flings (not traced); 1k and other entry points were not re-measured.
 - **Memory over repeated use at 5k (11-28):** [evidence](native-android-memory-2026-11-28.md). **No app leak.** 200 cycles of normal
   use (every tab, editor, quick capture, a Menu screen, search, list scroll), sampled every 20 cycles after a forced GC: QuickJS
   heap 38.5 MB flat, Java heap 7.9–8.3 MB, native heap 77–80 MB, graphics 55 MB, 1 activity. A Benchmark-only broadcast runs the
