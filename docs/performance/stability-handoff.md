@@ -105,6 +105,14 @@ large-5000 and 1k fixtures, interleaved A/B on archived APKs in quiet windows.
   content **529 → 493 ms**, `store:normalize` 89.7 → 49.9 ms; with `rev`/`revBy` on every row **549 → 488 ms**, 109.2 → 40.9 ms;
   empty unchanged (232 vs 229). Desktop and RN not measured.
   **Next:** `JSON.parse` of the read (about 43 ms), then `sqlite:decodeTasks` (29 ms).
+- **SQL read reply at 5k (11-28):** [evidence](native-android-boot-read-2026-11-28.md). Android SQL reads now use a second bridge
+  call, `sqlAllArrays`: the column names once, then one value array per row. The bundle builds each row with an object literal made
+  once per column list (`bundle/host-sql-rows.ts`), so the rows match the old `JSON.parse` output (key order, repeated names,
+  `__proto__`, `-0`; frozen corpus from the old reply, mutants caught; 0 mismatches on the phone over 6 starts). Native iOS and an
+  older host keep `sqlAll`. S23, interleaved A/B, n = 20 each: 5k first content **494 → 465 ms** (p90 513 → 502),
+  `sqlite:readRows` 91.9 → 67.3 ms (Kotlin 43.0 → 32.3, QuickJS 48.9 → 35.0); empty unchanged (235 vs 233). Log line
+  `v1.4.0/sql-array-rows`. `sqlite:decodeTasks` unchanged (29.4 ms): a third of it is the task literal; `tags`/`contexts` parsing
+  through `fromJson` and `toStringArray` costs about 4 ms more than bare `JSON.parse` on the phone (shared core, not started).
 - **`[[` task-link search at 5k (11-27):** [evidence](native-android-wikilink-search-2026-11-27.md). Core's
   `searchMarkdownReferences` (shared) sorted every match with two `localeCompare` calls per comparison, then kept 6; QuickJS
   normalizes strings on each call. It now keeps only the best few while it walks the list, with the same comparison and the same

@@ -1354,8 +1354,12 @@ assert.doesNotMatch(owner, /SharedPreferences|SavedStateHandle|File\(app\.filesD
 assert.match(model, /ProcessCoreHost\.get\(/);
 
 assert.equal(coreHost.match(/JSCallFunction \{/g).length, 1, 'the only JS callback constructor is guarded');
+assert.match(coreHost, /bridge\.setProperty\("sqlAllArrays", guarded \{ args -> traced\("sql:all"\) \{ database\(\)\.allArrays\(args\[0\] as String, args\[1\] as String\) \} \}\)/,
+    'the array reply is a guarded, traced SQL read');
+assert.match(hostEntry, /return bridge\.sqlAllArrays \? rowsFromArrayReply<T>\(checked\(bridge\.sqlAllArrays\(sql, values\)\)\) : JSON\.parse\(checked\(bridge\.sqlAll\(sql, values\)\)\) as T\[\];/,
+    'SQL reads use the array reply when the host has it and the object reply otherwise (native iOS, an older host)');
 const bridgeCallbacks = coreHost.match(/bridge\.setProperty\([^\n]*/g);
-assert.equal(bridgeCallbacks.length, 56, 'the SQL calls, trace, nowMs, randomBytes, rnStateCommit, collationKey, dateTimeFormat, log, the fetch, secret and sync crypto calls, logFile, the key-value calls, hostEvent, the queue\'s file calls, Settings › Data\'s three channel calls, its debug property and memory probe (D1c), the attachment file, delete, abort and installer calls and the reminder alarms\' calls: and the widgets\' three calls, the background sync\'s schedule, the device calendar call, system search\'s info and call (O2d), and File Sync\'s document and lock calls (S5), Gmail\'s authorization call, receipts file call and receipts SQL (G2), voice capture\'s microphone call (V3) and Dropbox\'s sign-in call: each guarded');
+assert.equal(bridgeCallbacks.length, 57, 'the SQL calls (with the array reply), trace, nowMs, randomBytes, rnStateCommit, collationKey, dateTimeFormat, log, the fetch, secret and sync crypto calls, logFile, the key-value calls, hostEvent, the queue\'s file calls, Settings › Data\'s three channel calls, its debug property and memory probe (D1c), the attachment file, delete, abort and installer calls and the reminder alarms\' calls: and the widgets\' three calls, the background sync\'s schedule, the device calendar call, system search\'s info and call (O2d), and File Sync\'s document and lock calls (S5), Gmail\'s authorization call, receipts file call and receipts SQL (G2), voice capture\'s microphone call (V3) and Dropbox\'s sign-in call: each guarded');
 
 
 assert(bridgeCallbacks.includes('bridge.setProperty("gmailCall", guarded { args -> io.gmail(args[0] as String, authorization) }) }'));

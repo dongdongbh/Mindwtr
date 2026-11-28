@@ -351,6 +351,10 @@ class CoreHost(
         Log.i(TAG, "Native Android SQL rows releaseCheck=v1.3.9/sql-rows-direct outcome=direct rows=$rows")
         logLine("Native Android SQL rows releaseCheck=v1.3.9/sql-rows-direct", JSONObject().put("releaseCheck", "v1.3.9/sql-rows-direct")
             .put("outcome", "direct").put("rows", rows))
+        val arrays = sqlArrayReplies.get()
+        Log.i(TAG, "Native Android SQL array rows releaseCheck=v1.4.0/sql-array-rows replies=$arrays")
+        logLine("Native Android SQL array rows releaseCheck=v1.4.0/sql-array-rows", JSONObject().put("releaseCheck", "v1.4.0/sql-array-rows")
+            .put("replies", arrays))
     }
 
 
@@ -388,6 +392,7 @@ class CoreHost(
         val bridge = engine.createNewJSObject()
         bridge.setProperty("sqlRun", guarded { args -> traced("sql:run") { database().run(args[0] as String, args[1] as String) }; null })
         bridge.setProperty("sqlAll", guarded { args -> traced("sql:all") { database().all(args[0] as String, args[1] as String) } })
+        bridge.setProperty("sqlAllArrays", guarded { args -> traced("sql:all") { database().allArrays(args[0] as String, args[1] as String) } })
         bridge.setProperty("sqlExec", guarded { args -> traced("sql:exec") { database().exec(args[0] as String) }; null })
 
         bridge.setProperty("trace", guarded { args ->

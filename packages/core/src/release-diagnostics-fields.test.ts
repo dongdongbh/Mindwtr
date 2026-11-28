@@ -226,6 +226,8 @@ const RELEASE_CHECK_FIELD_NAMES = [
 
     'rows',
 
+    'replies',
+
     'mode',
 
     'direction',

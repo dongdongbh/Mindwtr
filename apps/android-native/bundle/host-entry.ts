@@ -233,11 +233,13 @@ import { createNativeReminders } from './host-reminders';
 import { createIosReminderMethods, createIosReminderSnoozeMethods } from './host-ios-reminders';
 import { createIosDirectoryFileSync, createIosFileSync, createNativeSync, createHostSyncCrypto, isNativeIosSelfHostedProvider, type NativeSync, type NativeSyncBindings } from './host-sync';
 import { createWidgetPublisher, type WidgetInputs } from './host-widgets';
+import { rowsFromArrayReply } from './host-sql-rows';
 
 type NativeBridge = {
     cloudKitAvailable?(): boolean;
     sqlRun(sql: string, params: string): string | null;
     sqlAll(sql: string, params: string): string;
+    sqlAllArrays?(sql: string, params: string): string;
     sqlExec(sql: string): string | null;
     nowMs(): number;
     randomBytes(length: number): string;
@@ -391,6 +393,12 @@ if ((globalThis.__mindwtrNative as NativeBridge | undefined)?.trace) {
     globalThis.__mindwtrTraceSection = (name: string) => { native().trace?.(name); };
 }
 
+const readSqlRows = <T,>(sql: string, params?: unknown[]): T[] => {
+    const bridge = native();
+    const values = JSON.stringify(params ?? []);
+    return bridge.sqlAllArrays ? rowsFromArrayReply<T>(checked(bridge.sqlAllArrays(sql, values))) : JSON.parse(checked(bridge.sqlAll(sql, values))) as T[];
+};
+
 const sqlite: SqliteClient = {
     run: async (sql, params) => { checked(native().sqlRun(sql, JSON.stringify(params ?? []))); },
     all: async <T,>(sql: string, params?: unknown[]): Promise<T[]> => {
@@ -400,10 +408,10 @@ const sqlite: SqliteClient = {
             const delay = Number(debugProp('sql_read_delay_ms'));
             if (delay > 0 && fullReads > (Number(debugProp('sql_read_delay_skip')) || 0)) await pause(delay);
         }
-        return JSON.parse(checked(native().sqlAll(sql, JSON.stringify(params ?? [])))) as T[];
+        return readSqlRows<T>(sql, params);
     },
     get: async <T,>(sql: string, params?: unknown[]): Promise<T | undefined> =>
-        (JSON.parse(checked(native().sqlAll(sql, JSON.stringify(params ?? [])))) as T[])[0],
+        readSqlRows<T>(sql, params)[0],
     exec: async (sql) => {
         for (const statement of splitSqlStatements(sql)) checked(native().sqlExec(statement));
     },

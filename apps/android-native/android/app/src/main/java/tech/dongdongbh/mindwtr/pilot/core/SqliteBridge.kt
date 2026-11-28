@@ -122,6 +122,33 @@ class SqliteBridge(databaseFile: File) {
         return json.append(']').toString()
     }
 
+    fun allArrays(sql: String, paramsJson: String): String {
+        val statement = statementFor(sql)
+        bind(statement, JSONArray(paramsJson))
+        var hasRow = statement.step()
+        val columns = statement.getColumnCount()
+        val json = StringBuilder("[[")
+        for (column in 0 until columns) {
+            if (column > 0) json.append(',')
+            json.append(JSONObject.quote(statement.getColumnName(column)))
+        }
+        json.append(']')
+        var rows = 0L
+        while (hasRow) {
+            rows++
+            json.append(",[")
+            for (column in 0 until columns) {
+                if (column > 0) json.append(',')
+                appendValue(json, statement, column)
+            }
+            json.append(']')
+            hasRow = statement.step()
+        }
+        sqlRowsWritten.addAndGet(rows)
+        sqlArrayReplies.incrementAndGet()
+        return json.append(']').toString()
+    }
+
     private fun appendValue(json: StringBuilder, statement: SQLiteStatement, column: Int) {
         when (statement.getColumnType(column)) {
             COLUMN_NULL, COLUMN_BLOB -> json.append("null")
@@ -171,6 +198,8 @@ class SqliteBridge(databaseFile: File) {
 
 
 internal val sqlRowsWritten = AtomicLong()
+
+internal val sqlArrayReplies = AtomicLong()
 
 
 internal fun syncFile(file: File) {
