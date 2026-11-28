@@ -225,6 +225,11 @@ internal object ProcessCoreHost {
     private val engineLogged = java.util.concurrent.atomic.AtomicBoolean(false)
 
 
+    fun benchmarkMemoryProbe() {
+        synchronized(this) { resumedRuntime() }?.let { runtime -> runCatching { runtime.benchmarkMemoryProbe() } }
+    }
+
+
     private fun resumedRuntime(): CoreHost? = boot?.takeIf { it.isDone }?.let { task -> runCatching { task.get() }.getOrNull() }
 
 

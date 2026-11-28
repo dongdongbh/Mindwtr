@@ -34,6 +34,7 @@ follow-ups before acting on an older report's next-step recommendation.
 - [Profiling-cache isolation](profiling-cache-2026-09.md)
 - [Capture context rendering and native frame findings](capture-context-2026-09.md)
 - [Native Android QuickJS engine upgrade](native-android-quickjs-2026-11-11.md)
+- [Native Android memory over repeated use](native-android-memory-2026-11-28.md)
 
 Raw traces, builds, maps, and synthetic databases stay outside Git. The
 [diagnostics ledger](../release-notes/diagnostics-ledger.md) remains the source of

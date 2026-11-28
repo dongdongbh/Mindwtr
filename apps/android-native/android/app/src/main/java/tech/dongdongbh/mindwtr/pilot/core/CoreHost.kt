@@ -722,6 +722,12 @@ class CoreHost(
         runCatching { callAsync("logLinkHandoff", outcome, surface) }
     }
 
+    fun benchmarkMemoryProbe() {
+        val quickjsUsedBytes = onEngine { checkNotNull(context).run { runGC(); memoryUsedSize } }
+        Runtime.getRuntime().gc()
+        Log.i(TAG, "Native Android benchmark memory probe quickjsUsedBytes=$quickjsUsedBytes")
+    }
+
     fun logLine(message: String, context: JSONObject) {
         runCatching { callAsync("logLine", message, context.toString()) }.onFailure { Log.i(TAG, "$message $context") }
     }

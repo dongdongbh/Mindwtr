@@ -119,6 +119,14 @@ large-5000 and 1k fixtures, interleaved A/B on archived APKs in quiet windows.
   tie order (frozen corpus of 111 digests from the old code, mutants caught, work-count test). S23, interleaved A/B: one search
   **153.1 → 19.9 ms** median, p90 164.0 → 24.3 (n = 61 / 80), under the 50 ms typing budget. The bridge adds about 0.4 ms. No cache.
   A negative `limit` now returns nothing (no caller passes one). Desktop and RN not measured (Bun: 1.8 → 1.2 ms).
+- **Memory over repeated use at 5k (11-28):** [evidence](native-android-memory-2026-11-28.md). **No app leak.** 200 cycles of normal
+  use (every tab, editor, quick capture, a Menu screen, search, list scroll), sampled every 20 cycles after a forced GC: QuickJS
+  heap 38.5 MB flat, Java heap 7.9–8.3 MB, native heap 77–80 MB, graphics 55 MB, 1 activity. A Benchmark-only broadcast runs the
+  QuickJS and Java GC and logs the QuickJS heap; `measure-memory-soak-device.mjs` runs the soak. Trap: a soak that dumps the UI at
+  every step grows the Java heap by about 20 KB per cycle. Compose's accessibility delegate keeps action maps for every element an
+  accessibility client reads and clears them only when the view leaves the window (also on upstream main). Use `replay` mode.
+  Cold-start PSS at 5k without a GC: native 204 MB, RN 281 MB (n = 3 each). Not attributed: the shared `System` row grows about
+  3 MB per run and levels off.
 
 September 15 shared-core update: [archive reactivation candidate validation](archive-reactivation-2026-09-15.md) removes repeated full-section projections. This is synthetic core work-count evidence; native desktop and mobile latency remain unmeasured for this change.
 
@@ -505,6 +513,9 @@ mounted-row bounds, offscreen work, GC/allocations, and retained memory after
 returning idle. Measure cold canonical reads/migrations separately from warm
 loading and IPC transfer. Profile native Settings configuration/keyring reads on
 appropriate test profiles; portable Linux mode bypasses the OS keyring.
+
+Native Android at 5k has a retained-memory baseline: no app growth over 200 cycles
+([2026-11-28](native-android-memory-2026-11-28.md)). Desktop, RN and native iOS are not measured.
 
 Acceptance: stable virtualization and selection/edit state, no sustained growth
 across repeated cycles, complete readiness without backup-only/error/locked false

@@ -2321,6 +2321,12 @@ assert.match(source('CoreWork.kt'), /fun retryDrain\(context: Context\) = enqueu
     assert.equal(coreWork.match(/enqueueUniqueWork\(SYNC_WORK/g).length, 2, 'the sync job is queued only by core\'s decision and by its own run');
     assert.match(coreWork, /syncAgain = \{ isStopped \|\| runCatching \{ syncAgain\(app\)\.result\.get\(STORE_WAIT_SECONDS, TimeUnit\.SECONDS\) \}/, 'a cancelled run queues no next one; a next run not stored retries this one (review S4a 3)');
     assert.match(source('MindwtrApplication.kt'), /runCatching \{ CoreWork\.cancelRnSync\(this\) \}/);
+    const application = source('MindwtrApplication.kt');
+    assert.deepEqual(application.match(/.*registerBenchmarkMemoryProbe\(\)$/gm), ['        if (BuildConfig.BUILD_TYPE.startsWith("benchmark")) registerBenchmarkMemoryProbe()'],
+        'only Benchmark builds register the exported memory probe receiver');
+    const probeAction = /BENCHMARK_MEMORY_PROBE = "([\w.]+)"/.exec(application)?.[1];
+    assert.ok(probeAction && readFileSync(resolve(app, 'scripts/measure-memory-soak-device.mjs'), 'utf8').includes(`am broadcast -a ${probeAction} `),
+        'the soak script sends the probe action the app listens for');
     assert.match(hostEntry, /scheduleBackgroundSync: \(on\) => \{ const bridge = native\(\); if \(bridge\.bgSyncSchedule\) checked\(bridge\.bgSyncSchedule\(on\)\); \},/);
     const tested = spawnSync('bun', ['test', 'apps/android-native/bundle/host-sync.test.ts'], { cwd: resolve(app, '../..'), encoding: 'utf8' });
     assert.equal(tested.status, 0, `bundle/host-sync.test.ts: ${tested.stderr.slice(-1500)}`);
